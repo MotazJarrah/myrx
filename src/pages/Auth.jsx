@@ -9,7 +9,8 @@ export default function Auth() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
   const [, navigate] = useLocation()
   const { signIn, signUp } = useAuth()
 
@@ -18,16 +19,41 @@ export default function Auth() {
     setError('')
     setLoading(true)
     try {
-      const { error } = mode === 'signup'
-        ? await signUp(email, password)
-        : await signIn(email, password)
-      if (error) throw error
-      navigate('/dashboard')
+      if (mode === 'signup') {
+        const { error } = await signUp(email, password)
+        if (error) throw error
+        setEmailSent(true)
+      } else {
+        const { error } = await signIn(email, password)
+        if (error) throw error
+        navigate('/dashboard')
+      }
     } catch (err) {
       setError(err.message || 'Something went wrong')
     } finally {
       setLoading(false)
     }
+  }
+
+  if (emailSent) {
+    return (
+      <div className="min-h-screen bg-[#0a0b0a] flex items-center justify-center px-4">
+        <div className="w-full max-w-sm text-center">
+          <div className="text-4xl mb-4">📬</div>
+          <h1 className="text-xl font-semibold text-white mb-2">Check your email</h1>
+          <p className="text-gray-400 text-sm mb-6">
+            We sent a confirmation link to <span className="text-white">{email}</span>.
+            Click it to activate your account, then come back and sign in.
+          </p>
+          <button
+            onClick={() => { setEmailSent(false); setMode('signin') }}
+            className="bg-[#c4f031] text-black font-semibold px-6 py-2.5 rounded-lg hover:bg-[#d4ff41] transition-colors"
+          >
+            Go to sign in
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (
