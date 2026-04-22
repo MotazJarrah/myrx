@@ -21,18 +21,18 @@ export default function Navbar() {
         <Link href="/dashboard" className="hidden md:flex items-center gap-2 font-bold text-white text-lg">
           <span style={{letterSpacing:"-0.02em"}}>My<span style={{color:"#c4f031"}}>RX</span></span>
         </Link>
-        <div className="flex items-center gap-1 w-full md:w-auto overflow-x-auto md:overflow-visible scrollbar-hide justify-start md:justify-start md:gap-1">
+        <div className="flex items-center w-full md:w-auto justify-around md:justify-start md:gap-1">
           {links.map(({ href, label, icon: Icon }) => {
             const active = location === href
             return (
               <Link
                 key={href}
                 href={href}
-                className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-2 py-2 rounded-lg text-xs md:text-sm transition-colors shrink-0
+                className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 py-2 rounded-lg text-xs md:text-sm transition-colors
                   ${active ? 'text-[#c4f031] bg-[#c4f031]/10' : 'text-gray-400 hover:text-white'}`}
               >
-                <Icon size={18} />
-                <span className="md:inline">{label}</span>
+                <Icon size={20} />
+                <span className="hidden md:inline">{label}</span>
               </Link>
             )
           })}
