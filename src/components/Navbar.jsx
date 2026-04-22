@@ -19,7 +19,7 @@ export default function Navbar() {
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-[#111211] border-t border-[#1e201e] md:static md:border-t-0 md:border-b md:border-[#1e201e]">
       <div className="max-w-4xl mx-auto flex items-center justify-between px-4 py-2 md:py-0 md:h-14">
         <Link href="/dashboard" className="hidden md:flex items-center gap-2 font-bold text-white text-lg">
-          <span className="text-[#c4f031]">M</span>yRX
+          <span className="text-[#c4f031]">My</span>RX
         </Link>
         <div className="flex items-center gap-1 w-full md:w-auto justify-around md:justify-start md:gap-1">
           {links.map(({ href, label, icon: Icon }) => {

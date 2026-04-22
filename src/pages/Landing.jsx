@@ -6,7 +6,7 @@ export default function Landing() {
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b border-[#1e201e]">
         <div className="flex items-center gap-2 font-bold text-xl">
-          <span className="text-[#c4f031]">M</span>yRX
+          <span className="text-[#c4f031]">My</span>RX
         </div>
         <div className="flex items-center gap-3">
           <Link href="/auth?mode=signin" className="text-sm text-gray-400 hover:text-white transition-colors px-4 py-2">
