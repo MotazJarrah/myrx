@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import { Link, useLocation } from 'wouter'
 import { useAuth } from '../contexts/AuthContext'
 import { Dumbbell, Activity, Weight, Flame, History, LayoutDashboard } from 'lucide-react'
@@ -7,7 +6,7 @@ const links = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/strength', label: 'Strength', icon: Dumbbell },
   { href: '/cardio', label: 'Cardio', icon: Activity },
-  { href: '/bodyweight', label: 'Bodyweight', icon: Weight },
+  { href: '/bodyweight', label: 'Body', icon: Weight },
   { href: '/calories', label: 'Calories', icon: Flame },
   { href: '/history', label: 'History', icon: History },
 ]
@@ -15,34 +14,25 @@ const links = [
 export default function Navbar() {
   const { signOut } = useAuth()
   const [location] = useLocation()
-  const scrollRef = useRef(null)
-  const activeRef = useRef(null)
-
-  useEffect(() => {
-    if (activeRef.current && scrollRef.current) {
-      activeRef.current.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' })
-    }
-  }, [location])
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-[#111211] border-t border-[#1e201e] md:static md:border-t-0 md:border-b md:border-[#1e201e]">
-      <div className="max-w-4xl mx-auto flex items-center justify-between px-4 py-2 md:py-0 md:h-14">
+      <div className="max-w-4xl mx-auto flex items-center justify-between px-2 py-1 md:px-4 md:py-0 md:h-14">
         <Link href="/dashboard" className="hidden md:flex items-center gap-2 font-bold text-white text-lg">
           <span style={{letterSpacing:"-0.02em"}}>My<span style={{color:"#c4f031"}}>RX</span></span>
         </Link>
-        <div ref={scrollRef} className="flex items-center gap-1 w-full md:w-auto overflow-x-auto md:overflow-visible md:justify-start" style={{scrollbarWidth:'none', msOverflowStyle:'none'}}>
+        <div className="flex items-center w-full md:w-auto justify-between md:justify-start md:gap-1">
           {links.map(({ href, label, icon: Icon }) => {
             const active = location === href
             return (
               <Link
                 key={href}
                 href={href}
-                ref={active ? activeRef : null}
-                className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 py-2 rounded-lg text-xs md:text-sm transition-colors shrink-0
+                className={`flex flex-col items-center gap-0.5 md:flex-row md:gap-2 px-1 py-1.5 rounded-lg md:px-3 md:py-2 md:text-sm transition-colors
                   ${active ? 'text-[#c4f031] bg-[#c4f031]/10' : 'text-gray-400 hover:text-white'}`}
               >
-                <Icon size={18} />
-                <span>{label}</span>
+                <Icon size={16} />
+                <span style={{fontSize:'10px'}} className="md:text-sm">{label}</span>
               </Link>
             )
           })}
