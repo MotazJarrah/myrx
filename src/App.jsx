@@ -10,14 +10,22 @@ import Bodyweight from './pages/Bodyweight'
 import Calories from './pages/Calories'
 import History from './pages/History'
 
-function ProtectedRoute({ component: Component }) {
+function ProtectedLayout() {
   const { user, loading } = useAuth()
   if (loading) return <div className="min-h-screen bg-[#0a0b0a] flex items-center justify-center text-gray-500 text-sm">Loading…</div>
   if (!user) return <Redirect to="/auth" />
   return (
     <div className="min-h-screen bg-[#0a0b0a]">
       <Navbar />
-      <Component />
+      <Switch>
+        <Route path="/dashboard" component={Dashboard} />
+        <Route path="/strength" component={Strength} />
+        <Route path="/cardio" component={Cardio} />
+        <Route path="/bodyweight" component={Bodyweight} />
+        <Route path="/calories" component={Calories} />
+        <Route path="/history" component={History} />
+        <Route component={() => <Redirect to="/dashboard" />} />
+      </Switch>
     </div>
   )
 }
@@ -30,13 +38,7 @@ function AppRoutes() {
     <Switch>
       <Route path="/" component={() => user ? <Redirect to="/dashboard" /> : <Landing />} />
       <Route path="/auth" component={Auth} />
-      <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
-      <Route path="/strength" component={() => <ProtectedRoute component={Strength} />} />
-      <Route path="/cardio" component={() => <ProtectedRoute component={Cardio} />} />
-      <Route path="/bodyweight" component={() => <ProtectedRoute component={Bodyweight} />} />
-      <Route path="/calories" component={() => <ProtectedRoute component={Calories} />} />
-      <Route path="/history" component={() => <ProtectedRoute component={History} />} />
-      <Route component={() => <Redirect to="/" />} />
+      <Route component={ProtectedLayout} />
     </Switch>
   )
 }
