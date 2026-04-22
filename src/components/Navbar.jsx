@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useLayoutEffect } from 'react'
 import { Link, useLocation } from 'wouter'
 import { useAuth } from '../contexts/AuthContext'
 import { Dumbbell, Activity, Weight, Flame, History, LayoutDashboard } from 'lucide-react'
@@ -16,11 +16,17 @@ export default function Navbar() {
   const { signOut } = useAuth()
   const [location] = useLocation()
   const scrollRef = useRef(null)
+  const savedScroll = useRef(0)
 
-  const handleClick = () => {
+  useLayoutEffect(() => {
     if (scrollRef.current) {
-      const pos = scrollRef.current.scrollLeft
-      setTimeout(() => { scrollRef.current.scrollLeft = pos }, 0)
+      scrollRef.current.scrollLeft = savedScroll.current
+    }
+  })
+
+  const saveScroll = () => {
+    if (scrollRef.current) {
+      savedScroll.current = scrollRef.current.scrollLeft
     }
   }
 
@@ -30,14 +36,19 @@ export default function Navbar() {
         <Link href="/dashboard" className="hidden md:flex items-center gap-2 font-bold text-white text-lg">
           <span style={{letterSpacing:"-0.02em"}}>My<span style={{color:"#c4f031"}}>RX</span></span>
         </Link>
-        <div ref={scrollRef} className="flex items-center gap-1 w-full md:w-auto overflow-x-auto md:overflow-visible md:justify-start" style={{scrollbarWidth:'none'}}>
+        <div
+          ref={scrollRef}
+          onScroll={saveScroll}
+          className="flex items-center gap-1 w-full md:w-auto overflow-x-auto md:overflow-visible md:justify-start"
+          style={{scrollbarWidth:'none'}}
+        >
           {links.map(({ href, label, icon: Icon }) => {
             const active = location === href
             return (
               <Link
                 key={href}
                 href={href}
-                onClick={handleClick}
+                onClick={saveScroll}
                 className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 py-2 rounded-lg text-xs md:text-sm transition-colors shrink-0
                   ${active ? 'text-[#c4f031] bg-[#c4f031]/10' : 'text-gray-400 hover:text-white'}`}
               >
