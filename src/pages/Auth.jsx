@@ -35,7 +35,7 @@ export default function Auth() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-2xl font-bold mb-2">
-            <span className="text-[#c4f031]">My</span>RX
+            <span style={{letterSpacing:"-0.02em"}}>My<span style={{color:"#c4f031"}}>RX</span></span>
           </div>
           <h1 className="text-xl font-semibold text-white">
             {mode === 'signup' ? 'Create your account' : 'Welcome back'}
