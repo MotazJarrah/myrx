@@ -1,70 +1,149 @@
-import { useRef, useLayoutEffect } from 'react'
 import { Link, useLocation } from 'wouter'
 import { useAuth } from '../contexts/AuthContext'
-import { Dumbbell, Activity, Weight, Flame, History, LayoutDashboard } from 'lucide-react'
+import { useTheme } from '../contexts/ThemeContext'
+import {
+  Dumbbell, Activity, Weight, Flame, History,
+  LayoutDashboard, LogOut, Sun, Moon, Flower2,
+} from 'lucide-react'
 
 const links = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/strength', label: 'Strength', icon: Dumbbell },
-  { href: '/cardio', label: 'Cardio', icon: Activity },
-  { href: '/bodyweight', label: 'Bodyweight', icon: Weight },
-  { href: '/calories', label: 'Calories', icon: Flame },
-  { href: '/history', label: 'History', icon: History },
+  { href: '/strength',  label: 'Strength',  icon: Dumbbell },
+  { href: '/cardio',    label: 'Cardio',    icon: Activity },
+  { href: '/mobility',  label: 'Mobility',  icon: Flower2 },
+  { href: '/bodyweight',label: 'Bodyweight',icon: Weight },
+  { href: '/calories',  label: 'Calories',  icon: Flame },
+  { href: '/history',   label: 'History',   icon: History },
 ]
 
-export default function Navbar() {
-  const { signOut } = useAuth()
+function Logo() {
+  return (
+    <span className="text-lg font-bold" style={{ letterSpacing: '-0.02em' }}>
+      My<span className="text-primary">RX</span>
+    </span>
+  )
+}
+
+export default function AppShell({ children }) {
+  const { user, signOut } = useAuth()
+  const { theme, toggle } = useTheme()
   const [location] = useLocation()
-  const scrollRef = useRef(null)
-  const savedScroll = useRef(0)
 
-  useLayoutEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollLeft = savedScroll.current
-    }
-  })
-
-  const saveScroll = () => {
-    if (scrollRef.current) {
-      savedScroll.current = scrollRef.current.scrollLeft
-    }
-  }
+  const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || '?'
+  const initial = displayName[0]?.toUpperCase() ?? '?'
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 bg-[#111211] border-t border-[#1e201e] md:static md:border-t-0 md:border-b md:border-[#1e201e]">
-      <div className="max-w-4xl mx-auto flex items-center justify-between px-4 py-2 md:py-0 md:h-14">
-        <Link href="/dashboard" className="hidden md:flex items-center gap-2 font-bold text-white text-lg">
-          <span style={{letterSpacing:"-0.02em"}}>My<span style={{color:"#c4f031"}}>RX</span></span>
-        </Link>
-        <div
-          ref={scrollRef}
-          onScroll={saveScroll}
-          className="flex items-center gap-1 w-full md:w-auto overflow-x-auto md:overflow-visible md:justify-start"
-          style={{scrollbarWidth:'none'}}
-        >
+    <div className="min-h-dvh bg-background text-foreground">
+
+      {/* Desktop sidebar */}
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar md:flex">
+        <div className="flex h-16 items-center border-b border-sidebar-border px-5">
+          <Link href="/dashboard" className="inline-flex">
+            <Logo />
+          </Link>
+        </div>
+
+        <nav className="flex-1 space-y-0.5 p-3">
           {links.map(({ href, label, icon: Icon }) => {
             const active = location === href
             return (
               <Link
                 key={href}
                 href={href}
-                onClick={saveScroll}
-                className={`flex flex-col md:flex-row items-center gap-1 md:gap-2 px-3 py-2 rounded-lg text-xs md:text-sm transition-colors shrink-0
-                  ${active ? 'text-[#c4f031] bg-[#c4f031]/10' : 'text-gray-400 hover:text-white'}`}
+                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                  active
+                    ? 'bg-primary/10 text-foreground font-medium'
+                    : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+                }`}
               >
-                <Icon size={18} />
-                <span>{label}</span>
+                <Icon className={`h-4 w-4 shrink-0 ${active ? 'text-primary' : ''}`} strokeWidth={2} />
+                {label}
+                {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
               </Link>
             )
           })}
+        </nav>
+
+        <div className="border-t border-sidebar-border p-3">
+          <div className="flex items-center gap-2 rounded-md px-3 py-2">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">
+              {initial}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">{displayName}</p>
+              <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
+            </div>
+          </div>
+          <button
+            onClick={signOut}
+            className="mt-1 flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </button>
         </div>
-        <button
-          onClick={signOut}
-          className="hidden md:block text-sm text-gray-400 hover:text-white transition-colors px-3 py-2"
-        >
-          Sign out
-        </button>
+      </aside>
+
+      {/* Mobile top bar */}
+      <div className="fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b border-border bg-background/90 px-4 backdrop-blur md:hidden">
+        <Link href="/dashboard">
+          <Logo />
+        </Link>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={toggle}
+            aria-label="Toggle theme"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+          <button
+            onClick={signOut}
+            aria-label="Sign out"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
       </div>
-    </nav>
+
+      {/* Mobile bottom nav */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 flex items-center justify-around border-t border-border bg-background/95 px-1 py-1 backdrop-blur md:hidden">
+        {links.map(({ href, label, icon: Icon }) => {
+          const active = location === href
+          return (
+            <Link
+              key={href}
+              href={href}
+              className={`flex flex-1 flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-[11px] transition-colors ${
+                active ? 'text-primary' : 'text-muted-foreground'
+              }`}
+            >
+              <Icon className="h-4 w-4" strokeWidth={2.2} />
+              {label}
+            </Link>
+          )
+        })}
+      </nav>
+
+      {/* Main */}
+      <main className="pb-24 pt-14 md:pb-0 md:pl-60 md:pt-0">
+        {/* Desktop sticky header (theme toggle only) */}
+        <header className="sticky top-0 z-30 hidden h-16 items-center justify-end border-b border-border bg-background/80 px-8 backdrop-blur-md md:flex">
+          <button
+            onClick={toggle}
+            aria-label="Toggle theme"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+        </header>
+        <div className="p-4 md:p-8">
+          <div className="mx-auto max-w-6xl">
+            {children}
+          </div>
+        </div>
+      </main>
+    </div>
   )
 }

@@ -15,6 +15,7 @@
     "lucide-react": "^1.8.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-phone-number-input": "^3.4.16",
     "recharts": "^3.8.1",
     "tslib": "^2.8.1",
     "wouter": "^3.9.0"

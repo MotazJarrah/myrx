@@ -3,11 +3,17 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
+const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
+const labelCls = 'text-sm text-muted-foreground'
+
 export default function Bodyweight() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [weight, setWeight] = useState('')
-  const [unit, setUnit] = useState('lb')
+  const [unit, setUnit] = useState(profile?.weight_unit || 'lb')
   const [logs, setLogs] = useState([])
+
+  // Profile loads async — re-sync unit once it's available
+  useEffect(() => { if (profile?.weight_unit) setUnit(profile.weight_unit) }, [profile?.weight_unit])
 
   useEffect(() => {
     if (!user) return
@@ -21,11 +27,10 @@ export default function Bodyweight() {
 
   async function logWeight() {
     if (!weight || !user) return
-    const { data } = await supabase.from('bodyweight').insert({
-      user_id: user.id,
-      weight: Number(weight),
-      unit,
-    }).select()
+    const { data } = await supabase
+      .from('bodyweight')
+      .insert({ user_id: user.id, weight: Number(weight), unit })
+      .select()
     if (data) setLogs(prev => [...prev, data[0]])
     setWeight('')
   }
@@ -36,30 +41,24 @@ export default function Bodyweight() {
   }))
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8 pb-24 md:pb-8">
-      <h1 className="text-2xl font-bold text-white mb-1">Bodyweight</h1>
-      <p className="text-gray-400 text-sm mb-8">Track your weight over time.</p>
+    <div className="max-w-2xl mx-auto space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Bodyweight</h1>
+        <p className="mt-0.5 text-sm text-muted-foreground">Track your weight over time.</p>
+      </div>
 
-      <div className="bg-[#111211] border border-[#1e201e] rounded-2xl p-5 flex flex-col gap-4 mb-6">
+      <div className="animate-rise rounded-xl border border-border bg-card p-5 space-y-4">
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2 flex flex-col gap-1.5">
-            <label className="text-sm text-gray-400">Weight</label>
+            <label className={labelCls}>Weight</label>
             <input
-              type="number"
-              value={weight}
-              onChange={e => setWeight(e.target.value)}
-              placeholder="185"
-              step="0.1"
-              className="bg-[#0a0b0a] border border-[#1e201e] rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-[#c4f031]/50"
+              type="number" value={weight} onChange={e => setWeight(e.target.value)}
+              step="0.1" className={inputCls}
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm text-gray-400">Unit</label>
-            <select
-              value={unit}
-              onChange={e => setUnit(e.target.value)}
-              className="bg-[#0a0b0a] border border-[#1e201e] rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-[#c4f031]/50"
-            >
+            <label className={labelCls}>Unit</label>
+            <select value={unit} onChange={e => setUnit(e.target.value)} className={inputCls}>
               <option>lb</option>
               <option>kg</option>
             </select>
@@ -67,34 +66,42 @@ export default function Bodyweight() {
         </div>
         <button
           onClick={logWeight}
-          className="bg-[#c4f031] text-black font-semibold py-2.5 rounded-lg hover:bg-[#d4ff41] transition-colors"
+          className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
         >
           Log weight
         </button>
       </div>
 
       {logs.length > 1 && (
-        <div className="bg-[#111211] border border-[#1e201e] rounded-2xl p-5 mb-6">
-          <h2 className="text-sm font-medium text-white mb-4">Progress</h2>
+        <div className="animate-rise rounded-xl border border-border bg-card p-5">
+          <h2 className="text-sm font-semibold mb-4">Progress</h2>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={chartData}>
-              <XAxis dataKey="date" tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: '#6b7280', fontSize: 11 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-              <Tooltip contentStyle={{ background: '#111211', border: '1px solid #1e201e', borderRadius: 8, color: '#fff' }} />
-              <Line type="monotone" dataKey="weight" stroke="#c4f031" strokeWidth={2} dot={false} />
+              <XAxis dataKey="date" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+              <Tooltip
+                contentStyle={{
+                  background: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: 8,
+                  color: 'hsl(var(--foreground))',
+                  fontSize: 12,
+                }}
+              />
+              <Line type="monotone" dataKey="weight" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
       )}
 
       {logs.length > 0 && (
-        <div className="bg-[#111211] border border-[#1e201e] rounded-2xl p-5">
-          <h2 className="text-sm font-medium text-white mb-3">Log</h2>
-          <div className="flex flex-col gap-2">
+        <div className="animate-rise rounded-xl border border-border bg-card p-5">
+          <h2 className="text-sm font-semibold mb-3">Log</h2>
+          <div className="divide-y divide-border">
             {[...logs].reverse().slice(0, 10).map(l => (
-              <div key={l.id} className="flex justify-between text-sm">
-                <span className="text-gray-400">{new Date(l.created_at).toLocaleDateString()}</span>
-                <span className="font-mono text-white">{l.weight} {l.unit}</span>
+              <div key={l.id} className="flex justify-between py-2.5 text-sm">
+                <span className="text-muted-foreground">{new Date(l.created_at).toLocaleDateString()}</span>
+                <span className="font-mono tabular-nums">{l.weight} {l.unit}</span>
               </div>
             ))}
           </div>

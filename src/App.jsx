@@ -1,6 +1,9 @@
-import { Route, Switch, Redirect } from 'wouter'
+import { useEffect } from 'react'
+import { Route, Switch, Redirect, useLocation } from 'wouter'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
-import Navbar from './components/Navbar'
+import { ThemeProvider } from './contexts/ThemeContext'
+import AppShell from './components/Navbar'
+import CompleteProfile from './components/CompleteProfile'
 import Landing from './pages/Landing'
 import Auth from './pages/Auth'
 import Dashboard from './pages/Dashboard'
@@ -9,14 +12,33 @@ import Cardio from './pages/Cardio'
 import Bodyweight from './pages/Bodyweight'
 import Calories from './pages/Calories'
 import History from './pages/History'
+import EditProfile from './pages/EditProfile'
+import StrengthDetail from './pages/StrengthDetail'
+import CardioDetail from './pages/CardioDetail'
+import Mobility from './pages/Mobility'
+import MobilityDetail from './pages/MobilityDetail'
+
+function ScrollToTop() {
+  const [location] = useLocation()
+  useEffect(() => { window.scrollTo(0, 0) }, [location])
+  return null
+}
 
 function ProtectedLayout() {
-  const { user, loading } = useAuth()
-  if (loading) return <div className="min-h-screen bg-[#0a0b0a] flex items-center justify-center text-gray-500 text-sm">Loading…</div>
+  const { user, profile, loading } = useAuth()
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground text-sm">
+        Loading…
+      </div>
+    )
+  }
   if (!user) return <Redirect to="/auth" />
+  // User confirmed email but hasn't completed profile yet
+  if (!profile) return <CompleteProfile />
   return (
-    <div className="min-h-screen bg-[#0a0b0a]">
-      <Navbar />
+    <AppShell>
+      <ScrollToTop />
       <Switch>
         <Route path="/dashboard" component={Dashboard} />
         <Route path="/strength" component={Strength} />
@@ -24,16 +46,26 @@ function ProtectedLayout() {
         <Route path="/bodyweight" component={Bodyweight} />
         <Route path="/calories" component={Calories} />
         <Route path="/history" component={History} />
+        <Route path="/profile" component={EditProfile} />
+        <Route path="/effort/strength/:exercise" component={StrengthDetail} />
+        <Route path="/effort/cardio/:activity" component={CardioDetail} />
+        <Route path="/mobility" component={Mobility} />
+        <Route path="/mobility/:movement" component={MobilityDetail} />
         <Route component={() => <Redirect to="/dashboard" />} />
       </Switch>
-    </div>
+    </AppShell>
   )
 }
 
 function AppRoutes() {
   const { user, loading } = useAuth()
-  if (loading) return <div className="min-h-screen bg-[#0a0b0a] flex items-center justify-center text-gray-500 text-sm">Loading…</div>
-
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground text-sm">
+        Loading…
+      </div>
+    )
+  }
   return (
     <Switch>
       <Route path="/" component={() => user ? <Redirect to="/dashboard" /> : <Landing />} />
@@ -45,8 +77,10 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppRoutes />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </ThemeProvider>
   )
 }
