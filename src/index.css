@@ -173,3 +173,5 @@
 .PhoneInputInput::placeholder {
   color: hsl(var(--muted-foreground) / 0.6);
 }
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }

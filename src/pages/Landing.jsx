@@ -3,10 +3,10 @@ import { useTheme } from '../contexts/ThemeContext'
 import { Dumbbell, Activity, Weight, Flame, Sun, Moon, ArrowRight, Zap, LineChart, Lock } from 'lucide-react'
 
 function Logo() {
+  const { theme } = useTheme()
+  const src = theme === 'dark' ? '/logo-dark.png?v=5' : '/logo-light.png?v=5'
   return (
-    <span className="text-lg font-bold" style={{ letterSpacing: '-0.02em' }}>
-      My<span className="text-primary">RX</span>
-    </span>
+    <img src={src} alt="MyRX" className="h-9 w-auto object-contain" />
   )
 }
 

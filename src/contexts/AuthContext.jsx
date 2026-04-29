@@ -4,15 +4,13 @@ import { supabase } from '../lib/supabase'
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
-  const [profile, setProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [user,           setUser]           = useState(null)
+  const [profile,        setProfile]        = useState(null)
+  const [loading,        setLoading]        = useState(true)   // true until first session check done
+  const [profileLoading, setProfileLoading] = useState(true)   // true while any profile fetch is in flight
 
   const fetchProfile = useCallback(async (userId) => {
-    if (!userId) {
-      setProfile(null)
-      return
-    }
+    setProfileLoading(true)
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -26,20 +24,41 @@ export function AuthProvider({ children }) {
       setProfile(data ?? null)
     } catch (err) {
       console.error('Unexpected error fetching profile:', err)
+    } finally {
+      setProfileLoading(false)
     }
   }, [])
 
   useEffect(() => {
+    // Initial session check
     supabase.auth.getSession().then(({ data: { session } }) => {
       const sessionUser = session?.user ?? null
-      setUser(sessionUser)
-      fetchProfile(sessionUser?.id).finally(() => setLoading(false))
+      if (sessionUser) {
+        setUser(sessionUser)
+        fetchProfile(sessionUser.id).finally(() => setLoading(false))
+      } else {
+        setUser(null)
+        setProfile(null)
+        setProfileLoading(false)
+        setLoading(false)
+      }
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+    // Subsequent auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        // Clear everything atomically — no async fetch, no race condition
+        setUser(null)
+        setProfile(null)
+        setProfileLoading(false)
+        return
+      }
+
       const sessionUser = session?.user ?? null
-      setUser(sessionUser)
-      fetchProfile(sessionUser?.id)
+      if (sessionUser) {
+        setUser(sessionUser)
+        fetchProfile(sessionUser.id)
+      }
     })
 
     return () => subscription.unsubscribe()
@@ -65,7 +84,11 @@ export function AuthProvider({ children }) {
     return supabase.auth.signInWithPassword({ email: emailData, password })
   }
 
-  const signOut = () => supabase.auth.signOut()
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut()
+    // Hard navigate so no React state race condition can land on CompleteProfile
+    window.location.replace('/auth?mode=signin')
+  }, [])
 
   const refreshProfile = useCallback(() => {
     if (user?.id) return fetchProfile(user.id)
@@ -93,7 +116,11 @@ export function AuthProvider({ children }) {
   }, [user])
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signUp, signIn, signInWithEmailOrPhone, signOut, refreshProfile, updateProfile, uploadAvatar }}>
+    <AuthContext.Provider value={{
+      user, profile, loading, profileLoading,
+      signUp, signIn, signInWithEmailOrPhone, signOut,
+      refreshProfile, updateProfile, uploadAvatar,
+    }}>
       {children}
     </AuthContext.Provider>
   )

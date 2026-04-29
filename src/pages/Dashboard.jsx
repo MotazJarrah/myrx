@@ -2,8 +2,17 @@ import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import { getEffortTags } from '../lib/effortTags'
-import { Dumbbell, Activity, Weight, ArrowRight, User, Pencil } from 'lucide-react'
+import { getEffortTags, TAG_STYLES } from '../lib/effortTags'
+import { Dumbbell, Activity, Weight, ArrowRight, User, Pencil, Flower2, Flame, Trash2, AlertTriangle, X } from 'lucide-react'
+import TickerNumber from '../components/TickerNumber'
+import { dataCache } from '../lib/cache'
+
+function getGreeting() {
+  const h = new Date().getHours()
+  if (h >= 5 && h < 12) return 'Good morning'
+  if (h >= 12 && h < 17) return 'Good afternoon'
+  return 'Good evening'
+}
 
 function calcAge(birthdate) {
   if (!birthdate) return null
@@ -24,6 +33,58 @@ function formatGender(g) {
   return map[g] ?? g
 }
 
+// ── Confirm delete dialog ──────────────────────────────────────────────────────
+
+const ROM_META_LABELS = {
+  'shoulder-flexion':   'Shoulder Flexion',
+  'shoulder-extension': 'Shoulder Extension',
+  'shoulder-abduction': 'Shoulder Abduction',
+  'hip-flexion':        'Hip Flexion',
+  'hip-abduction':      'Hip Abduction',
+  'knee-flexion':       'Knee Flexion',
+  'ankle-dorsiflexion': 'Ankle Dorsiflexion',
+  'spinal-flexion':     'Spinal Flexion',
+}
+
+function ConfirmDialog({ item, onConfirm, onCancel }) {
+  const name = item._kind === 'rom'
+    ? `${ROM_META_LABELS[item.movement_key] ?? item.movement_key} · ${item.degrees}°`
+    : item._kind === 'weighin'
+      ? `Weigh-in · ${item.weight} ${item.unit}`
+      : item._kind === 'calorie'
+        ? `Intake · ${item.calories} kcal`
+        : item.label
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative w-full max-w-sm animate-rise rounded-2xl border border-border bg-card p-6 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold">Delete entry</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Remove <span className="font-medium text-foreground">{name}</span> from your history? This can't be undone.
+            </p>
+          </div>
+          <button onClick={onCancel} className="shrink-0 text-muted-foreground hover:text-foreground transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="mt-5 flex gap-2">
+          <button onClick={onCancel} className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="flex-1 rounded-lg bg-destructive py-2 text-sm font-semibold text-white hover:opacity-90 transition-opacity">
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function formatDate(ts) {
   const diff = Date.now() - new Date(ts).getTime()
   const days = Math.floor(diff / 86_400_000)
@@ -36,6 +97,79 @@ function formatDate(ts) {
 function formatMemberSince(ts) {
   if (!ts) return '—'
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+}
+
+// ── Streak helpers ─────────────────────────────────────────────────────────────
+
+function getWeekKey(dateStr) {
+  const d = new Date(dateStr)
+  const day = d.getDay() === 0 ? 7 : d.getDay() // Mon=1 … Sun=7
+  d.setDate(d.getDate() - (day - 1))             // rewind to Monday
+  d.setHours(0, 0, 0, 0)
+  return d.toISOString().split('T')[0]
+}
+
+function computeWeekStreak(dates) {
+  if (!dates || dates.length === 0) return 0
+  const weekSet = new Set(dates.map(d => getWeekKey(d)))
+  const now = new Date()
+  const thisWeek = getWeekKey(now.toISOString())
+  // Grace: if current week has no efforts yet, start counting from last week
+  // so the streak doesn't break just because it's Monday and they haven't logged yet.
+  let check = new Date(now)
+  if (!weekSet.has(thisWeek)) check.setDate(check.getDate() - 7)
+  let streak = 0
+  while (true) {
+    const key = getWeekKey(check.toISOString())
+    if (weekSet.has(key)) { streak++; check.setDate(check.getDate() - 7) }
+    else break
+  }
+  return streak
+}
+
+// ── Monthly PR helpers ─────────────────────────────────────────────────────────
+
+function parseEffort1RM(value) {
+  const m = value?.match(/Est\. 1RM (\d+(?:\.\d+)?)/)
+  return m ? parseFloat(m[1]) : null
+}
+
+function computeMonthlyPRs(allStrengthEfforts, allRomRecords) {
+  const now = new Date()
+  const y = now.getFullYear(), mo = now.getMonth()
+  const isThisMonth = ds => {
+    const d = new Date(ds)
+    return d.getFullYear() === y && d.getMonth() === mo
+  }
+  let count = 0
+
+  // Strength: per exercise, is the all-time best 1RM set this month?
+  const byEx = {}
+  allStrengthEfforts.forEach(e => {
+    const rm = parseEffort1RM(e.value)
+    if (!rm) return
+    const ex = e.label?.split(' · ')[0]
+    if (!ex) return
+    if (!byEx[ex]) byEx[ex] = []
+    byEx[ex].push({ rm, date: e.created_at })
+  })
+  Object.values(byEx).forEach(arr => {
+    const best = arr.reduce((b, e) => e.rm > b.rm ? e : b, arr[0])
+    if (isThisMonth(best.date)) count++
+  })
+
+  // Mobility: per movement, is the all-time best degrees set this month?
+  const byMov = {}
+  allRomRecords.forEach(r => {
+    if (!byMov[r.movement_key]) byMov[r.movement_key] = []
+    byMov[r.movement_key].push({ deg: r.degrees, date: r.created_at })
+  })
+  Object.values(byMov).forEach(arr => {
+    const best = arr.reduce((b, e) => e.deg > b.deg ? e : b, arr[0])
+    if (isThisMonth(best.date)) count++
+  })
+
+  return count
 }
 
 function formatHeight(height, unit) {
@@ -51,43 +185,105 @@ function formatHeight(height, unit) {
 
 export default function Dashboard() {
   const { user, profile } = useAuth()
-  const [recentEfforts, setRecentEfforts] = useState([])
-  const [totalEfforts, setTotalEfforts] = useState(null)
-  const [latestBW, setLatestBW] = useState(null)
+
+  const cacheKey = user ? `dashboard:${user.id}` : null
+  const cached   = cacheKey ? dataCache.get(cacheKey) : null
+
+  const [recentEfforts, setRecentEfforts]   = useState(cached?.efforts   ?? [])
+  const [recentROM, setRecentROM]           = useState(cached?.rom       ?? [])
+  const [recentBW, setRecentBW]             = useState(cached?.bw        ?? [])
+  const [recentCalories, setRecentCalories] = useState(cached?.calories  ?? [])
+  const [totalEfforts, setTotalEfforts]     = useState(cached?.total     ?? null)
+  const [trainingStreak, setTrainingStreak] = useState(cached?.streak    ?? null)
+  const [monthlyPRs,     setMonthlyPRs]     = useState(cached?.prs       ?? null)
+  const [pendingDelete, setPendingDelete]   = useState(null)
+  const [deleting, setDeleting]             = useState(false)
 
   useEffect(() => {
     if (!user) return
-    supabase
-      .from('efforts')
-      .select('*', { count: 'exact', head: false })
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(5)
-      .then(({ data, count }) => {
-        setRecentEfforts(data || [])
-        setTotalEfforts(count ?? (data?.length ?? 0))
-      })
-    // Latest bodyweight log
-    supabase
-      .from('bodyweight')
-      .select('weight, unit, created_at')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .then(({ data }) => { if (data?.[0]) setLatestBW(data[0]) })
+    Promise.all([
+      supabase.from('efforts').select('*', { count: 'exact', head: false }).eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
+      supabase.from('rom_records').select('id, movement_key, degrees, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
+      supabase.from('bodyweight').select('id, weight, unit, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
+      supabase.from('calorie_logs').select('id, log_date, calories').eq('user_id', user.id).order('log_date', { ascending: false }).limit(5),
+      // All effort dates + labels for streak + monthly PR computation
+      supabase.from('efforts').select('created_at, label, value, type').eq('user_id', user.id),
+      // All ROM records for monthly mobility PR computation
+      supabase.from('rom_records').select('movement_key, degrees, created_at').eq('user_id', user.id),
+    ]).then(([efRes, romRes, bwRes, calRes, allEffRes, allRomRes]) => {
+      const efforts  = efRes.data  || []
+      const total    = efRes.count ?? efforts.length
+      const rom      = romRes.data || []
+      const bw       = bwRes.data  || []
+      const calories = (calRes.data || []).map(r => ({ ...r, created_at: r.log_date + 'T12:00:00' }))
+      const allEff   = allEffRes.data || []
+      const allRom   = allRomRes.data || []
+
+      const streak = computeWeekStreak(allEff.map(e => e.created_at))
+      const prs    = computeMonthlyPRs(allEff.filter(e => e.type === 'strength'), allRom)
+
+      setRecentEfforts(efforts)
+      setTotalEfforts(total)
+      setRecentROM(rom)
+      setRecentBW(bw)
+      setRecentCalories(calories)
+      setTrainingStreak(streak)
+      setMonthlyPRs(prs)
+
+      if (cacheKey) dataCache.set(cacheKey, { efforts, total, rom, bw, calories, streak, prs })
+    })
   }, [user])
+
+  async function handleDelete() {
+    if (!pendingDelete) return
+    setDeleting(true)
+    const table = pendingDelete._kind === 'rom'     ? 'rom_records'
+                : pendingDelete._kind === 'weighin' ? 'bodyweight'
+                : pendingDelete._kind === 'calorie' ? 'calorie_logs'
+                : 'efforts'
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq('id', pendingDelete.id)
+      .eq('user_id', user.id)
+    if (!error) {
+      if (pendingDelete._kind === 'rom')      setRecentROM(prev => prev.filter(r => r.id !== pendingDelete.id))
+      else if (pendingDelete._kind === 'weighin')  setRecentBW(prev => prev.filter(b => b.id !== pendingDelete.id))
+      else if (pendingDelete._kind === 'calorie')  setRecentCalories(prev => prev.filter(c => c.id !== pendingDelete.id))
+      else setRecentEfforts(prev => prev.filter(e => e.id !== pendingDelete.id))
+    }
+    setPendingDelete(null)
+    setDeleting(false)
+  }
+
+  // Merge efforts + ROM + bodyweight + calorie logs, sorted newest first, capped at 5
+  const allActivity = [
+    ...recentEfforts.map(e => ({ ...e, _kind: 'effort' })),
+    ...recentROM.map(r => ({ ...r, _kind: 'rom' })),
+    ...recentBW.map(b => ({ ...b, _kind: 'weighin' })),
+    ...recentCalories.map(c => ({ ...c, _kind: 'calorie' })),
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5)
+
+  const ROM_META = {
+    'shoulder-flexion':   { label: 'Shoulder Flexion',   group: 'Shoulder' },
+    'shoulder-extension': { label: 'Shoulder Extension', group: 'Shoulder' },
+    'shoulder-abduction': { label: 'Shoulder Abduction', group: 'Shoulder' },
+    'hip-flexion':        { label: 'Hip Flexion',         group: 'Hip'      },
+    'hip-abduction':      { label: 'Hip Abduction',       group: 'Hip'      },
+    'knee-flexion':       { label: 'Knee Flexion',        group: 'Knee'     },
+    'ankle-dorsiflexion': { label: 'Ankle Dorsiflexion', group: 'Ankle'    },
+    'spinal-flexion':     { label: 'Spinal Flexion',      group: 'Spine'    },
+  }
 
   const age = calcAge(profile?.birthdate)
   const gender = formatGender(profile?.gender)
   const memberSince = formatMemberSince(user?.created_at)
   const avatarUrl = profile?.avatar_url || null
 
-  // Current weight: latest BW log takes priority over profile value
-  const displayWeight = latestBW
-    ? `${latestBW.weight} ${latestBW.unit}`
-    : profile?.current_weight
-      ? `${profile.current_weight} ${profile.weight_unit || 'lb'}`
-      : null
+  // Current weight: use profile value (set explicitly by user in Edit Profile)
+  const displayWeight = profile?.current_weight
+    ? `${profile.current_weight} ${profile.weight_unit || 'lb'}`
+    : null
 
   const displayHeight = formatHeight(profile?.current_height, profile?.height_unit || 'imperial')
 
@@ -110,6 +306,11 @@ export default function Dashboard() {
           </button>
         </Link>
 
+        {/* Greeting — same size as name, far-left, above avatar */}
+        <p className="text-xl font-semibold tracking-tight mb-4 pr-9">
+          {getGreeting()},
+        </p>
+
         <div className="flex items-center gap-5">
           {/* Avatar */}
           <div className="shrink-0">
@@ -122,8 +323,8 @@ export default function Dashboard() {
             )}
           </div>
 
-          {/* Name + details — full width, no competition */}
-          <div className="min-w-0 flex-1 pr-6">
+          {/* Name + details */}
+          <div className="min-w-0 flex-1">
             <h1 className="truncate text-xl font-semibold tracking-tight">
               {profile?.full_name || user?.email?.split('@')[0] || 'Athlete'}
             </h1>
@@ -149,13 +350,21 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Stats — single line */}
-        <div className="mt-5 flex items-center gap-1.5 border-t border-border pt-4 text-sm">
-          <span className="font-bold tabular-nums text-foreground">{totalEfforts ?? '—'}</span>
-          <span className="text-muted-foreground">efforts</span>
-          <span className="mx-2 select-none text-border">·</span>
-          <span className="text-muted-foreground">member since</span>
-          <span className="font-semibold text-foreground">{memberSince}</span>
+        {/* Stats — streak · PRs this month · member since */}
+        <div className="mt-5 flex flex-wrap gap-1.5 border-t border-border pt-4">
+          {trainingStreak != null && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-0.5 text-[11px] font-medium text-blue-400 whitespace-nowrap">
+              🗓️ <span className="font-bold tabular-nums"><TickerNumber value={trainingStreak} /></span> wk streak
+            </span>
+          )}
+          {monthlyPRs != null && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-medium text-amber-400 whitespace-nowrap">
+              🏆 <span className="font-bold tabular-nums"><TickerNumber value={monthlyPRs} /></span> PR{monthlyPRs !== 1 ? 's' : ''} this month
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/30 px-2.5 py-0.5 text-[11px] text-muted-foreground whitespace-nowrap">
+            📅 since {memberSince}
+          </span>
         </div>
       </div>
 
@@ -170,9 +379,9 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {recentEfforts.length === 0 ? (
+        {allActivity.length === 0 ? (
           <div className="px-5 py-10 text-center">
-            <p className="text-sm text-muted-foreground">No efforts logged yet.</p>
+            <p className="text-sm text-muted-foreground">No activity logged yet.</p>
             <Link href="/strength">
               <button className="mt-3 text-sm font-medium text-primary hover:underline">
                 Log your first lift →
@@ -181,21 +390,108 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="p-3 space-y-2">
-            {recentEfforts.map(e => {
-              const { primary, secondary } = getEffortTags(e)
+            {allActivity.map(item => {
+              const deleteBtn = (
+                <button
+                  onClick={() => setPendingDelete(item)}
+                  className="shrink-0 ml-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                  aria-label="Delete entry"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )
+
+              if (item._kind === 'calorie') {
+                return (
+                  <div key={`cal-${item.id}`} className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10 text-red-400">
+                      <Flame className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">Intake · {item.calories} kcal</p>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_STYLES.calories}`}>
+                          Calories
+                        </span>
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_STYLES['Intake']}`}>
+                          Intake
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {formatDate(item.created_at)}
+                        </span>
+                      </div>
+                    </div>
+                    {deleteBtn}
+                  </div>
+                )
+              }
+              if (item._kind === 'rom') {
+                const meta = ROM_META[item.movement_key]
+                return (
+                  <div key={`rom-${item.id}`} className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-fuchsia-500/10 text-fuchsia-400">
+                      <Flower2 className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {meta?.label ?? item.movement_key} · {item.degrees}° ROM
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_STYLES.mobility}`}>
+                          Mobility
+                        </span>
+                        {meta?.group && (
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_STYLES[meta.group] ?? TAG_STYLES.Movement}`}>
+                            {meta.group}
+                          </span>
+                        )}
+                        <span className="text-[11px] text-muted-foreground">
+                          {formatDate(item.created_at)}
+                        </span>
+                      </div>
+                    </div>
+                    {deleteBtn}
+                  </div>
+                )
+              }
+              if (item._kind === 'weighin') {
+                return (
+                  <div key={`bw-${item.id}`} className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+                      <Weight className="h-3.5 w-3.5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">Weigh-in · {item.weight} {item.unit}</p>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_STYLES.weighin}`}>
+                          Bodyweight
+                        </span>
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${TAG_STYLES['Weigh-in']}`}>
+                          Weigh-in
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {formatDate(item.created_at)}
+                        </span>
+                      </div>
+                    </div>
+                    {deleteBtn}
+                  </div>
+                )
+              }
+              const { primary, secondary } = getEffortTags(item)
               return (
-                <div key={e.id} className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3">
+                <div key={item.id} className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3">
                   <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                    e.type === 'strength' ? 'bg-blue-500/10 text-blue-400'
-                    : e.type === 'cardio' ? 'bg-amber-500/10 text-amber-400'
+                    item.type === 'strength' ? 'bg-blue-500/10 text-blue-400'
+                    : item.type === 'cardio' ? 'bg-amber-500/10 text-amber-400'
                     : 'bg-primary/10 text-primary'
                   }`}>
-                    {e.type === 'strength' ? <Dumbbell className="h-3.5 w-3.5" />
-                      : e.type === 'cardio' ? <Activity className="h-3.5 w-3.5" />
+                    {item.type === 'strength' ? <Dumbbell className="h-3.5 w-3.5" />
+                      : item.type === 'cardio' ? <Activity className="h-3.5 w-3.5" />
                       : <Weight className="h-3.5 w-3.5" />}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{e.label}</p>
+                    <p className="truncate text-sm font-medium">{item.label}</p>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${primary.cls}`}>
                         {primary.label}
@@ -206,10 +502,11 @@ export default function Dashboard() {
                         </span>
                       )}
                       <span className="text-[11px] text-muted-foreground">
-                        {formatDate(e.created_at)}
+                        {formatDate(item.created_at)}
                       </span>
                     </div>
                   </div>
+                  {deleteBtn}
                 </div>
               )
             })}
@@ -217,6 +514,13 @@ export default function Dashboard() {
         )}
       </div>
 
+      {pendingDelete && (
+        <ConfirmDialog
+          item={pendingDelete}
+          onConfirm={handleDelete}
+          onCancel={() => !deleting && setPendingDelete(null)}
+        />
+      )}
     </div>
   )
 }

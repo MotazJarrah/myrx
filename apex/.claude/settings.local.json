@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m http.server 3000)",
+      "Bash(ipconfig)",
+      "Bash(grep -oE '\"[A-Za-z][^\"]{5,60}\"')",
+      "Read(//c/Users/motaz/OneDrive/Desktop/**)",
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(npx tailwindcss *)",
+      "Bash(npm run *)",
+      "Bash(pkill -f \"vite\")",
+      "Bash(rm -rf node_modules/.vite)",
+      "Bash(node -e ' *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(netlify --version)",
+      "Bash(netlify link *)",
+      "Read(//c/Users/motaz/AppData/Roaming/netlify//**)",
+      "Read(//c/Users/motaz/.config/**)",
+      "Bash(NETLIFY_AUTH_TOKEN=nfp_ikp59aDgNfheF44giM2V1d5XGt3mNKyTca7b netlify link --id 8e5d9d92-6346-4281-9da7-d0d8950a0125)",
+      "Bash(NETLIFY_AUTH_TOKEN=nfp_ikp59aDgNfheF44giM2V1d5XGt3mNKyTca7b netlify deploy --dir=dist --prod)",
+      "Bash(setx NETLIFY_AUTH_TOKEN \"nfp_ikp59aDgNfheF44giM2V1d5XGt3mNKyTca7b\")",
+      "Bash(NETLIFY_AUTH_TOKEN=nfp_ikp59aDgNfheF44giM2V1d5XGt3mNKyTca7b netlify deploy --dir=dist --prod --no-build)",
+      "Bash(grep -oE '#[0-9a-fA-F]{3,6}')",
+      "Bash(npx serve *)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__computer",
+      "mcp__Claude_in_Chrome__find",
+      "mcp__Claude_in_Chrome__file_upload",
+      "Bash(npx wrangler *)",
+      "PowerShell(cd \"C:\\\\Users\\\\motaz\\\\OneDrive\\\\Desktop\\\\MyRX\"; $env:CLOUDFLARE_API_TOKEN=\"cfut_KwpN3U4uLTicrx83lZcaV4hvvDTayVNMrrdE1ffYfe6b3095\"; npx wrangler pages deploy dist --project-name=myrx --account-id=d42e96189bfa3cacb2aaab8231eb0097 2>&1)",
+      "PowerShell(cd \"C:\\\\Users\\\\motaz\\\\OneDrive\\\\Desktop\\\\MyRX\"; $env:CLOUDFLARE_API_TOKEN=\"cfut_KwpN3U4uLTicrx83lZcaV4hvvDTayVNMrrdE1ffYfe6b3095\"; $env:CLOUDFLARE_ACCOUNT_ID=\"d42e96189bfa3cacb2aaab8231eb0097\"; npx wrangler pages deploy dist --project-name=myrx 2>&1)",
+      "PowerShell(cd \"C:\\\\Users\\\\motaz\\\\OneDrive\\\\Desktop\\\\MyRX\"; $env:CLOUDFLARE_API_TOKEN = \"cfut_KwpN3U4uLTicrx83lZcaV4hvvDTayVNMrrdE1ffYfe6b3095\"; $env:CLOUDFLARE_ACCOUNT_ID = \"d42e96189bfa3cacb2aaab8231eb0097\"; npx wrangler pages deploy dist --project-name=myrx 2>&1)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "PowerShell($env:CLOUDFLARE_API_TOKEN=\"cfut_KwpN3U4uLTicrz83lZcaV4hvvDTayVNMrrdE1ffYfe6b3095\"; $env:CLOUDFLARE_ACCOUNT_ID=\"d42e96189bfa3cacb2aaab8231eb0097\"; npx wrangler pages deploy \"C:\\\\Users\\\\motaz\\\\OneDrive\\\\Desktop\\\\_bundle\" --project-name=apex-bundle 2>&1)"
+    ]
+  }
+}

@@ -65,15 +65,15 @@ export default function Strength() {
   // Reset state whenever inputs change
   useEffect(() => { setSaved(false); setSaveError('') }, [exercise, weight, reps, timeStr, unit])
 
-  async function handleSuggestMove(name) {
+  function handleSuggestMove(name) {
     if (!user) return
-    await supabase.from('messages').insert({
+    setSuggestionSent(name)
+    setTimeout(() => setSuggestionSent(''), 3000)
+    supabase.from('messages').insert({
       user_id: user.id, from_admin: false,
       body: `New strength move suggestion: ${name}`,
       is_suggestion: true, read: false,
     })
-    setSuggestionSent(name)
-    setTimeout(() => setSuggestionSent(''), 3000)
   }
 
   // Reset input fields when exercise type changes
@@ -148,6 +148,7 @@ export default function Strength() {
         value:   `${durSecs} sec`,
       })
       setSaved(true)
+      setTimeout(() => { setExercise(''); setTimeStr('') }, 1500)
       return
     }
 
@@ -167,6 +168,7 @@ export default function Strength() {
       value:   `Est. 1RM ${liveOneRM} ${unit}`,
     })
     setSaved(true)
+    setTimeout(() => { setExercise(''); setWeight(''); setReps(''); setTimeStr('') }, 1500)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -182,7 +184,7 @@ export default function Strength() {
             </div>
           </div>
           <div className="h-1 bg-amber-500/20">
-            <div className="h-full bg-amber-500 origin-left animate-[shrink_3s_linear_forwards]" />
+            <div className="h-full bg-amber-500 origin-left animate-shrink" />
           </div>
         </div>
       )}

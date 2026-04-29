@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRoute, useLocation } from 'wouter'
 import { ArrowLeft } from 'lucide-react'
+import TickerNumber from '../components/TickerNumber'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -104,7 +105,7 @@ function IsometricDetail({ exercise, efforts, navigate }) {
       const secs = parseDurationSecs(e.value)
       if (secs === null) return null
       return {
-        date: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        ts: e.created_at,
         secs,
       }
     })
@@ -123,7 +124,7 @@ function IsometricDetail({ exercise, efforts, navigate }) {
         </button>
         <h1 className="text-xl font-semibold tracking-tight">{exercise}</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Personal best — <span className="font-mono text-primary">{fmtDurationLong(bestSecs)}</span>
+          Personal best — <span className="font-mono text-blue-400">{fmtDurationLong(bestSecs)}</span>
         </p>
       </div>
 
@@ -148,24 +149,24 @@ function IsometricDetail({ exercise, efforts, navigate }) {
                 disabled={!achieved}
                 className={`rounded-lg border p-2 text-center transition-all duration-200 ${
                   isSelected
-                    ? 'border-primary bg-primary/15 scale-105 shadow-sm'
+                    ? 'border-blue-500 bg-blue-500/15 scale-105 shadow-sm'
                     : isCurrent
-                      ? 'border-primary/40 bg-primary/8'
+                      ? 'border-blue-500/40 bg-blue-500/8'
                       : achieved
                         ? 'border-border/60 bg-card/40 hover:border-border hover:bg-accent/40'
                         : 'border-border/30 bg-card/20 opacity-35 cursor-not-allowed'
                 }`}
               >
                 <div className={`font-mono text-xs tabular-nums font-semibold leading-tight ${
-                  isSelected   ? 'text-primary'
-                  : isCurrent  ? 'text-primary/80'
+                  isSelected   ? 'text-blue-400'
+                  : isCurrent  ? 'text-blue-400/80'
                   : achieved   ? 'text-foreground'
                   : 'text-muted-foreground/40'
                 }`}>
                   {fmtDuration(ms)}
                 </div>
                 {achieved && (
-                  <div className="text-[9px] mt-0.5 text-primary/60">✓</div>
+                  <div className="text-[9px] mt-0.5 text-blue-400/60">✓</div>
                 )}
               </button>
             )
@@ -177,14 +178,14 @@ function IsometricDetail({ exercise, efforts, navigate }) {
         </p>
 
         {/* Target panel */}
-        <div className="animate-rise rounded-lg border border-primary/30 bg-primary/8 px-4 py-4 space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-primary">Your next training target</p>
+        <div className="animate-rise rounded-lg border border-blue-500/30 bg-blue-500/8 px-4 py-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">Your next training target</p>
 
           {bestSecs === 0 ? (
             // No efforts logged yet
             <>
               <div className="flex items-baseline gap-1.5">
-                <span className="font-mono text-3xl tabular-nums font-bold text-primary leading-none">
+                <span className="font-mono text-3xl tabular-nums font-bold text-blue-400 leading-none">
                   {fmtDuration(milestones[0])}
                 </span>
                 <span className="text-sm text-muted-foreground">first target</span>
@@ -197,7 +198,7 @@ function IsometricDetail({ exercise, efforts, navigate }) {
             // Achieved tile selected — show next target
             <>
               <div className="flex items-baseline gap-1.5">
-                <span className="font-mono text-3xl tabular-nums font-bold text-primary leading-none">
+                <span className="font-mono text-3xl tabular-nums font-bold text-blue-400 leading-none">
                   {fmtDuration(selectedMilestone)}
                 </span>
                 <span className="text-sm text-muted-foreground">achieved</span>
@@ -212,7 +213,7 @@ function IsometricDetail({ exercise, efforts, navigate }) {
             // All milestones done
             <>
               <div className="flex items-baseline gap-1.5">
-                <span className="font-mono text-3xl tabular-nums font-bold text-primary leading-none">
+                <span className="font-mono text-3xl tabular-nums font-bold text-blue-400 leading-none">
                   {fmtDuration(milestones[milestones.length - 1])}
                 </span>
                 <span className="text-sm text-muted-foreground">all done</span>
@@ -230,16 +231,19 @@ function IsometricDetail({ exercise, efforts, navigate }) {
         <div className="animate-rise rounded-xl border border-border bg-card p-5">
           <h2 className="text-sm font-semibold mb-4">Hold time over time</h2>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={chartData}>
+            <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
               <XAxis
-                dataKey="date"
+                dataKey="ts"
+                tickFormatter={iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
                 axisLine={false} tickLine={false}
+                interval="preserveStartEnd"
               />
               <YAxis
                 tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
                 axisLine={false} tickLine={false}
                 tickFormatter={s => fmtDuration(s)}
+                width={48}
                 domain={[
                   dataMin => Math.max(0, Math.round(dataMin * 0.85)),
                   dataMax => Math.round(dataMax * 1.15),
@@ -247,18 +251,19 @@ function IsometricDetail({ exercise, efforts, navigate }) {
               />
               <Tooltip
                 contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                labelFormatter={iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 formatter={s => [fmtDurationLong(s), 'Hold time']}
               />
               {chartData.length > 1 && (
-                <ReferenceLine y={bestSecs} stroke="hsl(var(--primary))" strokeDasharray="4 3" strokeOpacity={0.4} />
+                <ReferenceLine y={bestSecs} stroke="#60a5fa" strokeDasharray="4 3" strokeOpacity={0.4} />
               )}
               <Line
                 type="monotone"
                 dataKey="secs"
-                stroke="hsl(var(--primary))"
+                stroke="#60a5fa"
                 strokeWidth={2}
-                dot={{ fill: 'hsl(var(--primary))', r: 4, strokeWidth: 0 }}
-                activeDot={{ r: 6 }}
+                dot={{ fill: '#60a5fa', r: 4, strokeWidth: 0 }}
+                activeDot={{ r: 8 }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -278,7 +283,7 @@ function IsometricDetail({ exercise, efforts, navigate }) {
               <div key={e.id} className="flex items-center justify-between px-5 py-3">
                 <p className="text-xs text-muted-foreground">{new Date(e.created_at).toLocaleDateString()}</p>
                 <div className="text-right">
-                  <span className="font-mono text-sm tabular-nums text-primary font-semibold">
+                  <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">
                     {fmtDurationLong(secs)}
                   </span>
                 </div>
@@ -437,7 +442,7 @@ export default function StrengthDetail() {
       const parsed = parseOneRM(e.value)
       if (!parsed) return null
       return {
-        date:  new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        ts:    e.created_at,
         oneRM: parsed.oneRM,
       }
     })
@@ -459,13 +464,13 @@ export default function StrengthDetail() {
         <p className="mt-0.5 text-sm text-muted-foreground">
           {isBodyweightExercise
             ? <>
-                Best — <span className="font-mono text-primary">{bestReps} max attempts</span>
+                Best — <span className="font-mono text-blue-400">{bestReps} max attempts</span>
                 {bestRepsAddedWeight > 0
-                  ? <> plus <span className="font-mono text-primary">{bestRepsAddedWeight} {unit}</span> added weight</>
+                  ? <> plus <span className="font-mono text-blue-400">{bestRepsAddedWeight} {unit}</span> added weight</>
                   : ' at bodyweight'
                 }
               </>
-            : <>Best Est. 1RM — <span className="font-mono text-primary">{bestOneRM} {unit}</span></>
+            : <>Best Est. 1RM — <span className="font-mono text-blue-400"><TickerNumber value={bestOneRM} /> {unit}</span></>
           }
         </p>
       </div>
@@ -491,25 +496,25 @@ export default function StrengthDetail() {
                   disabled={!achievable}
                   className={`rounded-lg border p-2 text-center transition-all duration-200 ${
                     isSelected
-                      ? 'border-primary bg-primary/15 scale-105 shadow-sm'
+                      ? 'border-blue-500 bg-blue-500/15 scale-105 shadow-sm'
                       : isCurrent
-                        ? 'border-primary/40 bg-primary/8'
+                        ? 'border-blue-500/40 bg-blue-500/8'
                         : achievable
                           ? 'border-border/60 bg-card/40 hover:border-border hover:bg-accent/40'
                           : 'border-border/30 bg-card/20 opacity-35 cursor-not-allowed'
                   }`}
                 >
                   <div className={`text-[10px] uppercase tracking-wider ${
-                    isSelected ? 'text-primary'
-                    : isCurrent ? 'text-primary/70'
+                    isSelected ? 'text-blue-400'
+                    : isCurrent ? 'text-blue-400/70'
                     : achievable ? 'text-muted-foreground'
                     : 'text-muted-foreground/40'
                   }`}>
                     {r} rep{r > 1 ? 's' : ''}
                   </div>
                   <div className={`mt-0.5 font-mono text-xs tabular-nums font-semibold leading-tight ${
-                    isSelected ? 'text-primary'
-                    : isCurrent ? 'text-primary/80'
+                    isSelected ? 'text-blue-400'
+                    : isCurrent ? 'text-blue-400/80'
                     : achievable ? 'text-foreground'
                     : 'text-muted-foreground/40'
                   }`}>
@@ -528,25 +533,25 @@ export default function StrengthDetail() {
             <div>
               <div className="flex justify-between mb-1">
                 <span className="text-[11px] text-muted-foreground">Progress to weighted training</span>
-                <span className="font-mono text-[11px] text-primary">{bestReps}/{BODYWEIGHT_THRESHOLD}</span>
+                <span className="font-mono text-[11px] text-blue-400">{bestReps}/{BODYWEIGHT_THRESHOLD}</span>
               </div>
               <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-primary transition-all duration-500"
+                  className="h-full rounded-full bg-blue-500 transition-all duration-500"
                   style={{ width: `${(bestReps / BODYWEIGHT_THRESHOLD) * 100}%` }}
                 />
               </div>
             </div>
           )}
 
-          <div className="animate-rise rounded-lg border border-primary/30 bg-primary/8 px-4 py-4 space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-primary">Your next training target</p>
+          <div className="animate-rise rounded-lg border border-blue-500/30 bg-blue-500/8 px-4 py-4 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">Your next training target</p>
 
             {!selectedBWTile || !selectedBWTile.achievable ? (
               <>
                 <p className="text-sm text-muted-foreground">Target</p>
                 <div className="flex items-baseline gap-1">
-                  <span className="font-mono text-3xl tabular-nums font-bold text-primary leading-none">{selectedRM}</span>
+                  <span className="font-mono text-3xl tabular-nums font-bold text-blue-400 leading-none">{selectedRM}</span>
                   <span className="text-sm text-muted-foreground">max attempts</span>
                 </div>
                 <p className="text-[11px] text-muted-foreground">
@@ -558,7 +563,7 @@ export default function StrengthDetail() {
                 {bestReps >= BODYWEIGHT_THRESHOLD ? (
                   <>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-mono text-3xl tabular-nums font-bold text-primary leading-none">2.5</span>
+                      <span className="font-mono text-3xl tabular-nums font-bold text-blue-400 leading-none">2.5</span>
                       <span className="text-sm text-muted-foreground">{profileUnit} added to start</span>
                     </div>
                     <p className="text-[11px] text-muted-foreground">
@@ -568,7 +573,7 @@ export default function StrengthDetail() {
                 ) : (
                   <>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-mono text-3xl tabular-nums font-bold text-primary leading-none">
+                      <span className="font-mono text-3xl tabular-nums font-bold text-blue-400 leading-none">
                         {bestReps + 1}
                       </span>
                       <span className="text-sm text-muted-foreground">reps next at bodyweight</span>
@@ -585,7 +590,7 @@ export default function StrengthDetail() {
                   <div>
                     <p className="text-sm text-muted-foreground">{selectedRM} rep{selectedRM > 1 ? 's' : ''} target</p>
                     <div className="flex items-baseline gap-1 mt-0.5">
-                      <span className="font-mono text-3xl tabular-nums font-bold text-primary leading-none">
+                      <span className="font-mono text-3xl tabular-nums font-bold text-blue-400 leading-none">
                         +{selectedBWTile.addedWeight}
                       </span>
                       <span className="text-sm text-muted-foreground">{profileUnit} added</span>
@@ -596,7 +601,7 @@ export default function StrengthDetail() {
                       <p className="text-[11px] text-muted-foreground mb-1">belt / vest</p>
                       <div className="flex flex-wrap justify-end gap-1">
                         {selectedBWTile.plates.map((p, i) => (
-                          <span key={i} className="inline-flex items-center rounded border border-primary/30 bg-card px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-primary font-semibold">
+                          <span key={i} className="inline-flex items-center rounded border border-blue-500/30 bg-card px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-blue-400 font-semibold">
                             {p}
                           </span>
                         ))}
@@ -620,31 +625,35 @@ export default function StrengthDetail() {
           <div className="grid grid-cols-5 gap-2">
             {projections.map(({ reps: r, weight: w }) => {
               const isSelected = selectedRM === r
+              const pct = Math.round((w / effectiveOneRM) * 100)
               return (
                 <button
                   key={r}
                   onClick={() => setSelectedRM(isSelected ? 1 : r)}
                   className={`rounded-lg border p-2 text-center transition-all duration-200 ${
                     isSelected
-                      ? 'border-primary bg-primary/15 scale-105 shadow-sm'
+                      ? 'border-blue-500 bg-blue-500/15 scale-105 shadow-sm'
                       : 'border-border/60 bg-card/40 hover:border-border hover:bg-accent/40'
                   }`}
                 >
-                  <div className={`text-[10px] uppercase tracking-wider opacity-70 ${isSelected ? 'text-primary' : 'text-muted-foreground'}`}>
+                  <div className={`text-[10px] uppercase tracking-wider opacity-70 ${isSelected ? 'text-blue-400' : 'text-muted-foreground'}`}>
                     {r}RM
                   </div>
-                  <div className={`mt-0.5 font-mono text-sm tabular-nums font-semibold ${isSelected ? 'text-primary' : 'text-foreground'}`}>
+                  <div className={`mt-0.5 font-mono text-sm tabular-nums font-semibold ${isSelected ? 'text-blue-400' : 'text-foreground'}`}>
                     {w}
+                  </div>
+                  <div className={`text-[9px] tabular-nums mt-0.5 leading-none ${isSelected ? 'text-blue-400/70' : 'text-muted-foreground/50'}`}>
+                    {pct}%
                   </div>
                 </button>
               )
             })}
           </div>
-          <p className="mt-3 text-[11px] text-muted-foreground">Epley · Brzycki · Lombardi averaged</p>
+          <p className="mt-3 text-[11px] text-muted-foreground">Epley · Brzycki · Lombardi averaged · % of 1RM</p>
 
           {selectedProjection && nextLoad && (
-            <div className="mt-4 animate-rise rounded-lg border border-primary/30 bg-primary/8 px-4 py-4 space-y-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-primary">Your next training target</p>
+            <div className="mt-4 animate-rise rounded-lg border border-blue-500/30 bg-blue-500/8 px-4 py-4 space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-blue-400">Your next training target</p>
 
               {equipmentType === 'barbell' && (
                 <>
@@ -654,7 +663,7 @@ export default function StrengthDetail() {
                         {selectedProjection.reps} rep{selectedProjection.reps > 1 ? 's' : ''}
                       </p>
                       <div className="flex items-baseline gap-1 mt-0.5">
-                        <span className="font-mono text-3xl tabular-nums font-bold text-primary leading-none">
+                        <span className="font-mono text-3xl tabular-nums font-bold text-blue-400 leading-none">
                           {nextLoad.weight}
                         </span>
                         <span className="text-sm text-muted-foreground">{unit}</span>
@@ -664,7 +673,7 @@ export default function StrengthDetail() {
                       <p className="text-[11px] text-muted-foreground mb-1">per side</p>
                       <div className="flex flex-wrap justify-end gap-1">
                         {nextLoad.platesPerSide.map((p, i) => (
-                          <span key={i} className="inline-flex items-center rounded border border-primary/30 bg-card px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-primary font-semibold">
+                          <span key={i} className="inline-flex items-center rounded border border-blue-500/30 bg-card px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-blue-400 font-semibold">
                             {p}
                           </span>
                         ))}
@@ -685,7 +694,7 @@ export default function StrengthDetail() {
                         {selectedProjection.reps} rep{selectedProjection.reps > 1 ? 's' : ''}
                       </p>
                       <div className="flex items-baseline gap-1 mt-0.5">
-                        <span className="font-mono text-3xl tabular-nums font-bold text-primary leading-none">
+                        <span className="font-mono text-3xl tabular-nums font-bold text-blue-400 leading-none">
                           {nextLoad.weight}
                         </span>
                         <span className="text-sm text-muted-foreground">{unit}</span>
@@ -708,15 +717,18 @@ export default function StrengthDetail() {
         <div className="animate-rise rounded-xl border border-border bg-card p-5">
           <h2 className="text-sm font-semibold mb-4">Est. 1RM over time</h2>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={chartData}>
+            <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
               <XAxis
-                dataKey="date"
+                dataKey="ts"
+                tickFormatter={iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
                 axisLine={false} tickLine={false}
+                interval="preserveStartEnd"
               />
               <YAxis
                 tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
                 axisLine={false} tickLine={false}
+                width={48}
                 domain={[
                   dataMin => Math.max(0, Math.round(dataMin * 0.9)),
                   dataMax => Math.round(dataMax * 1.1),
@@ -724,18 +736,19 @@ export default function StrengthDetail() {
               />
               <Tooltip
                 contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                labelFormatter={iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 formatter={v => [`${v} ${unit}`, 'Est. 1RM']}
               />
               {chartData.length > 1 && (
-                <ReferenceLine y={bestOneRM} stroke="hsl(var(--primary))" strokeDasharray="4 3" strokeOpacity={0.4} />
+                <ReferenceLine y={bestOneRM} stroke="#60a5fa" strokeDasharray="4 3" strokeOpacity={0.4} />
               )}
               <Line
                 type="monotone"
                 dataKey="oneRM"
-                stroke="hsl(var(--primary))"
+                stroke="#60a5fa"
                 strokeWidth={2}
-                dot={{ fill: 'hsl(var(--primary))', r: 4, strokeWidth: 0 }}
-                activeDot={{ r: 6 }}
+                dot={{ fill: '#60a5fa', r: 4, strokeWidth: 0 }}
+                activeDot={{ r: 8 }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -761,12 +774,12 @@ export default function StrengthDetail() {
                 {isBodyweightExercise ? (
                   <div className="text-right">
                     <p className="text-[11px] text-muted-foreground">max attempts</p>
-                    <span className="font-mono text-sm tabular-nums text-primary font-semibold">{reps}</span>
+                    <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">{reps}</span>
                   </div>
                 ) : parsed ? (
                   <div className="text-right">
                     <p className="text-[11px] text-muted-foreground">Est. 1RM</p>
-                    <span className="font-mono text-sm tabular-nums text-primary font-semibold">
+                    <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">
                       {parsed.oneRM} {parsed.unit}
                     </span>
                   </div>

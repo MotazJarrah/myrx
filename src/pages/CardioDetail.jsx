@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRoute, useLocation } from 'wouter'
 import { ArrowLeft, Target } from 'lucide-react'
+import TickerNumber from '../components/TickerNumber'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -168,7 +169,7 @@ export default function CardioDetail() {
 
 function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
   const distances = getCardioDistances(activity, distUnit)
-  const [selectedIdx, setSelectedIdx] = useState(null)
+  const [selectedIdx, setSelectedIdx] = useState(0)
 
   // Best = fastest pace (lowest secs/km)
   let bestEffort   = null
@@ -185,7 +186,7 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
 
   const chartData = efforts
     .map(e => ({
-      date: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      ts:   e.created_at,
       secs: parsePaceToSecs(e.value),
     }))
     .filter(d => d.secs !== null)
@@ -217,7 +218,7 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
         </button>
         <h1 className="text-xl font-semibold tracking-tight">{activity}</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Best pace — <span className="font-mono text-primary">{convertStoredPace(bestEffort?.value, distUnit)}</span>
+          Best pace — <span className="font-mono text-amber-400"><TickerNumber value={convertStoredPace(bestEffort?.value, distUnit)} /></span>
         </p>
       </div>
 
@@ -238,7 +239,7 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
                   onClick={() => setSelectedIdx(isSelected ? null : idx)}
                   className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
                     isSelected
-                      ? 'border-primary/40 bg-primary/8'
+                      ? 'border-amber-500/40 bg-amber-500/8'
                       : 'border-border/60 bg-card/40 hover:bg-accent/50'
                   }`}
                 >
@@ -247,7 +248,7 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
                   </span>
                   <div className="text-right">
                     <div className="font-mono text-sm tabular-nums">{time}</div>
-                    <div className={`font-mono text-xs tabular-nums ${isSelected ? 'text-primary font-semibold' : 'text-primary'}`}>{displayPace}</div>
+                    <div className={`font-mono text-xs tabular-nums ${isSelected ? 'text-amber-400 font-semibold' : 'text-amber-400'}`}>{displayPace}</div>
                   </div>
                 </button>
               )
@@ -256,10 +257,10 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
 
           {/* Goal panel */}
           {goalPanel && selectedProj && (
-            <div className="mt-4 rounded-lg border border-primary/25 bg-primary/8 px-4 py-3.5 space-y-2.5">
+            <div className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-3.5 space-y-2.5">
               <div className="flex items-center gap-2 mb-1">
-                <Target className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-semibold text-primary">Next target — {selectedProj.name}</span>
+                <Target className="h-3.5 w-3.5 text-amber-400" />
+                <span className="text-xs font-semibold text-amber-400">Next target — {selectedProj.name}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">Beat</span>
@@ -269,9 +270,9 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">Required pace</span>
-                <span className="font-mono text-sm tabular-nums text-primary">{goalPanel.targetPaceStr}</span>
+                <span className="font-mono text-sm tabular-nums text-amber-400">{goalPanel.targetPaceStr}</span>
               </div>
-              <div className="flex items-center justify-between border-t border-primary/20 pt-2">
+              <div className="flex items-center justify-between border-t border-amber-500/20 pt-2">
                 <span className="text-xs text-muted-foreground">Gap vs current best</span>
                 <span className="text-xs font-medium text-foreground">{goalPanel.improveSuffix}</span>
               </div>
@@ -285,21 +286,23 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
         <div className="animate-rise rounded-xl border border-border bg-card p-5">
           <h2 className="text-sm font-semibold mb-4">Pace over time</h2>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={chartData}>
-              <XAxis dataKey="date" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
+              <XAxis dataKey="ts" tickFormatter={iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
               <YAxis
                 tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }}
                 axisLine={false} tickLine={false}
+                width={52}
                 domain={['auto', 'auto']}
                 reversed
                 tickFormatter={fmtPaceTick}
               />
               <Tooltip
                 contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                labelFormatter={iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 formatter={v => [fmtPaceStr(v, distUnit), 'Pace']}
               />
-              <ReferenceLine y={bestPaceSecs} stroke="hsl(var(--primary))" strokeDasharray="4 3" strokeOpacity={0.4} />
-              <Line type="monotone" dataKey="secs" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ fill: 'hsl(var(--primary))', r: 3 }} activeDot={{ r: 5 }} />
+              <ReferenceLine y={bestPaceSecs} stroke="#fbbf24" strokeDasharray="4 3" strokeOpacity={0.4} />
+              <Line type="monotone" dataKey="secs" stroke="#fbbf24" strokeWidth={2} dot={{ fill: '#fbbf24', r: 3 }} activeDot={{ r: 8 }} />
             </LineChart>
           </ResponsiveContainer>
           <p className="mt-2 text-[11px] text-muted-foreground">Lower = faster · Dashed = personal best</p>
@@ -318,7 +321,7 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
                 <p className="text-sm font-medium">{e.label.split(' · ').slice(1).join(' · ')}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">{new Date(e.created_at).toLocaleDateString()}</p>
               </div>
-              <span className="font-mono text-sm tabular-nums text-primary">{convertStoredPace(e.value, distUnit)}</span>
+              <span className="font-mono text-sm tabular-nums text-amber-400">{convertStoredPace(e.value, distUnit)}</span>
             </div>
           ))}
         </div>
@@ -339,7 +342,7 @@ function DurationDetail({ activity, efforts, navigate }) {
   })
 
   const chartData = efforts
-    .map(e => ({ date: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), secs: parseTimeStr(e.value) ?? 0 }))
+    .map(e => ({ ts: e.created_at, secs: parseTimeStr(e.value) ?? 0 }))
     .filter(d => d.secs > 0)
 
   return (
@@ -350,7 +353,7 @@ function DurationDetail({ activity, efforts, navigate }) {
         </button>
         <h1 className="text-xl font-semibold tracking-tight">{activity}</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Best session — <span className="font-mono text-primary">{fmtSecs(bestSecs)}</span>
+          Best session — <span className="font-mono text-amber-400">{fmtSecs(bestSecs)}</span>
         </p>
       </div>
 
@@ -368,13 +371,13 @@ function DurationDetail({ activity, efforts, navigate }) {
                 onClick={() => achieved && setSelectedMs(isSelected ? null : ms)}
                 className={`rounded-lg border px-3 py-2.5 text-center transition-colors ${
                   isSelected
-                    ? 'border-primary/40 bg-primary/15'
+                    ? 'border-primary/40 bg-amber-500/15'
                     : achieved
                       ? 'border-border bg-card hover:bg-accent/50'
                       : 'border-border/40 bg-card/40 opacity-40 cursor-not-allowed'
                 }`}
               >
-                <div className={`text-xs font-semibold tabular-nums ${achieved ? 'text-primary' : 'text-muted-foreground'}`}>
+                <div className={`text-xs font-semibold tabular-nums ${achieved ? 'text-amber-400' : 'text-muted-foreground'}`}>
                   {DURATION_LABELS[idx]}
                 </div>
                 {achieved && (
@@ -391,10 +394,10 @@ function DurationDetail({ activity, efforts, navigate }) {
           const nextMs  = DURATION_MILESTONES[msIdx + 1]
           const gapSecs = nextMs ? nextMs - bestSecs : null
           return (
-            <div className="mt-4 rounded-lg border border-primary/25 bg-primary/8 px-4 py-3.5 space-y-2">
+            <div className="mt-4 rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-3.5 space-y-2">
               <div className="flex items-center gap-2 mb-1">
-                <Target className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-semibold text-primary">
+                <Target className="h-3.5 w-3.5 text-amber-400" />
+                <span className="text-xs font-semibold text-amber-400">
                   {nextMs ? `Next milestone — ${DURATION_LABELS[msIdx + 1]}` : "You've hit every milestone!"}
                 </span>
               </div>
@@ -408,7 +411,7 @@ function DurationDetail({ activity, efforts, navigate }) {
                     <span className="text-xs text-muted-foreground">Target</span>
                     <span className="font-mono text-sm tabular-nums font-bold text-foreground">{DURATION_LABELS[msIdx + 1]}</span>
                   </div>
-                  <div className="flex items-center justify-between border-t border-primary/20 pt-2">
+                  <div className="flex items-center justify-between border-t border-amber-500/20 pt-2">
                     <span className="text-xs text-muted-foreground">Gap</span>
                     <span className="text-xs font-medium text-foreground">{fmtSecs(gapSecs)} to go</span>
                   </div>
@@ -426,15 +429,16 @@ function DurationDetail({ activity, efforts, navigate }) {
         <div className="animate-rise rounded-xl border border-border bg-card p-5">
           <h2 className="text-sm font-semibold mb-4">Session time over time</h2>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={chartData}>
-              <XAxis dataKey="date" tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} tickFormatter={fmtSecs} />
+            <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
+              <XAxis dataKey="ts" tickFormatter={iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
+              <YAxis tick={{ fill: 'hsl(var(--muted-foreground))', fontSize: 11 }} axisLine={false} tickLine={false} width={52} domain={['auto', 'auto']} tickFormatter={fmtSecs} />
               <Tooltip
                 contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+                labelFormatter={iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                 formatter={v => [fmtSecs(v), 'Duration']}
               />
-              <ReferenceLine y={bestSecs} stroke="hsl(var(--primary))" strokeDasharray="4 3" strokeOpacity={0.4} />
-              <Line type="monotone" dataKey="secs" stroke="hsl(var(--primary))" strokeWidth={2} dot={{ fill: 'hsl(var(--primary))', r: 3 }} activeDot={{ r: 5 }} />
+              <ReferenceLine y={bestSecs} stroke="#fbbf24" strokeDasharray="4 3" strokeOpacity={0.4} />
+              <Line type="monotone" dataKey="secs" stroke="#fbbf24" strokeWidth={2} dot={{ fill: '#fbbf24', r: 3 }} activeDot={{ r: 8 }} />
             </LineChart>
           </ResponsiveContainer>
           <p className="mt-2 text-[11px] text-muted-foreground">Higher = longer session · Dashed = personal best</p>
@@ -450,7 +454,7 @@ function DurationDetail({ activity, efforts, navigate }) {
           {[...efforts].reverse().map(e => (
             <div key={e.id} className="flex items-center justify-between px-5 py-3">
               <p className="text-xs text-muted-foreground">{new Date(e.created_at).toLocaleDateString()}</p>
-              <span className="font-mono text-sm tabular-nums text-primary">{fmtSecs(parseTimeStr(e.value))}</span>
+              <span className="font-mono text-sm tabular-nums text-amber-400">{fmtSecs(parseTimeStr(e.value))}</span>
             </div>
           ))}
         </div>

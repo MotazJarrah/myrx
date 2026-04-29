@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { MessageCircle, Lightbulb, Send, ArrowLeft } from 'lucide-react'
+import SwipeDelete from '../../components/SwipeDelete'
 
 const ENTER_KEY = 'myrx_enter_to_send'
 
@@ -42,7 +43,7 @@ function Tab({ active, onClick, children, badge }) {
 }
 
 // ── Messages tab ──────────────────────────────────────────────────────────────
-function MessagesTab({ users, messages, onMarkRead, onNewMessage }) {
+function MessagesTab({ users, messages, onMarkRead, onNewMessage, onDeleteMessage }) {
   const [selectedId, setSelectedId] = useState(null)
   const [body,       setBody]       = useState('')
   const [sending,    setSending]    = useState(false)
@@ -199,19 +200,21 @@ function MessagesTab({ users, messages, onMarkRead, onNewMessage }) {
                 <div className="py-8 text-center text-sm text-muted-foreground">No messages yet.</div>
               )}
               {conversation.map(msg => (
-                <div key={msg.id} className={`flex ${msg.from_admin ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 text-sm ${
-                    msg.from_admin
-                      ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                      : 'bg-muted text-foreground rounded-tl-sm'
-                  }`}>
-                    <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
-                    <p className={`mt-1 text-[10px] ${msg.from_admin ? 'opacity-60' : 'text-muted-foreground'}`}>
-                      {formatFull(msg.created_at)}
-                      {msg.from_admin && msg.read && <span className="ml-1 opacity-60">· Read</span>}
-                    </p>
+                <SwipeDelete key={msg.id} onDelete={() => onDeleteMessage(msg.id)}>
+                  <div className={`flex px-0 py-0.5 ${msg.from_admin ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 text-sm ${
+                      msg.from_admin
+                        ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                        : 'bg-muted text-foreground rounded-tl-sm'
+                    }`}>
+                      <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
+                      <p className={`mt-1 text-[10px] ${msg.from_admin ? 'opacity-60' : 'text-muted-foreground'}`}>
+                        {formatFull(msg.created_at)}
+                        {msg.from_admin && msg.read && <span className="ml-1 opacity-60">· Read</span>}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                </SwipeDelete>
               ))}
               <div ref={bottomRef} />
             </div>
@@ -260,7 +263,7 @@ function MessagesTab({ users, messages, onMarkRead, onNewMessage }) {
 }
 
 // ── Suggestions tab ───────────────────────────────────────────────────────────
-function SuggestionsTab({ users, messages }) {
+function SuggestionsTab({ users, messages, onDelete }) {
   const userMap = useMemo(() => {
     const m = {}
     users.forEach(u => { m[u.id] = u })
@@ -285,30 +288,32 @@ function SuggestionsTab({ users, messages }) {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="rounded-xl border border-border bg-card overflow-hidden divide-y divide-border">
       {suggestions.map(s => {
         const u = userMap[s.user_id]
         return (
-          <div key={s.id} className="flex gap-3 rounded-xl border border-amber-500/15 bg-amber-500/5 p-4">
-            <div className="mt-0.5 shrink-0">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary overflow-hidden">
-                {u?.avatar_url
-                  ? <img src={u.avatar_url} alt={u.full_name} className="h-8 w-8 object-cover" />
-                  : (u?.full_name?.[0]?.toUpperCase() ?? '?')
-                }
+          <SwipeDelete key={s.id} onDelete={() => onDelete(s.id)}>
+            <div className="flex gap-3 p-4">
+              <div className="mt-0.5 shrink-0">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary overflow-hidden">
+                  {u?.avatar_url
+                    ? <img src={u.avatar_url} alt={u.full_name} className="h-8 w-8 object-cover" />
+                    : (u?.full_name?.[0]?.toUpperCase() ?? '?')
+                  }
+                </div>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="text-sm font-medium truncate">{u?.full_name || u?.email || 'Unknown'}</p>
+                  <span className="flex items-center gap-1 text-[10px] text-amber-400 font-medium">
+                    <Lightbulb className="h-2.5 w-2.5" /> Suggestion
+                  </span>
+                  <span className="ml-auto shrink-0 text-[11px] text-muted-foreground/60">{formatTime(s.created_at)}</span>
+                </div>
+                <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">{s.body}</p>
               </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <p className="text-sm font-medium truncate">{u?.full_name || u?.email || 'Unknown'}</p>
-                <span className="flex items-center gap-1 text-[10px] text-amber-400 font-medium">
-                  <Lightbulb className="h-2.5 w-2.5" /> Suggestion
-                </span>
-                <span className="ml-auto shrink-0 text-[11px] text-muted-foreground/60">{formatTime(s.created_at)}</span>
-              </div>
-              <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap break-words">{s.body}</p>
-            </div>
-          </div>
+          </SwipeDelete>
         )
       })}
     </div>
@@ -347,18 +352,32 @@ export default function AdminMessages() {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // Mark messages as read — optimistic update first, then persist to DB
+  // Mark messages as read
   async function handleMarkRead(ids) {
     setMessages(prev => prev.map(m => ids.includes(m.id) ? { ...m, read: true } : m))
     window.dispatchEvent(new CustomEvent('myrx_signal', { detail: { type: 'messages_read', count: ids.length } }))
     await supabase.from('messages').update({ read: true }).in('id', ids)
   }
 
+  // Mark all unread suggestions as read when suggestions tab is opened
+  useEffect(() => {
+    if (tab !== 'suggestions') return
+    const unread = messages.filter(m => m.is_suggestion && !m.from_admin && !m.read).map(m => m.id)
+    if (!unread.length) return
+    setMessages(prev => prev.map(m => unread.includes(m.id) ? { ...m, read: true } : m))
+    supabase.from('messages').update({ read: true }).in('id', unread)
+  }, [tab])
+
   function handleNewMessage(msg) {
     setMessages(prev => [...prev, msg])
   }
 
-  const unreadMessages   = useMemo(() => messages.filter(m => !m.from_admin && !m.read && !m.is_suggestion).length, [messages])
+  async function handleDeleteMessage(id) {
+    setMessages(prev => prev.filter(m => m.id !== id))
+    await supabase.from('messages').delete().eq('id', id)
+  }
+
+  const unreadMessages    = useMemo(() => messages.filter(m => !m.from_admin && !m.read && !m.is_suggestion).length, [messages])
   const unreadSuggestions = useMemo(() => messages.filter(m => !m.from_admin && !m.read && m.is_suggestion).length, [messages])
 
   if (loading) {
@@ -388,9 +407,10 @@ export default function AdminMessages() {
           messages={messages}
           onMarkRead={handleMarkRead}
           onNewMessage={handleNewMessage}
+          onDeleteMessage={handleDeleteMessage}
         />
       ) : (
-        <SuggestionsTab users={users} messages={messages} />
+        <SuggestionsTab users={users} messages={messages} onDelete={handleDeleteMessage} />
       )}
     </div>
   )

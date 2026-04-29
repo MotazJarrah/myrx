@@ -71,15 +71,15 @@ export default function Cardio() {
     setSaved(false); setSaveError('')
   }, [activity, distValue, distUnit, timeStr])
 
-  async function handleSuggestMove(name) {
+  function handleSuggestMove(name) {
     if (!user) return
-    await supabase.from('messages').insert({
+    setSuggestionSent(name)
+    setTimeout(() => setSuggestionSent(''), 3000)
+    supabase.from('messages').insert({
       user_id: user.id, from_admin: false,
       body: `New cardio move suggestion: ${name}`,
       is_suggestion: true, read: false,
     })
-    setSuggestionSent(name)
-    setTimeout(() => setSuggestionSent(''), 3000)
   }
 
   // Load "Your activities"
@@ -161,6 +161,7 @@ export default function Cardio() {
     })
     if (error) { setSaveError('Failed to save. Try again.'); return }
     setSaved(true)
+    setTimeout(() => { setActivity(''); setDistValue(''); setTimeStr('') }, 1500)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -176,7 +177,7 @@ export default function Cardio() {
             </div>
           </div>
           <div className="h-1 bg-amber-500/20">
-            <div className="h-full bg-amber-500 origin-left animate-[shrink_3s_linear_forwards]" />
+            <div className="h-full bg-amber-500 origin-left animate-shrink" />
           </div>
         </div>
       )}

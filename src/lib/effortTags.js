@@ -14,10 +14,17 @@ import { ISOMETRIC_EXERCISE_NAMES } from './movements.js'
 // Format: full Tailwind class string for a pill chip.
 
 export const TAG_STYLES = {
-  // ── Primary tags (one per effort type) ───────────────────────────────────
+  // ── Primary tags (one per effort type / page) ────────────────────────────
   strength:     'bg-blue-500/10 text-blue-400 border border-blue-500/20',
   cardio:       'bg-amber-500/10 text-amber-400 border border-amber-500/20',
   weighin:      'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
+  calories:     'bg-red-500/10 text-red-400 border border-red-500/20',
+
+  // ── Bodyweight subtypes (emerald/teal/green family) ───────────────────────
+  'Weigh-in':   'bg-teal-500/10 text-teal-400 border border-teal-400/30',
+
+  // ── Calorie subtypes (red family) ─────────────────────────────────────────
+  'Intake':     'bg-red-400/10 text-red-300 border border-red-400/30',
 
   // ── Strength subtypes (blue-family hue shifts) ────────────────────────────
   Barbell:      'bg-blue-500/10 text-blue-400 border border-blue-400/30',
@@ -27,10 +34,18 @@ export const TAG_STYLES = {
   Isometric:    'bg-sky-500/10 text-sky-400 border border-sky-400/30',
   Machine:      'bg-slate-500/10 text-slate-400 border border-slate-400/30',
 
-  // ── Mobility (fuchsia/pink family) ───────────────────────────────────────
+  // ── Mobility (fuchsia/pink/rose/violet family) ────────────────────────────
   mobility:     'bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20',
-  Crawl:        'bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-400/30',
+  Movement:     'bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-400/30',
   Yoga:         'bg-pink-500/10 text-pink-400 border border-pink-400/30',
+  Stretch:      'bg-rose-500/10 text-rose-400 border border-rose-400/30',
+
+  // ── ROM body groups (analogous hue shifts within the fuchsia family) ──────
+  Shoulder:     'bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-400/30',
+  Hip:          'bg-pink-500/10 text-pink-400 border border-pink-400/30',
+  Knee:         'bg-rose-500/10 text-rose-400 border border-rose-400/30',
+  Ankle:        'bg-violet-500/10 text-violet-400 border border-violet-400/30',
+  Spine:        'bg-purple-500/10 text-purple-400 border border-purple-400/30',
 
   // ── Cardio subtypes (amber/orange/yellow family) ──────────────────────────
   Endurance:    'bg-amber-500/10 text-amber-400 border border-amber-400/30',
@@ -110,6 +125,21 @@ function getCardioSubtype(activityName) {
   return 'Machine'
 }
 
+// ── Mobility subtype detection ────────────────────────────────────────────────
+
+function getMobilitySubtype(lower) {
+  // Locomotion & quadrupedal movement patterns
+  if (/bear crawl|bear hold|beast hold|commando crawl|crab hold|crab walk|crocodile crawl|duck walk|kickthrough|frog hop|gorilla walk|inchworm|lateral bear|lateral crab|leopard crawl|lizard walk|low crawl|monkey walk|plank walk|scorpion reach|scorpion walk|seal walk|spider|tabletop hold|traveling ape|underswitch/.test(lower))
+    return 'Movement'
+
+  // Yoga poses (asanas)
+  if (/boat pose|bound angle|bow pose|bridge pose|cat cow|chair pose|child|cobra pose|corpse pose|crescent|dancer|double pigeon|downward dog|extended side angle|fish pose|frog pose|garland|goddess|half moon|happy baby|head.to.knee|hero pose|knees.to.chest|legs up the wall|lizard pose|locust pose|low lunge|mountain pose|pigeon pose|puppy pose|reversed warrior|sphinx|supine spinal twist|tree pose|triangle pose|upward dog|warrior|wheel pose|wide.angle/.test(lower))
+    return 'Yoga'
+
+  // Everything else: static & dynamic stretches
+  return 'Stretch'
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -137,9 +167,13 @@ export function getEffortTags(effort) {
   }
 
   if (effort.type === 'mobility') {
-    const movementName = effort.label.replace(/^Mobility Session\s*·?\s*/i, '').split(',')[0].trim()
-    const lower = movementName.toLowerCase()
-    const subtype = /crawl|walk|inchworm|seal|monkey|scorpion|lizard walk/.test(lower) ? 'Crawl' : 'Yoga'
+    const movementsStr = effort.label.replace(/^Mobility Session\s*·?\s*/i, '')
+    const counts = { Movement: 0, Yoga: 0, Stretch: 0 }
+    movementsStr.split(',').forEach(chunk => {
+      const name = chunk.trim().replace(/\s+\d+:\d{2}(?::\d{2})?$/, '').trim()
+      if (name) counts[getMobilitySubtype(name.toLowerCase())]++
+    })
+    const subtype = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0]
     return {
       primary:   { label: 'Mobility', cls: TAG_STYLES.mobility },
       secondary: { label: subtype,    cls: TAG_STYLES[subtype] },

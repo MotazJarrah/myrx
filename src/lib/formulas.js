@@ -101,8 +101,13 @@ const PLATE_SIZES = {
 const MIN_INCREMENT = { lb: 5, kg: 2.5 }
 
 /**
- * Returns nearest achievable barbell weight at or above `projected`
- * and the plates to load on each side.
+ * Returns the next achievable barbell weight strictly above `projected`
+ * by exactly one minimum plate increment (+5 lb / +2.5 kg per session —
+ * the science-backed atomic unit of barbell progression).
+ *
+ * The fix vs a naive Math.ceil: when `projected` already sits exactly on a
+ * plate boundary (e.g. 335 lb = 45 bar + 290, which is divisible by 5),
+ * Math.ceil would return the same value. We always advance by one more inc.
  */
 export function getNextBarbellLoad(projected, unit = 'lb') {
   const bar    = BAR_WEIGHT[unit]  ?? 45
@@ -110,7 +115,10 @@ export function getNextBarbellLoad(projected, unit = 'lb') {
   const plates = PLATE_SIZES[unit] ?? PLATE_SIZES.lb
 
   const weightAboveBar = Math.max(0, projected - bar)
-  const nextAboveBar   = Math.ceil(weightAboveBar / inc) * inc
+  // If already on a boundary, take the next one; otherwise round up to boundary.
+  const nextAboveBar = (weightAboveBar % inc === 0)
+    ? weightAboveBar + inc
+    : Math.ceil(weightAboveBar / inc) * inc
   const targetWeight   = bar + nextAboveBar
   const perSide        = nextAboveBar / 2
 
@@ -130,11 +138,14 @@ export function getNextBarbellLoad(projected, unit = 'lb') {
 // Dumbbells come in 5 lb / 2 kg fixed increments.
 
 /**
- * Returns the nearest dumbbell weight at or above `projected` (per hand).
+ * Returns the next dumbbell weight strictly above `projected` (per hand).
+ * Dumbbells increment in fixed steps (5 lb / 2 kg). Same boundary fix as barbell.
  */
 export function getNextDumbbellWeight(projected, unit = 'lb') {
   const inc = unit === 'kg' ? 2 : 5
-  return Math.ceil(projected / inc) * inc
+  return (projected % inc === 0)
+    ? projected + inc
+    : Math.ceil(projected / inc) * inc
 }
 
 // ─── Bodyweight-plus added weight ────────────────────────────────────────────
@@ -142,14 +153,17 @@ export function getNextDumbbellWeight(projected, unit = 'lb') {
 // Plates are added in 2.5 lb / 1.25 kg increments (no bar).
 
 /**
- * Returns the nearest added-weight value at or above `projected`
- * and the plates that make it up (no bar weight).
+ * Returns the next added-weight value strictly above `projected`
+ * (belt/vest for bodyweight exercises). Same boundary fix as barbell.
  */
 export function getNextAddedWeight(projected, unit = 'lb') {
   const inc    = unit === 'kg' ? 2.5 : 2.5
   const plates = PLATE_SIZES[unit] ?? PLATE_SIZES.lb
 
-  const target = Math.ceil(Math.max(0, projected) / inc) * inc
+  const safe = Math.max(0, projected)
+  const target = (safe % inc === 0)
+    ? safe + inc
+    : Math.ceil(safe / inc) * inc
 
   const usedPlates = []
   let rem = target

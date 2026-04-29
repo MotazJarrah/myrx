@@ -45,7 +45,7 @@ const labelCls = 'text-sm text-muted-foreground'
 
 export default function Auth() {
   const [search] = useState(() => new URLSearchParams(window.location.search))
-  const isSignUp = search.get('mode') !== 'signin'
+  const isSignUp = search.get('mode') === 'signup'
 
   const [mode, setMode] = useState(isSignUp ? 'signup' : 'signin')
   const [step, setStep] = useState(1)
@@ -66,6 +66,20 @@ export default function Auth() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
+  const [forgotSent, setForgotSent] = useState(false)
+  const [forgotLoading, setForgotLoading] = useState(false)
+
+  async function handleForgotPassword() {
+    if (!email.trim()) { setError('Enter your email address first.'); return }
+    setForgotLoading(true)
+    setError('')
+    await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/auth?mode=signin`,
+    })
+    setForgotLoading(false)
+    setForgotSent(true)
+    setTimeout(() => setForgotSent(false), 5000)
+  }
 
   const [, navigate] = useLocation()
   const { signInWithEmailOrPhone } = useAuth()
@@ -243,7 +257,17 @@ export default function Auth() {
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className={labelCls}>Password</label>
+              <div className="flex items-center justify-between">
+                <label className={labelCls}>Password</label>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={forgotLoading}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  {forgotLoading ? 'Sending…' : forgotSent ? '✓ Link sent' : 'Forgot password?'}
+                </button>
+              </div>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}

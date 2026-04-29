@@ -1,298 +1,387 @@
-import { useState, useEffect } from 'react'
-import { useLocation } from 'wouter'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import { MOBILITY_MOVEMENTS } from '../lib/movements'
-import MovementSearch from '../components/MovementSearch'
-import { Plus, Trash2, ChevronRight, Timer } from 'lucide-react'
+import ROMVisualizer, { MOVEMENT_CONFIG } from '../components/ROMVisualizer'
+import { ChevronDown, ChevronUp, Trash2, Loader2 } from 'lucide-react'
 
-// ── Time helpers ──────────────────────────────────────────────────────────────
+// ── Movement list (ordered for display) ──────────────────────────────────────
 
-function parseTimeStr(str) {
-  if (!str) return null
-  const parts = str.split(':').map(Number)
-  if (parts.some(n => isNaN(n))) return null
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
-  if (parts.length === 2) return parts[0] * 60 + parts[1]
-  return null
+const MOVEMENTS = [
+  { key: 'shoulder-flexion',    group: 'Shoulder' },
+  { key: 'shoulder-extension',  group: 'Shoulder' },
+  { key: 'shoulder-abduction',  group: 'Shoulder' },
+  { key: 'hip-flexion',         group: 'Hip' },
+  { key: 'hip-abduction',       group: 'Hip' },
+  { key: 'knee-flexion',        group: 'Knee' },
+  { key: 'ankle-dorsiflexion',  group: 'Ankle' },
+  { key: 'spinal-flexion',      group: 'Spine' },
+]
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function dateLabel(isoStr) {
+  return new Date(isoStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function fmtSecs(totalSecs) {
-  if (!totalSecs) return '0:00'
-  const h = Math.floor(totalSecs / 3600)
-  const m = Math.floor((totalSecs % 3600) / 60)
-  const s = totalSecs % 60
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  return `${m}:${String(s).padStart(2, '0')}`
+// ── ROM chip (shown in card header — always shows last logged value) ──────────
+
+function ROMChip({ degrees }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40">
+      {degrees}° current
+    </span>
+  )
 }
 
-function applyTimeMask(raw) {
-  const digits = raw.replace(/\D/g, '').slice(0, 6)
-  if (!digits) return ''
-  if (digits.length <= 2) return digits
-  if (digits.length <= 4) return `${digits.slice(0, -2)}:${digits.slice(-2)}`
-  return `${digits.slice(0, -4)}:${digits.slice(-4, -2)}:${digits.slice(-2)}`
+// ── ROM Snapshot grid ─────────────────────────────────────────────────────────
+// Shows all movements in a 2-col grid; tracked = fuchsia + bar, untracked = faded.
+
+function ROMSnapshot({ records, onTileClick }) {
+  const trackedCount = MOVEMENTS.filter(m => records[m.key]?.length > 0).length
+
+  return (
+    <div className="animate-rise rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/5 p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-semibold text-fuchsia-300 uppercase tracking-wide">ROM Snapshot</p>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {trackedCount}/{MOVEMENTS.length} movements logged
+        </p>
+      </div>
+
+      {/* 2-column grid */}
+      <div className="grid grid-cols-2 gap-2">
+        {MOVEMENTS.map(m => {
+          const recs = records[m.key]
+          // Always show most-recent value — ROM fluctuates, it is not a PR metric.
+          // Sort explicitly so order is guaranteed regardless of fetch/insert sequence.
+          const sorted = recs?.length > 0
+            ? [...recs].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            : []
+          const best = sorted.length > 0 ? sorted[0].degrees : null
+          const clinicalMax  = MOVEMENT_CONFIG[m.key].normalRange[1]
+          const athleticMax  = MOVEMENT_CONFIG[m.key].athleticRange[1]
+          const hasData      = best !== null
+          const isAthletic   = hasData && best > clinicalMax
+
+          // Bar fills to 100% at clinical, stays full in athletic zone
+          const barWidth = hasData ? Math.min(100, Math.round((best / clinicalMax) * 100)) : 0
+
+          // Same fuchsia→amber interpolation as the in-card progress bar
+          const t = isAthletic
+            ? Math.min(1, (best - clinicalMax) / (athleticMax - clinicalMax))
+            : 0
+          const barColor = hasData
+            ? `rgb(${Math.round(232 + 13 * t)},${Math.round(121 + 37 * t)},${Math.round(249 - 238 * t)})`
+            : 'transparent'
+
+          // Degree label color matches the bar
+          const degreeColor = isAthletic
+            ? `rgb(${Math.round(232 + 13 * t)},${Math.round(121 + 37 * t)},${Math.round(249 - 238 * t)})`
+            : '#E879F9'
+
+          const clinicalPct = hasData ? Math.min(100, Math.round((best / clinicalMax) * 100)) : 0
+          const lastDate = sorted.length > 0 ? dateLabel(sorted[0].created_at) : null
+
+          return (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => hasData && onTileClick?.(m.key)}
+              className={`rounded-lg px-3 py-2.5 text-left transition-colors ${
+                hasData
+                  ? 'bg-card border border-border hover:bg-accent/40 cursor-pointer'
+                  : 'bg-muted/10 border border-transparent cursor-default'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-1 min-w-0">
+                <p className={`text-[11px] leading-snug font-medium truncate ${
+                  hasData ? 'text-foreground' : 'text-muted-foreground/40'
+                }`}>
+                  {MOVEMENT_CONFIG[m.key].label}
+                </p>
+                {hasData && (
+                  <span
+                    className="font-mono text-sm font-bold tabular-nums shrink-0 ml-1"
+                    style={{ color: degreeColor }}
+                  >
+                    {best}°
+                  </span>
+                )}
+              </div>
+
+              {hasData ? (
+                <div className="mt-2 space-y-1">
+                  <div className="h-1 rounded-full bg-gray-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{ width: `${barWidth}%`, backgroundColor: barColor }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-muted-foreground">
+                      {isAthletic ? 'Athletic ROM' : `${clinicalPct}% of normal`}
+                    </p>
+                    {lastDate && (
+                      <p className="text-[10px] text-muted-foreground/60">{lastDate}</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-1.5 text-[10px] text-muted-foreground/35">Not logged yet</p>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
-const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
-const labelCls = 'text-sm text-muted-foreground'
+// ── Movement card ─────────────────────────────────────────────────────────────
+
+function MovementCard({ movementKey, records, onSave, onDelete, forceOpen }) {
+  const config          = MOVEMENT_CONFIG[movementKey]
+  const cardRef         = useRef(null)
+  const initializedRef  = useRef(false)
+  const [expanded, setExpanded]     = useState(false)
+  const [degrees, setDegrees]       = useState(0)
+  const [saving, setSaving]         = useState(false)
+  const [justSaved, setJustSaved]   = useState(false)
+  const [confirmId, setConfirmId]   = useState(null)
+  const [deleting, setDeleting]     = useState(false)
+
+  // Sort records by date descending — always explicit, never rely on fetch/insert order
+  const sortedRecords = [...records].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+
+  // Pre-fill slider with the most recent recorded value (once, when records first load)
+  useEffect(() => {
+    if (!initializedRef.current && sortedRecords.length > 0) {
+      initializedRef.current = true
+      setDegrees(sortedRecords[0].degrees)
+    }
+  }, [records])
+
+  // When parent triggers forceOpen, expand and scroll into view
+  useEffect(() => {
+    if (forceOpen) {
+      setExpanded(true)
+      setTimeout(() => {
+        cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 50)
+    }
+  }, [forceOpen])
+
+  // Last ROM = most recent record
+  const lastROM = sortedRecords.length > 0 ? sortedRecords[0].degrees : null
+
+  const handleSave = useCallback(async () => {
+    if (!degrees || saving) return
+    setSaving(true)
+    const ok = await onSave(movementKey, degrees)
+    setSaving(false)
+    if (ok) {
+      // Keep the saved value on the slider (don't reset to 0)
+      setJustSaved(true)
+      setTimeout(() => setJustSaved(false), 2500)
+    }
+  }, [degrees, movementKey, onSave, saving])
+
+  async function handleDeleteRecord(id) {
+    setDeleting(true)
+    const ok = await onDelete(movementKey, id)
+    setDeleting(false)
+    if (ok) setConfirmId(null)
+  }
+
+  // Last 5 records (already sorted above)
+  const recent = sortedRecords.slice(0, 5)
+
+  return (
+    <div ref={cardRef} className="rounded-xl border border-border bg-card overflow-hidden">
+      {/* Header row */}
+      <button
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-accent/30 transition-colors"
+        onClick={() => setExpanded(p => !p)}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold truncate">{config.label}</p>
+            <p className="text-xs text-muted-foreground truncate">{config.description}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 shrink-0 ml-3">
+          {lastROM !== null && <ROMChip degrees={lastROM} />}
+          {expanded
+            ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
+            : <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          }
+        </div>
+      </button>
+
+      {/* Expanded panel */}
+      {expanded && (
+        <div className="border-t border-border px-5 pb-5 pt-4 space-y-5">
+
+          {/* Visualizer */}
+          <ROMVisualizer
+            movementKey={movementKey}
+            degrees={degrees}
+            onChange={setDegrees}
+          />
+
+          {/* Save button */}
+          <button
+            onClick={handleSave}
+            disabled={degrees === 0 || saving || justSaved}
+            className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
+              justSaved
+                ? 'bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30'
+                : degrees > 0
+                  ? 'bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30 hover:bg-fuchsia-500/25'
+                  : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
+            }`}
+          >
+            {justSaved ? '✓ Saved' : saving ? 'Saving…' : degrees > 0 ? `Log ${degrees}°` : 'Move slider to log'}
+          </button>
+
+          {/* History */}
+          {recent.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground font-medium">Recent sessions</p>
+              <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
+                {recent.map((r, i) => {
+                  const isLatest = i === 0
+                  return (
+                    <div key={r.id ?? i} className="flex items-center justify-between px-3 py-2 gap-2">
+                      <span className="text-xs text-muted-foreground shrink-0">{dateLabel(r.created_at)}</span>
+                      <div className="flex items-center gap-2 ml-auto">
+                        <span className={`font-mono text-sm font-semibold tabular-nums ${isLatest ? 'text-fuchsia-400' : 'text-foreground'}`}>
+                          {r.degrees}°{isLatest && <span className="ml-1 text-[10px] text-fuchsia-400/70">latest</span>}
+                        </span>
+                        {confirmId === r.id ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] text-destructive">Delete?</span>
+                            <button
+                              onClick={() => handleDeleteRecord(r.id)}
+                              disabled={deleting}
+                              className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-destructive border border-destructive/30 hover:bg-destructive/10 transition-colors disabled:opacity-50"
+                            >
+                              {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes'}
+                            </button>
+                            <button
+                              onClick={() => setConfirmId(null)}
+                              className="rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground border border-border hover:bg-accent transition-colors"
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmId(r.id)}
+                            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Mobility() {
   const { user } = useAuth()
-  const [, navigate] = useLocation()
+  const [records,  setRecords]  = useState({})
+  const [loading,  setLoading]  = useState(true)
+  const [openKey,  setOpenKey]  = useState(null)
 
-  // Session builder state
-  const [selectedMovement, setSelectedMovement] = useState('')
-  const [movementTime, setMovementTime] = useState('')
-  const [sessionItems, setSessionItems] = useState([]) // [{ name, timeStr, secs }]
-
-  // Save state
-  const [saved, setSaved] = useState(false)
-  const [saveError, setSaveError] = useState('')
-
-  // Previous sessions + my movements
-  const [recentSessions, setRecentSessions] = useState([])
-  const [myMovements, setMyMovements] = useState([])
-
-  const totalSecs = sessionItems.reduce((sum, item) => sum + item.secs, 0)
-  const canAdd = selectedMovement && parseTimeStr(movementTime) > 0
-  const canSave = sessionItems.length > 0
-
-  // Clear save state on session change
-  useEffect(() => {
-    setSaved(false)
-    setSaveError('')
-  }, [sessionItems])
-
-  // Load history
   useEffect(() => {
     if (!user) return
     supabase
-      .from('efforts')
-      .select('id, label, value, created_at')
+      .from('rom_records')
+      .select('id, movement_key, degrees, created_at')
       .eq('user_id', user.id)
-      .eq('type', 'mobility')
       .order('created_at', { ascending: false })
-      .limit(50)
-      .then(({ data }) => {
-        if (!data) return
-
-        // Recent sessions (last 10)
-        setRecentSessions(data.slice(0, 10))
-
-        // Best time per movement
-        const map = new Map()
-        data.forEach(entry => {
-          const movementsStr = entry.label.replace(/^Mobility Session\s*·\s*/i, '')
-          movementsStr.split(',').forEach(chunk => {
-            const trimmed = chunk.trim()
-            const lastSpace = trimmed.lastIndexOf(' ')
-            if (lastSpace === -1) return
-            const name = trimmed.slice(0, lastSpace).trim()
-            const timeStr = trimmed.slice(lastSpace + 1).trim()
-            const secs = parseTimeStr(timeStr)
-            if (!secs || !name) return
-            const existing = map.get(name)
-            if (!existing || secs > existing.secs) {
-              map.set(name, { name, secs, displayTime: fmtSecs(secs) })
-            }
-          })
+      .then(({ data, error }) => {
+        if (!data || error) { setLoading(false); return }
+        const grouped = {}
+        data.forEach(row => {
+          if (!grouped[row.movement_key]) grouped[row.movement_key] = []
+          grouped[row.movement_key].push(row)
         })
-        setMyMovements([...map.values()].sort((a, b) => a.name.localeCompare(b.name)))
+        setRecords(grouped)
+        setLoading(false)
       })
-  }, [user, saved])
+  }, [user])
 
-  function addToSession() {
-    const secs = parseTimeStr(movementTime)
-    if (!selectedMovement || !secs) return
-    setSessionItems(prev => [...prev, { name: selectedMovement, timeStr: movementTime, secs }])
-    setSelectedMovement('')
-    setMovementTime('')
-  }
+  const handleSave = useCallback(async (movementKey, degrees) => {
+    if (!user) return false
+    const { data, error } = await supabase
+      .from('rom_records')
+      .insert({ user_id: user.id, movement_key: movementKey, degrees })
+      .select()
+      .single()
+    if (error || !data) return false
+    setRecords(prev => ({
+      ...prev,
+      [movementKey]: [data, ...(prev[movementKey] ?? [])],
+    }))
+    return true
+  }, [user])
 
-  function removeFromSession(index) {
-    setSessionItems(prev => prev.filter((_, i) => i !== index))
-  }
-
-  async function saveSession() {
-    if (!user || saved || !canSave) return
-    setSaveError('')
-
-    // "Mobility Session · Bear Crawl 1:30, Downward Dog 2:00, ..."
-    const movementsStr = sessionItems.map(item => `${item.name} ${item.timeStr}`).join(', ')
-    const label = `Mobility Session · ${movementsStr}`
-    const value = fmtSecs(totalSecs)
-
-    const { error } = await supabase.from('efforts').insert({
-      user_id: user.id,
-      type: 'mobility',
-      label,
-      value,
-    })
-    if (error) { setSaveError('Failed to save. Try again.'); return }
-    setSaved(true)
-    setSessionItems([])
-  }
+  const handleDelete = useCallback(async (movementKey, id) => {
+    const { error } = await supabase
+      .from('rom_records')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
+    if (error) return false
+    setRecords(prev => ({
+      ...prev,
+      [movementKey]: (prev[movementKey] ?? []).filter(r => r.id !== id),
+    }))
+    return true
+  }, [user])
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Mobility</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Build a session — add movements and set a time for each.
+          Track your range of motion — log degrees and monitor your best ROM.
         </p>
       </div>
 
-      {/* Session builder */}
-      <div className="animate-rise rounded-xl border border-border bg-card p-5 space-y-4">
+      {/* ROM Snapshot — full grid overview of all movements */}
+      {!loading && <ROMSnapshot records={records} onTileClick={key => { setOpenKey(key); setTimeout(() => setOpenKey(null), 100) }} />}
 
-        {/* Add movement row */}
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <label className={labelCls}>Movement</label>
-            <MovementSearch
-              value={selectedMovement}
-              onChange={setSelectedMovement}
-              movements={MOBILITY_MOVEMENTS}
-              placeholder="Search or type movement…"
+      {/* Movement cards */}
+      {loading ? (
+        <div className="text-sm text-muted-foreground">Loading…</div>
+      ) : (
+        <div className="space-y-3 animate-rise">
+          {MOVEMENTS.map(m => (
+            <MovementCard
+              key={m.key}
+              movementKey={m.key}
+              records={records[m.key] ?? []}
+              onSave={handleSave}
+              onDelete={handleDelete}
+              forceOpen={openKey === m.key}
             />
-          </div>
-
-          <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
-            <div className="flex flex-col gap-1.5">
-              <label className={labelCls}>Duration</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={movementTime}
-                onChange={e => setMovementTime(applyTimeMask(e.target.value))}
-                placeholder="mm:ss"
-                className={inputCls}
-              />
-            </div>
-            <button
-              onClick={addToSession}
-              disabled={!canAdd}
-              className={`flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all ${
-                canAdd
-                  ? 'bg-fuchsia-500/15 text-fuchsia-400 hover:bg-fuchsia-500/25 border border-fuchsia-500/30'
-                  : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-              }`}
-            >
-              <Plus className="h-4 w-4" />
-              Add
-            </button>
-          </div>
-        </div>
-
-        {/* Session item list */}
-        {sessionItems.length > 0 && (
-          <div className="rounded-lg border border-border divide-y divide-border">
-            {sessionItems.map((item, i) => (
-              <div key={i} className="flex items-center justify-between px-3 py-2.5">
-                <span className="text-sm font-medium">{item.name}</span>
-                <div className="flex items-center gap-3">
-                  <span className="font-mono text-sm tabular-nums text-fuchsia-400 font-semibold">
-                    {item.timeStr}
-                  </span>
-                  <button
-                    onClick={() => removeFromSession(i)}
-                    className="text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Total time banner */}
-        {totalSecs > 0 && (
-          <div className="flex items-center justify-between rounded-lg border border-fuchsia-500/25 bg-fuchsia-500/8 px-4 py-2.5">
-            <div className="flex items-center gap-2">
-              <Timer className="h-3.5 w-3.5 text-fuchsia-400" />
-              <span className="text-xs text-muted-foreground">Total session time</span>
-            </div>
-            <span className="font-mono text-base tabular-nums font-bold text-fuchsia-400">
-              {fmtSecs(totalSecs)}
-            </span>
-          </div>
-        )}
-
-        <button
-          onClick={saveSession}
-          disabled={saved || !canSave}
-          className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
-            saved
-              ? 'bg-fuchsia-500/15 text-fuchsia-400 border border-fuchsia-500/30'
-              : canSave
-                ? 'bg-fuchsia-500 text-white hover:opacity-90'
-                : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-          }`}
-        >
-          {saved ? '✓ Session Saved' : 'Save Session'}
-        </button>
-
-        {saveError && (
-          <p className="text-xs text-destructive leading-snug">{saveError}</p>
-        )}
-      </div>
-
-      {/* My movements */}
-      {myMovements.length > 0 && (
-        <div className="animate-rise rounded-xl border border-border bg-card">
-          <div className="border-b border-border px-5 py-3.5">
-            <h2 className="text-sm font-semibold">My movements</h2>
-          </div>
-          <div className="divide-y divide-border">
-            {myMovements.map(mov => (
-              <button
-                key={mov.name}
-                onClick={() => navigate(`/mobility/${encodeURIComponent(mov.name)}`)}
-                className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-accent/50 transition-colors text-left"
-              >
-                <span className="text-sm font-medium">{mov.name}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Best</span>
-                  <span className="font-mono text-sm tabular-nums text-fuchsia-400 font-semibold">
-                    {mov.displayTime}
-                  </span>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Recent sessions */}
-      {recentSessions.length > 0 && (
-        <div className="animate-rise rounded-xl border border-border bg-card">
-          <div className="border-b border-border px-5 py-3.5">
-            <h2 className="text-sm font-semibold">Recent sessions</h2>
-          </div>
-          <div className="divide-y divide-border">
-            {recentSessions.map(session => {
-              const movementsStr = session.label.replace(/^Mobility Session\s*·\s*/i, '')
-              const date = new Date(session.created_at).toLocaleDateString(undefined, {
-                month: 'short', day: 'numeric',
-              })
-              return (
-                <div key={session.id} className="px-5 py-3.5">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-muted-foreground">{date}</span>
-                    <span className="font-mono text-sm tabular-nums text-fuchsia-400 font-semibold">
-                      {session.value}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
-                    {movementsStr}
-                  </p>
-                </div>
-              )
-            })}
-          </div>
+          ))}
         </div>
       )}
     </div>

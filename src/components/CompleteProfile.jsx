@@ -371,7 +371,6 @@ export default function CompleteProfile() {
                         type="number"
                         value={currentWeight}
                         onChange={e => setCurrentWeight(e.target.value)}
-                        placeholder="0"
                         step="0.1"
                         min="0"
                         className={inputCls}
@@ -392,7 +391,6 @@ export default function CompleteProfile() {
                             type="number"
                             value={heightFt}
                             onChange={e => setHeightFt(e.target.value)}
-                            placeholder="5"
                             min="0"
                             max="9"
                             className={inputCls}
@@ -404,7 +402,6 @@ export default function CompleteProfile() {
                             type="number"
                             value={heightIn}
                             onChange={e => setHeightIn(e.target.value)}
-                            placeholder="10"
                             min="0"
                             max="11"
                             className={inputCls}
@@ -418,7 +415,6 @@ export default function CompleteProfile() {
                           type="number"
                           value={heightCm}
                           onChange={e => setHeightCm(e.target.value)}
-                          placeholder="178"
                           min="0"
                           max="300"
                           className={inputCls}
