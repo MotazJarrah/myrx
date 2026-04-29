@@ -55,6 +55,12 @@ export default {
         sans: ['Geist', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
       },
+      keyframes: {
+        shrink: { '0%': { width: '100%' }, '100%': { width: '0%' } },
+      },
+      animation: {
+        shrink: 'shrink 3s linear forwards',
+      },
     },
   },
   plugins: [],

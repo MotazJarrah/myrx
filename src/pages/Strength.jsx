@@ -60,9 +60,21 @@ export default function Strength() {
   const [saved, setSaved]       = useState(false)
   const [saveError, setSaveError] = useState('')
   const [movements, setMovements] = useState([])
+  const [suggestionSent, setSuggestionSent] = useState('')
 
   // Reset state whenever inputs change
   useEffect(() => { setSaved(false); setSaveError('') }, [exercise, weight, reps, timeStr, unit])
+
+  async function handleSuggestMove(name) {
+    if (!user) return
+    await supabase.from('messages').insert({
+      user_id: user.id, from_admin: false,
+      body: `New strength move suggestion: ${name}`,
+      is_suggestion: true, read: false,
+    })
+    setSuggestionSent(name)
+    setTimeout(() => setSuggestionSent(''), 3000)
+  }
 
   // Reset input fields when exercise type changes
   const isIsometric          = exercise ? ISOMETRIC_EXERCISE_NAMES.has(exercise) : false
@@ -160,6 +172,20 @@ export default function Strength() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="max-w-2xl mx-auto space-y-6">
+      {suggestionSent && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-sm rounded-xl border border-amber-500/30 bg-card shadow-xl overflow-hidden">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <Dumbbell className="h-4 w-4 text-amber-400 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Suggestion sent!</p>
+              <p className="text-xs text-muted-foreground truncate">&ldquo;{suggestionSent}&rdquo; added to your coach&rsquo;s review queue.</p>
+            </div>
+          </div>
+          <div className="h-1 bg-amber-500/20">
+            <div className="h-full bg-amber-500 origin-left animate-[shrink_3s_linear_forwards]" />
+          </div>
+        </div>
+      )}
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Strength</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
@@ -173,6 +199,7 @@ export default function Strength() {
           <MovementSearch
             value={exercise}
             onChange={setExercise}
+            onSuggest={handleSuggestMove}
             movements={STRENGTH_MOVEMENTS}
             placeholder="Search or type movement…"
           />
@@ -194,12 +221,12 @@ export default function Strength() {
             </div>
 
             {durSecs >= 1 && (
-              <div className="flex items-center justify-between rounded-lg border border-primary/25 bg-primary/8 px-4 py-2.5">
+              <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
                 <div className="flex items-center gap-2">
-                  <Timer className="h-3.5 w-3.5 text-primary" />
+                  <Timer className="h-3.5 w-3.5 text-blue-400" />
                   <span className="text-xs text-muted-foreground">Hold duration</span>
                 </div>
-                <span className="font-mono text-base tabular-nums font-bold text-primary">
+                <span className="font-mono text-base tabular-nums font-bold text-blue-400">
                   {fmtDuration(durSecs)}
                 </span>
               </div>
@@ -221,7 +248,7 @@ export default function Strength() {
                 {isBodyweightExercise ? (
                   <div className="flex items-center gap-0.5">
                     <span className={labelCls}>Added weight</span>
-                    <span className="text-primary text-sm leading-none shrink-0">*</span>
+                    <span className="text-blue-400 text-sm leading-none shrink-0">*</span>
                   </div>
                 ) : (
                   <label className={labelCls}>Weight</label>
@@ -243,12 +270,12 @@ export default function Strength() {
             </div>
 
             {liveOneRM && (
-              <div className="flex items-center justify-between rounded-lg border border-primary/25 bg-primary/8 px-4 py-2.5">
+              <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
                 <div className="flex items-center gap-2">
-                  <Dumbbell className="h-3.5 w-3.5 text-primary" />
+                  <Dumbbell className="h-3.5 w-3.5 text-blue-400" />
                   <span className="text-xs text-muted-foreground">Estimated 1RM</span>
                 </div>
-                <span className="font-mono text-base tabular-nums font-bold text-primary">
+                <span className="font-mono text-base tabular-nums font-bold text-blue-400">
                   {liveOneRM} {unit}
                 </span>
               </div>
@@ -261,9 +288,9 @@ export default function Strength() {
           disabled={saved || (isIsometric ? !canSaveIso : (!liveOneRM && !(isBodyweightExercise && reps && r >= 1 && r <= 30)))}
           className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
             saved
-              ? 'bg-primary/15 text-primary border border-primary/30'
+              ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
               : (isIsometric ? canSaveIso : (liveOneRM || (isBodyweightExercise && reps && r >= 1 && r <= 30)))
-                ? 'bg-primary text-primary-foreground hover:opacity-90'
+                ? 'bg-blue-500 text-white hover:opacity-90'
                 : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
           }`}
         >
@@ -276,7 +303,7 @@ export default function Strength() {
 
         {isBodyweightExercise && !isIsometric && (
           <p className="text-[11px] text-muted-foreground leading-snug">
-            <span className="text-primary font-semibold">*</span> Optional — this movement uses your latest logged bodyweight for calculations.
+            <span className="text-blue-400 font-semibold">*</span> Optional — this movement uses your latest logged bodyweight for calculations.
           </p>
         )}
       </div>
@@ -299,14 +326,14 @@ export default function Strength() {
                   {mov.kind === 'isometric' ? (
                     <>
                       <span className="text-xs text-muted-foreground">Best hold</span>
-                      <span className="font-mono text-sm tabular-nums text-primary font-semibold">
+                      <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">
                         {fmtDuration(mov.bestSecs)}
                       </span>
                     </>
                   ) : (
                     <>
                       <span className="text-xs text-muted-foreground">Est. 1RM</span>
-                      <span className="font-mono text-sm tabular-nums text-primary font-semibold">
+                      <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">
                         {mov.oneRM} {mov.unit}
                       </span>
                     </>

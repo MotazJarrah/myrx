@@ -57,6 +57,7 @@ export default function Cardio() {
   const [saved, setSaved]         = useState(false)
   const [saveError, setSaveError] = useState('')
   const [activities, setActivities] = useState([])
+  const [suggestionSent, setSuggestionSent] = useState('')
 
   const mode = activity ? getCardioMode(activity) : 'pace'
 
@@ -69,6 +70,17 @@ export default function Cardio() {
   useEffect(() => {
     setSaved(false); setSaveError('')
   }, [activity, distValue, distUnit, timeStr])
+
+  async function handleSuggestMove(name) {
+    if (!user) return
+    await supabase.from('messages').insert({
+      user_id: user.id, from_admin: false,
+      body: `New cardio move suggestion: ${name}`,
+      is_suggestion: true, read: false,
+    })
+    setSuggestionSent(name)
+    setTimeout(() => setSuggestionSent(''), 3000)
+  }
 
   // Load "Your activities"
   useEffect(() => {
@@ -154,6 +166,20 @@ export default function Cardio() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="max-w-2xl mx-auto space-y-6">
+      {suggestionSent && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-sm rounded-xl border border-amber-500/30 bg-card shadow-xl overflow-hidden">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <Activity className="h-4 w-4 text-amber-400 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Suggestion sent!</p>
+              <p className="text-xs text-muted-foreground truncate">&ldquo;{suggestionSent}&rdquo; added to your coach&rsquo;s review queue.</p>
+            </div>
+          </div>
+          <div className="h-1 bg-amber-500/20">
+            <div className="h-full bg-amber-500 origin-left animate-[shrink_3s_linear_forwards]" />
+          </div>
+        </div>
+      )}
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Cardio</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
@@ -170,6 +196,7 @@ export default function Cardio() {
           <MovementSearch
             value={activity}
             onChange={setActivity}
+            onSuggest={handleSuggestMove}
             movements={CARDIO_MOVEMENTS}
             placeholder="Search or type activity…"
           />
@@ -191,12 +218,12 @@ export default function Cardio() {
             </div>
 
             {timeSecs > 0 && (
-              <div className="flex items-center justify-between rounded-lg border border-primary/25 bg-primary/8 px-4 py-2.5">
+              <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
                 <div className="flex items-center gap-2">
-                  <Timer className="h-3.5 w-3.5 text-primary" />
+                  <Timer className="h-3.5 w-3.5 text-amber-400" />
                   <span className="text-xs text-muted-foreground">Session time</span>
                 </div>
-                <span className="font-mono text-base tabular-nums font-bold text-primary">
+                <span className="font-mono text-base tabular-nums font-bold text-amber-400">
                   {fmtSecs(timeSecs)}
                 </span>
               </div>
@@ -238,12 +265,12 @@ export default function Cardio() {
             </div>
 
             {livePaceDisplay && (
-              <div className="flex items-center justify-between rounded-lg border border-primary/25 bg-primary/8 px-4 py-2.5">
+              <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
                 <div className="flex items-center gap-2">
-                  <Activity className="h-3.5 w-3.5 text-primary" />
+                  <Activity className="h-3.5 w-3.5 text-amber-400" />
                   <span className="text-xs text-muted-foreground">Pace</span>
                 </div>
-                <span className="font-mono text-base tabular-nums font-bold text-primary">
+                <span className="font-mono text-base tabular-nums font-bold text-amber-400">
                   {livePaceDisplay}
                 </span>
               </div>
@@ -256,9 +283,9 @@ export default function Cardio() {
           disabled={saved || !canSave}
           className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
             saved
-              ? 'bg-primary/15 text-primary border border-primary/30'
+              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
               : canSave
-                ? 'bg-primary text-primary-foreground hover:opacity-90'
+                ? 'bg-amber-500 text-white hover:opacity-90'
                 : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
           }`}
         >
@@ -288,14 +315,14 @@ export default function Cardio() {
                   {act.mode === 'duration' ? (
                     <>
                       <span className="text-xs text-muted-foreground">Best time</span>
-                      <span className="font-mono text-sm tabular-nums text-primary font-semibold">
+                      <span className="font-mono text-sm tabular-nums text-amber-400 font-semibold">
                         {fmtSecs(act.secs)}
                       </span>
                     </>
                   ) : (
                     <>
                       <span className="text-xs text-muted-foreground">Best pace</span>
-                      <span className="font-mono text-sm tabular-nums text-primary font-semibold">
+                      <span className="font-mono text-sm tabular-nums text-amber-400 font-semibold">
                         {distUnit === 'mi'
                           ? (() => {
                               const m = act.displayValue?.match(/^(\d+):(\d{2})\//)

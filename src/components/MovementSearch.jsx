@@ -6,15 +6,16 @@ const inputCls =
 
 /**
  * A combobox that filters a list of movements as the user types.
- * Accepts custom entries not in the list.
  *
  * Props:
  *   value        string   – currently selected movement name
- *   onChange     fn       – called with the new name string
+ *   onChange     fn       – called with the new name string (known move selected)
+ *   onSuggest    fn?      – called with the typed string when user submits an unknown move;
+ *                           if provided, unknown moves are sent as suggestions, not added to the field
  *   movements    string[] – master list to filter
  *   placeholder  string   – input placeholder text
  */
-export default function MovementSearch({ value, onChange, movements = [], placeholder = 'Search movement…' }) {
+export default function MovementSearch({ value, onChange, onSuggest, movements = [], placeholder = 'Search movement…' }) {
   const [query, setQuery]           = useState('')
   const [open, setOpen]             = useState(false)
   const [focused, setFocused]       = useState(false)
@@ -61,7 +62,14 @@ export default function MovementSearch({ value, onChange, movements = [], placeh
     const trimmed = query.trim()
     if (trimmed && trimmed !== value) {
       const exact = movements.find(m => m.toLowerCase() === trimmed.toLowerCase())
-      onChange(exact ?? trimmed)
+      if (exact) {
+        onChange(exact)
+      } else if (onSuggest) {
+        onSuggest(trimmed)
+        onChange('')
+      } else {
+        onChange(trimmed)
+      }
     }
     setQuery('')
     setOpen(false)
@@ -165,8 +173,11 @@ export default function MovementSearch({ value, onChange, movements = [], placeh
       )}
 
       {open && query.trim() && filtered.length === 0 && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-muted-foreground shadow-lg">
-          Press Enter to add &ldquo;{query.trim()}&rdquo;
+        <div className="absolute z-50 mt-1 w-full rounded-md border border-amber-500/30 bg-card px-3 py-2 text-sm text-muted-foreground shadow-lg">
+          {onSuggest
+            ? <>Press Enter to send <span className="font-medium text-amber-400">&ldquo;{query.trim()}&rdquo;</span> as a suggestion</>
+            : <>Press Enter to add <span className="font-medium">&ldquo;{query.trim()}&rdquo;</span></>
+          }
         </div>
       )}
     </div>
