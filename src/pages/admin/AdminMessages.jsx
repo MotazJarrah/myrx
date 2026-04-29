@@ -347,11 +347,11 @@ export default function AdminMessages() {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // Mark messages as read — optimistic + DB + signal AdminShell immediately
-  function handleMarkRead(ids) {
+  // Mark messages as read — optimistic update first, then persist to DB
+  async function handleMarkRead(ids) {
     setMessages(prev => prev.map(m => ids.includes(m.id) ? { ...m, read: true } : m))
-    supabase.from('messages').update({ read: true }).in('id', ids)
     window.dispatchEvent(new CustomEvent('myrx_signal', { detail: { type: 'messages_read', count: ids.length } }))
+    await supabase.from('messages').update({ read: true }).in('id', ids)
   }
 
   function handleNewMessage(msg) {

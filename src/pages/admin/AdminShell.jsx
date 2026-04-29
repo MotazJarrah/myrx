@@ -90,6 +90,7 @@ export default function AdminShell({ children, onSwitchToClientView }) {
         .select('id', { count: 'exact', head: true })
         .eq('from_admin', false)
         .eq('read', false)
+        .eq('is_suggestion', false)
       setUnreadMessages(count ?? 0)
     }
 
