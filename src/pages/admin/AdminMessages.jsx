@@ -200,21 +200,29 @@ function MessagesTab({ users, messages, onMarkRead, onNewMessage, onDeleteMessag
                 <div className="py-8 text-center text-sm text-muted-foreground">No messages yet.</div>
               )}
               {conversation.map(msg => (
-                <SwipeDelete key={msg.id} onDelete={() => onDeleteMessage(msg.id)}>
-                  <div className={`flex px-0 py-0.5 ${msg.from_admin ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-3.5 py-2.5 text-sm ${
-                      msg.from_admin
-                        ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                        : 'bg-muted text-foreground rounded-tl-sm'
-                    }`}>
+                <div key={msg.id} className={`flex py-0.5 ${msg.from_admin ? 'justify-end' : 'justify-start'}`}>
+                  {msg.from_admin ? (
+                    /* Admin bubble: swipe left to reveal delete — overflow-hidden clips red zone to rounded shape */
+                    <SwipeDelete
+                      onDelete={() => onDeleteMessage(msg.id)}
+                      className="max-w-[75%] rounded-2xl rounded-tr-sm"
+                      bg="bg-primary"
+                    >
+                      <div className="px-3.5 py-2.5 text-sm text-primary-foreground">
+                        <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
+                        <p className="mt-1 text-[10px] opacity-60">
+                          {formatFull(msg.created_at)}
+                          {msg.read && <span className="ml-1">· Read</span>}
+                        </p>
+                      </div>
+                    </SwipeDelete>
+                  ) : (
+                    <div className="max-w-[75%] rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-sm bg-muted text-foreground">
                       <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
-                      <p className={`mt-1 text-[10px] ${msg.from_admin ? 'opacity-60' : 'text-muted-foreground'}`}>
-                        {formatFull(msg.created_at)}
-                        {msg.from_admin && msg.read && <span className="ml-1 opacity-60">· Read</span>}
-                      </p>
+                      <p className="mt-1 text-[10px] text-muted-foreground">{formatFull(msg.created_at)}</p>
                     </div>
-                  </div>
-                </SwipeDelete>
+                  )}
+                </div>
               ))}
               <div ref={bottomRef} />
             </div>
@@ -352,19 +360,27 @@ export default function AdminMessages() {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
+  // Always-fresh ref so effects never capture a stale messages closure
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+
+  // Auto-mark suggestions as read whenever the suggestions tab is active.
+  // Runs on tab switch AND when new realtime suggestions arrive while on the tab.
+  useEffect(() => {
+    if (tab !== 'suggestions') return
+    const unread = messagesRef.current
+      .filter(m => m.is_suggestion && !m.from_admin && !m.read)
+      .map(m => m.id)
+    if (!unread.length) return
+    setMessages(prev => prev.map(m => unread.includes(m.id) ? { ...m, read: true } : m))
+    supabase.from('messages').update({ read: true }).in('id', unread)
+  }, [tab, messages]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Mark messages as read
   async function handleMarkRead(ids) {
     setMessages(prev => prev.map(m => ids.includes(m.id) ? { ...m, read: true } : m))
     window.dispatchEvent(new CustomEvent('myrx_signal', { detail: { type: 'messages_read', count: ids.length } }))
     await supabase.from('messages').update({ read: true }).in('id', ids)
-  }
-
-  function handleSuggestionsTabClick() {
-    setTab('suggestions')
-    const unread = messages.filter(m => m.is_suggestion && !m.from_admin && !m.read).map(m => m.id)
-    if (!unread.length) return
-    setMessages(prev => prev.map(m => unread.includes(m.id) ? { ...m, read: true } : m))
-    supabase.from('messages').update({ read: true }).in('id', unread)
   }
 
   function handleNewMessage(msg) {
@@ -395,7 +411,7 @@ export default function AdminMessages() {
         <Tab active={tab === 'messages'}    onClick={() => setTab('messages')}    badge={unreadMessages}>
           <MessageCircle className="h-3.5 w-3.5" /> Messages
         </Tab>
-        <Tab active={tab === 'suggestions'} onClick={handleSuggestionsTabClick} badge={unreadSuggestions}>
+        <Tab active={tab === 'suggestions'} onClick={() => setTab('suggestions')} badge={unreadSuggestions}>
           <Lightbulb className="h-3.5 w-3.5" /> Suggestions
         </Tab>
       </div>

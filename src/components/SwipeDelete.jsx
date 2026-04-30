@@ -3,7 +3,7 @@ import { Trash2 } from 'lucide-react'
 
 const REVEAL = 80
 
-export default function SwipeDelete({ onDelete, children, className = '' }) {
+export default function SwipeDelete({ onDelete, children, className = '', bg = 'bg-card' }) {
   const [offset,       setOffset]       = useState(0)
   const [removing,     setRemoving]     = useState(false)
   const [transitioning, setTransitioning] = useState(false)
@@ -63,9 +63,9 @@ export default function SwipeDelete({ onDelete, children, className = '' }) {
         </button>
       </div>
 
-      {/* Sliding content — bg-card covers the delete zone when at rest */}
+      {/* Sliding content — solid bg covers the delete zone when at rest */}
       <div
-        className="relative bg-card"
+        className={`relative ${bg}`}
         style={{
           transform: `translateX(${offset}px)`,
           transition: transitioning ? 'transform 0.2s ease' : 'none',
