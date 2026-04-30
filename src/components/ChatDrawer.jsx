@@ -104,7 +104,7 @@ export default function ChatDrawer({ isOpen, onClose }) {
       is_suggestion: false,
       read:          false,
     }).select().single()
-    if (!error && data) setMessages(prev => [...prev, data])
+    if (!error && data) setMessages(prev => prev.some(m => m.id === data.id) ? prev : [...prev, data])
     setBody('')
     setSending(false)
   }

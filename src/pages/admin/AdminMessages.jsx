@@ -394,7 +394,7 @@ export default function AdminMessages() {
   }
 
   function handleNewMessage(msg) {
-    setMessages(prev => [...prev, msg])
+    setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg])
   }
 
   async function handleDeleteMessage(id) {
