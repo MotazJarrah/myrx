@@ -162,22 +162,25 @@ export default function ChatDrawer({ isOpen, onClose }) {
           ) : (
             <div className="py-2">
               {messages.map(msg => (
-                <SwipeDelete key={msg.id} onDelete={() => handleDelete(msg.id)}>
-                  <div className={`flex px-4 py-1.5 ${msg.from_admin ? 'justify-start' : 'justify-end'}`}>
-                    <div
-                      className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm ${
-                        msg.from_admin
-                          ? 'bg-muted text-foreground rounded-tl-sm'
-                          : 'bg-primary text-primary-foreground rounded-tr-sm'
-                      }`}
-                    >
+                <div key={msg.id} className={`flex px-4 py-1.5 ${msg.from_admin ? 'justify-start' : 'justify-end'}`}>
+                  {msg.from_admin ? (
+                    <div className="max-w-[80%] rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-sm bg-muted text-foreground">
                       <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
-                      <p className={`mt-1 text-[10px] ${msg.from_admin ? 'text-muted-foreground' : 'opacity-60'}`}>
-                        {formatTime(msg.created_at)}
-                      </p>
+                      <p className="mt-1 text-[10px] text-muted-foreground">{formatTime(msg.created_at)}</p>
                     </div>
-                  </div>
-                </SwipeDelete>
+                  ) : (
+                    <SwipeDelete
+                      onDelete={() => handleDelete(msg.id)}
+                      className="max-w-[80%] rounded-2xl rounded-tr-sm"
+                      bg="bg-primary"
+                    >
+                      <div className="px-3.5 py-2.5 text-sm text-primary-foreground">
+                        <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
+                        <p className="mt-1 text-[10px] opacity-60">{formatTime(msg.created_at)}</p>
+                      </div>
+                    </SwipeDelete>
+                  )}
+                </div>
               ))}
             </div>
           )}

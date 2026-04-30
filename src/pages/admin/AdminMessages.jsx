@@ -373,7 +373,11 @@ export default function AdminMessages() {
       .map(m => m.id)
     if (!unread.length) return
     setMessages(prev => prev.map(m => unread.includes(m.id) ? { ...m, read: true } : m))
-    supabase.from('messages').update({ read: true }).in('id', unread)
+    supabase.from('messages').update({ read: true })
+      .eq('is_suggestion', true)
+      .eq('from_admin', false)
+      .eq('read', false)
+      .then(() => {})
   }, [tab, messages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Mark messages as read

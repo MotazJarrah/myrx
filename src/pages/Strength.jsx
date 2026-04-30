@@ -56,12 +56,13 @@ export default function Strength() {
   const [timeStr, setTimeStr]   = useState('')
   const [unit, setUnit]         = useState(profile?.weight_unit || 'lb')
   useEffect(() => { if (profile?.weight_unit) setUnit(profile.weight_unit) }, [profile?.weight_unit])
-  const [saved, setSaved]         = useState(false)
-  const [suggested, setSuggested] = useState(false)
-  const [saveError, setSaveError] = useState('')
-  const [movements, setMovements] = useState([])
+  const [saved, setSaved]             = useState(false)
+  const [suggestSent, setSuggestSent] = useState(false)
+  const [suggesting, setSuggesting]   = useState(false)
+  const [saveError, setSaveError]     = useState('')
+  const [movements, setMovements]     = useState([])
   const [pendingQuery, setPendingQuery] = useState('')
-  const [movementKey, setMovementKey]  = useState(0)
+  const [movementKey, setMovementKey]   = useState(0)
 
   useEffect(() => { setSaved(false); setSaveError('') }, [exercise, weight, reps, timeStr, unit])
 
@@ -72,19 +73,24 @@ export default function Strength() {
     && pendingQuery.trim() !== ''
     && !STRENGTH_MOVEMENTS.some(m => m.toLowerCase() === pendingQuery.trim().toLowerCase())
 
-  function handleSuggestMove(name) {
-    if (!user) return
-    const n = name || pendingQuery.trim()
+  async function handleSuggestMove(name) {
+    if (!user || suggesting || suggestSent) return
+    const n = (name || pendingQuery).trim()
     if (!n) return
-    setSuggested(true)
-    setPendingQuery('')
-    setMovementKey(k => k + 1)
-    setTimeout(() => setSuggested(false), 1500)
-    supabase.from('messages').insert({
+    setSuggesting(true)
+    const { error } = await supabase.from('messages').insert({
       user_id: user.id, from_admin: false,
       body: `New strength move suggestion: ${n}`,
       is_suggestion: true, read: false,
     })
+    setSuggesting(false)
+    if (!error) {
+      setSuggestSent(true)
+      setPendingQuery('')
+      setMovementKey(k => k + 1)
+      setExercise(''); setWeight(''); setReps(''); setTimeStr('')
+      setTimeout(() => setSuggestSent(false), 2000)
+    }
   }
 
   useEffect(() => {
@@ -174,7 +180,7 @@ export default function Strength() {
   }
 
   const canSaveRep = isIsometric ? canSaveIso : (liveOneRM || (isBodyweightExercise && reps && r >= 1 && r <= 30))
-  const buttonDisabled = suggestionMode ? suggested : (saved || !canSaveRep)
+  const buttonDisabled = suggestionMode ? (suggesting || suggestSent) : (saved || !canSaveRep)
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -282,9 +288,11 @@ export default function Strength() {
           disabled={buttonDisabled}
           className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
             suggestionMode
-              ? suggested
-                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                : 'bg-amber-500 text-white hover:opacity-90'
+              ? suggestSent
+                ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+                : suggesting
+                  ? 'bg-blue-500/60 text-white cursor-wait'
+                  : 'bg-blue-500 text-white hover:opacity-90'
               : saved
                 ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
                 : canSaveRep
@@ -293,12 +301,12 @@ export default function Strength() {
           }`}
         >
           {suggestionMode
-            ? suggested ? '✓ Suggested' : 'Send Suggestion'
+            ? suggestSent ? '✓ Suggestion Sent' : suggesting ? 'Sending…' : 'Send Suggestion'
             : saved ? '✓ Saved' : 'Save Effort'}
         </button>
 
-        {suggested && (
-          <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+        {suggestSent && (
+          <div className="flex items-center gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs text-blue-400">
             <Check className="h-3.5 w-3.5 shrink-0" /> Suggestion sent to your coach.
           </div>
         )}

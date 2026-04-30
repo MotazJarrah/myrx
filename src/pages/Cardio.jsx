@@ -55,12 +55,13 @@ export default function Cardio() {
   // Profile loads async — re-sync default distance unit once available
   useEffect(() => { if (profile?.distance_unit) setDistUnit(profile.distance_unit) }, [profile?.distance_unit])
   const [timeStr, setTimeStr]     = useState('')
-  const [saved, setSaved]           = useState(false)
-  const [suggested, setSuggested]   = useState(false)
-  const [saveError, setSaveError]   = useState('')
-  const [activities, setActivities] = useState([])
+  const [saved, setSaved]               = useState(false)
+  const [suggestSent, setSuggestSent]   = useState(false)
+  const [suggesting, setSuggesting]     = useState(false)
+  const [saveError, setSaveError]       = useState('')
+  const [activities, setActivities]     = useState([])
   const [pendingQuery, setPendingQuery] = useState('')
-  const [movementKey, setMovementKey]  = useState(0)
+  const [movementKey, setMovementKey]   = useState(0)
 
   const mode = activity ? getCardioMode(activity) : 'pace'
 
@@ -78,19 +79,24 @@ export default function Cardio() {
     && pendingQuery.trim() !== ''
     && !CARDIO_MOVEMENTS.some(m => m.toLowerCase() === pendingQuery.trim().toLowerCase())
 
-  function handleSuggestMove(name) {
-    if (!user) return
-    const n = name || pendingQuery.trim()
+  async function handleSuggestMove(name) {
+    if (!user || suggesting || suggestSent) return
+    const n = (name || pendingQuery).trim()
     if (!n) return
-    setSuggested(true)
-    setPendingQuery('')
-    setMovementKey(k => k + 1)
-    setTimeout(() => setSuggested(false), 1500)
-    supabase.from('messages').insert({
+    setSuggesting(true)
+    const { error } = await supabase.from('messages').insert({
       user_id: user.id, from_admin: false,
       body: `New cardio move suggestion: ${n}`,
       is_suggestion: true, read: false,
     })
+    setSuggesting(false)
+    if (!error) {
+      setSuggestSent(true)
+      setPendingQuery('')
+      setMovementKey(k => k + 1)
+      setActivity(''); setDistValue(''); setTimeStr('')
+      setTimeout(() => setSuggestSent(false), 2000)
+    }
   }
 
   // Load "Your activities"
@@ -280,12 +286,14 @@ export default function Cardio() {
 
         <button
           onClick={suggestionMode ? () => handleSuggestMove(pendingQuery) : saveEffort}
-          disabled={suggestionMode ? suggested : (saved || !canSave)}
+          disabled={suggestionMode ? (suggesting || suggestSent) : (saved || !canSave)}
           className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
             suggestionMode
-              ? suggested
+              ? suggestSent
                 ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                : 'bg-amber-500 text-white hover:opacity-90'
+                : suggesting
+                  ? 'bg-amber-500/60 text-white cursor-wait'
+                  : 'bg-amber-500 text-white hover:opacity-90'
               : saved
                 ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                 : canSave
@@ -294,11 +302,11 @@ export default function Cardio() {
           }`}
         >
           {suggestionMode
-            ? suggested ? '✓ Suggested' : 'Send Suggestion'
+            ? suggestSent ? '✓ Suggestion Sent' : suggesting ? 'Sending…' : 'Send Suggestion'
             : saved ? '✓ Saved' : 'Save Effort'}
         </button>
 
-        {suggested && (
+        {suggestSent && (
           <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
             <Check className="h-3.5 w-3.5 shrink-0" /> Suggestion sent to your coach.
           </div>

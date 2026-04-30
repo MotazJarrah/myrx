@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { ChevronDown } from 'lucide-react'
 
 const inputCls =
-  'w-full rounded-md border border-border bg-input/30 px-3 py-2.5 pr-8 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
+  'w-full rounded-md border bg-input/30 px-3 py-2.5 pr-8 text-sm text-foreground outline-none placeholder:text-muted-foreground transition-colors'
 
 /**
  * A combobox that filters a list of movements as the user types.
@@ -23,6 +23,12 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
   const containerRef = useRef(null)
   const inputRef     = useRef(null)
   const listRef      = useRef(null)
+
+  // True when user has typed something not in the movement list — triggers red border + suggestion mode
+  const isSuggesting = !!onSuggest && query.trim().length > 0 && (() => {
+    const q = query.trim().toLowerCase()
+    return !movements.some(m => m.toLowerCase().includes(q))
+  })()
 
   // When the external value changes, clear any in-progress query
   useEffect(() => { setQuery('') }, [value])
@@ -84,7 +90,16 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
 
   function handleKeyDown(e) {
     if (!open) {
-      if (e.key === 'ArrowDown' || e.key === 'Enter') setOpen(true)
+      if (e.key === 'Enter') {
+        if (isSuggesting) {
+          e.preventDefault()
+          commitQuery()
+        } else {
+          setOpen(true)
+        }
+        return
+      }
+      if (e.key === 'ArrowDown') { setOpen(true); return }
       return
     }
     if (e.key === 'ArrowDown') {
@@ -117,7 +132,10 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
           type="text"
           value={displayValue}
           placeholder={placeholder}
-          className={inputCls}
+          className={`${inputCls} ${isSuggesting
+            ? 'border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500/30'
+            : 'border-border focus:border-ring focus:ring-1 focus:ring-ring'
+          }`}
           autoComplete="off"
           spellCheck={false}
           onFocus={() => {
