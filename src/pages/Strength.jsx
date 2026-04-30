@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { estimate1RM, getEquipmentType } from '../lib/formulas'
 import { STRENGTH_MOVEMENTS, ISOMETRIC_EXERCISE_NAMES } from '../lib/movements'
 import MovementSearch from '../components/MovementSearch'
-import { Dumbbell, Timer, ChevronRight } from 'lucide-react'
+import { Dumbbell, Timer, ChevronRight, Check } from 'lucide-react'
 
 function parseTimeStr(str) {
   if (!str) return null
@@ -55,30 +55,37 @@ export default function Strength() {
   const [reps, setReps]         = useState('')
   const [timeStr, setTimeStr]   = useState('')
   const [unit, setUnit]         = useState(profile?.weight_unit || 'lb')
-  // Profile loads async — re-sync default unit once it's available
   useEffect(() => { if (profile?.weight_unit) setUnit(profile.weight_unit) }, [profile?.weight_unit])
-  const [saved, setSaved]       = useState(false)
+  const [saved, setSaved]         = useState(false)
+  const [suggested, setSuggested] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [movements, setMovements] = useState([])
-  const [suggestionSent, setSuggestionSent] = useState('')
+  const [pendingQuery, setPendingQuery] = useState('')
+  const [movementKey, setMovementKey]  = useState(0)
 
-  // Reset state whenever inputs change
   useEffect(() => { setSaved(false); setSaveError('') }, [exercise, weight, reps, timeStr, unit])
+
+  const isIsometric          = exercise ? ISOMETRIC_EXERCISE_NAMES.has(exercise) : false
+  const isBodyweightExercise = exercise && !isIsometric && getEquipmentType(exercise) === 'bodyweight'
+
+  const suggestionMode = !exercise
+    && pendingQuery.trim() !== ''
+    && !STRENGTH_MOVEMENTS.some(m => m.toLowerCase() === pendingQuery.trim().toLowerCase())
 
   function handleSuggestMove(name) {
     if (!user) return
-    setSuggestionSent(name)
-    setTimeout(() => setSuggestionSent(''), 3000)
+    const n = name || pendingQuery.trim()
+    if (!n) return
+    setSuggested(true)
+    setPendingQuery('')
+    setMovementKey(k => k + 1)
+    setTimeout(() => setSuggested(false), 1500)
     supabase.from('messages').insert({
       user_id: user.id, from_admin: false,
-      body: `New strength move suggestion: ${name}`,
+      body: `New strength move suggestion: ${n}`,
       is_suggestion: true, read: false,
     })
   }
-
-  // Reset input fields when exercise type changes
-  const isIsometric          = exercise ? ISOMETRIC_EXERCISE_NAMES.has(exercise) : false
-  const isBodyweightExercise = exercise && !isIsometric && getEquipmentType(exercise) === 'bodyweight'
 
   useEffect(() => {
     setWeight(''); setReps(''); setTimeStr('')
@@ -98,7 +105,6 @@ export default function Strength() {
         data.forEach(e => {
           const name = e.label.split(' · ')[0]
           if (ISOMETRIC_EXERCISE_NAMES.has(name)) {
-            // Isometric: track best duration
             const secs = parseDurationSecs(e.value)
             if (secs === null) return
             const existing = map.get(name)
@@ -106,7 +112,6 @@ export default function Strength() {
               map.set(name, { name, bestSecs: secs, kind: 'isometric' })
             }
           } else {
-            // Rep-based: track best 1RM
             const parsed = parseOneRM(e.value)
             if (!parsed) return
             const existing = map.get(name)
@@ -119,7 +124,6 @@ export default function Strength() {
       })
   }, [user, saved])
 
-  // ── Derived state (rep-based) ─────────────────────────────────────────────
   const profileBodyWeight = profile?.current_weight ?? null
   const addedWeight       = Number(weight) || 0
   const effectiveWeight   = isBodyweightExercise
@@ -131,11 +135,9 @@ export default function Strength() {
     ? estimate1RM(effectiveWeight, r)
     : null
 
-  // ── Derived state (isometric) ─────────────────────────────────────────────
   const durSecs    = parseTimeStr(timeStr) || 0
   const canSaveIso = isIsometric && durSecs >= 1
 
-  // ── Save handlers ─────────────────────────────────────────────────────────
   async function saveEffort() {
     if (!user || saved) return
 
@@ -171,23 +173,11 @@ export default function Strength() {
     setTimeout(() => { setExercise(''); setWeight(''); setReps(''); setTimeStr('') }, 1500)
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const canSaveRep = isIsometric ? canSaveIso : (liveOneRM || (isBodyweightExercise && reps && r >= 1 && r <= 30))
+  const buttonDisabled = suggestionMode ? suggested : (saved || !canSaveRep)
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      {suggestionSent && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-sm rounded-xl border border-amber-500/30 bg-card shadow-xl overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-3">
-            <Dumbbell className="h-4 w-4 text-amber-400 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-foreground">Suggestion sent!</p>
-              <p className="text-xs text-muted-foreground truncate">&ldquo;{suggestionSent}&rdquo; added to your coach&rsquo;s review queue.</p>
-            </div>
-          </div>
-          <div className="h-1 bg-amber-500/20">
-            <div className="h-full bg-amber-500 origin-left animate-shrink" />
-          </div>
-        </div>
-      )}
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Strength</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
@@ -199,9 +189,11 @@ export default function Strength() {
         <div className="flex flex-col gap-1.5">
           <label className={labelCls}>Exercise</label>
           <MovementSearch
+            key={movementKey}
             value={exercise}
             onChange={setExercise}
             onSuggest={handleSuggestMove}
+            onQueryChange={setPendingQuery}
             movements={STRENGTH_MOVEMENTS}
             placeholder="Search or type movement…"
           />
@@ -286,18 +278,30 @@ export default function Strength() {
         )}
 
         <button
-          onClick={saveEffort}
-          disabled={saved || (isIsometric ? !canSaveIso : (!liveOneRM && !(isBodyweightExercise && reps && r >= 1 && r <= 30)))}
+          onClick={suggestionMode ? () => handleSuggestMove(pendingQuery) : saveEffort}
+          disabled={buttonDisabled}
           className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
-            saved
-              ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
-              : (isIsometric ? canSaveIso : (liveOneRM || (isBodyweightExercise && reps && r >= 1 && r <= 30)))
-                ? 'bg-blue-500 text-white hover:opacity-90'
-                : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
+            suggestionMode
+              ? suggested
+                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                : 'bg-amber-500 text-white hover:opacity-90'
+              : saved
+                ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+                : canSaveRep
+                  ? 'bg-blue-500 text-white hover:opacity-90'
+                  : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
           }`}
         >
-          {saved ? '✓ Saved' : 'Save Effort'}
+          {suggestionMode
+            ? suggested ? '✓ Suggested' : 'Send Suggestion'
+            : saved ? '✓ Saved' : 'Save Effort'}
         </button>
+
+        {suggested && (
+          <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <Check className="h-3.5 w-3.5 shrink-0" /> Suggestion sent to your coach.
+          </div>
+        )}
 
         {saveError && (
           <p className="text-xs text-destructive leading-snug">{saveError}</p>

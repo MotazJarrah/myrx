@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRoute, useLocation } from 'wouter'
 import { ArrowLeft, Target } from 'lucide-react'
+import SwipeDelete from '../components/SwipeDelete'
 import TickerNumber from '../components/TickerNumber'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { useAuth } from '../contexts/AuthContext'
@@ -133,6 +134,11 @@ export default function CardioDetail() {
   const [efforts, setEfforts] = useState([])
   const [loading, setLoading] = useState(true)
 
+  async function handleDeleteEffort(id) {
+    setEfforts(prev => prev.filter(e => e.id !== id))
+    await supabase.from('efforts').delete().eq('id', id).eq('user_id', user.id)
+  }
+
   useEffect(() => {
     if (!user || !activity) return
     supabase
@@ -161,13 +167,13 @@ export default function CardioDetail() {
     </div>
   )
 
-  if (mode === 'duration') return <DurationDetail activity={activity} efforts={efforts} navigate={navigate} />
-  return <PaceDetail activity={activity} efforts={efforts} navigate={navigate} distUnit={distUnit} />
+  if (mode === 'duration') return <DurationDetail activity={activity} efforts={efforts} navigate={navigate} onDelete={handleDeleteEffort} />
+  return <PaceDetail activity={activity} efforts={efforts} navigate={navigate} distUnit={distUnit} onDelete={handleDeleteEffort} />
 }
 
 // ── Pace detail ───────────────────────────────────────────────────────────────
 
-function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
+function PaceDetail({ activity, efforts, navigate, distUnit = 'km', onDelete }) {
   const distances = getCardioDistances(activity, distUnit)
   const [selectedIdx, setSelectedIdx] = useState(0)
 
@@ -316,13 +322,15 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
         </div>
         <div className="divide-y divide-border">
           {[...efforts].reverse().map(e => (
-            <div key={e.id} className="flex items-center justify-between px-5 py-3">
-              <div>
-                <p className="text-sm font-medium">{e.label.split(' · ').slice(1).join(' · ')}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{new Date(e.created_at).toLocaleDateString()}</p>
+            <SwipeDelete key={e.id} onDelete={() => onDelete(e.id)}>
+              <div className="flex items-center justify-between px-5 py-3 bg-card">
+                <div>
+                  <p className="text-sm font-medium">{e.label.split(' · ').slice(1).join(' · ')}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{new Date(e.created_at).toLocaleDateString()}</p>
+                </div>
+                <span className="font-mono text-sm tabular-nums text-amber-400">{convertStoredPace(e.value, distUnit)}</span>
               </div>
-              <span className="font-mono text-sm tabular-nums text-amber-400">{convertStoredPace(e.value, distUnit)}</span>
-            </div>
+            </SwipeDelete>
           ))}
         </div>
       </div>
@@ -332,7 +340,7 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km' }) {
 
 // ── Duration detail ───────────────────────────────────────────────────────────
 
-function DurationDetail({ activity, efforts, navigate }) {
+function DurationDetail({ activity, efforts, navigate, onDelete }) {
   const [selectedMs, setSelectedMs] = useState(null)
 
   let bestSecs = 0
@@ -452,10 +460,12 @@ function DurationDetail({ activity, efforts, navigate }) {
         </div>
         <div className="divide-y divide-border">
           {[...efforts].reverse().map(e => (
-            <div key={e.id} className="flex items-center justify-between px-5 py-3">
-              <p className="text-xs text-muted-foreground">{new Date(e.created_at).toLocaleDateString()}</p>
-              <span className="font-mono text-sm tabular-nums text-amber-400">{fmtSecs(parseTimeStr(e.value))}</span>
-            </div>
+            <SwipeDelete key={e.id} onDelete={() => onDelete(e.id)}>
+              <div className="flex items-center justify-between px-5 py-3 bg-card">
+                <p className="text-xs text-muted-foreground">{new Date(e.created_at).toLocaleDateString()}</p>
+                <span className="font-mono text-sm tabular-nums text-amber-400">{fmtSecs(parseTimeStr(e.value))}</span>
+              </div>
+            </SwipeDelete>
           ))}
         </div>
       </div>

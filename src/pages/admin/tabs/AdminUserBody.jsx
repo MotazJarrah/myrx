@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
-import { Weight, Plus, Trash2, Loader2, Check, AlertCircle } from 'lucide-react'
+import { Weight, Plus, Check, AlertCircle } from 'lucide-react'
+import SwipeDelete from '../../../components/SwipeDelete'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceDot } from 'recharts'
 
 function convertWeight(weight, fromUnit, toUnit) {
@@ -101,30 +102,11 @@ function BodyweightChart({ entries }) {
   )
 }
 
-// ── Confirm delete ────────────────────────────────────────────────────────────
-
-function ConfirmDelete({ onConfirm, onCancel, busy }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[11px] text-destructive">Delete?</span>
-      <button onClick={onConfirm} disabled={busy}
-        className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-destructive border border-destructive/30 hover:bg-destructive/10 transition-colors disabled:opacity-50">
-        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes'}
-      </button>
-      <button onClick={onCancel} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground border border-border hover:bg-accent transition-colors">
-        No
-      </button>
-    </div>
-  )
-}
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AdminUserBody({ userId, onSaved }) {
   const [entries,  setEntries]  = useState([])
   const [loading,  setLoading]  = useState(true)
-  const [deleting, setDeleting] = useState(null)
-  const [confirm,  setConfirm]  = useState(null)
 
   const [showForm,   setShowForm]   = useState(false)
   const [newWeight,  setNewWeight]  = useState('')
@@ -149,11 +131,8 @@ export default function AdminUserBody({ userId, onSaved }) {
   }
 
   async function deleteEntry(id) {
-    setDeleting(id)
-    const { error } = await supabase.from('bodyweight').delete().eq('id', id)
-    if (!error) setEntries(prev => prev.filter(e => e.id !== id))
-    setDeleting(null)
-    setConfirm(null)
+    setEntries(prev => prev.filter(e => e.id !== id))
+    await supabase.from('bodyweight').delete().eq('id', id)
   }
 
   async function handleAdd(e) {
@@ -240,24 +219,16 @@ export default function AdminUserBody({ userId, onSaved }) {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="divide-y divide-border">
             {entries.map(e => (
-              <div key={e.id} className="flex items-center gap-3 px-4 py-2.5">
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
-                  <Weight className="h-3.5 w-3.5" />
+              <SwipeDelete key={e.id} onDelete={() => deleteEntry(e.id)}>
+                <div className="flex items-center gap-3 px-4 py-2.5 bg-card">
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400">
+                    <Weight className="h-3.5 w-3.5" />
+                  </div>
+                  <span className="text-sm text-muted-foreground flex-1 whitespace-nowrap">{fmtDateFull(e.created_at)}</span>
+                  <span className="text-sm font-bold tabular-nums font-mono">{e.weight}</span>
+                  <span className="text-xs text-muted-foreground w-6">{e.unit}</span>
                 </div>
-                <span className="text-sm text-muted-foreground flex-1 whitespace-nowrap">{fmtDateFull(e.created_at)}</span>
-                <span className="text-sm font-bold tabular-nums font-mono">{e.weight}</span>
-                <span className="text-xs text-muted-foreground w-6">{e.unit}</span>
-                <div className="flex justify-end shrink-0">
-                  {confirm === e.id ? (
-                    <ConfirmDelete onConfirm={() => deleteEntry(e.id)} onCancel={() => setConfirm(null)} busy={deleting === e.id} />
-                  ) : (
-                    <button onClick={() => setConfirm(e.id)}
-                      className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
+              </SwipeDelete>
             ))}
           </div>
         </div>

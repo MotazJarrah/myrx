@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { TrendingUp, TrendingDown, Target, Minus, Trash2, Loader2 } from 'lucide-react'
+import { TrendingUp, TrendingDown, Target, Minus } from 'lucide-react'
+import SwipeDelete from '../components/SwipeDelete'
 import { TAG_STYLES } from '../lib/effortTags'
 import TickerNumber from '../components/TickerNumber'
 import { dataCache } from '../lib/cache'
@@ -59,8 +60,6 @@ export default function Bodyweight() {
   const { user, profile, refreshProfile } = useAuth()
   const [weight, setWeight] = useState('')
   const [unit, setUnit]     = useState(profile?.weight_unit || 'lb')
-  const [confirm,  setConfirm]  = useState(null)
-  const [deleting, setDeleting] = useState(false)
 
   const bwKey  = user ? `bodyweight:${user.id}` : null
   const [logs, setLogs] = useState(() => (bwKey && dataCache.get(bwKey)) ?? [])
@@ -107,11 +106,8 @@ export default function Bodyweight() {
   }
 
   async function deleteEntry(id) {
-    setDeleting(id)
-    const { error } = await supabase.from('bodyweight').delete().eq('id', id).eq('user_id', user.id)
-    if (!error) setLogs(prev => prev.filter(l => l.id !== id))
-    setDeleting(null)
-    setConfirm(null)
+    setLogs(prev => prev.filter(l => l.id !== id))
+    await supabase.from('bodyweight').delete().eq('id', id).eq('user_id', user.id)
   }
 
   // ── Derived stats ──────────────────────────────────────────────────────────
@@ -349,48 +345,25 @@ export default function Bodyweight() {
 
       {/* ── Log ── */}
       {logs.length > 0 && (
-        <div className="animate-rise rounded-xl border border-border bg-card p-5">
-          <h2 className="text-sm font-semibold mb-3">Log</h2>
+        <div className="animate-rise rounded-xl border border-border bg-card">
+          <div className="px-5 py-3.5 border-b border-border">
+            <h2 className="text-sm font-semibold">Log</h2>
+          </div>
           <div className="divide-y divide-border">
             {logs.slice(0, 30).map(l => (
-              <div key={l.id} className="flex items-center gap-3 py-2.5">
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${TAG_STYLES.weighin}`}>
-                    Weigh-in
-                  </span>
-                  <span className="text-sm text-muted-foreground truncate">
-                    {new Date(l.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </span>
+              <SwipeDelete key={l.id} onDelete={() => deleteEntry(l.id)}>
+                <div className="flex items-center gap-3 py-2.5 px-5 bg-card">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 ${TAG_STYLES.weighin}`}>
+                      Weigh-in
+                    </span>
+                    <span className="text-sm text-muted-foreground truncate">
+                      {new Date(l.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
+                  </div>
+                  <span className="font-mono text-sm tabular-nums font-medium shrink-0">{l.weight} {l.unit}</span>
                 </div>
-                <span className="font-mono text-sm tabular-nums font-medium shrink-0">{l.weight} {l.unit}</span>
-                <div className="flex justify-end shrink-0">
-                  {confirm === l.id ? (
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-destructive">Delete?</span>
-                      <button
-                        onClick={() => deleteEntry(l.id)}
-                        disabled={!!deleting}
-                        className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-destructive border border-destructive/30 hover:bg-destructive/10 transition-colors disabled:opacity-50"
-                      >
-                        {deleting === l.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes'}
-                      </button>
-                      <button
-                        onClick={() => setConfirm(null)}
-                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground border border-border hover:bg-accent transition-colors"
-                      >
-                        No
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setConfirm(l.id)}
-                      className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
+              </SwipeDelete>
             ))}
           </div>
         </div>

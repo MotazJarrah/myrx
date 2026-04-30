@@ -359,14 +359,13 @@ export default function AdminMessages() {
     await supabase.from('messages').update({ read: true }).in('id', ids)
   }
 
-  // Mark all unread suggestions as read when suggestions tab is opened
-  useEffect(() => {
-    if (tab !== 'suggestions') return
+  function handleSuggestionsTabClick() {
+    setTab('suggestions')
     const unread = messages.filter(m => m.is_suggestion && !m.from_admin && !m.read).map(m => m.id)
     if (!unread.length) return
     setMessages(prev => prev.map(m => unread.includes(m.id) ? { ...m, read: true } : m))
     supabase.from('messages').update({ read: true }).in('id', unread)
-  }, [tab])
+  }
 
   function handleNewMessage(msg) {
     setMessages(prev => [...prev, msg])
@@ -396,7 +395,7 @@ export default function AdminMessages() {
         <Tab active={tab === 'messages'}    onClick={() => setTab('messages')}    badge={unreadMessages}>
           <MessageCircle className="h-3.5 w-3.5" /> Messages
         </Tab>
-        <Tab active={tab === 'suggestions'} onClick={() => setTab('suggestions')} badge={unreadSuggestions}>
+        <Tab active={tab === 'suggestions'} onClick={handleSuggestionsTabClick} badge={unreadSuggestions}>
           <Lightbulb className="h-3.5 w-3.5" /> Suggestions
         </Tab>
       </div>

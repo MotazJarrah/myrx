@@ -108,16 +108,16 @@ export default function AdminShell({ children, onSwitchToClientView }) {
     fetchUnread()
     fetchGoals()
 
-    // Listen for same-tab signals from AdminMessages (mark-read) and AdminProgress (ack goals)
+    // StorageEvent only fires in OTHER tabs; custom event handles same-tab
     function onStorage(e) {
       if (e.key === 'myrx_messages_read_at') fetchUnread()
-      if (e.key === 'myrx_goals_acknowledged') fetchGoals()
+      if (e.key === 'myrx_goals_acknowledged') setGoalsReached(0)
     }
-    // StorageEvent only fires in OTHER tabs; for same-tab use a custom event
     function onSignal(e) {
       if (e.detail?.type === 'messages_read') setUnreadMessages(prev => Math.max(0, prev - e.detail.count))
       if (e.detail === 'goals_acked') setGoalsReached(0)
     }
+    window.addEventListener('storage', onStorage)
     window.addEventListener('myrx_signal', onSignal)
 
     const channel = supabase
@@ -129,6 +129,7 @@ export default function AdminShell({ children, onSwitchToClientView }) {
 
     return () => {
       supabase.removeChannel(channel)
+      window.removeEventListener('storage', onStorage)
       window.removeEventListener('myrx_signal', onSignal)
     }
   }, [])

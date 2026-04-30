@@ -3,9 +3,9 @@ import { Trash2 } from 'lucide-react'
 
 const REVEAL = 80
 
-export default function SwipeDelete({ onDelete, children }) {
-  const [offset,      setOffset]      = useState(0)
-  const [removing,    setRemoving]    = useState(false)
+export default function SwipeDelete({ onDelete, children, className = '' }) {
+  const [offset,       setOffset]       = useState(0)
+  const [removing,     setRemoving]     = useState(false)
   const [transitioning, setTransitioning] = useState(false)
   const base   = useRef(0)
   const startX = useRef(null)
@@ -48,16 +48,22 @@ export default function SwipeDelete({ onDelete, children }) {
   }
 
   return (
-    <div className="relative overflow-hidden">
-      {/* Red delete zone */}
-      <div className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-destructive">
+    <div
+      className={`relative overflow-hidden${className ? ` ${className}` : ''}`}
+      style={{ zIndex: offset < 0 ? 2 : 'auto' }}
+    >
+      {/* Red delete zone — extends 2px beyond bounds to fill divider gaps */}
+      <div
+        className="absolute right-0 flex w-20 items-center justify-center bg-destructive"
+        style={{ top: '-2px', bottom: '-2px' }}
+      >
         <button onClick={doDelete} className="flex flex-col items-center gap-0.5 text-white">
           <Trash2 className="h-4 w-4" />
           <span className="text-[10px] font-semibold">Delete</span>
         </button>
       </div>
 
-      {/* Sliding content */}
+      {/* Sliding content — bg-card covers the delete zone when at rest */}
       <div
         className="relative bg-card"
         style={{

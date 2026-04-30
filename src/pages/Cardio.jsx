@@ -4,7 +4,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { CARDIO_MOVEMENTS, getCardioMode } from '../lib/movements'
 import MovementSearch from '../components/MovementSearch'
-import { Activity, Timer, ChevronRight } from 'lucide-react'
+import { Activity, Timer, ChevronRight, Check } from 'lucide-react'
+
 
 // ── Time helpers ──────────────────────────────────────────────────────────────
 
@@ -54,10 +55,12 @@ export default function Cardio() {
   // Profile loads async — re-sync default distance unit once available
   useEffect(() => { if (profile?.distance_unit) setDistUnit(profile.distance_unit) }, [profile?.distance_unit])
   const [timeStr, setTimeStr]     = useState('')
-  const [saved, setSaved]         = useState(false)
-  const [saveError, setSaveError] = useState('')
+  const [saved, setSaved]           = useState(false)
+  const [suggested, setSuggested]   = useState(false)
+  const [saveError, setSaveError]   = useState('')
   const [activities, setActivities] = useState([])
-  const [suggestionSent, setSuggestionSent] = useState('')
+  const [pendingQuery, setPendingQuery] = useState('')
+  const [movementKey, setMovementKey]  = useState(0)
 
   const mode = activity ? getCardioMode(activity) : 'pace'
 
@@ -71,13 +74,21 @@ export default function Cardio() {
     setSaved(false); setSaveError('')
   }, [activity, distValue, distUnit, timeStr])
 
+  const suggestionMode = !activity
+    && pendingQuery.trim() !== ''
+    && !CARDIO_MOVEMENTS.some(m => m.toLowerCase() === pendingQuery.trim().toLowerCase())
+
   function handleSuggestMove(name) {
     if (!user) return
-    setSuggestionSent(name)
-    setTimeout(() => setSuggestionSent(''), 3000)
+    const n = name || pendingQuery.trim()
+    if (!n) return
+    setSuggested(true)
+    setPendingQuery('')
+    setMovementKey(k => k + 1)
+    setTimeout(() => setSuggested(false), 1500)
     supabase.from('messages').insert({
       user_id: user.id, from_admin: false,
-      body: `New cardio move suggestion: ${name}`,
+      body: `New cardio move suggestion: ${n}`,
       is_suggestion: true, read: false,
     })
   }
@@ -167,20 +178,6 @@ export default function Cardio() {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      {suggestionSent && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-sm rounded-xl border border-amber-500/30 bg-card shadow-xl overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-3">
-            <Activity className="h-4 w-4 text-amber-400 shrink-0" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-foreground">Suggestion sent!</p>
-              <p className="text-xs text-muted-foreground truncate">&ldquo;{suggestionSent}&rdquo; added to your coach&rsquo;s review queue.</p>
-            </div>
-          </div>
-          <div className="h-1 bg-amber-500/20">
-            <div className="h-full bg-amber-500 origin-left animate-shrink" />
-          </div>
-        </div>
-      )}
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Cardio</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
@@ -195,9 +192,11 @@ export default function Cardio() {
         <div className="flex flex-col gap-1.5">
           <label className={labelCls}>Activity</label>
           <MovementSearch
+            key={movementKey}
             value={activity}
             onChange={setActivity}
             onSuggest={handleSuggestMove}
+            onQueryChange={setPendingQuery}
             movements={CARDIO_MOVEMENTS}
             placeholder="Search or type activity…"
           />
@@ -280,18 +279,30 @@ export default function Cardio() {
         )}
 
         <button
-          onClick={saveEffort}
-          disabled={saved || !canSave}
+          onClick={suggestionMode ? () => handleSuggestMove(pendingQuery) : saveEffort}
+          disabled={suggestionMode ? suggested : (saved || !canSave)}
           className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
-            saved
-              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-              : canSave
-                ? 'bg-amber-500 text-white hover:opacity-90'
-                : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
+            suggestionMode
+              ? suggested
+                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                : 'bg-amber-500 text-white hover:opacity-90'
+              : saved
+                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                : canSave
+                  ? 'bg-amber-500 text-white hover:opacity-90'
+                  : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
           }`}
         >
-          {saved ? '✓ Saved' : 'Save Effort'}
+          {suggestionMode
+            ? suggested ? '✓ Suggested' : 'Send Suggestion'
+            : saved ? '✓ Saved' : 'Save Effort'}
         </button>
+
+        {suggested && (
+          <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <Check className="h-3.5 w-3.5 shrink-0" /> Suggestion sent to your coach.
+          </div>
+        )}
 
         {saveError && (
           <p className="text-xs text-destructive leading-snug">{saveError}</p>

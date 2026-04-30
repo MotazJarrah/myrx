@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useRoute, useLocation } from 'wouter'
 import { ArrowLeft } from 'lucide-react'
+import SwipeDelete from '../components/SwipeDelete'
 import TickerNumber from '../components/TickerNumber'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { useAuth } from '../contexts/AuthContext'
@@ -81,7 +82,7 @@ const TEN_MIN_ISO = new Set([
 
 // ── Isometric detail view ─────────────────────────────────────────────────────
 
-function IsometricDetail({ exercise, efforts, navigate }) {
+function IsometricDetail({ exercise, efforts, navigate, onDelete }) {
   const milestones = TEN_MIN_ISO.has(exercise) ? ISO_MILESTONES_10MIN : ISO_MILESTONES_2MIN
 
   const durations = efforts
@@ -280,14 +281,16 @@ function IsometricDetail({ exercise, efforts, navigate }) {
           {[...efforts].reverse().map(e => {
             const secs = parseDurationSecs(e.value)
             return (
-              <div key={e.id} className="flex items-center justify-between px-5 py-3">
-                <p className="text-xs text-muted-foreground">{new Date(e.created_at).toLocaleDateString()}</p>
-                <div className="text-right">
-                  <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">
-                    {fmtDurationLong(secs)}
-                  </span>
+              <SwipeDelete key={e.id} onDelete={() => onDelete(e.id)}>
+                <div className="flex items-center justify-between px-5 py-3 bg-card">
+                  <p className="text-xs text-muted-foreground">{new Date(e.created_at).toLocaleDateString()}</p>
+                  <div className="text-right">
+                    <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">
+                      {fmtDurationLong(secs)}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              </SwipeDelete>
             )
           })}
         </div>
@@ -304,9 +307,14 @@ export default function StrengthDetail() {
   const { user, profile } = useAuth()
   const exercise = decodeURIComponent(params?.exercise || '')
 
-  const [efforts, setEfforts]     = useState([])
-  const [loading, setLoading]     = useState(true)
+  const [efforts, setEfforts]       = useState([])
+  const [loading, setLoading]       = useState(true)
   const [selectedRM, setSelectedRM] = useState(1)
+
+  async function handleDeleteEffort(id) {
+    setEfforts(prev => prev.filter(e => e.id !== id))
+    await supabase.from('efforts').delete().eq('id', id).eq('user_id', user.id)
+  }
 
   const isIsometric          = ISOMETRIC_EXERCISE_NAMES.has(exercise)
   const equipmentType        = isIsometric ? 'bodyweight' : getEquipmentType(exercise)
@@ -354,7 +362,7 @@ export default function StrengthDetail() {
 
   // ── Isometric branch ───────────────────────────────────────────────────────
   if (isIsometric) {
-    return <IsometricDetail exercise={exercise} efforts={efforts} navigate={navigate} />
+    return <IsometricDetail exercise={exercise} efforts={efforts} navigate={navigate} onDelete={handleDeleteEffort} />
   }
 
   // ── Rep-based derivations ─────────────────────────────────────────────────
@@ -766,25 +774,27 @@ export default function StrengthDetail() {
             const parsed = parseOneRM(e.value)
             const reps   = parseRepsFromLabel(e.label)
             return (
-              <div key={e.id} className="flex items-center justify-between px-5 py-3">
-                <div>
-                  <p className="text-sm font-medium">{e.label.split(' · ').slice(1).join(' · ')}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{new Date(e.created_at).toLocaleDateString()}</p>
+              <SwipeDelete key={e.id} onDelete={() => handleDeleteEffort(e.id)}>
+                <div className="flex items-center justify-between px-5 py-3 bg-card">
+                  <div>
+                    <p className="text-sm font-medium">{e.label.split(' · ').slice(1).join(' · ')}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{new Date(e.created_at).toLocaleDateString()}</p>
+                  </div>
+                  {isBodyweightExercise ? (
+                    <div className="text-right">
+                      <p className="text-[11px] text-muted-foreground">max attempts</p>
+                      <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">{reps}</span>
+                    </div>
+                  ) : parsed ? (
+                    <div className="text-right">
+                      <p className="text-[11px] text-muted-foreground">Est. 1RM</p>
+                      <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">
+                        {parsed.oneRM} {parsed.unit}
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
-                {isBodyweightExercise ? (
-                  <div className="text-right">
-                    <p className="text-[11px] text-muted-foreground">max attempts</p>
-                    <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">{reps}</span>
-                  </div>
-                ) : parsed ? (
-                  <div className="text-right">
-                    <p className="text-[11px] text-muted-foreground">Est. 1RM</p>
-                    <span className="font-mono text-sm tabular-nums text-blue-400 font-semibold">
-                      {parsed.oneRM} {parsed.unit}
-                    </span>
-                  </div>
-                ) : null}
-              </div>
+              </SwipeDelete>
             )
           })}
         </div>

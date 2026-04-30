@@ -15,7 +15,7 @@ const inputCls =
  *   movements    string[] – master list to filter
  *   placeholder  string   – input placeholder text
  */
-export default function MovementSearch({ value, onChange, onSuggest, movements = [], placeholder = 'Search movement…' }) {
+export default function MovementSearch({ value, onChange, onSuggest, onQueryChange, movements = [], placeholder = 'Search movement…' }) {
   const [query, setQuery]           = useState('')
   const [open, setOpen]             = useState(false)
   const [focused, setFocused]       = useState(false)
@@ -127,6 +127,7 @@ export default function MovementSearch({ value, onChange, onSuggest, movements =
           onBlur={() => setFocused(false)}
           onChange={e => {
             setQuery(e.target.value)
+            onQueryChange?.(e.target.value)
             setOpen(true)
           }}
           onKeyDown={handleKeyDown}
