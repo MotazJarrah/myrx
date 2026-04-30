@@ -64,18 +64,19 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
     if (item) item.scrollIntoView({ block: 'nearest' })
   }, [highlighted])
 
+  // commitQuery is ONLY for committing a known/custom value — never calls onSuggest.
+  // Suggestions are triggered exclusively through handleKeyDown so there is one code path.
   function commitQuery() {
     const trimmed = query.trim()
     if (trimmed && trimmed !== value) {
       const exact = movements.find(m => m.toLowerCase() === trimmed.toLowerCase())
       if (exact) {
         onChange(exact)
-      } else if (onSuggest) {
-        onSuggest(trimmed)
-        onChange('')
-      } else {
+      } else if (!onSuggest) {
         onChange(trimmed)
       }
+      // When onSuggest is present and no exact match, clicking outside silently discards —
+      // the user must press Enter or click the page-level button to send a suggestion.
     }
     setQuery('')
     setOpen(false)
@@ -93,7 +94,13 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
       if (e.key === 'Enter') {
         if (isSuggesting) {
           e.preventDefault()
-          commitQuery()
+          // Call onSuggest directly — do NOT go through commitQuery so we avoid
+          // any risk of the outside-click handler also triggering onSuggest.
+          const trimmed = query.trim()
+          onSuggest(trimmed)
+          setQuery('')
+          onQueryChange?.('')
+          setOpen(false)
         } else {
           setOpen(true)
         }
@@ -112,6 +119,12 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
       e.preventDefault()
       if (filtered[highlighted]) {
         selectItem(filtered[highlighted])
+      } else if (isSuggesting) {
+        const trimmed = query.trim()
+        onSuggest(trimmed)
+        setQuery('')
+        onQueryChange?.('')
+        setOpen(false)
       } else {
         commitQuery()
       }
