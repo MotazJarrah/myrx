@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'wouter'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -59,6 +59,7 @@ export default function Cardio() {
   const [saved, setSaved]               = useState(false)
   const [suggestSent, setSuggestSent]   = useState(false)
   const [suggesting, setSuggesting]     = useState(false)
+  const suggestingRef = useRef(false)
   const [saveError, setSaveError]       = useState('')
   const [activities, setActivities]     = useState([])
   const [pendingQuery, setPendingQuery] = useState('')
@@ -81,15 +82,17 @@ export default function Cardio() {
     && !CARDIO_MOVEMENTS.some(m => m.toLowerCase() === pendingQuery.trim().toLowerCase())
 
   async function handleSuggestMove(name) {
-    if (!user || suggesting || suggestSent) return
+    if (!user || suggestingRef.current || suggestSent) return
     const n = (name || pendingQuery).trim()
     if (!n) return
+    suggestingRef.current = true
     setSuggesting(true)
     const { error } = await supabase.from('messages').insert({
       user_id: user.id, from_admin: false,
       body: `New cardio move suggestion: ${n}`,
       is_suggestion: true, read: false,
     })
+    suggestingRef.current = false
     setSuggesting(false)
     if (!error) {
       setSuggestSent(true)
