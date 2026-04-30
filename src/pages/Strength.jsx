@@ -49,6 +49,7 @@ const labelCls = 'text-sm text-muted-foreground'
 
 export default function Strength() {
   const { user, profile } = useAuth()
+  const isAdmin = !!profile?.is_superuser
   const [, navigate] = useLocation()
   const [exercise, setExercise] = useState('')
   const [weight, setWeight]     = useState('')
@@ -198,8 +199,8 @@ export default function Strength() {
             key={movementKey}
             value={exercise}
             onChange={setExercise}
-            onSuggest={handleSuggestMove}
-            onQueryChange={setPendingQuery}
+            onSuggest={isAdmin ? undefined : handleSuggestMove}
+            onQueryChange={isAdmin ? undefined : setPendingQuery}
             movements={STRENGTH_MOVEMENTS}
             placeholder="Search or type movement…"
           />

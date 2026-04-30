@@ -48,6 +48,7 @@ const labelCls = 'text-sm text-muted-foreground'
 
 export default function Cardio() {
   const { user, profile } = useAuth()
+  const isAdmin = !!profile?.is_superuser
   const [, navigate] = useLocation()
   const [activity, setActivity]   = useState('')
   const [distValue, setDistValue] = useState('')
@@ -201,8 +202,8 @@ export default function Cardio() {
             key={movementKey}
             value={activity}
             onChange={setActivity}
-            onSuggest={handleSuggestMove}
-            onQueryChange={setPendingQuery}
+            onSuggest={isAdmin ? undefined : handleSuggestMove}
+            onQueryChange={isAdmin ? undefined : setPendingQuery}
             movements={CARDIO_MOVEMENTS}
             placeholder="Search or type activity…"
           />

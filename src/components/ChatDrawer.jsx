@@ -75,7 +75,7 @@ export default function ChatDrawer({ isOpen, onClose }) {
         filter: `user_id=eq.${user.id}`,
       }, payload => {
         if (payload.new.is_suggestion) return
-        setMessages(prev => [...prev, payload.new])
+        setMessages(prev => prev.some(m => m.id === payload.new.id) ? prev : [...prev, payload.new])
         if (payload.new.from_admin) {
           supabase.from('messages').update({ read: true }).eq('id', payload.new.id)
         }
@@ -164,10 +164,16 @@ export default function ChatDrawer({ isOpen, onClose }) {
               {messages.map(msg => (
                 <div key={msg.id} className={`flex px-4 py-1.5 ${msg.from_admin ? 'justify-start' : 'justify-end'}`}>
                   {msg.from_admin ? (
-                    <div className="max-w-[80%] rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-sm bg-muted text-foreground">
-                      <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
-                      <p className="mt-1 text-[10px] text-muted-foreground">{formatTime(msg.created_at)}</p>
-                    </div>
+                    <SwipeDelete
+                      onDelete={() => handleDelete(msg.id)}
+                      className="max-w-[80%] rounded-2xl rounded-tl-sm"
+                      bg="bg-muted"
+                    >
+                      <div className="px-3.5 py-2.5 text-sm text-foreground">
+                        <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">{formatTime(msg.created_at)}</p>
+                      </div>
+                    </SwipeDelete>
                   ) : (
                     <SwipeDelete
                       onDelete={() => handleDelete(msg.id)}

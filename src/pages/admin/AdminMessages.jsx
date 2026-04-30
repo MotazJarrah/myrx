@@ -217,10 +217,16 @@ function MessagesTab({ users, messages, onMarkRead, onNewMessage, onDeleteMessag
                       </div>
                     </SwipeDelete>
                   ) : (
-                    <div className="max-w-[75%] rounded-2xl rounded-tl-sm px-3.5 py-2.5 text-sm bg-muted text-foreground">
-                      <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
-                      <p className="mt-1 text-[10px] text-muted-foreground">{formatFull(msg.created_at)}</p>
-                    </div>
+                    <SwipeDelete
+                      onDelete={() => onDeleteMessage(msg.id)}
+                      className="max-w-[75%] rounded-2xl rounded-tl-sm"
+                      bg="bg-muted"
+                    >
+                      <div className="px-3.5 py-2.5 text-sm text-foreground">
+                        <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">{formatFull(msg.created_at)}</p>
+                      </div>
+                    </SwipeDelete>
                   )}
                 </div>
               ))}
@@ -350,7 +356,7 @@ export default function AdminMessages() {
     const channel = supabase
       .channel('admin-messages-all')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-        setMessages(prev => [...prev, payload.new])
+        setMessages(prev => prev.some(m => m.id === payload.new.id) ? prev : [...prev, payload.new])
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, payload => {
         setMessages(prev => prev.map(m => m.id === payload.new.id ? payload.new : m))
