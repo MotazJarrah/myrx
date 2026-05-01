@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { X, Send, Lightbulb } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -51,7 +51,7 @@ export default function SuggestionDrawer({ isOpen, onClose }) {
         filter: `user_id=eq.${user.id}`,
       }, payload => {
         if (!payload.new.is_suggestion) return
-        setSuggestions(prev => [...prev, payload.new])
+        setSuggestions(prev => prev.some(s => s.id === payload.new.id) ? prev : [...prev, payload.new])
       })
       .on('postgres_changes', {
         event: 'DELETE',
@@ -81,7 +81,7 @@ export default function SuggestionDrawer({ isOpen, onClose }) {
       is_suggestion: true,
       read:          false,
     }).select().single()
-    if (!error && data) setSuggestions(prev => [...prev, data])
+    if (!error && data) setSuggestions(prev => prev.some(s => s.id === data.id) ? prev : [...prev, data])
     setBody('')
     setSending(false)
   }
@@ -97,6 +97,19 @@ export default function SuggestionDrawer({ isOpen, onClose }) {
       handleSend()
     }
   }
+
+  // Defensive render-time dedup — guarantees no duplicate suggestions display
+  // regardless of realtime races, double subscriptions, or replays.
+  const uniqueSuggestions = useMemo(() => {
+    const seen = new Set()
+    const result = []
+    for (const s of suggestions) {
+      if (seen.has(s.id)) continue
+      seen.add(s.id)
+      result.push(s)
+    }
+    return result
+  }, [suggestions])
 
   return (
     <>
@@ -128,7 +141,7 @@ export default function SuggestionDrawer({ isOpen, onClose }) {
 
         {/* List */}
         <div className="flex-1 overflow-y-auto min-h-0">
-          {suggestions.length === 0 ? (
+          {uniqueSuggestions.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-8 text-center px-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/10">
                 <Lightbulb className="h-5 w-5 text-amber-400" />
@@ -138,7 +151,7 @@ export default function SuggestionDrawer({ isOpen, onClose }) {
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {suggestions.map(s => (
+              {uniqueSuggestions.map(s => (
                 <SwipeDelete key={s.id} onDelete={() => handleDelete(s.id)}>
                   <div className="flex gap-2.5 px-4 py-3">
                     <div className="mt-0.5 shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500/15">
