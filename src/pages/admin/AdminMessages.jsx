@@ -90,10 +90,18 @@ function MessagesTab({ users, messages, onMarkRead, onNewMessage, onDeleteMessag
     if (unreadIds.length) onMarkRead(unreadIds)
   }, [selectedId])
 
-  const conversation = useMemo(() =>
-    messages.filter(m => m.user_id === selectedId && !m.is_suggestion),
-    [messages, selectedId]
-  )
+  // Defensive dedup by id — guarantees no duplicate bubbles even if state has dupes
+  const conversation = useMemo(() => {
+    const seen = new Set()
+    const result = []
+    for (const m of messages) {
+      if (m.user_id !== selectedId || m.is_suggestion) continue
+      if (seen.has(m.id)) continue
+      seen.add(m.id)
+      result.push(m)
+    }
+    return result
+  }, [messages, selectedId])
 
   async function handleSend() {
     const trimmed = body.trim()
@@ -284,12 +292,18 @@ function SuggestionsTab({ users, messages, onDelete }) {
     return m
   }, [users])
 
-  const suggestions = useMemo(() =>
-    messages
-      .filter(m => m.is_suggestion && !m.from_admin)
-      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)),
-    [messages]
-  )
+  // Defensive dedup by id — guarantees one entry per suggestion even with duplicate state
+  const suggestions = useMemo(() => {
+    const seen = new Set()
+    const result = []
+    for (const m of messages) {
+      if (!m.is_suggestion || m.from_admin) continue
+      if (seen.has(m.id)) continue
+      seen.add(m.id)
+      result.push(m)
+    }
+    return result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  }, [messages])
 
   if (suggestions.length === 0) {
     return (

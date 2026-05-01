@@ -1,5 +1,5 @@
-const CACHE = 'myrx-assets-v2'
-const SHELL_CACHE = 'myrx-shell-v2'
+const CACHE = 'myrx-assets-v3'
+const SHELL_CACHE = 'myrx-shell-v3'
 
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', e => {

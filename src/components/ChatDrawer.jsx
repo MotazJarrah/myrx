@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { X, Send, MessageCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -121,6 +121,19 @@ export default function ChatDrawer({ isOpen, onClose }) {
     }
   }
 
+  // Defensive render-time dedup: even if state somehow contains duplicates
+  // (Supabase replays, double subscription, race conditions), render unique only.
+  const uniqueMessages = useMemo(() => {
+    const seen = new Set()
+    const result = []
+    for (const m of messages) {
+      if (seen.has(m.id)) continue
+      seen.add(m.id)
+      result.push(m)
+    }
+    return result
+  }, [messages])
+
   return (
     <>
       {isOpen && (
@@ -151,7 +164,7 @@ export default function ChatDrawer({ isOpen, onClose }) {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto min-h-0">
-          {messages.length === 0 ? (
+          {uniqueMessages.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-8 text-center px-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
                 <MessageCircle className="h-5 w-5 text-muted-foreground" />
@@ -161,7 +174,7 @@ export default function ChatDrawer({ isOpen, onClose }) {
             </div>
           ) : (
             <div className="py-2">
-              {messages.map(msg => (
+              {uniqueMessages.map(msg => (
                 <div key={msg.id} className={`flex px-4 py-1.5 ${msg.from_admin ? 'justify-start' : 'justify-end'}`}>
                   {msg.from_admin ? (
                     <SwipeDelete
