@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Loader2, X, Check, Trash2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ function CalorieGraph({ days, logs, dailyTarget, onDotClick }) {
   if (points.length === 0) {
     return (
       <div className="h-[72px] flex items-center justify-center">
-        <p className="text-[11px] text-muted-foreground/40">Log a day to see your trend</p>
+        <p className="text-[11px] text-muted-foreground/40">Log food to see your intake trend</p>
       </div>
     )
   }
@@ -168,39 +168,45 @@ function CalorieGraph({ days, logs, dailyTarget, onDotClick }) {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
+// Props:
+//   dailyTarget  — coach-set kcal target (number | null)
+//   onDayClick   — (isoDateStr) => void — called when a tile or graph dot is clicked
+//   selectedIso  — which tile is highlighted (controlled from parent)
+//   refreshKey   — increment to force a data refresh
 
-export default function CalorieStrip({ dailyTarget }) {
+export default function CalorieStrip({ dailyTarget, onDayClick, selectedIso, refreshKey = 0 }) {
   const { user } = useAuth()
-  const [logs, setLogs]         = useState({})
-  const [loading, setLoading]   = useState(true)
-  const [activeIso, setActiveIso]   = useState(null)  // tile is selected AND editor is open
-  const [focusedIso, setFocusedIso] = useState(null)  // tile is highlighted by dot-click, editor NOT open
-  const [draftValue, setDraftValue] = useState('')
-  const [saving, setSaving]   = useState(false)
-  const stripRef = useRef(null)
-  const todayRef = useRef(null)
+  const [logs, setLogs]     = useState({})   // { [iso]: { calories } }
+  const [loading, setLoading] = useState(true)
+  const stripRef  = useRef(null)
+  const todayRef  = useRef(null)
 
   const days = useMemo(() => buildDayWindow(), [])
 
-  // ── Load 14-day window ───────────────────────────────────────────────────
+  // ── Load 14-day window sums from food_logs ───────────────────────────────
   useEffect(() => {
     if (!user) return
     const fromIso = days[0].iso
     const toIso   = days[days.length - 1].iso
+    setLoading(true)
     supabase
-      .from('calorie_logs')
-      .select('id, log_date, calories')
+      .from('food_logs')
+      .select('log_date, calories')
       .eq('user_id', user.id)
       .gte('log_date', fromIso)
       .lte('log_date', toIso)
       .then(({ data, error }) => {
-        if (error) console.error(error)
+        if (error) { setLoading(false); return }
+        // Sum calories per day
         const map = {}
-        ;(data || []).forEach(r => { map[r.log_date] = { id: r.id, calories: r.calories } })
+        ;(data || []).forEach(r => {
+          if (!map[r.log_date]) map[r.log_date] = { calories: 0 }
+          map[r.log_date].calories += r.calories
+        })
         setLogs(map)
         setLoading(false)
       })
-  }, [user, days])
+  }, [user, days, refreshKey])
 
   // ── Auto-scroll today into view ──────────────────────────────────────────
   useEffect(() => {
@@ -212,75 +218,6 @@ export default function CalorieStrip({ dailyTarget }) {
     }
   }, [loading])
 
-  function openEditor(iso) {
-    setFocusedIso(null)   // clear dot-highlight when editor opens
-    setActiveIso(iso)
-    setDraftValue(logs[iso] ? String(logs[iso].calories) : '')
-  }
-
-  function closeEditor() {
-    setActiveIso(null)
-    setFocusedIso(null)
-    setDraftValue('')
-  }
-
-  // Scroll the tile strip to a given iso date and highlight it — does NOT open editor
-  function scrollToDay(iso) {
-    const idx = days.findIndex(d => d.iso === iso)
-    if (idx === -1 || !stripRef.current) return
-    const strip = stripRef.current
-    const tileW = 64  // 58px tile + 6px gap
-    const left  = idx * tileW - strip.clientWidth / 2 + 29
-    strip.scrollTo({ left, behavior: 'smooth' })
-    setActiveIso(null)
-    setFocusedIso(iso)   // highlight the tile without opening editor
-  }
-
-  // ── Save (upsert) ────────────────────────────────────────────────────────
-  async function handleSave() {
-    if (!user || !activeIso) return
-    const num = parseInt(draftValue, 10)
-    if (isNaN(num) || num <= 0 || num >= 15000) return
-
-    setSaving(true)
-    const { data, error } = await supabase
-      .from('calorie_logs')
-      .upsert(
-        { user_id: user.id, log_date: activeIso, calories: num, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id,log_date' },
-      )
-      .select('id, log_date, calories')
-      .maybeSingle()
-
-    if (error) { console.error(error); setSaving(false); return }
-
-    const id   = data?.id ?? logs[activeIso]?.id ?? crypto.randomUUID()
-    const date = data?.log_date ?? activeIso
-    const cal  = data?.calories ?? num
-    setLogs(prev => ({ ...prev, [date]: { id, calories: cal } }))
-    setSaving(false)
-    closeEditor()
-  }
-
-  // ── Delete ───────────────────────────────────────────────────────────────
-  async function handleDelete() {
-    if (!user || !activeIso || !logs[activeIso]) return
-    setSaving(true)
-    const { error } = await supabase
-      .from('calorie_logs')
-      .delete()
-      .eq('id', logs[activeIso].id)
-    if (error) { console.error(error); setSaving(false); return }
-    setLogs(prev => {
-      const next = { ...prev }
-      delete next[activeIso]
-      return next
-    })
-    setSaving(false)
-    closeEditor()
-  }
-
-  const activeDay  = activeIso ? days.find(d => d.iso === activeIso) : null
   const targetText = dailyTarget ? `${dailyTarget} kcal` : null
 
   return (
@@ -299,11 +236,9 @@ export default function CalorieStrip({ dailyTarget }) {
         style={{ scrollbarWidth: 'none' }}
       >
         {days.map(day => {
-          const log        = logs[day.iso]
-          const status     = statusFor(log?.calories, dailyTarget)
-          const isActive   = activeIso === day.iso    // editor open
-          const isFocused  = focusedIso === day.iso   // dot-click highlight only
-          const isHighlit  = isActive || isFocused
+          const log       = logs[day.iso]
+          const status    = statusFor(log?.calories, dailyTarget)
+          const isSelected = selectedIso === day.iso
 
           return (
             <button
@@ -311,9 +246,9 @@ export default function CalorieStrip({ dailyTarget }) {
               ref={day.isToday ? todayRef : null}
               type="button"
               data-iso={day.iso}
-              onClick={() => isActive ? closeEditor() : openEditor(day.iso)}
+              onClick={() => onDayClick?.(day.iso)}
               className={`relative shrink-0 snap-center flex flex-col items-center justify-between rounded-xl border transition-all px-2 py-2 w-[58px] h-[72px]
-                ${isHighlit
+                ${isSelected
                   ? 'border-red-500/60 bg-red-500/10 ring-1 ring-red-500/30'
                   : day.isToday
                     ? 'border-red-500/40 bg-red-500/5'
@@ -329,7 +264,7 @@ export default function CalorieStrip({ dailyTarget }) {
               </div>
               <div className="text-[10px] tabular-nums leading-none">
                 {log
-                  ? <span className="font-semibold">{log.calories}</span>
+                  ? <span className="font-semibold">{Math.round(log.calories)}</span>
                   : <span className="text-muted-foreground/60">—</span>}
               </div>
               <span className={`absolute bottom-1 left-1/2 -translate-x-1/2 h-1 w-5 rounded-full ${STATUS_DOT[status]}`} />
@@ -337,81 +272,6 @@ export default function CalorieStrip({ dailyTarget }) {
           )
         })}
       </div>
-
-      {/* Inline editor — between tiles and graph */}
-      {activeDay && (
-        <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              Logging for{' '}
-              <span className="font-medium text-foreground">
-                {activeDay.day} {activeDay.date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-              </span>
-              {activeDay.isToday && <span className="ml-1.5 text-red-400">· today</span>}
-            </p>
-            <button
-              type="button"
-              onClick={closeEditor}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Close"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <div className="flex-1 flex items-center gap-2">
-              <input
-                type="number"
-                inputMode="numeric"
-                value={draftValue}
-                onChange={e => setDraftValue(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleSave() }}
-                autoFocus
-                min="1"
-                max="14999"
-                className="w-full rounded-md border border-border bg-input/30 px-3 py-2 text-sm text-foreground outline-none focus:border-red-500/40 focus:ring-1 focus:ring-red-500/30 transition-colors"
-              />
-              <span className="text-xs text-muted-foreground">kcal</span>
-            </div>
-
-            {logs[activeIso] && (
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={saving}
-                className="flex h-9 w-9 items-center justify-center rounded-md border border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-                aria-label="Delete log"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving || !draftValue || isNaN(parseInt(draftValue, 10))}
-              className="flex h-9 items-center gap-1.5 rounded-md bg-red-500 px-3 text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-              Save
-            </button>
-          </div>
-
-          {dailyTarget && draftValue && !isNaN(parseInt(draftValue, 10)) && (() => {
-            const v    = parseInt(draftValue, 10)
-            const diff = v - dailyTarget
-            return (
-              <p className="text-[11px] text-muted-foreground">
-                {diff === 0
-                  ? 'Right on your daily budget.'
-                  : diff > 0
-                    ? `${diff} kcal over your daily budget.`
-                    : `${Math.abs(diff)} kcal left of your daily budget.`}
-              </p>
-            )
-          })()}
-        </div>
-      )}
 
       {/* Trend graph */}
       {loading ? (
@@ -424,7 +284,7 @@ export default function CalorieStrip({ dailyTarget }) {
             days={days}
             logs={logs}
             dailyTarget={dailyTarget}
-            onDotClick={scrollToDay}
+            onDotClick={iso => onDayClick?.(iso)}
           />
         </div>
       )}
