@@ -107,12 +107,17 @@ export function AuthProvider({ children }) {
   const uploadAvatar = useCallback(async (file) => {
     if (!user?.id) throw new Error('No authenticated user')
     const path = `${user.id}/avatar`
+    // Android pickers sometimes return file.type = '' — fall back to jpeg so
+    // Supabase Storage doesn't store the object with an empty content-type.
+    const contentType = file.type || 'image/jpeg'
     const { error: uploadError } = await supabase.storage
       .from('avatars')
-      .upload(path, file, { upsert: true, contentType: file.type })
+      .upload(path, file, { upsert: true, contentType })
     if (uploadError) throw uploadError
     const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-    return data.publicUrl
+    // Append a timestamp so the browser fetches the new image instead of
+    // serving the old one from cache (the storage path never changes).
+    return `${data.publicUrl}?t=${Date.now()}`
   }, [user])
 
   return (

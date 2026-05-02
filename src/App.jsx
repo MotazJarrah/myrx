@@ -34,6 +34,8 @@ const AdminEffortDetail   = lazy(() => import('./pages/admin/AdminEffortDetail')
 const AdminCardioDetail   = lazy(() => import('./pages/admin/AdminCardioDetail'))
 const AdminMobilityDetail = lazy(() => import('./pages/admin/AdminMobilityDetail'))
 const AdminMessages       = lazy(() => import('./pages/admin/AdminMessages'))
+const AdminMovements      = lazy(() => import('./pages/admin/AdminMovements'))
+const AdminFoodLibrary    = lazy(() => import('./pages/admin/AdminFoodLibrary'))
 
 // ── Shared loading fallback ───────────────────────────────────────────────────
 
@@ -108,7 +110,9 @@ function ProtectedLayout() {
               <Route path="/admin/nutrition" component={AdminNutrition} />
               <Route path="/admin/feed"      component={AdminFeed} />
               <Route path="/admin/messages"  component={AdminMessages} />
-              <Route path="/admin/profile"   component={AdminProfile} />
+              <Route path="/admin/movements"     component={AdminMovements} />
+              <Route path="/admin/food-library" component={AdminFoodLibrary} />
+              <Route path="/admin/profile"      component={AdminProfile} />
               <Route path="/admin/user/:userId/effort/mobility/:movement" component={AdminMobilityDetail} />
               <Route path="/admin/user/:userId/effort/cardio/:slug"       component={AdminCardioDetail} />
               <Route path="/admin/user/:userId/effort/:kind/:slug"        component={AdminEffortDetail} />

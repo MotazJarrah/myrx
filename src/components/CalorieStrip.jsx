@@ -223,7 +223,10 @@ export default function CalorieStrip({ dailyTarget, onDayClick, selectedIso, ref
   return (
     <div className="animate-rise rounded-2xl border border-border bg-card p-4 space-y-3">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold">Daily intake log</h2>
+        <div>
+          <h2 className="text-sm font-semibold">Daily intake log</h2>
+          <p className="text-[10px] text-muted-foreground/60 mt-0.5">Tap a day to log food</p>
+        </div>
         {targetText && (
           <span className="text-[11px] text-muted-foreground">Target {targetText}</span>
         )}

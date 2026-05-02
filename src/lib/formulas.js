@@ -1,4 +1,4 @@
-import { BODYWEIGHT_EXERCISE_NAMES } from './movements.js'
+import { BODYWEIGHT_EXERCISE_NAMES, ASSISTED_MACHINE_NAMES } from './movements.js'
 
 // 1RM estimation formulas (averaged)
 export function estimate1RM(weight, reps) {
@@ -69,6 +69,7 @@ export function estimateCalories(met, weightKg, durationMins) {
 const DUMBBELL_KEYWORDS = [
   'dumbbell', ' db ', 'dumbell',
   'kettlebell', 'goblet squat', 'concentration curl', 'renegade row',
+  'single arm', 'one arm',
 ]
 
 /**
@@ -77,6 +78,7 @@ const DUMBBELL_KEYWORDS = [
  * then falls back to keyword heuristics.
  */
 export function getEquipmentType(name = '') {
+  if (ASSISTED_MACHINE_NAMES.has(name)) return 'assisted'
   if (BODYWEIGHT_EXERCISE_NAMES.has(name)) return 'bodyweight'
   const lower = ` ${name.toLowerCase()} `
   // Bodyweight keyword fallback for custom / unlisted names

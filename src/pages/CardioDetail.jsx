@@ -316,7 +316,7 @@ function PaceDetail({ activity, efforts, navigate, distUnit = 'km', onDelete }) 
       )}
 
       {/* History */}
-      <div className="animate-rise rounded-xl border border-border bg-card">
+      <div className="animate-rise rounded-xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3.5">
           <h2 className="text-sm font-semibold">All entries</h2>
         </div>
@@ -454,7 +454,7 @@ function DurationDetail({ activity, efforts, navigate, onDelete }) {
       )}
 
       {/* History */}
-      <div className="animate-rise rounded-xl border border-border bg-card">
+      <div className="animate-rise rounded-xl border border-border bg-card overflow-hidden">
         <div className="border-b border-border px-5 py-3.5">
           <h2 className="text-sm font-semibold">All entries</h2>
         </div>

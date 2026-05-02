@@ -181,12 +181,15 @@ function TodayIntakeCard({ entries, dailyTarget, macroTargets, onLogFood }) {
           {macroTargets && (
             <div className="grid grid-cols-3 gap-2">
               {[
-                { label: 'Protein', val: totals.protein,  target: macroTargets.protein, color: 'text-blue-400',    bg: 'border-blue-500/20 bg-blue-500/5'    },
-                { label: 'Fat',     val: totals.fat,       target: macroTargets.fat,     color: 'text-amber-400',   bg: 'border-amber-500/20 bg-amber-500/5'   },
-                { label: 'Carbs',   val: totals.carbs,     target: macroTargets.carbs,   color: 'text-emerald-400', bg: 'border-emerald-500/20 bg-emerald-500/5' },
-              ].map(({ label, val, target: t, color, bg }) => {
-                const pct   = t > 0 ? Math.min(100, Math.round((val / t) * 100)) : null
+                { label: 'Protein', val: totals.protein,  target: macroTargets.protein, color: 'text-blue-400',    bar: 'bg-blue-400',    bg: 'border-blue-500/20 bg-blue-500/5'    },
+                { label: 'Fat',     val: totals.fat,       target: macroTargets.fat,     color: 'text-amber-400',   bar: 'bg-amber-400',   bg: 'border-amber-500/20 bg-amber-500/5'   },
+                { label: 'Carbs',   val: totals.carbs,     target: macroTargets.carbs,   color: 'text-emerald-400', bar: 'bg-emerald-400', bg: 'border-emerald-500/20 bg-emerald-500/5' },
+              ].map(({ label, val, target: t, color, bar, bg }) => {
+                const pct   = t > 0 ? Math.round((val / t) * 100) : null
                 const isOvr = t > 0 && val > t
+                // Bar fill: capped at 100% in normal colour; overflow segment in red
+                const fillPct = t > 0 ? Math.min(100, (val / t) * 100) : 0
+                const ovrPct  = isOvr ? Math.min(100, ((val - t) / t) * 100) : 0
                 return (
                   <div key={label} className={`rounded-xl border p-3 ${bg}`}>
                     <p className={`text-base font-bold tabular-nums leading-none ${color}`}>
@@ -194,9 +197,20 @@ function TodayIntakeCard({ entries, dailyTarget, macroTargets, onLogFood }) {
                     </p>
                     <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
                     {t > 0 && (
-                      <p className={`text-[10px] tabular-nums mt-1 ${isOvr ? 'text-red-400/70' : 'text-muted-foreground/60'}`}>
-                        /{Math.round(t)}g · {pct}%
-                      </p>
+                      <>
+                        {/* Progress bar */}
+                        <div className="relative h-1 rounded-full bg-muted/40 mt-1.5 overflow-hidden">
+                          <div className={`absolute top-0 left-0 h-full rounded-full transition-all ${bar}`}
+                               style={{ width: `${fillPct}%` }} />
+                          {isOvr && (
+                            <div className="absolute top-0 h-full rounded-full bg-red-400 transition-all"
+                                 style={{ left: `${fillPct}%`, width: `${ovrPct}%` }} />
+                          )}
+                        </div>
+                        <p className={`text-[10px] tabular-nums mt-1 ${isOvr ? 'text-red-400' : 'text-muted-foreground/60'}`}>
+                          /{Math.round(t)}g · {pct}%
+                        </p>
+                      </>
                     )}
                   </div>
                 )
@@ -315,8 +329,12 @@ export default function Calories() {
 
   const result = useMemo(() => {
     if (!plan || !profile) return null
-    return calcFullPlan(profile, plan)
-  }, [plan, profile])
+    // Pass latest logged bodyweight so the timeline reflects real progress
+    const currentKgOverride = latestBW
+      ? (latestBW.unit === 'lb' ? latestBW.weight * 0.453592 : Number(latestBW.weight))
+      : null
+    return calcFullPlan(profile, plan, currentKgOverride)
+  }, [plan, profile, latestBW])
 
   const perMeal = useMemo(() => {
     if (!result || meals == null) return null
@@ -385,14 +403,6 @@ export default function Calories() {
         onDayClick={setDrawerDay}
         selectedIso={drawerDay}
         refreshKey={stripRefreshKey}
-      />
-
-      {/* Today's intake card */}
-      <TodayIntakeCard
-        entries={todayEntries}
-        dailyTarget={result?.dailyTarget}
-        macroTargets={macroTargets}
-        onLogFood={() => setDrawerDay(TODAY)}
       />
 
       {/* Daily target hero */}
@@ -638,6 +648,14 @@ export default function Calories() {
         ) : null}
       </div>
 
+      {/* Today's intake card */}
+      <TodayIntakeCard
+        entries={todayEntries}
+        dailyTarget={result?.dailyTarget}
+        macroTargets={macroTargets}
+        onLogFood={() => setDrawerDay(TODAY)}
+      />
+
       {/* Timeline */}
       {result.timeline && (
         <div className="animate-rise rounded-2xl border border-border bg-card p-5" style={{ animationDelay: '120ms' }}>
@@ -717,7 +735,7 @@ export default function Calories() {
         </div>
       )}
 
-      {/* Current weight target */}
+      {/* Current weight goal */}
       {result.goalWeightKg && (() => {
         const pUnit = profile?.weight_unit || 'lb'
         const startKg = plan.starting_weight_kg != null ? Number(plan.starting_weight_kg) : null
@@ -729,7 +747,7 @@ export default function Calories() {
         if (!startKg || !goalKg || Math.abs(startKg - goalKg) < 0.1) {
           return (
             <div className="animate-rise rounded-2xl border border-border bg-card p-5" style={{ animationDelay: '160ms' }}>
-              <h2 className="text-sm font-semibold mb-2">Current weight target</h2>
+              <h2 className="text-sm font-semibold mb-2">Current weight goal</h2>
               <p className="text-sm text-muted-foreground">
                 Your coach hasn't locked in a phase starting weight yet. Once they do, your progress toward{' '}
                 <span className="font-medium text-foreground">{fromKg(goalKg, pUnit).toFixed(1)} {pUnit}</span> will appear here.
@@ -780,7 +798,7 @@ export default function Calories() {
 
         return (
           <div className="animate-rise rounded-2xl border border-border bg-card p-5 space-y-4" style={{ animationDelay: '160ms' }}>
-            <h2 className="text-sm font-semibold">Current weight target</h2>
+            <h2 className="text-sm font-semibold">Current weight goal</h2>
 
             <div className="flex items-end justify-between">
               <div>
@@ -837,6 +855,10 @@ export default function Calories() {
           day={drawerDay}
           onClose={() => setDrawerDay(null)}
           onEntriesChange={handleDrawerEntriesChange}
+          mealSlotsDefault={profile?.meal_slots_default ?? null}
+          onSaveSlotsDefault={async (slots) => {
+            await supabase.from('profiles').update({ meal_slots_default: slots }).eq('id', user.id)
+          }}
         />
       )}
     </div>

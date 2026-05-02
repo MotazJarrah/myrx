@@ -7,7 +7,8 @@ import { useState, useEffect } from 'react'
 import { useParams, useLocation } from 'wouter'
 import { supabase } from '../../lib/supabase'
 import { projectAllRMs } from '../../lib/formulas'
-import { ArrowLeft, Trash2, Loader2 } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
+import SwipeDelete from '../../components/SwipeDelete'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -47,22 +48,6 @@ function parseDurationSecs(value) {
   return null
 }
 
-// ── Confirm delete ────────────────────────────────────────────────────────────
-
-function ConfirmDelete({ onConfirm, onCancel, busy }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[11px] text-destructive">Delete?</span>
-      <button onClick={onConfirm} disabled={busy}
-        className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-destructive border border-destructive/30 hover:bg-destructive/10 disabled:opacity-50">
-        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes'}
-      </button>
-      <button onClick={onCancel} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground border border-border hover:bg-accent">
-        No
-      </button>
-    </div>
-  )
-}
 
 // ── Rep-max grid (mirrors StrengthDetail) ─────────────────────────────────────
 
@@ -112,8 +97,6 @@ export default function AdminEffortDetail() {
 
   const [entries,  setEntries]  = useState([])
   const [loading,  setLoading]  = useState(true)
-  const [deleting, setDeleting] = useState(null)
-  const [confirm,  setConfirm]  = useState(null)
 
   useEffect(() => {
     async function load() {
@@ -132,11 +115,9 @@ export default function AdminEffortDetail() {
   }, [userId, kind, exercise])
 
   async function deleteEntry(id) {
-    setDeleting(id)
     const { error } = await supabase.from('efforts').delete().eq('id', id)
     if (!error) setEntries(prev => prev.filter(e => e.id !== id))
-    setDeleting(null)
-    setConfirm(null)
+    else throw error
   }
 
   // ── Compute best 1RM for strength ────────────────────────────────────────
@@ -282,34 +263,24 @@ export default function AdminEffortDetail() {
               // Strip exercise name from display label
               const detail = e.label.split(' · ').slice(1).join(' · ')
               return (
-                <div key={e.id} className="flex items-center gap-3 px-4 py-2.5">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{detail || e.label}</p>
-                    <p className="text-[11px] text-muted-foreground">{fmtDate(e.created_at)}</p>
+                <SwipeDelete key={e.id} onDelete={() => deleteEntry(e.id)}>
+                  <div className="flex items-center gap-3 px-4 py-2.5">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{detail || e.label}</p>
+                      <p className="text-[11px] text-muted-foreground">{fmtDate(e.created_at)}</p>
+                    </div>
+                    {isStrength && parseOneRM(e.value) && (
+                      <span className="text-xs font-semibold text-blue-400 tabular-nums shrink-0">
+                        {parseOneRM(e.value).oneRM} {parseOneRM(e.value).unit} 1RM
+                      </span>
+                    )}
+                    {isCardio && e.value && (
+                      <span className="text-xs font-semibold text-amber-400 tabular-nums shrink-0">
+                        {e.value}
+                      </span>
+                    )}
                   </div>
-                  {isStrength && parseOneRM(e.value) && (
-                    <span className="text-xs font-semibold text-blue-400 tabular-nums shrink-0">
-                      {parseOneRM(e.value).oneRM} {parseOneRM(e.value).unit} 1RM
-                    </span>
-                  )}
-                  {isCardio && e.value && (
-                    <span className="text-xs font-semibold text-amber-400 tabular-nums shrink-0">
-                      {e.value}
-                    </span>
-                  )}
-                  {confirm === e.id ? (
-                    <ConfirmDelete
-                      onConfirm={() => deleteEntry(e.id)}
-                      onCancel={() => setConfirm(null)}
-                      busy={deleting === e.id}
-                    />
-                  ) : (
-                    <button onClick={() => setConfirm(e.id)}
-                      className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
+                </SwipeDelete>
               )
             })}
           </div>

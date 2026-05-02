@@ -178,6 +178,7 @@ export default function ChatDrawer({ isOpen, onClose }) {
                 <div key={msg.id} className={`flex px-4 py-1.5 ${msg.from_admin ? 'justify-start' : 'justify-end'}`}>
                   {msg.from_admin ? (
                     <SwipeDelete
+                      swipe
                       onDelete={() => handleDelete(msg.id)}
                       className="max-w-[80%] rounded-2xl rounded-tl-sm"
                       bg="bg-muted"
@@ -189,6 +190,7 @@ export default function ChatDrawer({ isOpen, onClose }) {
                     </SwipeDelete>
                   ) : (
                     <SwipeDelete
+                      swipe
                       onDelete={() => handleDelete(msg.id)}
                       className="max-w-[80%] rounded-2xl rounded-tr-sm"
                       bg="bg-primary"

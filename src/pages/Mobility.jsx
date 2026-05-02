@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import ROMVisualizer, { MOVEMENT_CONFIG } from '../components/ROMVisualizer'
-import { ChevronDown, ChevronUp, Trash2, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
+import SwipeDelete from '../components/SwipeDelete'
 
 // ── Movement list (ordered for display) ──────────────────────────────────────
 
@@ -150,8 +151,6 @@ function MovementCard({ movementKey, records, onSave, onDelete, forceOpen }) {
   const [degrees, setDegrees]       = useState(0)
   const [saving, setSaving]         = useState(false)
   const [justSaved, setJustSaved]   = useState(false)
-  const [confirmId, setConfirmId]   = useState(null)
-  const [deleting, setDeleting]     = useState(false)
 
   // Sort records by date descending — always explicit, never rely on fetch/insert order
   const sortedRecords = [...records].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
@@ -188,13 +187,6 @@ function MovementCard({ movementKey, records, onSave, onDelete, forceOpen }) {
       setTimeout(() => setJustSaved(false), 2500)
     }
   }, [degrees, movementKey, onSave, saving])
-
-  async function handleDeleteRecord(id) {
-    setDeleting(true)
-    const ok = await onDelete(movementKey, id)
-    setDeleting(false)
-    if (ok) setConfirmId(null)
-  }
 
   // Last 5 records (already sorted above)
   const recent = sortedRecords.slice(0, 5)
@@ -255,39 +247,20 @@ function MovementCard({ movementKey, records, onSave, onDelete, forceOpen }) {
                 {recent.map((r, i) => {
                   const isLatest = i === 0
                   return (
-                    <div key={r.id ?? i} className="flex items-center justify-between px-3 py-2 gap-2">
-                      <span className="text-xs text-muted-foreground shrink-0">{dateLabel(r.created_at)}</span>
-                      <div className="flex items-center gap-2 ml-auto">
-                        <span className={`font-mono text-sm font-semibold tabular-nums ${isLatest ? 'text-fuchsia-400' : 'text-foreground'}`}>
+                    <SwipeDelete
+                      key={r.id ?? i}
+                      onDelete={async () => {
+                        const ok = await onDelete(movementKey, r.id)
+                        if (!ok) throw new Error('Delete failed')
+                      }}
+                    >
+                      <div className="flex items-center justify-between px-3 py-2 gap-2">
+                        <span className="text-xs text-muted-foreground shrink-0">{dateLabel(r.created_at)}</span>
+                        <span className={`font-mono text-sm font-semibold tabular-nums ml-auto ${isLatest ? 'text-fuchsia-400' : 'text-foreground'}`}>
                           {r.degrees}°{isLatest && <span className="ml-1 text-[10px] text-fuchsia-400/70">latest</span>}
                         </span>
-                        {confirmId === r.id ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] text-destructive">Delete?</span>
-                            <button
-                              onClick={() => handleDeleteRecord(r.id)}
-                              disabled={deleting}
-                              className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-destructive border border-destructive/30 hover:bg-destructive/10 transition-colors disabled:opacity-50"
-                            >
-                              {deleting ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes'}
-                            </button>
-                            <button
-                              onClick={() => setConfirmId(null)}
-                              className="rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground border border-border hover:bg-accent transition-colors"
-                            >
-                              No
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setConfirmId(r.id)}
-                            className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
                       </div>
-                    </div>
+                    </SwipeDelete>
                   )
                 })}
               </div>

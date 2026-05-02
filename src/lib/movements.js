@@ -677,6 +677,74 @@ export function getCardioDistances(activityName, distUnit = 'km') {
   ]
 }
 
+// ── Assisted machines ─────────────────────────────────────────────────────────
+// These machines use a weight stack to REDUCE effective bodyweight (lower = harder).
+
+export const ASSISTED_MACHINE_NAMES = new Set([
+  'Assisted Dip Machine',
+  'Assisted Pull Up Machine',
+])
+
+// ── Carry / event exercises ────────────────────────────────────────────────────
+// Logged as Weight + Distance (meters), not Weight + Reps.
+
+export const CARRY_EXERCISES = new Set([
+  'Arm Over Arm Rope Pull',
+  "Farmer's Walk",
+  'Husafell Stone Carry',
+  'Keg Carry',
+  'Kettlebell Farmer Carry',
+  'Kettlebell Overhead Carry',
+  'Shield Carry',
+  'Single Arm Farmer Carry',
+  'Single Arm Overhead Carry',
+  'Sled Drag',
+  'Sled Push (Prowler)',
+  'Suitcase Carry',
+  'Vehicle Pull',
+  'Yoke Carry',
+])
+
+// ── Band-assisted eligible exercises ──────────────────────────────────────────
+// Bodyweight pulls/dips where a looped resistance band reduces effective weight.
+
+export const BAND_ASSIST_ELIGIBLE = new Set([
+  'Pull Up',
+  'Wide Grip Pull Up',
+  'Neutral Grip Pull Up',
+  'Chin Up',
+  'Mixed Grip Chin Up',
+  'Mixed Grip Pull Up',
+  'Chest to Bar Pull Up',
+  'L Sit Pull Up',
+  'Dead Hang Pull Up',
+  'Commando Pull Up',
+  'Behind the Neck Pull Up',
+  'Parallel Bar Dip',
+  'Ring Dip',
+])
+
+// ── Knee-assisted eligible exercises ──────────────────────────────────────────
+// Push-up variants where performing from the knees is a recognised regression.
+
+export const KNEE_ASSIST_ELIGIBLE = new Set([
+  'Push Up',
+  'Close Grip Push Up',
+  'Wide Grip Push Up',
+  'Diamond Push Up',
+  'Decline Push Up',
+  'Hand Release Push Up',
+  'T Push Up',
+  'Push Up to T',
+  'Archer Push Up',
+  'Hindu Push Up',
+  'Knuckle Push Up',
+  'Spiderman Push Up',
+  'Staggered Hands Push Up',
+  'Triceps Push Up',
+  'Uneven Push Up',
+])
+
 // ── Mobility movements ────────────────────────────────────────────────────────
 
 export const MOBILITY_MOVEMENTS = [

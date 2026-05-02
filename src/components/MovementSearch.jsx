@@ -24,22 +24,43 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
   const inputRef     = useRef(null)
   const listRef      = useRef(null)
 
+  // Smart multi-token match: every whitespace-separated token must appear somewhere in the name
+  function tokenMatch(name, tokens) {
+    const lower = name.toLowerCase()
+    return tokens.every(t => lower.includes(t))
+  }
+
+  // Priority score based on where the FIRST token lands in the name:
+  //   0 — name starts with the first token         ("push" → "Push Up")
+  //   1 — a later word starts with the first token ("push" → "Archer Push Up")
+  //   2 — first token is a mid-word substring only
+  function scoreMatch(name, tokens) {
+    const lower = name.toLowerCase()
+    const first = tokens[0]
+    if (lower.startsWith(first)) return 0
+    if (lower.split(/\s+/).some(w => w.startsWith(first))) return 1
+    return 2
+  }
+
   // True when user has typed something not in the movement list — triggers red border + suggestion mode
   const isSuggesting = !!onSuggest && query.trim().length > 0 && (() => {
-    const q = query.trim().toLowerCase()
-    return !movements.some(m => m.toLowerCase().includes(q))
+    const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    return !movements.some(m => tokenMatch(m, tokens))
   })()
 
   // When the external value changes, clear any in-progress query
   useEffect(() => { setQuery('') }, [value])
 
-  // Filter and sort: prefix matches first, then contains — both groups alphabetical
+  // Filter: all tokens must match. Sort by priority score, then alphabetically within each group.
   const filtered = (() => {
     const q = query.trim().toLowerCase()
     if (!q) return movements
-    const starts   = movements.filter(m => m.toLowerCase().startsWith(q))
-    const contains = movements.filter(m => !m.toLowerCase().startsWith(q) && m.toLowerCase().includes(q))
-    return [...starts, ...contains]
+    const tokens  = q.split(/\s+/).filter(Boolean)
+    const matches = movements.filter(m => tokenMatch(m, tokens))
+    return [...matches].sort((a, b) => {
+      const diff = scoreMatch(a, tokens) - scoreMatch(b, tokens)
+      return diff !== 0 ? diff : a.localeCompare(b)
+    })
   })()
 
   // Reset highlighted index whenever the filtered list changes
@@ -204,14 +225,6 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
         </ul>
       )}
 
-      {open && query.trim() && filtered.length === 0 && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border border-amber-500/30 bg-card px-3 py-2 text-sm text-muted-foreground shadow-lg">
-          {onSuggest
-            ? <>Press Enter to send <span className="font-medium text-amber-400">&ldquo;{query.trim()}&rdquo;</span> as a suggestion</>
-            : <>Press Enter to add <span className="font-medium">&ldquo;{query.trim()}&rdquo;</span></>
-          }
-        </div>
-      )}
     </div>
   )
 }

@@ -163,12 +163,15 @@ export function calcTimeline(currentWeightKg, goalWeightKg, energyAdjustment, co
 
 /**
  * Full pipeline. Returns null if required data is missing.
- * @param {object} profile – { current_weight, weight_unit, current_height, height_unit, gender, birthdate }
- * @param {object} plan    – { activity_factor, energy_balance_type?, energy_balance_pct?, protein_level, fat_level, goal_weight_kg, correction_factor }
+ * @param {object} profile                    – { current_weight, weight_unit, current_height, height_unit, gender, birthdate }
+ * @param {object} plan                       – { activity_factor, energy_balance_type?, energy_balance_pct?, protein_level, fat_level, goal_weight_kg, correction_factor }
  *   energy_balance_pct takes priority (e.g. -0.20 = −20% of TDEE).
  *   Falls back to energy_balance_type for legacy plans.
+ * @param {number|null} currentWeightKgOverride – When provided, overrides profile weight for the
+ *   timeline calculation only (e.g. latest logged bodyweight). BMR/TDEE still use profile weight
+ *   so plan targets stay stable between weigh-ins.
  */
-export function calcFullPlan(profile, plan) {
+export function calcFullPlan(profile, plan, currentWeightKgOverride = null) {
   const weightKg = profile.current_weight ? toKg(profile.current_weight, profile.weight_unit || 'lb') : null
   const heightCm = profile.current_height ? toCm(profile.current_height, profile.height_unit  || 'imperial') : null
   const age      = calcAge(profile.birthdate)
@@ -184,14 +187,23 @@ export function calcFullPlan(profile, plan) {
     : ENERGY_BALANCE_TYPES[plan.energy_balance_type]?.adjustment ?? 0
 
   const dailyTarget = Math.round(tdee + energyAdj)
-  const macros      = calcMacros(dailyTarget, plan.goal_weight_kg, plan.protein_level, plan.fat_level)
-  const timeline    = calcTimeline(
-    weightKg,
-    plan.goal_weight_kg,
-    energyAdj,
-    plan.correction_factor,
-    plan.energy_balance_pct ?? null,
-  )
+
+  // Fall back to current weight for protein calc when goal isn't set yet
+  const effectiveGoalKg = plan.goal_weight_kg || weightKg
+  const macros = calcMacros(dailyTarget, effectiveGoalKg, plan.protein_level, plan.fat_level)
+
+  // Timeline uses live bodyweight (override) if available, else profile weight.
+  // Skip entirely if no goal weight — prevents null-as-0 producing 300-month timelines.
+  const timelineWeightKg = currentWeightKgOverride ?? weightKg
+  const timeline = plan.goal_weight_kg
+    ? calcTimeline(
+        timelineWeightKg,
+        plan.goal_weight_kg,
+        energyAdj,
+        plan.correction_factor,
+        plan.energy_balance_pct ?? null,
+      )
+    : null
 
   return {
     bmr:          Math.round(bmr),
@@ -200,7 +212,7 @@ export function calcFullPlan(profile, plan) {
     energyAdj,
     macros,
     timeline,
-    currentWeightKg: weightKg,
+    currentWeightKg: timelineWeightKg,
     goalWeightKg:    plan.goal_weight_kg,
   }
 }

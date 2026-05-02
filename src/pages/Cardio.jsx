@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
-import { CARDIO_MOVEMENTS, getCardioMode } from '../lib/movements'
+import { useMovements } from '../hooks/useMovements'
 import MovementSearch from '../components/MovementSearch'
 import { Activity, Timer, ChevronRight, Check } from 'lucide-react'
 
@@ -65,7 +65,13 @@ export default function Cardio() {
   const [pendingQuery, setPendingQuery] = useState('')
   const [movementKey, setMovementKey]   = useState(0)
 
-  const mode = activity ? getCardioMode(activity) : 'pace'
+  // ── DB movements ─────────────────────────────────────────────────────────
+  const dbMovements   = useMovements()
+  const cardioRecords = useMemo(() => dbMovements.filter(m => m.category === 'cardio'), [dbMovements])
+  const cardioNames   = useMemo(() => cardioRecords.map(m => m.name), [cardioRecords])
+  const movementRecord = activity ? (cardioRecords.find(m => m.name === activity) ?? null) : null
+
+  const mode = movementRecord ? (movementRecord.cardio_mode || 'pace') : 'pace'
 
   // Reset fields when switching between pace/duration modes
   useEffect(() => {
@@ -77,9 +83,12 @@ export default function Cardio() {
     setSaved(false); setSaveError('')
   }, [activity, distValue, distUnit, timeStr])
 
-  const suggestionMode = !activity
+  const suggestionMode = !isAdmin && !activity
     && pendingQuery.trim() !== ''
-    && !CARDIO_MOVEMENTS.some(m => m.toLowerCase() === pendingQuery.trim().toLowerCase())
+    && !cardioNames.some(m => {
+        const tokens = pendingQuery.trim().toLowerCase().split(/\s+/).filter(Boolean)
+        return tokens.every(t => m.toLowerCase().includes(t))
+      })
 
   async function handleSuggestMove(name) {
     if (!user || suggestingRef.current || suggestSent) return
@@ -117,7 +126,7 @@ export default function Cardio() {
         const map = new Map()
         data.forEach(e => {
           const name    = e.label.split(' · ')[0]
-          const actMode = getCardioMode(name)
+          const actMode = (dbMovements.find(m => m.name === name)?.cardio_mode) || 'pace'
           if (actMode === 'pace') {
             const secs = parsePaceToSecs(e.value)
             if (secs === null) return
@@ -162,7 +171,7 @@ export default function Cardio() {
     return `${m}:${String(s).padStart(2, '0')}/mi`
   })()
 
-  const canSave = mode === 'pace' ? (distKm > 0 && timeSecs > 0) : timeSecs > 0
+  const canSave = !!activity?.trim() && (mode === 'pace' ? (distKm > 0 && timeSecs > 0) : timeSecs > 0)
 
   // ── Save ──────────────────────────────────────────────────────────────────
   async function saveEffort() {
@@ -182,7 +191,10 @@ export default function Cardio() {
     })
     if (error) { setSaveError('Failed to save. Try again.'); return }
     setSaved(true)
-    setTimeout(() => { setActivity(''); setDistValue(''); setTimeStr('') }, 1500)
+    setTimeout(() => {
+      setActivity(''); setDistValue(''); setTimeStr('')
+      setPendingQuery(''); setMovementKey(k => k + 1)
+    }, 1500)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -197,7 +209,7 @@ export default function Cardio() {
         </p>
       </div>
 
-      <div className="animate-rise rounded-xl border border-border bg-card p-5 space-y-4">
+      <div className="animate-rise relative z-10 rounded-xl border border-border bg-card p-5 space-y-4">
         {/* Activity search */}
         <div className="flex flex-col gap-1.5">
           <label className={labelCls}>Activity</label>
@@ -207,13 +219,17 @@ export default function Cardio() {
             onChange={setActivity}
             onSuggest={isAdmin ? undefined : handleSuggestMove}
             onQueryChange={isAdmin ? undefined : setPendingQuery}
-            movements={CARDIO_MOVEMENTS}
+            movements={cardioNames}
             placeholder="Search or type activity…"
           />
         </div>
 
-        {/* ── Duration-only mode ── */}
-        {mode === 'duration' ? (
+        {/* ── Input fields — shown only after an activity is selected ── */}
+        {suggestionMode ? (
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            This activity isn't in our list yet. Send it as a suggestion and your coach will add it.
+          </p>
+        ) : !activity ? null : mode === 'duration' ? (
           <>
             <div className="flex flex-col gap-1.5">
               <label className={labelCls}>Duration</label>
@@ -288,36 +304,41 @@ export default function Cardio() {
           </>
         )}
 
-        <button
-          onClick={suggestionMode ? () => handleSuggestMove(pendingQuery) : saveEffort}
-          disabled={suggestionMode ? (suggesting || suggestSent) : (saved || !canSave)}
-          className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
-            suggestionMode
-              ? suggestSent
-                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                : suggesting
-                  ? 'bg-amber-500/60 text-white cursor-wait'
-                  : 'bg-amber-500 text-white hover:opacity-90'
-              : saved
-                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                : canSave
-                  ? 'bg-amber-500 text-white hover:opacity-90'
-                  : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
-          }`}
-        >
-          {suggestionMode
-            ? suggestSent ? '✓ Suggestion Sent' : suggesting ? 'Sending…' : 'Send Suggestion'
-            : saved ? '✓ Saved' : 'Save Effort'}
-        </button>
+        {/* Save / Suggest button — only shown once an activity is selected or in suggestion mode */}
+        {(activity || suggestionMode) && (
+          <>
+            <button
+              onClick={suggestionMode ? () => handleSuggestMove(pendingQuery) : saveEffort}
+              disabled={suggestionMode ? (suggesting || suggestSent) : (saved || !canSave)}
+              className={`w-full rounded-lg py-2.5 text-sm font-semibold transition-all duration-300 ${
+                suggestionMode
+                  ? suggestSent
+                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                    : suggesting
+                      ? 'bg-amber-500/60 text-white cursor-wait'
+                      : 'bg-amber-500 text-white hover:opacity-90'
+                  : saved
+                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                    : canSave
+                      ? 'bg-amber-500 text-white hover:opacity-90'
+                      : 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
+              }`}
+            >
+              {suggestionMode
+                ? suggestSent ? '✓ Suggestion Sent' : suggesting ? 'Sending…' : 'Send Suggestion'
+                : saved ? '✓ Saved' : 'Save Effort'}
+            </button>
 
-        {suggestSent && (
-          <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-            <Check className="h-3.5 w-3.5 shrink-0" /> Suggestion sent to your coach.
-          </div>
-        )}
+            {suggestSent && (
+              <div className="flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                <Check className="h-3.5 w-3.5 shrink-0" /> Suggestion sent to your coach.
+              </div>
+            )}
 
-        {saveError && (
-          <p className="text-xs text-destructive leading-snug">{saveError}</p>
+            {saveError && (
+              <p className="text-xs text-destructive leading-snug">{saveError}</p>
+            )}
+          </>
         )}
       </div>
 

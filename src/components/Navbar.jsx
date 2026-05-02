@@ -165,14 +165,16 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
       <div className={`fixed inset-x-0 z-40 flex h-14 items-center justify-between border-b border-border bg-background/90 px-4 backdrop-blur md:hidden ${bannerVisible ? 'top-9' : 'top-0'}`}>
         <Link href="/dashboard"><Logo /></Link>
         <div className="flex items-center gap-2">
-          {/* Suggestion button — always shown */}
-          <button
-            onClick={() => setSuggOpen(true)}
-            title="Send a suggestion"
-            className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-amber-500 text-amber-500 bg-transparent hover:bg-amber-500/10 transition-colors"
-          >
-            <Lightbulb className="h-4 w-4" />
-          </button>
+          {/* Suggestion button — hidden for admins */}
+          {!isAdmin && (
+            <button
+              onClick={() => setSuggOpen(true)}
+              title="Send a suggestion"
+              className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-amber-500 text-amber-500 bg-transparent hover:bg-amber-500/10 transition-colors"
+            >
+              <Lightbulb className="h-4 w-4" />
+            </button>
+          )}
           {/* Chat button — only when chat_enabled */}
           {chatEnabled && (
             <button
@@ -236,14 +238,16 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
 
       {/* Desktop floating action buttons — bottom right */}
       <div className="fixed bottom-6 right-6 z-40 hidden md:flex flex-col items-center gap-2">
-        {/* Suggestion button — always */}
-        <button
-          onClick={() => setSuggOpen(true)}
-          title="Send a suggestion"
-          className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-amber-500 text-amber-500 bg-background shadow-lg hover:bg-amber-500/10 transition-colors"
-        >
-          <Lightbulb className="h-5 w-5" />
-        </button>
+        {/* Suggestion button — hidden for admins */}
+        {!isAdmin && (
+          <button
+            onClick={() => setSuggOpen(true)}
+            title="Send a suggestion"
+            className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-amber-500 text-amber-500 bg-background shadow-lg hover:bg-amber-500/10 transition-colors"
+          >
+            <Lightbulb className="h-5 w-5" />
+          </button>
+        )}
         {/* Chat button — only when chat_enabled */}
         {chatEnabled && (
           <button
@@ -262,7 +266,7 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
       </div>
 
       {/* Drawers */}
-      <SuggestionDrawer isOpen={suggOpen} onClose={() => setSuggOpen(false)} />
+      {!isAdmin && <SuggestionDrawer isOpen={suggOpen} onClose={() => setSuggOpen(false)} />}
       {chatEnabled && (
         <ChatDrawer isOpen={chatOpen} onClose={() => setChatOpen(false)} />
       )}

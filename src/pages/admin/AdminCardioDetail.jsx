@@ -8,7 +8,8 @@ import { useParams, useLocation } from 'wouter'
 import { supabase } from '../../lib/supabase'
 import { projectPaces } from '../../lib/formulas'
 import { getCardioMode, getCardioDistances } from '../../lib/movements'
-import { ArrowLeft, Target, Trash2, Loader2 } from 'lucide-react'
+import { ArrowLeft, Target } from 'lucide-react'
+import SwipeDelete from '../../components/SwipeDelete'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -111,31 +112,12 @@ function getNextMilestone(distanceKm, projectedSecs) {
 const DURATION_MILESTONES = [60, 2*60, 3*60, 5*60, 7*60, 10*60, 15*60, 20*60, 30*60]
 const DURATION_LABELS      = ['1 min', '2 min', '3 min', '5 min', '7 min', '10 min', '15 min', '20 min', '30 min']
 
-// ── Confirm delete ────────────────────────────────────────────────────────────
-
-function ConfirmDelete({ onConfirm, onCancel, busy }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[11px] text-destructive">Delete?</span>
-      <button onClick={onConfirm} disabled={busy}
-        className="rounded px-1.5 py-0.5 text-[11px] font-semibold text-destructive border border-destructive/30 hover:bg-destructive/10 disabled:opacity-50">
-        {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes'}
-      </button>
-      <button onClick={onCancel}
-        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground border border-border hover:bg-accent">
-        No
-      </button>
-    </div>
-  )
-}
 
 // ── Pace detail ───────────────────────────────────────────────────────────────
 
 function PaceDetail({ activity, efforts, setEfforts, distUnit, backFn }) {
   const distances    = getCardioDistances(activity, distUnit)
   const [selectedIdx, setSelectedIdx] = useState(null)
-  const [confirm,  setConfirm]  = useState(null)
-  const [deleting, setDeleting] = useState(null)
 
   let bestEffort   = null
   let bestPaceSecs = Infinity
@@ -173,11 +155,9 @@ function PaceDetail({ activity, efforts, setEfforts, distUnit, backFn }) {
   })()
 
   async function deleteEntry(id) {
-    setDeleting(id)
     const { error } = await supabase.from('efforts').delete().eq('id', id)
     if (!error) setEfforts(prev => prev.filter(e => e.id !== id))
-    setDeleting(null)
-    setConfirm(null)
+    else throw error
   }
 
   return (
@@ -272,23 +252,17 @@ function PaceDetail({ activity, efforts, setEfforts, distUnit, backFn }) {
         </div>
         <div className="divide-y divide-border">
           {[...efforts].reverse().map(e => (
-            <div key={e.id} className="flex items-center gap-3 px-5 py-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{e.label.split(' · ').slice(1).join(' · ')}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{new Date(e.created_at).toLocaleDateString()}</p>
+            <SwipeDelete key={e.id} onDelete={() => deleteEntry(e.id)}>
+              <div className="flex items-center gap-3 px-5 py-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{e.label.split(' · ').slice(1).join(' · ')}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{new Date(e.created_at).toLocaleDateString()}</p>
+                </div>
+                <span className="font-mono text-sm tabular-nums text-amber-400 shrink-0">
+                  {convertStoredPace(e.value, distUnit)}
+                </span>
               </div>
-              <span className="font-mono text-sm tabular-nums text-amber-400 shrink-0">
-                {convertStoredPace(e.value, distUnit)}
-              </span>
-              {confirm === e.id ? (
-                <ConfirmDelete onConfirm={() => deleteEntry(e.id)} onCancel={() => setConfirm(null)} busy={deleting === e.id} />
-              ) : (
-                <button onClick={() => setConfirm(e.id)}
-                  className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
+            </SwipeDelete>
           ))}
         </div>
       </div>
@@ -300,8 +274,6 @@ function PaceDetail({ activity, efforts, setEfforts, distUnit, backFn }) {
 
 function DurationDetail({ activity, efforts, setEfforts, backFn }) {
   const [selectedMs, setSelectedMs] = useState(null)
-  const [confirm,  setConfirm]  = useState(null)
-  const [deleting, setDeleting] = useState(null)
 
   let bestSecs = 0
   efforts.forEach(e => {
@@ -314,11 +286,9 @@ function DurationDetail({ activity, efforts, setEfforts, backFn }) {
     .filter(d => d.secs > 0)
 
   async function deleteEntry(id) {
-    setDeleting(id)
     const { error } = await supabase.from('efforts').delete().eq('id', id)
     if (!error) setEfforts(prev => prev.filter(e => e.id !== id))
-    setDeleting(null)
-    setConfirm(null)
+    else throw error
   }
 
   return (
@@ -422,18 +392,12 @@ function DurationDetail({ activity, efforts, setEfforts, backFn }) {
         </div>
         <div className="divide-y divide-border">
           {[...efforts].reverse().map(e => (
-            <div key={e.id} className="flex items-center gap-3 px-5 py-3">
-              <p className="text-xs text-muted-foreground flex-1">{new Date(e.created_at).toLocaleDateString()}</p>
-              <span className="font-mono text-sm tabular-nums text-amber-400 shrink-0">{fmtSecs(parseTimeStr(e.value))}</span>
-              {confirm === e.id ? (
-                <ConfirmDelete onConfirm={() => deleteEntry(e.id)} onCancel={() => setConfirm(null)} busy={deleting === e.id} />
-              ) : (
-                <button onClick={() => setConfirm(e.id)}
-                  className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
+            <SwipeDelete key={e.id} onDelete={() => deleteEntry(e.id)}>
+              <div className="flex items-center gap-3 px-5 py-3">
+                <p className="text-xs text-muted-foreground flex-1">{new Date(e.created_at).toLocaleDateString()}</p>
+                <span className="font-mono text-sm tabular-nums text-amber-400 shrink-0">{fmtSecs(parseTimeStr(e.value))}</span>
+              </div>
+            </SwipeDelete>
           ))}
         </div>
       </div>

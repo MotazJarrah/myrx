@@ -106,8 +106,26 @@ export default function Bodyweight() {
   }
 
   async function deleteEntry(id) {
-    setLogs(prev => prev.filter(l => l.id !== id))
+    const remaining = logs.filter(l => l.id !== id)
+    setLogs(remaining)
+    if (bwKey) dataCache.set(bwKey, remaining)
+
     await supabase.from('bodyweight').delete().eq('id', id).eq('user_id', user.id)
+
+    // Sync profile.current_weight to the new most-recent log.
+    // Logs are ordered desc by created_at, so remaining[0] is the latest.
+    if (remaining.length > 0) {
+      // Update current_weight to the new most-recent log
+      const latest   = remaining[0]
+      const prefUnit = profile?.weight_unit || 'lb'
+      const weightKg = toKg(latest.weight, latest.unit)
+      const normalized = prefUnit === 'kg'
+        ? Math.round(weightKg * 10) / 10
+        : Math.round((weightKg / 0.453592) * 10) / 10
+      await supabase.from('profiles').update({ current_weight: normalized }).eq('id', user.id)
+      refreshProfile()
+    }
+    // No remaining logs → leave current_weight as-is so the last known weight is preserved
   }
 
   // ── Derived stats ──────────────────────────────────────────────────────────
@@ -345,7 +363,7 @@ export default function Bodyweight() {
 
       {/* ── Log ── */}
       {logs.length > 0 && (
-        <div className="animate-rise rounded-xl border border-border bg-card">
+        <div className="animate-rise rounded-xl border border-border bg-card overflow-hidden">
           <div className="px-5 py-3.5 border-b border-border">
             <h2 className="text-sm font-semibold">Log</h2>
           </div>

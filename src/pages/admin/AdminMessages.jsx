@@ -212,6 +212,7 @@ function MessagesTab({ users, messages, onMarkRead, onNewMessage, onDeleteMessag
                   {msg.from_admin ? (
                     /* Admin bubble: swipe left to reveal delete — overflow-hidden clips red zone to rounded shape */
                     <SwipeDelete
+                      swipe
                       onDelete={() => onDeleteMessage(msg.id)}
                       className="max-w-[75%] rounded-2xl rounded-tr-sm"
                       bg="bg-primary"
@@ -226,6 +227,7 @@ function MessagesTab({ users, messages, onMarkRead, onNewMessage, onDeleteMessag
                     </SwipeDelete>
                   ) : (
                     <SwipeDelete
+                      swipe
                       onDelete={() => onDeleteMessage(msg.id)}
                       className="max-w-[75%] rounded-2xl rounded-tl-sm"
                       bg="bg-muted"

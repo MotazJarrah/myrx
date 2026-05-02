@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import {
   Users, LogOut, X, Menu, ShieldCheck,
   LayoutDashboard, TrendingUp, Utensils, Activity,
-  User, MessageCircle,
+  User, MessageCircle, Dumbbell, BookOpen,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
@@ -15,6 +15,8 @@ const NAV = [
   { href: '/admin/nutrition', label: 'Nutrition Overview',   icon: Utensils },
   { href: '/admin/feed',      label: 'Activity Feed',        icon: Activity },
   { href: '/admin/messages',  label: 'Messages',             icon: MessageCircle },
+  { href: '/admin/movements',     label: 'Movement Library', icon: Dumbbell  },
+  { href: '/admin/food-library',  label: 'Food Library',     icon: BookOpen  },
 ]
 
 function Logo() {

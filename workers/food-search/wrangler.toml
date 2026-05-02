@@ -1,0 +1,9 @@
+name = "myrx-food-search"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+account_id = "d42e96189bfa3cacb2aaab8231eb0097"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "myrx-food-library"
+database_id = "52b5d0d1-d9b5-4d76-89c8-34362fdc0fb6"

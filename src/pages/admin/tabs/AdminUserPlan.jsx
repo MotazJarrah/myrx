@@ -278,22 +278,29 @@ export default function AdminUserPlan({ profile, existingPlan: initPlan, userId,
   const [correctionFactor, setCorrectionFactor] = useState(() => String(initPlan?.correction_factor ?? '0.8'))
   const [notes,            setNotes]            = useState(() => initPlan?.notes || '')
   const [mealsAssignment,  setMealsAssignment]  = useState(() => initPlan?.meals ?? null)
-  const [weightUnit,       setWeightUnit]       = useState('kg')
+  // Init to profile's preferred unit so the admin works in the client's unit by default
+  const [weightUnit, setWeightUnit] = useState(() => profile?.weight_unit || 'kg')
   // Raw string state for number inputs — avoids the controlled-input rounding fight.
-  // Mirrors the same fallback chain as startingWeightKg so the field is always pre-filled.
+  // Display values are always in the current weightUnit.
   const [startRaw, setStartRaw] = useState(() => {
-    if (initPlan?.starting_weight_kg != null) return String(Math.round(initPlan.starting_weight_kg * 10) / 10)
+    const initUnit = profile?.weight_unit || 'kg'
+    const kgToDisp = (kg) => initUnit === 'lb' ? Math.round(kg / 0.453592 * 10) / 10 : Math.round(kg * 10) / 10
+    if (initPlan?.starting_weight_kg != null) return String(kgToDisp(initPlan.starting_weight_kg))
     if (profile?.current_weight) {
       const kg = profile.weight_unit === 'lb'
         ? Math.round(profile.current_weight * 0.453592 * 10) / 10
         : Number(profile.current_weight)
-      return String(Math.round(kg * 10) / 10)
+      return String(kgToDisp(kg))
     }
     return ''
   })
-  const [goalRaw,  setGoalRaw]  = useState(() =>
-    initPlan?.goal_weight_kg != null ? String(Math.round(initPlan.goal_weight_kg * 10) / 10) : ''
-  )
+  const [goalRaw, setGoalRaw] = useState(() => {
+    if (initPlan?.goal_weight_kg == null) return ''
+    const initUnit = profile?.weight_unit || 'kg'
+    const kg = initPlan.goal_weight_kg
+    const disp = initUnit === 'lb' ? Math.round(kg / 0.453592 * 10) / 10 : Math.round(kg * 10) / 10
+    return String(disp)
+  })
   const [resettingGoal,    setResettingGoal]    = useState(false)
 
   const [saving, setSaving] = useState(false)
@@ -367,13 +374,39 @@ export default function AdminUserPlan({ profile, existingPlan: initPlan, userId,
   async function handleResetGoal() {
     if (!existingPlan) return
     setResettingGoal(true)
+
+    // New phase: starting weight = client's current weight, goal cleared
+    const currentKg = profile?.current_weight
+      ? (profile.weight_unit === 'lb'
+          ? Math.round(profile.current_weight * 0.453592 * 10) / 10
+          : Math.round(Number(profile.current_weight) * 10) / 10)
+      : null
+
+    const updates = {
+      goal_reached:       false,
+      starting_weight_kg: currentKg,
+      goal_weight_kg:     null,
+    }
+
     const { error: err } = await supabase
       .from('calorie_plans')
-      .update({ goal_reached: false })
+      .update(updates)
       .eq('user_id', userId)
-    if (!err) {
-      setExistingPlan(p => ({ ...p, goal_reached: false }))
-      onPlanSaved?.({ ...existingPlan, goal_reached: false })
+
+    if (err) {
+      setError(`Reset failed: ${err.message}`)
+    } else {
+      setExistingPlan(p => ({ ...p, ...updates }))
+      onPlanSaved?.({ ...existingPlan, ...updates })
+
+      // Sync local form fields
+      if (currentKg != null) {
+        setStartingWeightKg(String(currentKg))
+        const dispKg = weightUnit === 'lb' ? currentKg / 0.453592 : currentKg
+        setStartRaw(String(Math.round(dispKg * 10) / 10))
+      }
+      setGoalWeightKg('')
+      setGoalRaw('')
     }
     setResettingGoal(false)
   }
@@ -388,7 +421,7 @@ export default function AdminUserPlan({ profile, existingPlan: initPlan, userId,
         <div className="rounded-xl border border-border bg-card p-5 space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Intake Plan variables</h2>
-            {existingPlan?.goal_reached && (
+            {existingPlan && existingPlan.goal_weight_kg != null && (
               <button
                 type="button"
                 onClick={handleResetGoal}
