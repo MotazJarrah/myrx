@@ -193,21 +193,33 @@ async function run() {
   )
   const usdaUpcs = new Set(usdaUpcRows.map(r => r.upc))
 
+  const { results: myrxUpcRows } = await db.query(
+    `SELECT upc, source_id FROM food_library WHERE source='myrx' AND upc IS NOT NULL`
+  )
+  const myrxByUpc = new Map(myrxUpcRows.map(r => [r.upc, r.source_id]))
+
   console.log(`  ${existingOn.size.toLocaleString()} existing ON rows loaded`)
   console.log(`  ${usdaUpcs.size.toLocaleString()} USDA UPCs loaded`)
+  console.log(`  ${myrxByUpc.size.toLocaleString()} MYRX UPCs loaded`)
 
   // ── Parse TSV and build diff ─────────────────────────────────────────────────
   console.log('\nStep 4/5  Parsing TSV and computing diff…')
   await updateProgress(db, { phase: 'on_diff', on_version: version })
 
-  const seenIds  = new Set()
-  const toInsert = []
-  const toUpdate = []
+  const seenIds       = new Set()
+  const toInsert      = []
+  const toUpdate      = []
+  const myrxSuperseded = []  // source_ids of MYRX items superseded by ON
 
   await streamOnTsv(zipPath, row => {
     const upc = normalizeUpc(row.ean_13)
     if (!upc) return                     // no barcode
     if (usdaUpcs.has(upc)) return        // USDA wins
+
+    // MYRX item with same UPC → will be deleted after inserts
+    if (myrxByUpc.has(upc)) {
+      myrxSuperseded.push({ upc, source_id: myrxByUpc.get(upc) })
+    }
 
     const macros  = extractOnMacros(row.nutrition_100g)
     if (macros.kcal === 0) return        // zero-cal excluded
@@ -239,7 +251,8 @@ async function run() {
   // Rows in DB but not in new TSV → delete
   const toDelete = [...existingOn.keys()].filter(id => !seenIds.has(id))
 
-  console.log(`\n  → ${toInsert.length.toLocaleString()} to insert, ${toUpdate.length.toLocaleString()} to update, ${toDelete.length.toLocaleString()} to delete`)
+  const myrxSupersededUniq = [...new Map(myrxSuperseded.map(r => [r.source_id, r])).values()]
+  console.log(`\n  → ${toInsert.length.toLocaleString()} to insert, ${toUpdate.length.toLocaleString()} to update, ${toDelete.length.toLocaleString()} to delete, ${myrxSupersededUniq.length} MYRX superseded`)
 
   // ── Apply changes ───────────────────────────────────────────────────────────
   console.log('\nStep 5/5  Applying changes to D1…')
@@ -272,13 +285,28 @@ async function run() {
     process.stdout.write(`\r  Updated ${Math.min(i + BATCH_SIZE, toUpdate.length).toLocaleString()} / ${toUpdate.length.toLocaleString()}`)
   }
 
-  // Deletes
+  // Deletes (ON rows no longer in TSV)
   for (let i = 0; i < toDelete.length; i += BATCH_SIZE) {
     const batch = toDelete.slice(i, i + BATCH_SIZE)
     await db.batch(batch.map(id => ({
       sql:    `DELETE FROM food_library WHERE source='on' AND source_id=?`,
       params: [id],
     })))
+  }
+
+  // Delete MYRX items superseded by ON
+  if (myrxSupersededUniq.length > 0) {
+    console.log(`\n  Removing ${myrxSupersededUniq.length} MYRX item(s) superseded by ON…`)
+    for (const { upc, source_id } of myrxSupersededUniq) {
+      console.log(`    ↳ MYRX source_id=${source_id} UPC=${upc}`)
+    }
+    for (let i = 0; i < myrxSupersededUniq.length; i += BATCH_SIZE) {
+      const batch = myrxSupersededUniq.slice(i, i + BATCH_SIZE)
+      await db.batch(batch.map(r => ({
+        sql:    `DELETE FROM food_library WHERE source='myrx' AND source_id=?`,
+        params: [r.source_id],
+      })))
+    }
   }
 
   console.log('\n  ✓ Changes applied')

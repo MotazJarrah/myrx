@@ -1,26 +1,39 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { supabase } from '../../lib/supabase'
-import { Search, Plus, Pencil, Trash2, Check, X, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, Check, X, Loader2, ChevronLeft, ChevronRight, RefreshCw, Play, CheckCircle2, AlertCircle, Clock } from 'lucide-react'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 50
 
-const FOOD_WORKER_URL = 'https://myrx-food-search.motaz-jarrah.workers.dev'
+const FOOD_WORKER_URL  = 'https://myrx-food-search.motaz-jarrah.workers.dev'
+const FOOD_ADMIN_KEY   = import.meta.env.VITE_FOOD_ADMIN_KEY ?? ''
+
+function workerFetch(path, options = {}) {
+  return fetch(`${FOOD_WORKER_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${FOOD_ADMIN_KEY}`,
+      ...(options.headers ?? {}),
+    },
+  })
+}
 
 const SOURCE_FILTERS = [
   { value: '',     label: 'All'  },
   { value: 'usda', label: 'USDA' },
-  { value: 'myrx', label: 'Custom' },
+  { value: 'on',   label: 'ON'   },
+  { value: 'myrx', label: 'MYRX' },
 ]
 
 const SOURCE_BADGE = {
   usda: 'bg-sky-500/15 text-sky-400',
+  on:   'bg-violet-500/15 text-violet-400',
   myrx: 'bg-emerald-500/15 text-emerald-400',
 }
 
 const EMPTY_FORM = {
-  name: '', brand: '',
+  name: '', brand: '', upc: '',
   kcal: '', protein_g: '', fat_g: '', carbs_g: '', fiber_g: '', sodium_mg: '',
   serving_g: '', serving_label: '', servings_per_container: '',
 }
@@ -42,22 +55,86 @@ function fmtNum(v) {
 
 // ── Food form (add / edit) ─────────────────────────────────────────────────────
 
-function FoodForm({ initial, onSave, onCancel, saving }) {
-  const [form, setForm] = useState({ ...EMPTY_FORM, ...initial })
+const FOOD_MODE_KEY = id => `food_input_mode_${id}`
+const NUTRIENT_KEYS = ['kcal', 'protein_g', 'fat_g', 'carbs_g', 'fiber_g', 'sodium_mg']
+
+function FoodForm({ initial, isEdit, foodId, onSave, onCancel, saving }) {
+  const savedMode = isEdit && foodId
+    ? localStorage.getItem(FOOD_MODE_KEY(foodId))
+    : null
+  const initPerServing = savedMode ? savedMode === 'serving' : true
+
+  // When editing in per-serving mode with a known serving size,
+  // convert the stored per-100g values to per-serving for display.
+  function initFormValues() {
+    const base = { ...EMPTY_FORM, ...initial }
+    if (!isEdit) return base
+    const srvG = parseFloat(initial?.serving_g)
+    if (!initPerServing || isNaN(srvG) || srvG <= 0) return base
+    const factor = srvG / 100
+    const out = { ...base }
+    for (const k of NUTRIENT_KEYS) {
+      const n = parseFloat(initial?.[k])
+      if (!isNaN(n)) out[k] = String(Math.round(n * factor * 100) / 100)
+    }
+    return out
+  }
+
+  const [form, setForm] = useState(initFormValues)
+  const [perServing, setPerServing] = useState(initPerServing)
+
+  function handleModeChange(val) {
+    if (val === perServing) return
+    const srvG = numOrNull(form.serving_g)
+    // If we have a serving size, convert the displayed values to the new mode
+    if (srvG && srvG > 0) {
+      setForm(prev => {
+        const next = { ...prev }
+        for (const k of NUTRIENT_KEYS) {
+          const n = parseFloat(prev[k])
+          if (!isNaN(n)) {
+            next[k] = val
+              ? String(Math.round(n * (srvG / 100) * 100) / 100)  // per-100g → per-serving
+              : String(Math.round(n * (100 / srvG) * 100) / 100)  // per-serving → per-100g
+          }
+        }
+        return next
+      })
+    }
+    setPerServing(val)
+    if (isEdit && foodId) {
+      localStorage.setItem(FOOD_MODE_KEY(foodId), val ? 'serving' : '100g')
+    }
+  }
   const set = useCallback((k, v) => setForm(p => ({ ...p, [k]: v })), [])
+
+  const servingG = numOrNull(form.serving_g)
+  const canConvert = perServing && servingG > 0
+
+  function toStored(v) {
+    // Convert per-serving input → per-100g for storage
+    const n = numOrNull(v)
+    if (n === null) return null
+    return Math.round((n / servingG) * 100 * 100) / 100
+  }
 
   function handleSubmit(e) {
     e.preventDefault()
     if (!form.name.trim()) return
+    if (perServing && !servingG) return  // need serving size to convert
+
+    const nutrient = canConvert ? toStored : numOrNull
+
     onSave({
       name:                   form.name.trim(),
       brand:                  form.brand.trim() || null,
-      kcal:                   numOrNull(form.kcal),
-      protein_g:              numOrNull(form.protein_g),
-      fat_g:                  numOrNull(form.fat_g),
-      carbs_g:                numOrNull(form.carbs_g),
-      fiber_g:                numOrNull(form.fiber_g),
-      sodium_mg:              numOrNull(form.sodium_mg),
+      upc:                    form.upc.trim()   || null,
+      kcal:                   nutrient(form.kcal),
+      protein_g:              nutrient(form.protein_g),
+      fat_g:                  nutrient(form.fat_g),
+      carbs_g:                nutrient(form.carbs_g),
+      fiber_g:                nutrient(form.fiber_g),
+      sodium_mg:              nutrient(form.sodium_mg),
       serving_g:              numOrNull(form.serving_g),
       serving_label:          form.serving_label.trim() || null,
       servings_per_container: numOrNull(form.servings_per_container),
@@ -78,13 +155,48 @@ function FoodForm({ initial, onSave, onCancel, saving }) {
             placeholder="e.g. Chobani" className={inputCls} />
         </div>
         <div className="flex flex-col gap-1">
+          <label className={labelCls}>Barcode (UPC)</label>
+          <input value={form.upc} onChange={e => set('upc', e.target.value)}
+            placeholder="e.g. 012345678901" className={inputCls} />
+        </div>
+        <div className="flex flex-col gap-1">
           <label className={labelCls}>Serving label</label>
           <input value={form.serving_label} onChange={e => set('serving_label', e.target.value)}
             placeholder="e.g. 1 cup" className={inputCls} />
         </div>
       </div>
 
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nutrients (per 100 g)</p>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1">
+          <label className={labelCls}>Serving size (g)</label>
+          <input type="number" step="0.1" value={form.serving_g}
+            onChange={e => set('serving_g', e.target.value)}
+            placeholder="e.g. 50" className={inputCls} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className={labelCls}>Servings per container</label>
+          <input type="number" step="0.5" value={form.servings_per_container}
+            onChange={e => set('servings_per_container', e.target.value)}
+            placeholder="e.g. 4" className={inputCls} />
+        </div>
+      </div>
+
+      {/* Nutrient input mode segmented control */}
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Nutrients</p>
+        <div className="flex rounded-lg bg-muted p-0.5 text-xs font-semibold gap-0.5">
+          {[['Per serving', true], ['Per 100g', false]].map(([label, val]) => (
+            <button key={label} type="button" onClick={() => handleModeChange(val)}
+              className={`px-3 py-1 rounded-md transition-colors ${perServing === val ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {perServing && !servingG && (
+        <p className="text-xs text-amber-400">Enter serving size (g) above first so we can convert correctly.</p>
+      )}
+
       <div className="grid grid-cols-3 gap-3">
         {[
           ['kcal',       'Calories (kcal)'],
@@ -101,21 +213,6 @@ function FoodForm({ initial, onSave, onCancel, saving }) {
               placeholder="0" className={inputCls} />
           </div>
         ))}
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1">
-          <label className={labelCls}>Serving size (g)</label>
-          <input type="number" step="0.1" value={form.serving_g}
-            onChange={e => set('serving_g', e.target.value)}
-            placeholder="e.g. 170" className={inputCls} />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className={labelCls}>Servings per container</label>
-          <input type="number" step="0.5" value={form.servings_per_container}
-            onChange={e => set('servings_per_container', e.target.value)}
-            placeholder="e.g. 4" className={inputCls} />
-        </div>
       </div>
 
       <div className="flex gap-2 pt-1">
@@ -179,15 +276,148 @@ function FoodRow({ food, onEdit, onDelete }) {
         )}
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        <button onClick={() => onEdit(food)}
-          className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
-          <Pencil className="h-3.5 w-3.5" />
-        </button>
+        {food.source === 'myrx' && (
+          <button onClick={() => onEdit(food)}
+            className="p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button onClick={() => onDelete(food)}
           className="p-1.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
           <Trash2 className="h-3.5 w-3.5" />
         </button>
       </div>
+    </div>
+  )
+}
+
+// ── Sync Panel ────────────────────────────────────────────────────────────────
+
+const STATUS_STYLES = {
+  idle:      { cls: 'border-border bg-muted/30 text-muted-foreground',                   label: 'Idle'      },
+  running:   { cls: 'border-amber-500/30 bg-amber-500/10 text-amber-400',                label: 'Running'   },
+  completed: { cls: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400',          label: 'Completed' },
+  failed:    { cls: 'border-destructive/30 bg-destructive/10 text-destructive',          label: 'Failed'    },
+  unknown:   { cls: 'border-border bg-muted/30 text-muted-foreground',                   label: '—'         },
+}
+
+function fmtShort(iso) {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    const date = d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })
+    const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    return `${date} ${time}`
+  } catch { return '—' }
+}
+
+function MetaItem({ label, value }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-medium">{label}</span>
+      <span className="text-xs text-foreground/80">{value}</span>
+    </div>
+  )
+}
+
+function SyncPanel({ onRefreshStats }) {
+  const [sync,       setSync]       = useState(null)
+  const [triggering, setTriggering] = useState(false)
+  const [trigErr,    setTrigErr]    = useState('')
+  const pollRef = useRef(null)
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const res = await workerFetch('/admin/sync/status')
+      if (res.ok) setSync(await res.json())
+    } catch { /* silent */ }
+  }, [])
+
+  useEffect(() => {
+    fetchStatus()
+    const schedule = () => {
+      pollRef.current = setTimeout(async () => {
+        await fetchStatus()
+        schedule()
+      }, sync?.status === 'running' ? 5_000 : 30_000)
+    }
+    schedule()
+    return () => clearTimeout(pollRef.current)
+  }, [fetchStatus, sync?.status])
+
+  async function triggerSync() {
+    setTriggering(true)
+    setTrigErr('')
+    try {
+      const res  = await workerFetch('/admin/sync', { method: 'POST', body: JSON.stringify({ force: false }) })
+      const data = await res.json()
+      if (!res.ok) { setTrigErr(data.error ?? 'Failed to trigger sync'); return }
+      await fetchStatus()
+      onRefreshStats?.()
+    } catch { setTrigErr('Network error') }
+    finally  { setTriggering(false) }
+  }
+
+  const st      = sync?.status ?? 'unknown'
+  const { cls, label } = STATUS_STYLES[st] ?? STATUS_STYLES.unknown
+  const isRunning = st === 'running'
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      {/* Header row */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {isRunning
+            ? <Loader2 className="h-3.5 w-3.5 text-amber-400 animate-spin" />
+            : <RefreshCw className="h-3.5 w-3.5 text-muted-foreground/50" />}
+          <span className="text-sm font-medium">Library Sync</span>
+          <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${cls}`}>{label}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={fetchStatus}
+            className="p-1.5 rounded text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+            title="Refresh status"
+          >
+            <RefreshCw className="h-3 w-3" />
+          </button>
+          <button
+            onClick={triggerSync}
+            disabled={triggering || isRunning}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-40 transition-opacity"
+          >
+            {triggering ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            {triggering ? 'Starting…' : 'Sync now'}
+          </button>
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div className="border-t border-border/50" />
+
+      {/* Meta grid */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        <MetaItem label="Started"    value={fmtShort(sync?.started_at)} />
+        <MetaItem label="Completed"  value={fmtShort(sync?.completed_at)} />
+        <MetaItem label="USDA sync"  value={sync?.usda?.last_sync_date || '—'} />
+        <MetaItem label="ON version" value={sync?.on?.last_version || '—'} />
+      </div>
+
+      {/* Running progress */}
+      {isRunning && sync?.progress && Object.keys(sync.progress).length > 0 && (
+        <div className="text-xs text-muted-foreground bg-muted/20 rounded-lg px-3 py-2 space-y-0.5">
+          {sync.progress.phase     && <div>Phase: <span className="text-foreground">{sync.progress.phase}</span></div>}
+          {sync.progress.usda_page && <div>USDA: <span className="text-foreground">{sync.progress.usda_page}/{sync.progress.usda_total ?? '?'}</span></div>}
+          {sync.progress.on_status && <div>OpenNutrition: <span className="text-foreground">{sync.progress.on_status}</span></div>}
+        </div>
+      )}
+
+      {/* Errors */}
+      {(sync?.error || trigErr) && (
+        <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-1.5">
+          {trigErr || sync.error}
+        </p>
+      )}
     </div>
   )
 }
@@ -201,6 +431,7 @@ export default function AdminFoodLibrary() {
   const [totalCount,   setTotalCount]   = useState(0)
   const [page,         setPage]         = useState(0)
   const [loading,      setLoading]      = useState(false)
+  const [stats,        setStats]        = useState({})
 
   // Panel state: null | { mode: 'add' } | { mode: 'edit', food } | { mode: 'delete', food }
   const [panel,   setPanel]   = useState(null)
@@ -211,6 +442,13 @@ export default function AdminFoodLibrary() {
   const searchRef = useRef(null)
   const debounceRef = useRef(null)
 
+  useEffect(() => {
+    fetch(`${FOOD_WORKER_URL}/stats`)
+      .then(r => r.ok ? r.json() : {})
+      .then(setStats)
+      .catch(() => {})
+  }, [])
+
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
   const fetchFoods = useCallback(async (q, src, pg) => {
@@ -219,8 +457,8 @@ export default function AdminFoodLibrary() {
 
     const trimmed = q.trim()
 
-    // ── USDA-only: query Cloudflare Worker (D1) ─────────────────────────────
-    if (src === 'usda') {
+    // ── USDA or ON only: query Cloudflare Worker (D1) ───────────────────────
+    if (src === 'usda' || src === 'on') {
       if (!trimmed) {
         setFoods([])
         setTotalCount(0)
@@ -228,9 +466,9 @@ export default function AdminFoodLibrary() {
         return
       }
       try {
-        const res  = await fetch(`${FOOD_WORKER_URL}/search?q=${encodeURIComponent(trimmed)}&limit=${PAGE_SIZE}`)
+        const res  = await fetch(`${FOOD_WORKER_URL}/search?q=${encodeURIComponent(trimmed)}&source=${src}&limit=${PAGE_SIZE}`)
         const data = res.ok ? await res.json() : []
-        setFoods((data ?? []).map(r => ({ ...r, id: r.source_id, source: 'usda' })))
+        setFoods((data ?? []).map(r => ({ ...r, id: r.source_id })))
         setTotalCount(data?.length ?? 0)
       } catch {
         setError('Failed to reach food search service.')
@@ -239,52 +477,39 @@ export default function AdminFoodLibrary() {
       return
     }
 
-    // ── Custom (myrx) only: Supabase paginated ──────────────────────────────
+    // ── MYRX only: Worker search ────────────────────────────────────────────
     if (src === 'myrx') {
-      const from = pg * PAGE_SIZE
-      const to   = from + PAGE_SIZE - 1
-      let countQ = supabase.from('food_library').select('*', { count: 'exact', head: true }).eq('source', 'myrx')
-      let dataQ  = supabase.from('food_library')
-        .select('id, source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g, fiber_g, sodium_mg, serving_g, serving_label, servings_per_container')
-        .eq('source', 'myrx').order('name').range(from, to)
-      if (trimmed) {
-        const pat = '%' + trimmed.replace(/\s+/g, '%') + '%'
-        countQ = countQ.ilike('name', pat)
-        dataQ  = dataQ.ilike('name', pat)
+      if (!trimmed) {
+        setFoods([]); setTotalCount(0); setLoading(false); return
       }
-      const [{ count }, { data, error: err }] = await Promise.all([countQ, dataQ])
+      try {
+        const res  = await fetch(`${FOOD_WORKER_URL}/search?q=${encodeURIComponent(trimmed)}&source=myrx&limit=${PAGE_SIZE}`)
+        const data = res.ok ? await res.json() : []
+        setFoods((data ?? []).map(r => ({ ...r, id: r.source_id })))
+        setTotalCount(data?.length ?? 0)
+      } catch {
+        setFoods([]); setTotalCount(0); setError('Failed to load MYRX foods.')
+      }
       setLoading(false)
-      if (err) { setError('Failed to load custom foods.'); return }
-      setFoods(data ?? [])
-      setTotalCount(count ?? 0)
       return
     }
 
-    // ── All sources: myrx from Supabase + USDA from Worker (when searching) ─
-    const myrxQ = supabase.from('food_library')
-      .select('id, source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g, fiber_g, sodium_mg, serving_g, serving_label, servings_per_container')
-      .eq('source', 'myrx').order('name').limit(PAGE_SIZE)
-    if (trimmed) myrxQ.ilike('name', '%' + trimmed.replace(/\s+/g, '%') + '%')
-
-    const workerPromise = trimmed
-      ? fetch(`${FOOD_WORKER_URL}/search?q=${encodeURIComponent(trimmed)}&limit=${PAGE_SIZE}`)
-          .then(r => r.ok ? r.json() : [])
-          .then(data => (data ?? []).map(r => ({ ...r, id: r.source_id, source: 'usda' })))
-          .catch(() => [])
-      : Promise.resolve([])
-
-    const [{ data: myrxData }, workerData] = await Promise.all([myrxQ, workerPromise])
-
-    const seen = new Set()
-    const merged = []
-    for (const r of [...(myrxData ?? []), ...workerData]) {
-      const key = `${r.name?.toLowerCase()}|${(r.brand ?? '').toLowerCase()}`
-      if (!seen.has(key)) { seen.add(key); merged.push(r) }
+    // ── All sources: everything is in D1, just query the Worker ────────────
+    if (!trimmed) {
+      setFoods([])
+      setTotalCount(0)
+      setLoading(false)
+      return
     }
-
+    try {
+      const res  = await fetch(`${FOOD_WORKER_URL}/search?q=${encodeURIComponent(trimmed)}&limit=${PAGE_SIZE}`)
+      const data = res.ok ? await res.json() : []
+      setFoods((data ?? []).map(r => ({ ...r, id: r.source_id })))
+      setTotalCount(data?.length ?? 0)
+    } catch {
+      setError('Failed to reach food search service.')
+    }
     setLoading(false)
-    setFoods(merged.slice(0, PAGE_SIZE * 2))
-    setTotalCount(merged.length)
   }, [])
 
   // Debounced search
@@ -305,35 +530,58 @@ export default function AdminFoodLibrary() {
 
   async function handleAdd(data) {
     setSaving(true)
-    const { error: err } = await supabase.from('food_library').insert({ ...data, source: 'myrx' })
-    setSaving(false)
-    if (err) { setError(`Save failed: ${err.message}`); return }
-    setPanel(null)
-    setPage(0)
-    fetchFoods(query, sourceFilter, 0)
+    try {
+      const res = await workerFetch('/food', { method: 'POST', body: JSON.stringify(data) })
+      const body = await res.json()
+      if (!res.ok) { setError(`Save failed: ${body.error ?? res.status}`); return }
+      setPanel(null)
+      setPage(0)
+      fetchFoods(query, sourceFilter, 0)
+    } catch (e) {
+      setError(`Save failed: ${e.message}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   // ── Edit ───────────────────────────────────────────────────────────────────
 
   async function handleEdit(data) {
     setSaving(true)
-    const { error: err } = await supabase.from('food_library').update(data).eq('id', panel.food.id)
-    setSaving(false)
-    if (err) { setError(`Save failed: ${err.message}`); return }
-    setPanel(null)
-    fetchFoods(query, sourceFilter, page)
+    try {
+      const res = await workerFetch(`/food/${encodeURIComponent(panel.food.source_id ?? panel.food.id)}`,
+        { method: 'PUT', body: JSON.stringify(data) })
+      const body = await res.json()
+      if (!res.ok) { setError(`Save failed: ${body.error ?? res.status}`); return }
+      setPanel(null)
+      fetchFoods(query, sourceFilter, page)
+    } catch (e) {
+      setError(`Save failed: ${e.message}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   // ── Delete ─────────────────────────────────────────────────────────────────
 
   async function handleDelete() {
     setDeleting(true)
-    const { error: err } = await supabase.from('food_library').delete().eq('id', panel.food.id)
-    setDeleting(false)
-    if (err) { setError(`Delete failed: ${err.message}`); return }
-    setPanel(null)
-    if (foods.length === 1 && page > 0) setPage(p => p - 1)
-    else fetchFoods(query, sourceFilter, page)
+    try {
+      const res = await workerFetch(`/food/${encodeURIComponent(panel.food.source_id ?? panel.food.id)}`,
+        { method: 'DELETE' })
+      if (!res.ok && res.status !== 204) {
+        const body = await res.json().catch(() => ({}))
+        setError(`Delete failed: ${body.error ?? res.status}`)
+        return
+      }
+      setPanel(null)
+      if (foods.length === 1 && page > 0) setPage(p => p - 1)
+      else fetchFoods(query, sourceFilter, page)
+    } catch (e) {
+      setError(`Delete failed: ${e.message}`)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -346,18 +594,24 @@ export default function AdminFoodLibrary() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Food Library</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            <span className="text-sky-400">2M+ USDA foods</span> via Cloudflare D1 ·
-            <span className="text-emerald-400"> Custom</span> foods in Supabase
-          </p>
+          <div className="mt-1 flex flex-col gap-0.5 text-xs text-muted-foreground">
+            <span><span className="text-sky-400 font-medium">{(stats.usda ?? 0).toLocaleString()}</span> USDA</span>
+            <span><span className="text-violet-400 font-medium">{(stats.on ?? 0).toLocaleString()}</span> OpenNutrition</span>
+            <span><span className="text-emerald-400 font-medium">{(stats.myrx ?? 0).toLocaleString()}</span> MYRX</span>
+          </div>
         </div>
         <button
           onClick={() => setPanel({ mode: 'add' })}
-          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+          className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity whitespace-nowrap"
         >
           <Plus className="h-4 w-4" /> Add food
         </button>
       </div>
+
+      {/* Sync panel */}
+      <SyncPanel onRefreshStats={() =>
+        fetch(`${FOOD_WORKER_URL}/stats`).then(r => r.ok ? r.json() : {}).then(setStats).catch(() => {})
+      } />
 
       {/* Add / Edit / Delete panel */}
       {panel && (
@@ -377,9 +631,12 @@ export default function AdminFoodLibrary() {
             <DeleteConfirm food={panel.food} onConfirm={handleDelete} onCancel={() => setPanel(null)} deleting={deleting} />
           ) : (
             <FoodForm
+              isEdit={panel.mode === 'edit'}
+              foodId={panel.mode === 'edit' ? (panel.food.source_id ?? panel.food.id) : null}
               initial={panel.mode === 'edit' ? {
                 name:                   panel.food.name  ?? '',
                 brand:                  panel.food.brand ?? '',
+                upc:                    panel.food.upc   ?? '',
                 kcal:                   panel.food.kcal                   ?? '',
                 protein_g:              panel.food.protein_g              ?? '',
                 fat_g:                  panel.food.fat_g                  ?? '',
@@ -451,9 +708,7 @@ export default function AdminFoodLibrary() {
           </div>
         ) : foods.length === 0 ? (
           <div className="py-16 text-center text-sm text-muted-foreground">
-            {sourceFilter === 'usda' && !query
-              ? 'Type a search term to browse USDA foods'
-              : query ? `No foods matching "${query}"` : 'No custom foods yet — add one above'}
+            {query ? `No foods matching "${query}"` : 'Type a search term to find foods'}
           </div>
         ) : (
           foods.map(food => (

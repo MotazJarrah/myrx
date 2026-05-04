@@ -158,6 +158,26 @@ async function run() {
           ],
         })
         inserted++
+      } else if (row.source === 'myrx') {
+        // MYRX item superseded by USDA — delete MYRX first, then insert USDA
+        console.log(`  ↳ MYRX superseded by USDA: UPC ${food.upc} (${food.name})`)
+        deleteStmts.push({
+          sql:    `DELETE FROM food_library WHERE source='myrx' AND upc=?`,
+          params: [food.upc],
+        })
+        upsertStmts.push({
+          sql: `INSERT OR IGNORE INTO food_library
+                  (source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
+                   fiber_g, sodium_mg, serving_g, serving_label, upc)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          params: [
+            food.source, food.source_id, food.name, food.brand,
+            food.kcal, food.protein_g, food.fat_g, food.carbs_g,
+            food.fiber_g, food.sodium_mg, food.serving_g, food.serving_label,
+            food.upc,
+          ],
+        })
+        inserted++
       } else if (row.source === 'usda' && parseInt(food.source_id) > parseInt(row.source_id)) {
         // Newer USDA submission — replace
         upsertStmts.push({

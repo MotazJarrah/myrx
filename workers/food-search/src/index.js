@@ -26,20 +26,6 @@ const CORS = {
 const SELECT_COLS = `source, source_id, name, brand, kcal, protein_g, fat_g,
   carbs_g, fiber_g, sodium_mg, serving_g, serving_label`
 
-/**
- * Normalize any barcode format to 12-digit UPC-A.
- * Handles UPC-A (12), EAN-13 (13), GTIN-14 (14) by stripping leading zeros
- * and padding back to 12 digits. A scanner returning 12-digit UPC-A will
- * always produce the same result as USDA's 14-digit GTIN or ON's EAN-13.
- */
-function normalizeUpc(raw) {
-  const digits = String(raw ?? '').replace(/\D/g, '')
-  if (digits.length < 8) return null  // too short to be a real barcode
-  const stripped = digits.replace(/^0+/, '')
-  if (!stripped) return null  // all-zero GTIN = no barcode in USDA data
-  return stripped.padStart(12, '0')
-}
-
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -70,6 +56,7 @@ function validateFood(body, { partial = false } = {}) {
   if (!partial && !body.name?.trim()) return 'name is required'
   if (body.name !== undefined && typeof body.name !== 'string') return 'name must be a string'
   if (body.brand !== undefined && body.brand !== null && typeof body.brand !== 'string') return 'brand must be a string or null'
+  if (body.upc !== undefined && body.upc !== null && typeof body.upc !== 'string') return 'upc must be a string or null'
   for (const f of NUMERIC_FIELDS) {
     if (body[f] !== undefined && body[f] !== null) {
       const n = Number(body[f])
@@ -80,10 +67,19 @@ function validateFood(body, { partial = false } = {}) {
   return null
 }
 
+function normalizeUpc(raw) {
+  const digits = String(raw ?? '').replace(/\D/g, '')
+  if (digits.length < 8) return null
+  const stripped = digits.replace(/^0+/, '')
+  if (!stripped) return null
+  return stripped.padStart(12, '0')
+}
+
 function coerce(body) {
   const out = {}
   if (body.name  !== undefined) out.name  = String(body.name).trim()
   if (body.brand !== undefined) out.brand = body.brand ? String(body.brand).trim() : null
+  if (body.upc   !== undefined) out.upc   = body.upc   ? (normalizeUpc(body.upc) ?? null) : null
   if (body.serving_label !== undefined) out.serving_label = body.serving_label ? String(body.serving_label).trim() : null
   for (const f of NUMERIC_FIELDS) {
     if (body[f] !== undefined) out[f] = body[f] === null ? null : Math.round(Number(body[f]) * 100) / 100
@@ -123,12 +119,12 @@ async function handleCreate(request, env) {
   await env.DB.batch([
     env.DB.prepare(`
       INSERT INTO food_library (source, source_id, name, brand, kcal, protein_g, fat_g,
-        carbs_g, fiber_g, sodium_mg, serving_g, serving_label)
-      VALUES ('myrx', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        carbs_g, fiber_g, sodium_mg, serving_g, serving_label, upc)
+      VALUES ('myrx', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(source_id, data.name, data.brand ?? null, data.kcal ?? null,
         data.protein_g ?? null, data.fat_g ?? null, data.carbs_g ?? null,
         data.fiber_g ?? null, data.sodium_mg ?? null, data.serving_g ?? null,
-        data.serving_label ?? null),
+        data.serving_label ?? null, data.upc ?? null),
     env.DB.prepare(`
       INSERT INTO food_fts(rowid, name, brand)
       SELECT id, name, brand FROM food_library WHERE source='myrx' AND source_id=?
