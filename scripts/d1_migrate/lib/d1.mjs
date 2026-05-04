@@ -8,14 +8,18 @@
 
 import { withRetry } from './retry.mjs'
 
-const D1_API = (accountId, dbId) =>
+const D1_QUERY = (accountId, dbId) =>
   `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${dbId}/query`
+
+const D1_BATCH = (accountId, dbId) =>
+  `https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${dbId}/batch`
 
 /**
  * @param {{ accountId: string, databaseId: string, apiToken: string }} config
  */
 export function createD1Client({ accountId, databaseId, apiToken }) {
-  const url = D1_API(accountId, databaseId)
+  const url      = D1_QUERY(accountId, databaseId)
+  const batchUrl = D1_BATCH(accountId, databaseId)
 
   const headers = {
     'Content-Type': 'application/json',
@@ -53,10 +57,10 @@ export function createD1Client({ accountId, databaseId, apiToken }) {
     for (let i = 0; i < statements.length; i += CHUNK) {
       const chunk = statements.slice(i, i + CHUNK)
       const res = await withRetry(async () => {
-        const r = await fetch(url, {
+        const r = await fetch(batchUrl, {
           method: 'POST',
           headers,
-          body: JSON.stringify(chunk.map(s => ({ sql: s.sql, params: s.params ?? [] }))),
+          body: JSON.stringify({ statements: chunk.map(s => ({ sql: s.sql, params: s.params ?? [] })) }),
         })
         if (!r.ok) throw new Error(`D1 batch HTTP ${r.status}: ${await r.text()}`)
         return r.json()
