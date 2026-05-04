@@ -1,0 +1,9 @@
+{
+  "name": "myrx-d1-migrate",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "unzipper": "^0.12.3"
+  }
+}

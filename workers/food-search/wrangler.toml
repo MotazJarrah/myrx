@@ -7,3 +7,8 @@ account_id = "d42e96189bfa3cacb2aaab8231eb0097"
 binding = "DB"
 database_name = "myrx-food-library"
 database_id = "52b5d0d1-d9b5-4d76-89c8-34362fdc0fb6"
+
+[vars]
+GITHUB_OWNER        = "MotazJarrah"
+GITHUB_REPO         = "myrx"
+GITHUB_WORKFLOW_REF = "main"

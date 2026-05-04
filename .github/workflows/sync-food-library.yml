@@ -1,0 +1,135 @@
+name: Sync Food Library
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force full re-sync even if checksums match'
+        required: false
+        default: 'false'
+
+  # Optional: uncomment to enable a weekly safety-net sync
+  # schedule:
+  #   - cron: '0 6 * * 0'   # Sundays at 06:00 UTC
+
+jobs:
+  sync:
+    name: Sync USDA + OpenNutrition → D1
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      CLOUDFLARE_API_TOKEN:   ${{ secrets.CF_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID:  ${{ secrets.CF_ACCOUNT_ID }}
+      D1_DATABASE_ID:         ${{ secrets.D1_DATABASE_ID }}
+      USDA_API_KEY:           ${{ secrets.USDA_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install script dependencies
+        working-directory: scripts/d1_migrate
+        run: npm ci
+
+      # ── Mark sync as started ────────────────────────────────────────────────
+      - name: Mark sync started in D1
+        run: |
+          node -e "
+          import('./scripts/d1_migrate/lib/d1.mjs').then(async ({ createD1Client }) => {
+            const db = createD1Client({
+              accountId:  process.env.CLOUDFLARE_ACCOUNT_ID,
+              databaseId: process.env.D1_DATABASE_ID,
+              apiToken:   process.env.CLOUDFLARE_API_TOKEN,
+            })
+            const now = new Date().toISOString()
+            await db.batch([
+              { sql: \"UPDATE sync_state SET value='running',  updated_at=datetime('now') WHERE key='sync_status'\" },
+              { sql: \"UPDATE sync_state SET value=?, updated_at=datetime('now') WHERE key='sync_started_at'\", params: [now] },
+              { sql: \"UPDATE sync_state SET value='',  updated_at=datetime('now') WHERE key='sync_error'\" },
+              { sql: \"UPDATE sync_state SET value='{}', updated_at=datetime('now') WHERE key='sync_progress'\" },
+            ])
+            console.log('Sync marked as started:', now)
+          })
+          "
+
+      # ── USDA incremental sync ───────────────────────────────────────────────
+      - name: Sync USDA (attempt 1)
+        id: usda_1
+        continue-on-error: true
+        run: node scripts/d1_migrate/sync_usda.mjs
+
+      - name: Sync USDA (attempt 2 — retry)
+        id: usda_2
+        if: steps.usda_1.outcome == 'failure'
+        continue-on-error: true
+        run: node scripts/d1_migrate/sync_usda.mjs
+
+      - name: Sync USDA (attempt 3 — final retry)
+        id: usda_3
+        if: steps.usda_2.outcome == 'failure'
+        continue-on-error: true
+        run: node scripts/d1_migrate/sync_usda.mjs
+
+      # ── ON diff sync ────────────────────────────────────────────────────────
+      - name: Sync OpenNutrition (attempt 1)
+        id: on_1
+        continue-on-error: true
+        run: node scripts/d1_migrate/sync_on.mjs
+
+      - name: Sync OpenNutrition (attempt 2 — retry)
+        id: on_2
+        if: steps.on_1.outcome == 'failure'
+        continue-on-error: true
+        run: node scripts/d1_migrate/sync_on.mjs
+
+      - name: Sync OpenNutrition (attempt 3 — final retry)
+        id: on_3
+        if: steps.on_2.outcome == 'failure'
+        run: node scripts/d1_migrate/sync_on.mjs
+
+      # ── Mark completed ──────────────────────────────────────────────────────
+      - name: Mark sync completed in D1
+        if: success()
+        run: |
+          node -e "
+          import('./scripts/d1_migrate/lib/d1.mjs').then(async ({ createD1Client }) => {
+            const db = createD1Client({
+              accountId:  process.env.CLOUDFLARE_ACCOUNT_ID,
+              databaseId: process.env.D1_DATABASE_ID,
+              apiToken:   process.env.CLOUDFLARE_API_TOKEN,
+            })
+            const now = new Date().toISOString()
+            await db.batch([
+              { sql: \"UPDATE sync_state SET value='completed', updated_at=datetime('now') WHERE key='sync_status'\" },
+              { sql: \"UPDATE sync_state SET value=?, updated_at=datetime('now') WHERE key='sync_completed_at'\", params: [now] },
+            ])
+            console.log('Sync marked as completed:', now)
+          })
+          "
+
+      # ── Mark failed (always runs on failure) ────────────────────────────────
+      - name: Mark sync failed in D1
+        if: failure()
+        run: |
+          node -e "
+          import('./scripts/d1_migrate/lib/d1.mjs').then(async ({ createD1Client }) => {
+            const db = createD1Client({
+              accountId:  process.env.CLOUDFLARE_ACCOUNT_ID,
+              databaseId: process.env.D1_DATABASE_ID,
+              apiToken:   process.env.CLOUDFLARE_API_TOKEN,
+            })
+            const now = new Date().toISOString()
+            await db.batch([
+              { sql: \"UPDATE sync_state SET value='failed', updated_at=datetime('now') WHERE key='sync_status'\" },
+              { sql: \"UPDATE sync_state SET value=?, updated_at=datetime('now') WHERE key='sync_completed_at'\", params: [now] },
+              { sql: \"UPDATE sync_state SET value='One or more sync steps failed after 3 attempts. Check GitHub Actions logs.', updated_at=datetime('now') WHERE key='sync_error'\" },
+            ])
+            console.log('Sync marked as failed:', now)
+          })
+          "
