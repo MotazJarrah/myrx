@@ -1,5 +1,66 @@
 # MyRX — Project Context
 
+## Repository structure
+
+Single repo at `C:\Users\motaz\OneDrive\Desktop\MyRX`. Everything lives under it.
+
+```
+MyRX/
+├── web/         ← Web app (Vite + React + Wouter + Supabase) — Cloudflare Pages target
+│   ├── src/                       source code (pages, components, contexts, lib)
+│   ├── public/                    static assets served verbatim
+│   ├── functions/                 Cloudflare Pages Functions (e.g. /api/off-search)
+│   ├── package.json               web-specific deps + scripts
+│   ├── vite.config.js
+│   ├── tailwind.config.js
+│   ├── postcss.config.js
+│   ├── eslint.config.js
+│   ├── index.html                 Vite HTML entry
+│   └── dist/                      build output (gitignored)
+│
+├── mobile/      ← Mobile app (Expo + React Native + Reanimated 4)
+│   ├── app/                       expo-router routes
+│   ├── src/                       components, contexts, lib, theme
+│   ├── assets/                    fonts, images, splash
+│   ├── package.json               mobile-specific deps
+│   ├── app.json, babel.config.js, metro.config.js, tailwind.config.cjs
+│   └── android/                   native folder (gitignored, regen via `npx expo prebuild`)
+│
+├── workers/     ← Cloudflare Workers (independent deploys)
+│   └── food-search/               D1-backed USDA / OpenNutrition food search worker
+│
+├── supabase/    ← Supabase schema + edge functions + applied migrations
+│   ├── migrations/                tracked SQL migrations
+│   ├── migrations-archive/        loose ad-hoc SQL files kept for reference
+│   └── functions/                 Supabase edge functions (Twilio Verify, etc.)
+│
+├── branding/    ← Logo + wordmark masters (Photoshop / SVG sources)
+│   └── Logo/
+│
+├── docs/        ← Design docs, blueprints, user stories, dataset licenses
+│   ├── BLUEPRINT_behavioral_features.md
+│   ├── User Stories.txt
+│   ├── Free Weights.docx, Distance.docx, Bodyweight_Reps_Exercises_Grouped.docx
+│   └── datasets/opennutrition/    OpenNutrition seed licenses (TSV was one-shot, discarded)
+│
+├── scripts/     ← Deploy helpers + data-import tooling
+│   ├── usda_import/               USDA FoodData Central importer (one-shot)
+│   ├── seed_movements.mjs, import-opennutrition.mjs
+│   └── data-tools/                Python scripts for spreadsheet wrangling
+│
+├── CLAUDE.md, README.md, .gitignore, .env.local (gitignored)
+└── .git, .claude, .github
+```
+
+**Path conventions used throughout this doc:**
+- `src/pages/Strength.jsx` (no folder prefix) → **web** file, lives at `web/src/pages/Strength.jsx`.
+- `app/(app)/strength.tsx`, `src/components/PhantomWheel.tsx` (no folder prefix, but `app/` or `.tsx` extension hints React Native) → **mobile** file, lives at `mobile/...`.
+- Anything with an explicit prefix (`web/`, `mobile/`, `workers/`, `supabase/`) means exactly that absolute location from the repo root.
+
+**Deploy is direct-upload, not Git-integrated.** Cloudflare Pages does NOT watch GitHub. `git push` is for source-of-truth only; deploys happen exclusively via `wrangler pages deploy web/dist` (see Deployment section).
+
+---
+
 ## Working Relationship
 - **You are the programmer. The user is the product manager.**
 - At the start of every new session, read this file top to bottom, then ask the user what they'd like to work on.
@@ -357,7 +418,7 @@ For each rep range r in 1..20:
   tile_bw_pct(r)            = round((projected_assistance(r) / bodyweight) × 100)
 ```
 
-The shared formula update (locked simultaneously): `estimate1RM` and `projectAllRMs` in both `src/lib/formulas.js` (web) and `MyRX-Mobile/src/lib/formulas.ts` (mobile) drop Brzycki when `reps > 10` and average only Epley + Lombardi. Brzycki's linear assumption under-projects high-rep loads relative to NSCA reference tables; the cap fixes that. This change also affects the 15RM / 20RM tiles on weighted-detail pages — expected ~3-4 percentage-point increase.
+The shared formula update (locked simultaneously): `estimate1RM` and `projectAllRMs` in both `src/lib/formulas.js` (web) and `mobile/src/lib/formulas.ts` (mobile) drop Brzycki when `reps > 10` and average only Epley + Lombardi. Brzycki's linear assumption under-projects high-rep loads relative to NSCA reference tables; the cap fixes that. This change also affects the 15RM / 20RM tiles on weighted-detail pages — expected ~3-4 percentage-point increase.
 
 **Bodyweight gate (locked):**
 - Source: latest log in the `bodyweight` table for the user, or `profile.current_weight` as fallback (always synced to latest log on insert/delete).
@@ -613,9 +674,9 @@ A React + Vite SPA — a fitness coaching platform. Clients track strength, card
 
 ---
 
-## Mobile Mirror (MyRX-Mobile)
+## Mobile Mirror (mobile/)
 
-There is a **React Native (Expo) port of this app** at `C:\Users\motaz\OneDrive\Desktop\MyRX-Mobile\`. It targets the same Supabase backend.
+There is a **React Native (Expo) port of this app** at `C:\Users\motaz\OneDrive\Desktop\MyRX\mobile\`. It targets the same Supabase backend.
 
 **⚠ Web is FROZEN for design + feature parity (locked 2026-05-12).** Mobile is now the active surface for ALL new feature work and design iteration. The web app continues to run against the same Supabase backend and read the same data, but it does NOT receive design or feature parity updates anymore. Touch the web codebase ONLY when:
   - A database schema change would cause the web app to crash or render broken output (in which case apply the minimum compatibility patch — read the new column tolerantly, fall back gracefully when fields are missing).
@@ -669,7 +730,7 @@ When in doubt, audit the rendered surface for ANY brand mark (image OR text) bef
 - **`profile.is_superuser`** hides the two share-with-coach toggles on the Settings page (admin has no coach). Applied in:
   - `src/pages/EditProfile.jsx` (end-user web, when admin is in client view) — `isAdmin` check
   - `src/pages/admin/tabs/AdminUserProfile.jsx` (admin's own profile via `/admin/profile`) — `isOwnProfile` prop
-  - `MyRX-Mobile/app/(app)/profile.tsx` (mobile, defensive) — `isAdmin` check
+  - `mobile/app/(app)/profile.tsx` (mobile, defensive) — `isAdmin` check
 - **Profile refresh no longer unmounts the route tree.** `App.jsx` `ProtectedLayout` only renders `<ShellSkeleton />` when `profile` is `null` (initial load), not on every `refreshProfile()` call. Mirrors mobile's `(app)/_layout.tsx` guard.
 
 ### Mobile auth infrastructure (shipped)
@@ -699,7 +760,7 @@ Phone OTP is wired through Twilio Verify, NOT Twilio Programmable Messaging. Ver
 
 ### Working across web + mobile in one session
 
-The mobile codebase lives at `C:\Users\motaz\OneDrive\Desktop\MyRX-Mobile` (Expo / React Native, Expo Router). The two projects share Supabase backend, edge functions, RLS policies, and DB schema. Both are accessed from the same Claude Code session — there's no separate workspace.
+The mobile codebase lives at `C:\Users\motaz\OneDrive\Desktop\MyRX\mobile` (Expo / React Native, Expo Router). The two projects share Supabase backend, edge functions, RLS policies, and DB schema. Both are accessed from the same Claude Code session — there's no separate workspace.
 
 When making changes that touch both sides:
 1. Edit the relevant files in whichever side you're starting from
@@ -710,8 +771,8 @@ When making changes that touch both sides:
 
 ### Mobile dev environment
 
-**Repo location:** `C:\Users\motaz\OneDrive\Desktop\MyRX-Mobile\`
-There is a small `MyRX-Mobile/CLAUDE.md` stub pointing back to this file — this section is the single source of truth for mobile dev guidance.
+**Repo location:** `C:\Users\motaz\OneDrive\Desktop\MyRX\mobile\`
+There is a small `mobile/CLAUDE.md` stub pointing back to this file — this section is the single source of truth for mobile dev guidance.
 
 #### Tech stack
 - Expo SDK 54, React Native 0.81, React 19
@@ -743,7 +804,7 @@ The user runs against a physical phone connected by USB cable, not Expo Go and n
    ```
 4. **Start Metro**:
    ```powershell
-   cd C:\Users\motaz\OneDrive\Desktop\MyRX-Mobile
+   cd C:\Users\motaz\OneDrive\Desktop\MyRX\mobile
    npx expo start --dev-client --port 8081
    ```
 5. **Open the MyRX dev client app on the phone.** It auto-connects to `localhost:8081`. JS edits hot-reload.
@@ -763,7 +824,7 @@ Once the APK is on the phone:
 2. **Disconnect the USB cable** — no longer needed.
 3. **Start Metro** from the mobile repo:
    ```powershell
-   cd C:\Users\motaz\OneDrive\Desktop\MyRX-Mobile
+   cd C:\Users\motaz\OneDrive\Desktop\MyRX\mobile
    npx expo start --dev-client --port 8081
    ```
    Metro's terminal output shows a `exp+myrx://expo-development-client/?url=http%3A%2F%2F192.168.x.x%3A8081` URL and a QR code. The IP in that URL is the laptop's LAN IP — that's how the phone reaches Metro.
@@ -778,7 +839,7 @@ Once the APK is on the phone:
   ```
   This kills the app and relaunches its main activity, which gives a fresh JS context that re-fetches the latest bundle from Metro. **Why force-stop + monkey instead of `adb shell am broadcast -a com.facebook.react.devsupport.RELOAD`:** broadcasts return `result=0` ("delivered") but no receiver is registered for them under Expo SDK 54 + new arch, so they're a silent no-op. Only the force-stop + relaunch path actually reloads. Verify success with `adb shell pidof com.myrx.app` before vs after — the PID should change.
 
-  Run as the LAST step of any turn that edits a `.ts`/`.tsx`/`.js`/`.jsx`/`.json` file under `MyRX-Mobile/`. Skip ONLY when there's no Metro server attached (e.g. native rebuild in progress) or the user explicitly says not to reload yet.
+  Run as the LAST step of any turn that edits a `.ts`/`.tsx`/`.js`/`.jsx`/`.json` file under `mobile/`. Skip ONLY when there's no Metro server attached (e.g. native rebuild in progress) or the user explicitly says not to reload yet.
 
   **Important caveat: `adb` commands require USB.** When the user has disconnected the cable to work over WiFi (their normal pattern after the initial build install), `adb devices` returns empty. In that case:
   1. Metro's Fast Refresh pushes JS-only edits to the connected dev client over WebSocket automatically — most edits don't need any reload trigger.
@@ -792,7 +853,7 @@ Once the APK is on the phone:
 **CRITICAL — never deep-link the dev client to `localhost:8081`.** That URL only resolves on the phone via an active `adb reverse tcp:8081 tcp:8081` USB tunnel. The moment the user unplugs the cable, the phone tries to connect to its OWN localhost (which has nothing on port 8081) and the dev client errors out. For every cold-launch via deep link, ALWAYS use the laptop's LAN IP, e.g.:
 ```powershell
 adb shell am start -W -a android.intent.action.VIEW \
-  -d "exp+myrx-mobile://expo-development-client/?url=http%3A%2F%2F10.0.0.187%3A8081" \
+  -d "exp+mobile://expo-development-client/?url=http%3A%2F%2F10.0.0.187%3A8081" \
   com.myrx.app
 ```
 The dev client persists the last-used URL across cold-starts. Once it's pointed at the LAN IP, the user can keep USB unplugged forever and reloads still work over WiFi — `adb shell am force-stop com.myrx.app` + `adb shell monkey ...` only need USB at the moment of the kill, not for the bundle fetch that follows. If you absolutely need `localhost` (e.g. testing changes on a network that blocks port 8081), explicitly run `adb reverse tcp:8081 tcp:8081` in the same turn AND remind the user to keep the cable in.
@@ -823,7 +884,7 @@ Used when no phone is plugged in. Emulator reaches the host PC at `10.0.2.2:8081
 ```powershell
 & "$env:ANDROID_HOME\emulator\emulator.exe" -avd Medium_Phone_API_35 -no-snapshot-save -no-audio
 & "$env:ANDROID_HOME\platform-tools\adb.exe" wait-for-device
-cd C:\Users\motaz\OneDrive\Desktop\MyRX-Mobile
+cd C:\Users\motaz\OneDrive\Desktop\MyRX\mobile
 npx expo start --dev-client --port 8081
 ```
 
@@ -834,7 +895,7 @@ npx expo start --dev-client --port 8081
 
 #### Mobile file tree (key paths)
 ```
-MyRX-Mobile/
+mobile/
 ├── app/                                # expo-router
 │   ├── _layout.tsx                     # GestureHandlerRootView + AuthProvider + cache hydration
 │   ├── index.tsx                       # auth-aware redirect → /(app)/dashboard or /(auth)/sign-in
@@ -1067,12 +1128,12 @@ When in doubt, do the cross-check rather than skipping it. A redundant check cos
 When verifying a deploy, hit myrxfit.com (not the pages.dev alias) so the asset hash you compare matches what the user actually sees:
 ```bash
 curl -s "https://myrxfit.com/" | grep -oE 'index-[^"]+\.js'
-ls dist/assets/index-*.js
+ls web/dist/assets/index-*.js
 ```
 
 ## Deployment
 ```powershell
-# From C:\Users\motaz\OneDrive\Desktop\MyRX
+# From C:\Users\motaz\OneDrive\Desktop\MyRX\web
 npm run build
 npx wrangler pages deploy dist --project-name myrx --commit-dirty=true
 ```
@@ -1080,11 +1141,13 @@ Env vars are already set in the shell profile. No need to set them manually.
 
 > 🚀 **AUTO-DEPLOY AFTER EVERY WEB CHANGE.**
 > The user QAs on the live URL — there is no `npm run dev` workflow. After any code
-> change to this repo (no matter how small), the assistant MUST chain
-> `npm run build && npx wrangler pages deploy dist --project-name myrx --commit-dirty=true`
+> change to `web/` (no matter how small), the assistant MUST chain the build + deploy
+> from inside `web/`:
+> `cd web && npm run build && npx wrangler pages deploy dist --project-name myrx --commit-dirty=true`
 > as the LAST action of the turn. Reporting "build passed, please verify" without
 > deploying wastes a round-trip because the user can't test until it's live.
-> Skip ONLY if the user explicitly says not to deploy (e.g. "don't deploy yet", "just write the code").
+> Skip ONLY if the user explicitly says not to deploy (e.g. "don't deploy yet", "just write the code"),
+> OR if the change was mobile-only (`mobile/...` — no web build needed).
 
 > ⚠️ **Deploy goes directly to Cloudflare — NOT via GitHub.**
 > The Cloudflare Pages project (`myrx`) is a **Direct Upload type** — its Git connection is not active. Pushing to `MotazJarrah/myrx` on GitHub does NOTHING for the live site. Wrangler uploads `dist/` straight to Cloudflare Pages, full stop.
@@ -1094,7 +1157,7 @@ Env vars are already set in the shell profile. No need to set them manually.
 > **If a change isn't visible at `myrxfit.com` after a deploy, verify with this:**
 > ```bash
 > curl -s "https://myrxfit.com/" | grep -oE 'index-[^"]+\.js'   # what's live
-> ls dist/assets/index-*.js                                       # what local build produced
+> ls web/dist/assets/index-*.js                                       # what local build produced
 > ```
 > If those two hashes don't match, the wrangler upload didn't run — re-run `npx wrangler pages deploy dist --project-name myrx --commit-dirty=true`.
 >

@@ -29,3 +29,6 @@ dist-ssr
 # OpenNutrition seed dataset — multi-hundred-MB TSV used once for D1 import.
 # Keep on disk for re-import but never commit it (kills git push over flaky links).
 opennutrition/
+
+# Cloudflare wrangler local cache (account info, build state)
+.wrangler/
