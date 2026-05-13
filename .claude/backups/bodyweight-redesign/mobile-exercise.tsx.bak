@@ -1,0 +1,1678 @@
+/**
+ * StrengthDetail — direct port of MyRX/src/pages/StrengthDetail.jsx to RN.
+ *
+ * Five rendering modes, dispatched off the movement record + name suffixes:
+ *
+ *   1. IsometricDetail        — strength_type === 'isometric'
+ *   2. AssistedMachineDetail  — equipment === 'assisted'
+ *   3. CarryDetail            — equipment === 'carry'
+ *   4. RepsOnlyDetail         — name endsWith [Band] / [Knee] / [Band + Knee]
+ *   5. Standard (rep-based)   — bodyweight or weighted (barbell/dumbbell/etc.)
+ *
+ * Recharts <LineChart> is replaced by `src/components/LineChart.tsx`
+ * (react-native-svg). DOM dropdowns / mouse-hover tooltips don't apply here —
+ * the chart uses tap-to-pin tooltips instead.
+ */
+
+import { useEffect, useRef, useState } from 'react'
+import { View, Text, Pressable, ScrollView, StyleSheet, type LayoutChangeEvent } from 'react-native'
+import Animated, { FadeInUp, FadeOutUp, LinearTransition } from 'react-native-reanimated'
+import { useLocalSearchParams, router } from 'expo-router'
+import { ChevronLeft } from 'lucide-react-native'
+import Skeleton from '../../../../src/components/Skeleton'
+import DeleteAction from '../../../../src/components/DeleteAction'
+import TickerNumber from '../../../../src/components/TickerNumber'
+import AnimateRise from '../../../../src/components/AnimateRise'
+import LineChart from '../../../../src/components/LineChart'
+import { useAuth } from '../../../../src/contexts/AuthContext'
+import { supabase } from '../../../../src/lib/supabase'
+import {
+  estimate1RM,
+  projectAllRMs,
+  getNextBarbellLoad,
+  getNextDumbbellWeight,
+  getNextAddedWeight,
+  platesForBarbellWeight,
+  platesForAddedWeight,
+  loadableWeight,
+  nextLoadableAbove,
+  getLadder,
+  adpZoneFor,
+  ADP_ZONE_CONFIG,
+  type LadderEquipment,
+  type AdpZone,
+} from '../../../../src/lib/formulas'
+import { Info } from 'lucide-react-native'
+import { useMovements } from '../../../../src/hooks/useMovements'
+import { colors, palette, alpha, withAlpha, fonts } from '../../../../src/theme'
+
+const BODYWEIGHT_THRESHOLD = 10
+
+// ── Effort row (denormalised from supabase) ──────────────────────────────────
+interface Effort {
+  id:         string
+  user_id:    string
+  type:       string
+  label:      string
+  value:      string
+  created_at: string
+}
+
+// ── Parsers (1:1 with web) ───────────────────────────────────────────────────
+
+function parseOneRM(value: string | null | undefined): { oneRM: number; unit: string } | null {
+  const m = value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
+  if (!m) return null
+  return { oneRM: parseFloat(m[1]), unit: m[2] }
+}
+
+function parseRepsFromLabel(label: string | null | undefined): number {
+  const m = label?.match(/×\s*(\d+)/)
+  return m ? parseInt(m[1]) : 0
+}
+
+/**
+ * Parses the main lifted weight from a weighted-strength label.
+ *   "Bench Press · 135 lb × 8"           → 135
+ *   "Squat · 155+25 lb × 5" (bodyweight) → 155 (returns the BW component)
+ * Mirror of web parseWeightFromLabel.
+ */
+function parseWeightFromLabel(label: string | null | undefined): number {
+  const m = label?.match(/·\s*([\d.]+)(?:\+[\d.]+)?\s*\w+\s*×/)
+  return m ? parseFloat(m[1]) : 0
+}
+
+function parseAddedWeightFromLabel(label: string | null | undefined): number {
+  const m = label?.match(/\+([\d.]+)\s*\w+\s*×/)
+  return m ? parseFloat(m[1]) : 0
+}
+
+function parseDurationSecs(value: string | null | undefined): number | null {
+  const m = value?.match(/^(\d+)\s*sec/)
+  return m ? parseInt(m[1]) : null
+}
+
+function parseAssistanceFromLabel(label: string | null | undefined): { assistance: number; unit: string } | null {
+  const m = label?.match(/·\s*([\d.]+)\s*(\w+)\s*assist/)
+  if (!m) return null
+  return { assistance: parseFloat(m[1]), unit: m[2] }
+}
+
+function parseCarryFromLabel(label: string | null | undefined): { weight: number; unit: string; dist: number } | null {
+  const weightM = label?.match(/·\s*([\d.]+)\s*(\w+)\s*×/)
+  const distM   = label?.match(/×\s*([\d.]+)\s*m/)
+  if (!weightM || !distM) return null
+  return { weight: parseFloat(weightM[1]), unit: weightM[2], dist: parseFloat(distM[1]) }
+}
+
+function parseRepsOnlyFromLabel(label: string | null | undefined, isBand: boolean): number | null {
+  if (isBand) {
+    const m = label?.match(/×\s*(\d+)/)
+    return m ? parseInt(m[1]) : null
+  }
+  const m = label?.match(/·\s*(\d+)\s*reps/)
+  return m ? parseInt(m[1]) : null
+}
+
+function parseBandLevelFromLabel(label: string | null | undefined): string | null {
+  const m = label?.match(/\[Band(?:\s*\+\s*Knee)?\]\s*·\s*([\w\s]+?)\s*×/)
+  return m ? m[1].trim() : null
+}
+
+// ── Formatters ───────────────────────────────────────────────────────────────
+
+function fmtDuration(secs: number | null | undefined): string {
+  if (!secs) return '0s'
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  if (m === 0) return `${s}s`
+  if (s === 0) return `${m}m`
+  return `${m}m ${s}s`
+}
+
+function fmtDurationLong(secs: number | null | undefined): string {
+  if (!secs) return '0 sec'
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  if (m === 0) return `${s} sec`
+  if (s === 0) return `${m} min`
+  return `${m} min ${s} sec`
+}
+
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString()
+}
+
+// ── Isometric milestones ─────────────────────────────────────────────────────
+
+const ISO_MILESTONES_2MIN  = [5, 10, 15, 20, 30, 45, 60, 75, 90, 120]
+const ISO_MILESTONES_10MIN = [15, 30, 45, 60, 90, 120, 180, 300, 420, 600]
+
+const TEN_MIN_ISO = new Set([
+  'Plank Hold', 'Wall Sit', 'Side Plank Hold',
+  'Reverse Plank Hold', 'Glute Bridge Hold', 'Superman Hold',
+])
+
+// ── Common navigation ───────────────────────────────────────────────────────
+
+function goBack() {
+  if (router.canGoBack()) router.back()
+  else router.replace('/(app)/strength' as any)
+}
+
+// ── Common subview pieces ───────────────────────────────────────────────────
+
+function BackButton() {
+  // Native-style chevron-only back affordance. Web has a wordy "← Back" link;
+  // on mobile, every modern app (Instagram, Spotify, Gmail, etc.) shows just a
+  // chevron in the top-left. hitSlop expands the tappable area beyond the
+  // visible icon so the small target is still easy to hit.
+  return (
+    <Pressable onPress={goBack} style={s.backBtn} hitSlop={12} accessibilityLabel="Go back">
+      <ChevronLeft size={24} color={colors.foreground} />
+    </Pressable>
+  )
+}
+
+function NextTargetCallout({
+  title = 'Your next training target',
+  children,
+}: { title?: string; children: React.ReactNode }) {
+  return (
+    <View style={s.callout}>
+      <Text style={s.calloutTitle}>{title}</Text>
+      {children}
+    </View>
+  )
+}
+
+interface TileGridProps<T> {
+  items: T[]
+  cols?: number
+  gap?: number
+  renderTile: (item: T, i: number, tileW: number) => React.ReactNode
+}
+
+function TileGrid<T>({ items, cols = 5, gap = 8, renderTile }: TileGridProps<T>) {
+  const [w, setW] = useState(0)
+  // Math.floor avoids fractional widths that RN can round in a way that
+  // pushes the last column to wrap. Using explicit marginRight per child
+  // (instead of `gap` on the parent) keeps the layout deterministic.
+  const tileW = w > 0 ? Math.floor((w - gap * (cols - 1)) / cols) : 0
+  const onLayout = (e: LayoutChangeEvent) => setW(e.nativeEvent.layout.width)
+  const totalRows = Math.ceil(items.length / cols)
+
+  return (
+    <View
+      style={{ flexDirection: 'row', flexWrap: 'wrap' }}
+      onLayout={onLayout}
+    >
+      {tileW > 0 && items.map((item, i) => {
+        const isLastInRow = (i + 1) % cols === 0
+        const row         = Math.floor(i / cols)
+        const isLastRow   = row === totalRows - 1
+        return (
+          <View
+            key={i}
+            style={{
+              width: tileW,
+              marginRight: isLastInRow ? 0 : gap,
+              marginBottom: isLastRow ? 0 : gap,
+            }}
+          >
+            {renderTile(item, i, tileW)}
+          </View>
+        )
+      })}
+    </View>
+  )
+}
+
+function EffortsHistorySection({
+  efforts,
+  renderRight,
+  onDelete,
+  renderLeft,
+}: {
+  efforts: Effort[]
+  renderRight: (e: Effort) => React.ReactNode
+  onDelete: (id: string) => void
+  renderLeft?: (e: Effort) => React.ReactNode
+}) {
+  return (
+    <AnimateRise style={s.cardNoPad}>
+      <View style={s.listHeader}>
+        <Text style={s.listHeaderText}>Efforts history</Text>
+      </View>
+      <View>
+        {[...efforts].reverse().map((e, i, arr) => (
+          <DeleteAction
+            key={e.id}
+            onDelete={() => onDelete(e.id)}
+            style={i < arr.length - 1 ? s.listRowDivider : undefined}
+            bg={colors.card}
+          >
+            <View style={s.listRow}>
+              <View style={{ flex: 1, marginRight: 12 }}>
+                {renderLeft ? renderLeft(e) : (
+                  <Text style={s.listRowDate}>{fmtDate(e.created_at)}</Text>
+                )}
+              </View>
+              {renderRight(e)}
+            </View>
+          </DeleteAction>
+        ))}
+      </View>
+    </AnimateRise>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IsometricDetail
+// ─────────────────────────────────────────────────────────────────────────────
+
+function IsometricDetail({
+  exercise, efforts, onDelete,
+}: { exercise: string; efforts: Effort[]; onDelete: (id: string) => void }) {
+  const milestones = TEN_MIN_ISO.has(exercise) ? ISO_MILESTONES_10MIN : ISO_MILESTONES_2MIN
+
+  const durations    = efforts.map(e => parseDurationSecs(e.value)).filter((s): s is number => s !== null)
+  const bestSecs     = durations.length > 0 ? Math.max(...durations) : 0
+  const lastAchieved = [...milestones].reverse().find(m => m <= bestSecs) ?? null
+
+  const [selectedMilestone, setSelectedMilestone] = useState<number>(lastAchieved ?? milestones[0])
+
+  const nextMilestone = milestones.find(m => m > bestSecs) ?? null
+
+  const chartData = efforts
+    .map(e => {
+      const secs = parseDurationSecs(e.value)
+      return secs !== null ? { ts: e.created_at, y: secs } : null
+    })
+    .filter((p): p is { ts: string; y: number } => p !== null)
+
+  return (
+    <View style={s.page}>
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{exercise}</Text>
+        <Text style={s.subText}>
+          Personal best — <Text style={s.subValueBlue}>{fmtDurationLong(bestSecs)}</Text>
+        </Text>
+      </View>
+
+      <AnimateRise style={s.card}>
+        <View style={{ gap: 2 }}>
+          <Text style={s.h2}>Hold time milestones</Text>
+          <Text style={s.helpText}>Tap an achieved milestone to review it</Text>
+        </View>
+
+        <TileGrid
+          items={milestones}
+          renderTile={(ms) => {
+            const achieved   = ms <= bestSecs
+            const isSelected = selectedMilestone === ms
+            const isCurrent  = ms === lastAchieved
+            return (
+              <Pressable
+                onPress={() => achieved && setSelectedMilestone(ms)}
+                disabled={!achieved}
+                style={[
+                  s.tile,
+                  isSelected  ? s.tileSelected
+                  : isCurrent ? s.tileCurrent
+                  : achieved  ? s.tileAchievable
+                              : s.tileLocked,
+                ]}
+              >
+                <Text
+                  style={[
+                    s.tileValueMono,
+                    isSelected  ? s.tileTextSelected
+                    : isCurrent ? s.tileTextCurrent
+                    : achieved  ? s.tileTextAchievable
+                                : s.tileTextLocked,
+                  ]}
+                >
+                  {fmtDuration(ms)}
+                </Text>
+                {achieved && <Text style={s.checkBlue}>✓</Text>}
+              </Pressable>
+            )
+          }}
+        />
+
+        <Text style={s.tinyText}>Greyed out tiles are milestones not yet reached</Text>
+
+        <NextTargetCallout>
+          {bestSecs === 0 ? (
+            <>
+              <View style={s.calloutValueRow}>
+                <Text style={s.calloutValue}>{fmtDuration(milestones[0])}</Text>
+                <Text style={s.calloutSubText}>first target</Text>
+              </View>
+              <Text style={s.tinyText}>
+                Hold for {fmtDurationLong(milestones[0])} without breaking form to unlock your first milestone
+              </Text>
+            </>
+          ) : selectedMilestone < (nextMilestone ?? Infinity) ? (
+            <>
+              <View style={s.calloutValueRow}>
+                <Text style={s.calloutValue}>{fmtDuration(selectedMilestone)}</Text>
+                <Text style={s.calloutSubText}>achieved</Text>
+              </View>
+              <Text style={s.tinyText}>
+                {nextMilestone
+                  ? `Next milestone: ${fmtDuration(nextMilestone)} — ${fmtDurationLong(nextMilestone - bestSecs)} more than your best`
+                  : "You've hit every milestone — outstanding!"}
+              </Text>
+            </>
+          ) : (
+            <>
+              <View style={s.calloutValueRow}>
+                <Text style={s.calloutValue}>{fmtDuration(milestones[milestones.length - 1])}</Text>
+                <Text style={s.calloutSubText}>all done</Text>
+              </View>
+              <Text style={s.tinyText}>You've hit every milestone — outstanding!</Text>
+            </>
+          )}
+        </NextTargetCallout>
+      </AnimateRise>
+
+      {chartData.length >= 1 && (
+        <AnimateRise style={s.card}>
+          <Text style={s.h2}>Hold time over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={chartData.length > 1 ? bestSecs : null}
+            yTickFormatter={(v) => fmtDuration(Math.round(v))}
+            tooltipValueFormatter={(v) => fmtDurationLong(Math.round(v))}
+            tooltipLabel="Hold time"
+            yDomain={{
+              min: (mn) => Math.max(0, Math.round(mn * 0.85)),
+              max: (mx) => Math.round(mx * 1.15),
+            }}
+            caption={<Text style={s.tinyText}>Dashed line = personal best</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      <EffortsHistorySection
+        efforts={efforts}
+        onDelete={onDelete}
+        renderLeft={e => (
+          <Text style={s.listRowDate}>{fmtDate(e.created_at)}</Text>
+        )}
+        renderRight={e => {
+          const secs = parseDurationSecs(e.value)
+          return (
+            <Text style={s.valBlue}>{fmtDurationLong(secs)}</Text>
+          )
+        }}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AssistedMachineDetail
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AssistedMachineDetail({
+  exercise, efforts, onDelete,
+}: { exercise: string; efforts: Effort[]; onDelete: (id: string) => void }) {
+  const parsed = efforts
+    .map(e => {
+      const p = parseAssistanceFromLabel(e.label)
+      if (!p) return null
+      const repsM = e.label.match(/×\s*(\d+)/)
+      return { ...p, reps: repsM ? parseInt(repsM[1]) : null, ts: e.created_at, id: e.id }
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+
+  const unit            = parsed[0]?.unit || 'lb'
+  const bestAssistance  = parsed.length > 0 ? Math.min(...parsed.map(p => p.assistance)) : null
+  const inc             = unit === 'kg' ? 2.5 : 5
+  const nextTarget      = bestAssistance !== null ? Math.max(0, bestAssistance - inc) : null
+  const chartData       = parsed.map(p => ({ ts: p.ts, y: p.assistance }))
+
+  return (
+    <View style={s.page}>
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{exercise}</Text>
+        <Text style={s.subText}>
+          Best assistance —{' '}
+          <Text style={s.subValueBlue}>
+            {bestAssistance !== null ? `${bestAssistance} ${unit}` : '—'}
+          </Text>
+          {bestAssistance === 0 && (
+            <Text style={[s.subValueBlue, { marginLeft: 6, fontSize: 12 }]}>{'  '}Fully unassisted 🎉</Text>
+          )}
+        </Text>
+      </View>
+
+      <AnimateRise style={s.card}>
+        <Text style={s.h2}>Progress tracker</Text>
+        <Text style={s.helpText}>
+          Lower assistance = less help = harder. Goal: reduce to 0 {unit}.
+        </Text>
+
+        <NextTargetCallout>
+          {bestAssistance === null ? (
+            <Text style={s.helpText}>No efforts logged yet</Text>
+          ) : bestAssistance === 0 ? (
+            <>
+              <View style={s.calloutValueRow}>
+                <Text style={s.calloutValue}>0</Text>
+                <Text style={s.calloutSubText}>{unit} — fully unassisted</Text>
+              </View>
+              <Text style={s.tinyText}>
+                You've graduated to bodyweight — switch to the unassisted version!
+              </Text>
+            </>
+          ) : (
+            <>
+              <View style={s.calloutValueRow}>
+                <Text style={s.calloutValue}>{nextTarget}</Text>
+                <Text style={s.calloutSubText}>{unit} assistance</Text>
+              </View>
+              <Text style={s.tinyText}>
+                Reduce by {inc} {unit} from your current best ({bestAssistance} {unit})
+              </Text>
+            </>
+          )}
+        </NextTargetCallout>
+      </AnimateRise>
+
+      {chartData.length >= 1 && (
+        <AnimateRise style={s.card}>
+          <Text style={s.h2}>Assistance over time</Text>
+          <Text style={[s.helpText, { marginTop: -6 }]}>Lower = better progress</Text>
+          <LineChart
+            data={chartData}
+            referenceY={chartData.length > 1 && bestAssistance !== null ? bestAssistance : null}
+            yTickFormatter={(v) => `${Math.round(v)}`}
+            tooltipValueFormatter={(v) => `${Math.round(v)} ${unit}`}
+            tooltipLabel="Assistance"
+            yDomain={{
+              min: () => 0,
+              max: (mx) => Math.round(mx * 1.1),
+            }}
+            caption={<Text style={s.tinyText}>Dashed line = lowest assistance (personal best)</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      <EffortsHistorySection
+        efforts={efforts}
+        onDelete={onDelete}
+        renderLeft={e => {
+          const repsM = e.label.match(/×\s*(\d+)/)
+          const reps  = repsM ? parseInt(repsM[1]) : null
+          return (
+            <View>
+              <Text style={s.listRowName}>{reps ? `${reps} rep${reps !== 1 ? 's' : ''}` : '—'}</Text>
+              <Text style={s.listRowDateSm}>{fmtDate(e.created_at)}</Text>
+            </View>
+          )
+        }}
+        renderRight={e => {
+          const p = parseAssistanceFromLabel(e.label)
+          return (
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={s.listRowSubLabel}>assistance</Text>
+              <Text style={s.valBlue}>{p ? `${p.assistance} ${p.unit}` : '—'}</Text>
+            </View>
+          )
+        }}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CarryDetail
+// ─────────────────────────────────────────────────────────────────────────────
+
+function CarryDetail({
+  exercise, efforts, onDelete,
+}: { exercise: string; efforts: Effort[]; onDelete: (id: string) => void }) {
+  const parsed = efforts
+    .map(e => {
+      const p = parseCarryFromLabel(e.label)
+      return p ? { ...p, ts: e.created_at, id: e.id } : null
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+
+  const unit       = parsed[0]?.unit || 'lb'
+  const bestDist   = parsed.length > 0 ? Math.max(...parsed.map(p => p.dist))   : 0
+  const bestWeight = parsed.length > 0 ? Math.max(...parsed.map(p => p.weight)) : 0
+  const chartData  = parsed.map(p => ({ ts: p.ts, y: p.dist }))
+
+  return (
+    <View style={s.page}>
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{exercise}</Text>
+        <Text style={s.subText}>
+          Best distance — <Text style={s.subValueBlue}>{bestDist} m</Text>
+        </Text>
+      </View>
+
+      <AnimateRise style={s.statGrid}>
+        <View style={s.statTile}>
+          <Text style={s.statLabel}>Best distance</Text>
+          <Text style={s.statValue}>
+            {bestDist} <Text style={s.statUnit}>m</Text>
+          </Text>
+        </View>
+        <View style={s.statTile}>
+          <Text style={s.statLabel}>Best weight</Text>
+          <Text style={s.statValue}>
+            {bestWeight} <Text style={s.statUnit}>{unit}</Text>
+          </Text>
+        </View>
+      </AnimateRise>
+
+      {chartData.length >= 1 && (
+        <AnimateRise style={s.card}>
+          <Text style={s.h2}>Distance over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={chartData.length > 1 ? bestDist : null}
+            yTickFormatter={(v) => `${Math.round(v)}`}
+            tooltipValueFormatter={(v) => `${Math.round(v)} m`}
+            tooltipLabel="Distance"
+            yDomain={{
+              min: (mn) => Math.max(0, Math.round(mn * 0.85)),
+              max: (mx) => Math.round(mx * 1.15),
+            }}
+            caption={<Text style={s.tinyText}>Dashed line = personal best distance</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      <EffortsHistorySection
+        efforts={efforts}
+        onDelete={onDelete}
+        renderLeft={e => {
+          const p = parseCarryFromLabel(e.label)
+          return (
+            <View>
+              <Text style={s.listRowName}>{p ? `${p.weight} ${p.unit}` : '—'}</Text>
+              <Text style={s.listRowDateSm}>{fmtDate(e.created_at)}</Text>
+            </View>
+          )
+        }}
+        renderRight={e => {
+          const p = parseCarryFromLabel(e.label)
+          return (
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={s.listRowSubLabel}>distance</Text>
+              <Text style={s.valBlue}>{p ? `${p.dist} m` : '—'}</Text>
+            </View>
+          )
+        }}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RepsOnlyDetail (Band / Knee / Band+Knee assisted)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function RepsOnlyDetail({
+  exercise, efforts, onDelete, assistType = 'band',
+}: {
+  exercise:    string
+  efforts:     Effort[]
+  onDelete:    (id: string) => void
+  assistType?: 'band' | 'knee' | 'band+knee'
+}) {
+  const isBand      = assistType !== 'knee'
+  const assistLabel =
+    assistType === 'band+knee' ? 'Band + Knee assisted'
+    : assistType === 'knee'    ? 'Knee assisted'
+                               : 'Band assisted'
+  const hintText =
+    assistType === 'band+knee'
+      ? 'Progress by using lighter bands and removing knee assist one step at a time'
+      : assistType === 'knee'
+        ? 'Build strength in the knee-assisted position to progress to full reps'
+        : 'Work towards unassisted reps by progressively using lighter bands'
+  const baseName = exercise
+    .replace(/ \[Band \+ Knee\]$/, '')
+    .replace(/ \[Band\]$/, '')
+    .replace(/ \[Knee\]$/, '')
+
+  const parsed = efforts
+    .map(e => {
+      const reps      = parseRepsOnlyFromLabel(e.label, isBand)
+      const bandLevel = isBand ? parseBandLevelFromLabel(e.label) : null
+      return reps !== null ? { reps, bandLevel, ts: e.created_at, id: e.id } : null
+    })
+    .filter((p): p is NonNullable<typeof p> => p !== null)
+
+  const bestReps = parsed.length > 0 ? Math.max(...parsed.map(p => p.reps)) : 0
+  const chartData = parsed.map(p => ({ ts: p.ts, y: p.reps }))
+
+  return (
+    <View style={s.page}>
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{baseName}</Text>
+        <Text style={s.subText}>
+          {assistLabel} · Best — <Text style={s.subValueBlue}>{bestReps} reps</Text>
+        </Text>
+      </View>
+
+      <AnimateRise style={s.card}>
+        <Text style={s.h2}>Progress</Text>
+        <NextTargetCallout title="Personal best">
+          <View style={s.calloutValueRow}>
+            <Text style={s.calloutValue}>{bestReps}</Text>
+            <Text style={s.calloutSubText}>reps</Text>
+          </View>
+          <Text style={s.tinyText}>{hintText}</Text>
+        </NextTargetCallout>
+      </AnimateRise>
+
+      {chartData.length >= 1 && (
+        <AnimateRise style={s.card}>
+          <Text style={s.h2}>Reps over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={chartData.length > 1 ? bestReps : null}
+            yWidth={32}
+            allowDecimals={false}
+            yTickFormatter={(v) => `${Math.round(v)}`}
+            tooltipValueFormatter={(v) => `${Math.round(v)}`}
+            tooltipLabel="Reps"
+            yDomain={{
+              min: (mn) => Math.max(0, mn - 1),
+              max: (mx) => mx + 2,
+            }}
+            caption={<Text style={s.tinyText}>Dashed line = personal best</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      <EffortsHistorySection
+        efforts={efforts}
+        onDelete={onDelete}
+        renderLeft={e => {
+          const bandLevel = isBand ? parseBandLevelFromLabel(e.label) : null
+          return (
+            <View>
+              {bandLevel && (
+                <Text style={s.listRowMutedBold}>{bandLevel} band</Text>
+              )}
+              <Text style={s.listRowDateSm}>{fmtDate(e.created_at)}</Text>
+            </View>
+          )
+        }}
+        renderRight={e => {
+          const reps = parseRepsOnlyFromLabel(e.label, isBand)
+          return (
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={s.listRowSubLabel}>reps</Text>
+              <Text style={s.valBlue}>{reps ?? '—'}</Text>
+            </View>
+          )
+        }}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main StrengthDetail (handles loading + dispatch + standard rep-based view)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function StrengthDetail() {
+  const { exercise: rawExercise } = useLocalSearchParams<{ exercise: string }>()
+  const exercise = typeof rawExercise === 'string' ? decodeURIComponent(rawExercise) : ''
+  const { user, profile } = useAuth()
+
+  const dbMovements    = useMovements()
+  const [efforts, setEfforts]       = useState<Effort[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [selectedRM, setSelectedRM] = useState<number>(1)
+  const [zoneInfoOpen, setZoneInfoOpen] = useState(false)
+
+  // Tile scroll container + tile-position map so a pill click can scroll the
+  // row to the first tile of that adp zone.
+  const tileScrollRef = useRef<ScrollView | null>(null)
+  const tileOffsets   = useRef<Record<number, number>>({})
+
+  function scrollToZone(firstRepInZone: number) {
+    setZoneInfoOpen(false)  // dismiss the info panel on any zone change
+    setSelectedRM(firstRepInZone)
+    const offset = tileOffsets.current[firstRepInZone] ?? 0
+    requestAnimationFrame(() => {
+      tileScrollRef.current?.scrollTo({ x: Math.max(0, offset - 8), animated: true })
+    })
+  }
+
+  async function handleDeleteEffort(id: string) {
+    setEfforts(prev => prev.filter(e => e.id !== id))
+    if (user) await supabase.from('efforts').delete().eq('id', id).eq('user_id', user.id)
+  }
+
+  // ── Exercise type detection (from DB record) ───────────────────────────────
+  const isBandKneeAssisted = exercise.endsWith(' [Band + Knee]')
+  const isBandAssisted     = exercise.endsWith(' [Band]')
+  const isKneeAssisted     = exercise.endsWith(' [Knee]')
+  const baseExercise = exercise
+    .replace(/ \[Band \+ Knee\]$/, '')
+    .replace(/ \[Band\]$/, '')
+    .replace(/ \[Knee\]$/, '')
+  const movementRecord    = dbMovements.find(m => m.name === baseExercise) ?? null
+  const isIsometric       = movementRecord?.strength_type === 'isometric'
+  const isAssistedMachine = movementRecord?.equipment === 'assisted'
+  const isCarry           = movementRecord?.equipment === 'carry'
+  const equipmentType     = movementRecord?.equipment ?? 'barbell'
+  const isBodyweightExercise = !isBandKneeAssisted && !isBandAssisted && !isKneeAssisted && equipmentType === 'bodyweight'
+
+  useEffect(() => {
+    if (!user || !exercise) return
+    let alive = true
+    supabase
+      .from('efforts')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('type', 'strength')
+      .ilike('label', `${exercise} ·%`)
+      .order('created_at', { ascending: true })
+      .then(({ data }) => {
+        if (!alive) return
+        const loaded = (data || []) as Effort[]
+        setEfforts(loaded)
+        setLoading(false)
+        if (isBodyweightExercise && loaded.length > 0) {
+          const bReps = Math.max(0, ...loaded.map(e => parseRepsFromLabel(e.label)))
+          // Cap at the grid size (10) so the selected tile is always visible
+          // — past 10 reps the at-max tile no longer exists in the grid.
+          if (bReps > 0) setSelectedRM(Math.min(bReps, 10))
+        }
+      })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, exercise])
+
+  if (loading) {
+    return (
+      <View style={s.page}>
+        <Skeleton style={{ height: 36, width: 36, borderRadius: 9999, marginBottom: 8 }} />
+        <View style={{ gap: 8, marginBottom: 16 }}>
+          <Skeleton style={{ height: 22, width: 200, borderRadius: 6 }} />
+          <Skeleton style={{ height: 14, width: 280, borderRadius: 6 }} />
+        </View>
+        <View style={{ gap: 16 }}>
+          {/* Projections */}
+          <Skeleton style={{ height: 144, width: '100%', borderRadius: 16 }} />
+          {/* Chart */}
+          <Skeleton style={{ height: 280, width: '100%', borderRadius: 16 }} />
+          {/* Log list */}
+          <Skeleton style={{ height: 320, width: '100%', borderRadius: 16 }} />
+        </View>
+      </View>
+    )
+  }
+
+  if (efforts.length === 0) {
+    return (
+      <View style={s.page}>
+        <BackButton />
+        <Text style={s.helpText}>No efforts found for {exercise}.</Text>
+      </View>
+    )
+  }
+
+  // ── Type-based routing ────────────────────────────────────────────────────
+  if (isIsometric)        return <IsometricDetail        exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} />
+  if (isAssistedMachine)  return <AssistedMachineDetail  exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} />
+  if (isCarry)            return <CarryDetail            exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} />
+  if (isBandKneeAssisted) return <RepsOnlyDetail         exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} assistType="band+knee" />
+  if (isBandAssisted)     return <RepsOnlyDetail         exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} assistType="band" />
+  if (isKneeAssisted)     return <RepsOnlyDetail         exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} assistType="knee" />
+
+  // ── Rep-based derivations (standard bodyweight or weighted) ──────────────
+  const best = efforts.reduce<{ oneRM: number; unit: string } | null>((acc, e) => {
+    const parsed = parseOneRM(e.value)
+    if (!parsed) return acc
+    if (!acc || parsed.oneRM > acc.oneRM) return parsed
+    return acc
+  }, null)
+
+  const unit      = best?.unit || 'lb'
+  const bestOneRM = best?.oneRM ?? 0
+
+  const bestReps = isBodyweightExercise
+    ? Math.max(0, ...efforts.map(e => parseRepsFromLabel(e.label)))
+    : 0
+
+  const bestRepsEffort = isBodyweightExercise && efforts.length > 0
+    ? efforts.reduce((b, e) => {
+        const bReps = parseRepsFromLabel(b.label)
+        const eReps = parseRepsFromLabel(e.label)
+        if (eReps > bReps) return e
+        if (eReps === bReps && parseAddedWeightFromLabel(e.label) > parseAddedWeightFromLabel(b.label)) return e
+        return b
+      })
+    : null
+  const bestRepsAddedWeight = bestRepsEffort ? parseAddedWeightFromLabel(bestRepsEffort.label) : 0
+
+  const profileBW   = (profile?.current_weight as number | null | undefined) ?? null
+  const profileUnit = (profile?.weight_unit as 'lb' | 'kg' | undefined) || (unit as 'lb' | 'kg')
+
+  const effectiveOneRM = isBodyweightExercise && bestOneRM === 0 && profileBW && bestReps > 0
+    ? estimate1RM(profileBW, bestReps)
+    : bestOneRM
+
+  const projections = effectiveOneRM > 0 ? projectAllRMs(effectiveOneRM, 1) : []
+
+  // ── Latest effort + rep-range context (mirror of web) ─────────────────────
+  const repRangeLo: number | null = (movementRecord as any)?.rep_range_lo ?? null
+  const repRangeHi: number | null = (movementRecord as any)?.rep_range_hi ?? null
+  const lastEffort = efforts.length > 0 ? efforts[efforts.length - 1] : null
+  const lastReps   = lastEffort ? parseRepsFromLabel(lastEffort.label) : 0
+  const lastWeight = lastEffort
+    ? (isBodyweightExercise
+        ? parseAddedWeightFromLabel(lastEffort.label)
+        : parseWeightFromLabel(lastEffort.label))
+    : 0
+
+  // ── Bodyweight tiles (mirror of web) ──────────────────────────────────────
+  // Three tile modes:
+  //   • locked    — rep count not yet achieved (above current best). Greyed.
+  //   • push      — the AT-MAX tile while still in Phase 1 (best < threshold).
+  //                 Tile shows "→ (best+1)"; card says "push for one more rep".
+  //   • weighted  — every other achievable tile. Tile shows "+X lb"; card
+  //                 prescribes belt/vest training at that rep count.
+  // Graduation moment (best === threshold, at-max tile, no weighted efforts
+  // yet) flips to a tailored "work back up to 10 reps" message — handled in
+  // the card body, not the tile data.
+  interface BwTile {
+    reps:         number
+    mode:         'locked' | 'push' | 'weighted'
+    addedWeight:  number | null
+    plates:       number[]
+    achievable:   boolean
+    nextRep?:     number
+    isGraduation: boolean
+  }
+  const bwTiles: BwTile[] = Array.from({ length: 10 }, (_, i) => i + 1).map(r => {
+    const achievable = r <= bestReps
+    const proj       = projections.find(p => p.reps === r)
+
+    if (!proj || !achievable) {
+      return { reps: r, mode: 'locked', addedWeight: null, plates: [], achievable, isGraduation: false }
+    }
+
+    if (r === bestReps && bestReps < BODYWEIGHT_THRESHOLD) {
+      return { reps: r, mode: 'push', addedWeight: null, plates: [], achievable, nextRep: r + 1, isGraduation: false }
+    }
+
+    const bestActualAdded = efforts
+      .filter(e => parseRepsFromLabel(e.label) === r)
+      .map(e => parseAddedWeightFromLabel(e.label))
+      .reduce((max, v) => Math.max(max, v), 0)
+
+    const baseWeight   = profileBW ?? effectiveOneRM
+    const formulaAdded = Math.max(0, proj.weight - baseWeight)
+    const targetRaw    = bestActualAdded > 0
+      ? Math.max(formulaAdded, bestActualAdded + 0.001)
+      : formulaAdded
+    const nextAdded    = targetRaw > 0 ? getNextAddedWeight(targetRaw, profileUnit) : null
+
+    const isGraduation = (r === bestReps) && (bestReps === BODYWEIGHT_THRESHOLD) && (bestActualAdded === 0)
+
+    return {
+      reps:         r,
+      mode:         'weighted',
+      addedWeight:  nextAdded?.weight ?? 0,
+      plates:       nextAdded?.plates ?? [],
+      achievable,
+      isGraduation,
+    }
+  })
+
+  const selectedBWTile = bwTiles.find(t => t.reps === selectedRM) ?? null
+
+  // ── Weighted projections ─────────────────────────────────────────────────
+  const selectedProjection = !isBodyweightExercise
+    ? projections.find(p => p.reps === selectedRM) ?? null
+    : null
+
+  // ── Weighted-standard next-target (mirror of web; see CLAUDE.md spec) ──
+  const current_1RM = bestOneRM
+  const selRepRange = selectedRM
+  const selProj     = selectedProjection?.weight ?? 0
+  const selRawForBig: number = selRepRange === 1
+    ? Math.max(current_1RM, selProj)
+    : selProj
+  const selCueWeight: number = selRepRange === 1
+    ? loadableWeight(current_1RM, equipmentType as LadderEquipment, unit as 'lb' | 'kg')
+    : loadableWeight(selRawForBig, equipmentType as LadderEquipment, unit as 'lb' | 'kg')
+  const selBigWeightRaw: number | null = nextLoadableAbove(selRawForBig, equipmentType as LadderEquipment, unit as 'lb' | 'kg')
+  const selBigWeight: number = selBigWeightRaw ?? selCueWeight
+
+  const selZone: AdpZone   = adpZoneFor(selRepRange)
+  const selZoneCfg         = ADP_ZONE_CONFIG[selZone]
+
+  const targetWeight: number = selBigWeight
+  const targetPlatesBarbell: number[] = (equipmentType === 'barbell')
+    ? platesForBarbellWeight(targetWeight, unit as 'lb' | 'kg')
+    : []
+  const targetPlatesAdded: number[] = (equipmentType === 'bodyweight')
+    ? platesForAddedWeight(targetWeight, unit as 'lb' | 'kg')
+    : []
+
+  const usesPair: boolean = !!(movementRecord as any)?.uses_pair
+
+  const chartData = efforts
+    .map(e => {
+      const parsed = parseOneRM(e.value)
+      return parsed ? { ts: e.created_at, y: parsed.oneRM } : null
+    })
+    .filter((p): p is { ts: string; y: number } => p !== null)
+
+  return (
+    <View style={s.page}>
+
+      {/* Header */}
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{exercise}</Text>
+        {isBodyweightExercise ? (
+          <Text style={s.subText}>
+            Best — <Text style={s.subValueBlue}>{bestReps} max attempts</Text>
+            {bestRepsAddedWeight > 0
+              ? <> plus <Text style={s.subValueBlue}>{bestRepsAddedWeight} {unit}</Text> added weight</>
+              : ' at bodyweight'
+            }
+          </Text>
+        ) : (
+          <View style={s.subRow}>
+            <Text style={s.subText}>Best Est. 1RM — </Text>
+            <TickerNumber value={bestOneRM} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+            <Text style={[s.subText, s.subValueBlue]}> {unit}</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Bodyweight branch */}
+      {isBodyweightExercise ? (
+        <AnimateRise style={s.card}>
+          <View style={{ gap: 2 }}>
+            <Text style={s.h2}>Max attempt projections</Text>
+            <Text style={s.helpText}>
+              Add the proposed weight via belt or vest to train each rep target at the same intensity as your current max
+            </Text>
+          </View>
+
+          <TileGrid
+            items={bwTiles}
+            renderTile={({ reps: r, addedWeight: aw, achievable, mode, nextRep }) => {
+              const isSelected = selectedRM === r
+              const isCurrent  = r === bestReps
+              return (
+                <Pressable
+                  onPress={() => achievable && setSelectedRM(r)}
+                  disabled={!achievable}
+                  style={[
+                    s.tile,
+                    isSelected  ? s.tileSelected
+                    : isCurrent ? s.tileCurrent
+                    : achievable ? s.tileAchievable
+                                : s.tileLocked,
+                  ]}
+                >
+                  {/* Two-line label so every tile has the same height (fixes
+                      "1 REP" rendering shorter than "2 REPS" / "3 REPS" etc.) */}
+                  <View style={{ alignItems: 'center' }}>
+                    <Text
+                      style={[
+                        s.tileLabel,
+                        isSelected  ? s.tileTextSelected
+                        : isCurrent ? s.tileTextCurrentDim
+                        : achievable ? s.tileLabelMuted
+                                    : s.tileTextLocked,
+                      ]}
+                    >
+                      {r}
+                    </Text>
+                    <Text
+                      style={[
+                        s.tileLabel,
+                        isSelected  ? s.tileTextSelected
+                        : isCurrent ? s.tileTextCurrentDim
+                        : achievable ? s.tileLabelMuted
+                                    : s.tileTextLocked,
+                      ]}
+                    >
+                      {r > 1 ? 'reps' : 'rep'}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      s.tileValueMono,
+                      isSelected  ? s.tileTextSelected
+                      : isCurrent ? s.tileTextCurrent
+                      : achievable ? s.tileTextAchievable
+                                  : s.tileTextLocked,
+                    ]}
+                  >
+                    {mode === 'locked' ? '—'
+                      : mode === 'push' ? `→ ${nextRep}`
+                      : aw === 0 ? 'BW' : `+${aw}`}
+                  </Text>
+                </Pressable>
+              )
+            }}
+          />
+
+          <Text style={s.tinyText}>Greyed out tiles are rep counts not yet achieved</Text>
+
+          <NextTargetCallout>
+            {!selectedBWTile || !selectedBWTile.achievable ? (
+              <>
+                <Text style={s.calloutLabel}>Target</Text>
+                <View style={s.calloutValueRow}>
+                  <Text style={s.calloutValue}>{selectedRM}</Text>
+                  <Text style={s.calloutSubText}>max attempts</Text>
+                </View>
+                <Text style={s.tinyText}>
+                  Build up to {selectedRM} clean reps at bodyweight first · current best: {bestReps}
+                </Text>
+              </>
+            ) : selectedBWTile.mode === 'push' ? (
+              <>
+                <View style={s.calloutValueRow}>
+                  <Text style={s.calloutValue}>{selectedBWTile.nextRep}</Text>
+                  <Text style={s.calloutSubText}>reps next at bodyweight</Text>
+                </View>
+                <Text style={s.tinyText}>
+                  Push for one more clean rep — current best: {bestReps}
+                </Text>
+              </>
+            ) : selectedBWTile.isGraduation ? (
+              <>
+                <View style={s.calloutValueRow}>
+                  <Text style={s.calloutValue}>+{selectedBWTile.addedWeight}</Text>
+                  <Text style={s.calloutSubText}>{profileUnit} added to start</Text>
+                </View>
+                <Text style={s.tinyText}>
+                  Attach {selectedBWTile.addedWeight} {profileUnit} via weight belt or vest and work back up to {BODYWEIGHT_THRESHOLD} reps
+                </Text>
+              </>
+            ) : (
+              <>
+                <View style={s.targetRow}>
+                  <View>
+                    <Text style={s.calloutLabel}>{selectedRM} rep{selectedRM > 1 ? 's' : ''} target</Text>
+                    <View style={[s.calloutValueRow, { marginTop: 2 }]}>
+                      <Text style={s.calloutValue}>+{selectedBWTile.addedWeight}</Text>
+                      <Text style={s.calloutSubText}>{profileUnit} added</Text>
+                    </View>
+                  </View>
+                  {selectedBWTile.plates.length > 0 && (
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[s.tinyText, { marginBottom: 4 }]}>belt / vest</Text>
+                      <View style={s.plateChipRow}>
+                        {selectedBWTile.plates.map((p, i) => (
+                          <View key={i} style={s.plateChip}>
+                            <Text style={s.plateChipText}>{p}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+                </View>
+                <Text style={s.tinyText}>
+                  Add {selectedBWTile.addedWeight} {profileUnit} via weight belt or vest — aim for {selectedRM} clean rep{selectedRM > 1 ? 's' : ''}
+                </Text>
+              </>
+            )}
+          </NextTargetCallout>
+        </AnimateRise>
+      ) : (
+        /* Weighted-standard branch — mirror of web. See CLAUDE.md spec. */
+        <AnimateRise style={s.card}>
+          <Text style={s.h2}>Rep-max projections</Text>
+          <Text style={[s.helpText, { marginTop: -6 }]}>Pick an adaptation zone, then tap a rep target.</Text>
+
+          {/* Three adp-zone pills — uniform 2-line height across all three */}
+          <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+            {(['strength', 'hypertrophy', 'endurance'] as const).map((zone) => {
+              const cfg = ADP_ZONE_CONFIG[zone]
+              const isActive = selZone === zone
+              const firstReps = zone === 'strength' ? 1 : zone === 'hypertrophy' ? 6 : 13
+              const parts = cfg.label.split(' ')
+              const verb = parts[0]
+              const noun = parts.slice(1).join(' ')
+              return (
+                <Pressable
+                  key={zone}
+                  onPress={() => scrollToZone(firstReps)}
+                  style={{
+                    flex: 1,
+                    paddingHorizontal: 8, paddingVertical: 6,
+                    borderRadius: 14, borderWidth: 1,
+                    borderColor: isActive ? palette.blue[500] : colors.border,
+                    backgroundColor: isActive ? withAlpha(palette.blue[500], 0.15) : 'transparent',
+                    alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 11, fontWeight: '700', textAlign: 'center', lineHeight: 14,
+                    color: isActive ? palette.blue[400] : colors.mutedForeground,
+                  }}>{verb}</Text>
+                  <Text style={{
+                    fontSize: 11, fontWeight: '700', textAlign: 'center', lineHeight: 14,
+                    color: isActive ? palette.blue[400] : colors.mutedForeground,
+                  }}>{noun}</Text>
+                </Pressable>
+              )
+            })}
+          </View>
+
+          {/* Horizontal scrollable tile row */}
+          <ScrollView
+            ref={tileScrollRef}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8, paddingVertical: 4, paddingHorizontal: 2 }}
+            style={{ marginHorizontal: -2 }}
+          >
+            {projections.map(({ reps: r, weight: w }) => {
+              const isSelected = selectedRM === r
+              const pct = effectiveOneRM > 0 ? Math.round((w / effectiveOneRM) * 100) : 0
+              return (
+                <Pressable
+                  key={r}
+                  onPress={() => { setZoneInfoOpen(false); setSelectedRM(r) }}
+                  onLayout={(e) => { tileOffsets.current[r] = e.nativeEvent.layout.x }}
+                  style={{
+                    minWidth: 68, paddingHorizontal: 12, paddingVertical: 10,
+                    borderRadius: 9, borderWidth: 1,
+                    borderColor: isSelected ? palette.blue[500] : colors.border,
+                    backgroundColor: isSelected ? withAlpha(palette.blue[500], 0.15) : alpha(colors.card, 0.4),
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 10, fontWeight: '700', textTransform: 'uppercase',
+                    letterSpacing: 0.5,
+                    color: isSelected ? palette.blue[400] : colors.mutedForeground,
+                  }}>
+                    {r}RM
+                  </Text>
+                  <View style={{ marginTop: 2 }}>
+                    <TickerNumber
+                      value={w}
+                      fontSize={16}
+                      color={isSelected ? palette.blue[400] : colors.foreground}
+                      fontWeight="700"
+                    />
+                  </View>
+                  <Text style={{
+                    marginTop: 2,
+                    fontFamily: fonts.mono[400], fontVariant: ['tabular-nums'],
+                    fontSize: 9,
+                    color: isSelected ? withAlpha(palette.blue[400], 0.7) : alpha(colors.mutedForeground, 0.5),
+                  }}>
+                    {pct}%
+                  </Text>
+                </Pressable>
+              )
+            })}
+          </ScrollView>
+
+          <Text style={s.tinyText}>Epley · Brzycki · Lombardi averaged · % of 1RM</Text>
+
+          {selectedProjection && (
+            <NextTargetCallout>
+              {/* Title text removed (NextTargetCallout already provides it).
+                  Adp-zone pill is the only header element here. */}
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+                <Pressable
+                  onPress={() => setZoneInfoOpen((o) => !o)}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', gap: 4,
+                    paddingHorizontal: 8, paddingVertical: 2,
+                    borderRadius: 999, borderWidth: 1,
+                    borderColor: withAlpha(palette.blue[500], 0.4),
+                    backgroundColor: withAlpha(palette.blue[500], 0.1),
+                  }}
+                >
+                  <Text style={{ fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 1, color: palette.blue[400] }} numberOfLines={1}>
+                    {selZoneCfg.label}
+                  </Text>
+                  <Info size={11} color={palette.blue[400]} />
+                </Pressable>
+              </View>
+
+              {/* Inline expandable adp zone info panel — slides down on open,
+                  slides up on close via Reanimated's FadeInUp / FadeOutUp
+                  layout animations. */}
+              {zoneInfoOpen && (
+                <Animated.View
+                  entering={FadeInUp.duration(200)}
+                  exiting={FadeOutUp.duration(180)}
+                  style={{
+                    borderWidth: 1, borderColor: withAlpha(palette.blue[500], 0.15),
+                    backgroundColor: alpha(colors.card, 0.6), borderRadius: 6,
+                    paddingHorizontal: 10, paddingVertical: 8, marginTop: 4,
+                  }}
+                >
+                  <Text style={[s.calloutLabel, { color: colors.foreground, fontWeight: '700', fontSize: 12, marginBottom: 4 }]}>
+                    {selZoneCfg.label}
+                  </Text>
+                  <Text style={[s.tinyText, { lineHeight: 16 }]}>{selZoneCfg.whyText}</Text>
+                </Animated.View>
+              )}
+
+              {/* Big weight + equipment-specific RHS.
+                  Wrapped in an Animated.View with LinearTransition so that
+                  when the info panel above mounts/unmounts, the big-weight
+                  block slides into its new position smoothly instead of
+                  popping. */}
+              <Animated.View layout={LinearTransition.duration(200)}>
+              {equipmentType === 'barbell' && (
+                <>
+                  <View style={s.targetRow}>
+                    <View style={[s.calloutValueRow, { marginTop: 2 }]}>
+                      <TickerNumber value={targetWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                      <Text style={s.calloutSubText}>{unit}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[s.tinyText, { marginBottom: 4 }]}>per side</Text>
+                      <View style={s.plateChipRow}>
+                        {targetPlatesBarbell.map((p, i) => (
+                          <View key={i} style={s.plateChip}>
+                            <Text style={s.plateChipText}>{p}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  </View>
+                  <Text style={s.tinyText}>
+                    {unit === 'kg' ? 20 : 45} {unit} bar + {targetPlatesBarbell.join(' + ') || '—'} {unit} per side
+                  </Text>
+                </>
+              )}
+
+              {equipmentType === 'dumbbell' && (
+                <>
+                  <View style={s.targetRow}>
+                    <View style={[s.calloutValueRow, { marginTop: 2 }]}>
+                      <TickerNumber value={targetWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                      <Text style={s.calloutSubText}>{unit}</Text>
+                    </View>
+                    <Text style={s.calloutSubText}>each hand</Text>
+                  </View>
+                  <Text style={s.tinyText}>
+                    Pick the {targetWeight} {unit} dumbbells — one in each hand
+                  </Text>
+                </>
+              )}
+
+              {equipmentType === 'kettlebell' && (
+                <>
+                  <View style={s.targetRow}>
+                    <View style={[s.calloutValueRow, { marginTop: 2 }]}>
+                      <TickerNumber value={targetWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                      <Text style={s.calloutSubText}>{unit}</Text>
+                    </View>
+                    <Text style={s.calloutSubText}>{usesPair ? 'each hand' : 'kettlebell'}</Text>
+                  </View>
+                  <Text style={s.tinyText}>
+                    {usesPair
+                      ? `Pick a pair of ${targetWeight} ${unit} kettlebells`
+                      : `Pick the ${targetWeight} ${unit} kettlebell`}
+                  </Text>
+                </>
+              )}
+
+              {equipmentType === 'machine' && (
+                <>
+                  <View style={s.targetRow}>
+                    <View style={[s.calloutValueRow, { marginTop: 2 }]}>
+                      <TickerNumber value={targetWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                      <Text style={s.calloutSubText}>{unit}</Text>
+                    </View>
+                    <Text style={s.calloutSubText}>pin setting</Text>
+                  </View>
+                  <Text style={s.tinyText}>
+                    Set the pin to {targetWeight} {unit}
+                  </Text>
+                </>
+              )}
+
+              {equipmentType === 'strongman' && (
+                <>
+                  <View style={s.targetRow}>
+                    <View style={[s.calloutValueRow, { marginTop: 2 }]}>
+                      <TickerNumber value={targetWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                      <Text style={s.calloutSubText}>{unit}</Text>
+                    </View>
+                    <Text style={s.calloutSubText}>load</Text>
+                  </View>
+                  <Text style={s.tinyText}>
+                    Use the {targetWeight} {unit} stone, sandbag, or D-ball (or closest available)
+                  </Text>
+                </>
+              )}
+              </Animated.View>
+
+              {/* Thin separator, then the prescription + rest line.
+                  Also LinearTransition-animated so it slides with the
+                  panel open/close. */}
+              <Animated.View
+                layout={LinearTransition.duration(200)}
+                style={{
+                  marginTop: 10, paddingTop: 10,
+                  borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15),
+                  gap: 2,
+                }}
+              >
+                {selRepRange === 1 ? (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                      <Text style={s.calloutLabel}>Hit one clean rep at </Text>
+                      <TickerNumber value={targetWeight} fontSize={14} color={palette.blue[400]} fontWeight="700" />
+                      <Text style={{ color: palette.blue[400], fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> {unit}</Text>
+                    </View>
+                    <Text style={s.tinyText}>Benchmark attempt</Text>
+                  </>
+                ) : (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                      <Text style={s.calloutLabel}>Do </Text>
+                      <Text style={{ color: colors.foreground, fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}>{selZoneCfg.setsText}</Text>
+                      <Text style={s.calloutLabel}> of </Text>
+                      <TickerNumber value={selRepRange} fontSize={14} color={colors.foreground} fontWeight="700" />
+                      <Text style={{ color: colors.foreground, fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> reps</Text>
+                      <Text style={s.calloutLabel}> at </Text>
+                      <TickerNumber value={targetWeight} fontSize={14} color={palette.blue[400]} fontWeight="700" />
+                      <Text style={{ color: palette.blue[400], fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> {unit}</Text>
+                    </View>
+                    <Text style={s.tinyText}>Rest {selZoneCfg.restText} between sets</Text>
+                  </>
+                )}
+              </Animated.View>
+            </NextTargetCallout>
+          )}
+        </AnimateRise>
+      )}
+
+      {/* Progress chart */}
+      {chartData.length >= 1 && (
+        <AnimateRise style={s.card}>
+          <Text style={s.h2}>Est. 1RM over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={chartData.length > 1 ? bestOneRM : null}
+            yTickFormatter={(v) => `${Math.round(v)}`}
+            tooltipValueFormatter={(v) => `${Math.round(v)} ${unit}`}
+            tooltipLabel="Est. 1RM"
+            yDomain={{
+              min: (mn) => Math.max(0, Math.round(mn * 0.9)),
+              max: (mx) => Math.round(mx * 1.1),
+            }}
+            caption={<Text style={s.tinyText}>Dashed line = personal best</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      {/* Efforts history */}
+      <EffortsHistorySection
+        efforts={efforts}
+        onDelete={handleDeleteEffort}
+        renderLeft={e => {
+          const tail = e.label.split(' · ').slice(1).join(' · ')
+          return (
+            <View>
+              <Text style={s.listRowName}>{tail}</Text>
+              <Text style={s.listRowDateSm}>{fmtDate(e.created_at)}</Text>
+            </View>
+          )
+        }}
+        renderRight={e => {
+          const parsed = parseOneRM(e.value)
+          const reps   = parseRepsFromLabel(e.label)
+          if (isBodyweightExercise) {
+            return (
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={s.listRowSubLabel}>max attempts</Text>
+                <Text style={s.valBlue}>{reps}</Text>
+              </View>
+            )
+          }
+          if (parsed) {
+            return (
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={s.listRowSubLabel}>Est. 1RM</Text>
+                <Text style={s.valBlue}>{parsed.oneRM} {parsed.unit}</Text>
+              </View>
+            )
+          }
+          return null
+        }}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────────────────
+
+const BLUE_BG_SOFT   = withAlpha(palette.blue[500], 0.08)
+const BLUE_BORDER    = withAlpha(palette.blue[500], 0.30)
+const BLUE_BORDER_DIM = withAlpha(palette.blue[500], 0.40)
+
+const s = StyleSheet.create({
+  page: { gap: 24 },
+
+  // ── Back button ─────────────────────────────────────────────────────────
+  // Native-style chevron-only back affordance. Negative marginLeft visually
+  // aligns the chevron's stroke with the H1 below (chevrons have built-in
+  // optical padding). marginBottom keeps spacing parity with the old
+  // text-label version.
+  backBtn:  { alignSelf: 'flex-start', marginLeft: -6, marginBottom: 8, padding: 4 },
+
+  // ── Headings ────────────────────────────────────────────────────────────
+  h1:      { color: colors.foreground, fontSize: 20, fontWeight: '600' },
+  subText: { color: colors.mutedForeground, fontSize: 14, marginTop: 2 },
+  subRow:  {
+    flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', marginTop: 2,
+  },
+  subValueBlue: {
+    color: palette.blue[400],
+    fontFamily: fonts.mono[400],
+    fontVariant: ['tabular-nums'],
+  },
+  h2:      { color: colors.foreground, fontSize: 14, fontWeight: '600' },
+
+  // ── Common card ─────────────────────────────────────────────────────────
+  card: {
+    backgroundColor: colors.card,
+    borderColor: colors.border, borderWidth: 1,
+    borderRadius: 12, padding: 20, gap: 16,
+  },
+  cardNoPad: {
+    backgroundColor: colors.card,
+    borderColor: colors.border, borderWidth: 1,
+    borderRadius: 12, overflow: 'hidden',
+  },
+
+  // ── Help text ───────────────────────────────────────────────────────────
+  helpText: { color: colors.mutedForeground, fontSize: 12, lineHeight: 18 },
+  tinyText: { color: colors.mutedForeground, fontSize: 11, lineHeight: 16 },
+
+  // ── Stat grid (carry detail) ─────────────────────────────────────────────
+  statGrid: {
+    flexDirection: 'row', gap: 12,
+  },
+  statTile: {
+    flex: 1, gap: 4,
+    backgroundColor: colors.card,
+    borderColor: colors.border, borderWidth: 1,
+    borderRadius: 12, padding: 16,
+  },
+  statLabel: {
+    color: colors.mutedForeground, fontSize: 12,
+    textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+  statValue: {
+    color: palette.blue[400], fontSize: 24,
+    fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'],
+  },
+  statUnit: {
+    color: colors.mutedForeground, fontSize: 14, fontWeight: '400',
+  },
+
+  // ── Tile grid items ─────────────────────────────────────────────────────
+  tile: {
+    borderWidth: 1, borderRadius: 9,
+    padding: 8,
+    alignItems: 'center', justifyContent: 'center',
+    gap: 2,
+  },
+  tileSelected: {
+    borderColor: palette.blue[500],
+    backgroundColor: withAlpha(palette.blue[500], 0.15),
+    transform: [{ scale: 1.05 }],
+  },
+  tileCurrent: {
+    borderColor: BLUE_BORDER_DIM,
+    backgroundColor: BLUE_BG_SOFT,
+  },
+  tileAchievable: {
+    borderColor: alpha(colors.border, 0.6),
+    backgroundColor: alpha(colors.card, 0.4),
+  },
+  tileLocked: {
+    borderColor: alpha(colors.border, 0.3),
+    backgroundColor: alpha(colors.card, 0.2),
+    opacity: 0.35,
+  },
+  tileLabel: {
+    color: colors.mutedForeground, fontSize: 10,
+    textTransform: 'uppercase', letterSpacing: 1,
+    opacity: 0.7,                  // matches web's `opacity-70` on the `{r}RM` div
+  },
+  tileLabelMuted: { color: colors.mutedForeground },
+  // text-xs (12) — used by isometric milestones + bodyweight tiles
+  tileValueMono: {
+    fontSize: 12,
+    fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'],
+    color: colors.foreground,
+    lineHeight: 14,                // leading-tight
+  },
+  // text-sm (14) — used by weighted rep-max projection tiles (`text-sm` on web)
+  tileValueLg: {
+    fontSize: 14,
+    fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'],
+    color: colors.foreground,
+  },
+  tilePct: {
+    fontSize: 9,
+    fontFamily: fonts.mono[400], fontVariant: ['tabular-nums'],
+    lineHeight: 9,                 // leading-none
+  },
+  tileTextSelected:    { color: palette.blue[400] },
+  tileTextCurrent:     { color: withAlpha(palette.blue[400], 0.8) },
+  tileTextCurrentDim:  { color: withAlpha(palette.blue[400], 0.7) },
+  tileTextAchievable:  { color: colors.foreground },
+  tileTextLocked:      { color: alpha(colors.mutedForeground, 0.4) },
+
+  // Small "✓" beneath an achieved milestone tile
+  checkBlue: {
+    fontSize: 9, color: withAlpha(palette.blue[400], 0.6), marginTop: 1,
+  },
+
+  // ── Blue "next training target" callout ─────────────────────────────────
+  callout: {
+    borderRadius: 9, paddingHorizontal: 16, paddingVertical: 16,
+    backgroundColor: BLUE_BG_SOFT, borderColor: BLUE_BORDER, borderWidth: 1,
+    gap: 8,
+  },
+  calloutTitle: {
+    color: palette.blue[400], fontSize: 11, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1.2,
+  },
+  calloutValueRow: {
+    flexDirection: 'row', alignItems: 'baseline', gap: 6,
+  },
+  calloutValue: {
+    color: palette.blue[400], fontSize: 36,
+    fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'],
+    lineHeight: 36,
+  },
+  calloutSubText: { color: colors.mutedForeground, fontSize: 14 },
+  calloutLabel:   { color: colors.mutedForeground, fontSize: 14 },
+
+  targetRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
+  },
+  plateChipRow: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end',
+  },
+  plateChip: {
+    borderColor: BLUE_BORDER, borderWidth: 1,
+    backgroundColor: colors.card,
+    paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: 4,
+  },
+  plateChipText: {
+    color: palette.blue[400], fontSize: 11,
+    fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'],
+  },
+
+  // ── Bodyweight progress bar (toward weighted threshold) ──────────────────
+  progressRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  progressTrack: {
+    height: 6, borderRadius: 9999,
+    backgroundColor: colors.muted, overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%', backgroundColor: palette.blue[500],
+    borderRadius: 9999,
+  },
+
+  // ── Efforts history list ────────────────────────────────────────────────
+  listHeader: {
+    paddingHorizontal: 20, paddingVertical: 14,
+    borderBottomColor: colors.border, borderBottomWidth: 1,
+  },
+  listHeaderText: { color: colors.foreground, fontSize: 14, fontWeight: '600' },
+
+  listRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 12,
+    backgroundColor: colors.card,
+  },
+  listRowDivider: {
+    borderBottomColor: colors.border, borderBottomWidth: 1,
+  },
+  listRowName: { color: colors.foreground, fontSize: 14, fontWeight: '500' },
+  listRowMutedBold: { color: colors.mutedForeground, fontSize: 12, fontWeight: '500' },
+  listRowDate: { color: colors.mutedForeground, fontSize: 12 },
+  listRowDateSm: { color: colors.mutedForeground, fontSize: 12, marginTop: 2 },
+  listRowSubLabel: { color: colors.mutedForeground, fontSize: 11 },
+
+  valBlue: {
+    color: palette.blue[400], fontSize: 14,
+    fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'],
+  },
+})
+

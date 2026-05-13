@@ -1,0 +1,9 @@
+- calries page needs to be able to switch between admin controlled or user controlled
+
+- weight goal needs toggle to switch if no goal is needed
+
+- notifications system
+
+- reflect logo and all over changes to homepage
+
+- we need a loading animation using our logo somehow

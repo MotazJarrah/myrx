@@ -1,0 +1,455 @@
+import LegalLayout from './LegalLayout'
+
+export default function TermsOfService() {
+  return (
+    <LegalLayout title="Terms of Service" effectiveDate="May 9, 2026">
+      <h2>1. Agreement to these Terms</h2>
+      <p>
+        These Terms of Service ("Terms") are a binding contract between you
+        and Northern Princess LLC, a Michigan limited liability company, doing
+        business as MyRX ("MyRX," "we," "us," or "our"), and govern your
+        access to and use of the MyRX mobile application, website, and
+        related services (collectively, the "Service").
+      </p>
+      <p>
+        <strong>By creating an account, signing in, or otherwise using the
+        Service, you agree to these Terms and to our{' '}
+        <a href="/privacy">Privacy Policy</a>. If you do not agree, do not
+        use the Service.</strong>
+      </p>
+      <p>
+        These Terms also incorporate by reference our{' '}
+        <a href="/acceptable-use">Acceptable Use Policy</a> and our{' '}
+        <a href="/cookies">Cookie Policy</a>.
+      </p>
+
+      <h2>2. Eligibility</h2>
+      <p>
+        You must be at least 13 years old to use the Service. If you are
+        located in the European Economic Area, the United Kingdom, or
+        another jurisdiction with a higher minimum digital-consent age, you
+        must be at least 16 (or the local age of digital consent) to use the
+        Service. By creating an account, you represent and warrant that you
+        meet this age requirement and have the legal capacity to enter into
+        a contract.
+      </p>
+      <p>
+        If you are using the Service on behalf of an organization (e.g. as a
+        coach), you represent that you are authorized to bind that
+        organization to these Terms.
+      </p>
+
+      <h2>3. Your account</h2>
+      <p>
+        To use most features of the Service you must create an account. You
+        agree to:
+      </p>
+      <ul>
+        <li>Provide accurate, current, and complete information when registering</li>
+        <li>Keep your account credentials confidential and not share them with anyone</li>
+        <li>Notify us promptly of any unauthorized use of your account</li>
+        <li>Be responsible for all activity that occurs under your account</li>
+      </ul>
+      <p>
+        We may refuse, suspend, or terminate accounts that we reasonably
+        believe violate these Terms, our Acceptable Use Policy, or applicable
+        law.
+      </p>
+
+      <h2>4. The Service</h2>
+      <p>
+        MyRX provides a fitness coaching platform that helps you log
+        workouts, track body composition, monitor nutrition, receive
+        behavioral coaching content, and (where applicable) communicate with
+        a connected coach. The Service is provided for personal,
+        non-commercial use, except for the coach features described below.
+      </p>
+      <p>
+        We are continuously improving the Service. We reserve the right to
+        add, modify, or remove features at any time, with or without notice.
+        We will not materially diminish the Service for paid subscribers
+        during a paid term without offering a pro-rated refund or equivalent
+        substitute.
+      </p>
+
+      <h2>5. Subscriptions and payments</h2>
+
+      <h3>5.1 Subscription tiers</h3>
+      <p>
+        The Service offers two categories of paid subscriptions, in addition
+        to a free tier for end users:
+      </p>
+      <ul>
+        <li>
+          <strong>End-user subscriptions</strong> — tiered subscriptions that
+          unlock additional features beyond the free tier (specific tiers,
+          features, and prices are published in the app and on the website
+          and may change from time to time).
+        </li>
+        <li>
+          <strong>Coach subscriptions</strong> — a recurring subscription that
+          grants access to the MyRX coach admin portal and the ability to
+          manage and message connected client accounts.
+        </li>
+      </ul>
+      <p>
+        Paid subscriptions to the Service are sold and billed by Northern
+        Princess LLC and processed by our payment processor (Stripe, Inc.) on
+        the website at <a href="https://myrxfit.com">myrxfit.com</a>.
+        We do not currently use Apple In-App Purchase or Google Play
+        Billing for the Service's subscription products. The mobile app may
+        link to the web checkout to start, manage, or cancel a subscription.
+      </p>
+
+      <h3>5.2 Free tier</h3>
+      <p>
+        End users may use a designated free tier of the Service indefinitely,
+        subject to these Terms and to feature limitations described in the
+        app and on the website. We may change the free tier (including
+        adding, removing, or modifying which features are free) at any time.
+      </p>
+
+      <h3>5.3 Billing and renewal</h3>
+      <p>
+        Paid subscriptions are billed in advance on a recurring basis (monthly
+        or annually, depending on the tier you select). Your subscription
+        will automatically renew at the end of each billing period at the
+        then-current price unless you cancel it before the end of the current
+        period. By starting a paid subscription you authorize us (or our
+        payment processor) to charge your payment method on each renewal
+        until you cancel.
+      </p>
+      <p>
+        If your payment method fails, we may attempt to retry the charge,
+        notify you, and suspend your access to paid features until payment
+        succeeds. Continued non-payment may result in cancellation of your
+        subscription.
+      </p>
+
+      <h3>5.4 Cancellation</h3>
+      <p>
+        You can cancel a subscription at any time through your account
+        settings on the website or by contacting{' '}
+        <a href="mailto:privacy@myrxfit.com">privacy@myrxfit.com</a>.
+        Cancellation takes effect at the end of the current billing period;
+        you will retain access to paid features until that date. We do not
+        prorate cancellations mid-period.
+      </p>
+
+      <h3>5.5 Refunds</h3>
+      <p>
+        Except where required by applicable law (including, where applicable,
+        the EU 14-day right of withdrawal for digital services), all fees
+        are non-refundable. If you believe you have been charged in error,
+        contact us at{' '}
+        <a href="mailto:privacy@myrxfit.com">privacy@myrxfit.com</a> within
+        30 days of the charge and we will review your request in good faith.
+      </p>
+
+      <h3>5.6 Taxes</h3>
+      <p>
+        Posted prices are exclusive of any applicable taxes (sales tax, VAT,
+        GST). Where we are required to collect taxes, they will be added
+        at checkout.
+      </p>
+
+      <h3>5.7 Price changes</h3>
+      <p>
+        We may change subscription prices. If the price of your subscription
+        changes, we will give you at least 30 days' notice before the new
+        price applies, and you may cancel before the new price takes effect.
+        Your continued use after the new price takes effect constitutes
+        acceptance of the new price.
+      </p>
+
+      <h2>6. User content and license</h2>
+      <p>
+        The Service lets you create and submit content — your name, profile
+        photo, body data, workout logs, nutrition logs, messages with your
+        coach, and similar (collectively, "Your Content").
+      </p>
+      <p>
+        <strong>You retain ownership of Your Content.</strong> You grant us
+        a worldwide, non-exclusive, royalty-free, sublicensable license to
+        host, store, reproduce, modify (for technical purposes such as
+        formatting and resizing), and display Your Content solely as
+        necessary to operate, provide, and improve the Service to you.
+      </p>
+      <p>
+        You represent and warrant that you own or have all rights necessary
+        to submit Your Content and that Your Content does not violate the
+        rights of any third party or any law.
+      </p>
+      <p>
+        We may remove Your Content if we reasonably believe it violates these
+        Terms, our Acceptable Use Policy, or applicable law.
+      </p>
+
+      <h2>7. Acceptable use</h2>
+      <p>
+        Your use of the Service is subject to our{' '}
+        <a href="/acceptable-use">Acceptable Use Policy</a>, which is
+        incorporated into these Terms by reference. Violations may result in
+        suspension or termination of your account and may also be unlawful.
+      </p>
+
+      <h2>8. Coach-specific terms</h2>
+      <p>
+        If you subscribe to MyRX as a coach, the following additional terms apply:
+      </p>
+      <ul>
+        <li>
+          <strong>Client relationship</strong>: any coaching relationship
+          between you and your clients is solely between you and your clients.
+          MyRX is not a party to that relationship and does not employ,
+          endorse, or supervise coaches. You are solely responsible for the
+          content, accuracy, and quality of the coaching, advice, and
+          programming you provide.
+        </li>
+        <li>
+          <strong>Compliance</strong>: you are solely responsible for
+          complying with all laws and regulations applicable to your coaching
+          activities, including any required licenses, certifications, and
+          tax obligations.
+        </li>
+        <li>
+          <strong>No medical practice</strong>: you must not use the Service
+          to provide medical diagnosis, treatment, prescriptions, or any
+          regulated healthcare services. Coaching content is general fitness
+          and lifestyle guidance only.
+        </li>
+        <li>
+          <strong>Client data</strong>: you may only access client data that
+          your clients have explicitly chosen to share with you. You must
+          handle that data confidentially and use it only to provide your
+          coaching service.
+        </li>
+        <li>
+          <strong>Indemnification</strong>: you agree to indemnify MyRX
+          against any claims arising from your coaching activities, including
+          claims by your clients about advice, programs, or content you provided.
+        </li>
+      </ul>
+
+      <h2>9. Health and fitness disclaimer</h2>
+      <p>
+        <strong>The Service is for general fitness and lifestyle information
+        only. It is not medical advice, diagnosis, or treatment.</strong>
+      </p>
+      <p>
+        Always consult a qualified healthcare professional before beginning
+        any new exercise program, diet, or other health-related activity,
+        especially if you have any medical condition, are pregnant, are
+        recovering from injury, or are taking medication. Do not use the
+        Service to diagnose or treat any health problem.
+      </p>
+      <p>
+        The Service may include programming, projections (such as estimated
+        one-rep max), nutritional information, and behavioral lessons. These
+        are estimates and general guidance only. Individual results vary, and
+        the Service makes no guarantees about specific outcomes.
+      </p>
+      <p>
+        <strong>If you experience a medical emergency, call your local
+        emergency number immediately.</strong>
+      </p>
+      <p>
+        You are solely responsible for any decisions you make based on the
+        Service. You assume all risks associated with any physical activity,
+        nutrition program, or lifestyle change you undertake based on the
+        Service.
+      </p>
+
+      <h2>10. Intellectual property</h2>
+      <p>
+        The Service, including all software, content, branding, and design
+        (other than Your Content), is owned by Northern Princess LLC or its
+        licensors and is protected by copyright, trademark, and other
+        intellectual property laws.
+      </p>
+      <p>
+        Subject to your compliance with these Terms, we grant you a limited,
+        non-exclusive, non-transferable, revocable license to use the Service
+        for your personal use (or, for coaches, for the licensed coaching
+        purpose). You may not copy, modify, distribute, sell, lease, reverse
+        engineer, or create derivative works of the Service except as
+        permitted by applicable law.
+      </p>
+      <p>
+        "MyRX" and the MyRX logo are trademarks of Northern Princess LLC. You
+        may not use them without our prior written consent.
+      </p>
+
+      <h2>11. Third-party services</h2>
+      <p>
+        The Service may interoperate with third-party services (e.g. App
+        Store, Google Play, Stripe, Twilio, Supabase). Your use of those
+        services is subject to their own terms and privacy policies. We are
+        not responsible for third-party services or their content.
+      </p>
+
+      <h2>12. Termination</h2>
+      <p>
+        You may stop using the Service and delete your account at any time
+        through Settings or by contacting{' '}
+        <a href="mailto:privacy@myrxfit.com">privacy@myrxfit.com</a>.
+      </p>
+      <p>
+        We may suspend or terminate your account at any time, with or without
+        notice, if we reasonably believe you have violated these Terms, our
+        Acceptable Use Policy, or applicable law, or if your account has been
+        inactive for an extended period.
+      </p>
+      <p>
+        Sections that by their nature should survive termination (including
+        Sections 6, 9, 10, 13–18) survive any termination.
+      </p>
+
+      <h2>13. Disclaimers</h2>
+      <p>
+        <strong>
+          THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT
+          WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING BUT
+          NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR
+          A PARTICULAR PURPOSE, NON-INFRINGEMENT, OR THE UNINTERRUPTED OR
+          ERROR-FREE OPERATION OF THE SERVICE.
+        </strong>
+      </p>
+      <p>
+        We do not warrant that the Service will be available at all times,
+        free of bugs or errors, or that any data you submit will be retained
+        without loss. You are responsible for maintaining your own backup
+        copies of any data important to you.
+      </p>
+      <p>
+        Some jurisdictions do not allow the exclusion of certain warranties,
+        so some of the above may not apply to you. In those jurisdictions,
+        disclaimers apply to the maximum extent permitted by law.
+      </p>
+
+      <h2>14. Limitation of liability</h2>
+      <p>
+        <strong>
+          TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL MYRX,
+          NORTHERN PRINCESS LLC, OR ANY OF ITS OFFICERS, EMPLOYEES, OR AGENTS
+          BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL,
+          OR PUNITIVE DAMAGES, OR FOR LOST PROFITS, LOST DATA, OR LOSS OF
+          GOODWILL, ARISING OUT OF OR RELATING TO YOUR USE OF, OR INABILITY
+          TO USE, THE SERVICE.
+        </strong>
+      </p>
+      <p>
+        <strong>
+          OUR TOTAL CUMULATIVE LIABILITY ARISING OUT OF OR RELATING TO
+          THESE TERMS OR THE SERVICE WILL NOT EXCEED THE GREATER OF (A)
+          THE AMOUNT YOU PAID US IN THE 12 MONTHS PRECEDING THE CLAIM,
+          OR (B) USD 100.
+        </strong>
+      </p>
+      <p>
+        Some jurisdictions do not allow the limitation or exclusion of
+        liability for incidental or consequential damages, so some or all
+        of the above may not apply to you. Nothing in these Terms excludes
+        liability that cannot lawfully be excluded.
+      </p>
+
+      <h2>15. Indemnification</h2>
+      <p>
+        You agree to indemnify, defend, and hold harmless MyRX, Northern
+        Princess LLC, and its officers, employees, and agents from and against
+        any claims, damages, losses, liabilities, costs, and expenses
+        (including reasonable attorneys' fees) arising out of or relating
+        to: (a) your use of the Service; (b) Your Content; (c) your breach
+        of these Terms or our Acceptable Use Policy; (d) your violation of
+        any law or the rights of a third party; or (e) for coaches, your
+        coaching activities.
+      </p>
+
+      <h2>16. Governing law and dispute resolution</h2>
+      <p>
+        These Terms are governed by the laws of the State of Michigan,
+        United States, without regard to its conflict-of-laws rules.
+      </p>
+      <p>
+        <strong>Mandatory arbitration (US users)</strong>. Except for
+        small-claims actions and disputes seeking injunctive relief for
+        intellectual property infringement, any dispute arising out of or
+        relating to these Terms or the Service that cannot be resolved
+        informally within 60 days will be resolved by binding individual
+        arbitration administered by the American Arbitration Association
+        under its Consumer Arbitration Rules. Arbitration will take place
+        in Michigan or via videoconference at the arbitrator's discretion.
+      </p>
+      <p>
+        <strong>Class-action waiver (US users)</strong>. You and we agree
+        that any dispute will be brought in your or our individual capacity
+        and not as a plaintiff or class member in any purported class,
+        consolidated, or representative action. The arbitrator may not
+        consolidate more than one person's claims and may not preside over
+        any form of representative or class proceeding.
+      </p>
+      <p>
+        If the foregoing arbitration clause is unenforceable in your
+        jurisdiction (including in the European Union), disputes will be
+        resolved by the courts of the State of Michigan, USA — except
+        where mandatory consumer-protection law gives you the right to
+        bring proceedings in the courts of your own country, in which case
+        those rights are unaffected.
+      </p>
+
+      <h2>17. Changes to these Terms</h2>
+      <p>
+        We may update these Terms from time to time. The "Effective date"
+        at the top of this page reflects the latest revision. If we make
+        material changes, we will notify you in advance — by email, in-app
+        banner, or both — at least 14 days before the changes take effect
+        for you. Your continued use of the Service after the new Terms take
+        effect constitutes acceptance. If you do not agree, you must stop
+        using the Service before the new Terms take effect.
+      </p>
+
+      <h2>18. Miscellaneous</h2>
+      <ul>
+        <li>
+          <strong>Entire agreement</strong>: these Terms (together with the
+          Privacy Policy, Acceptable Use Policy, and Cookie Policy) are the
+          entire agreement between you and us regarding the Service.
+        </li>
+        <li>
+          <strong>Severability</strong>: if any provision is held
+          unenforceable, the remaining provisions remain in full force and
+          effect.
+        </li>
+        <li>
+          <strong>No waiver</strong>: our failure to enforce any provision
+          is not a waiver of our right to enforce it later.
+        </li>
+        <li>
+          <strong>Assignment</strong>: you may not assign these Terms without
+          our prior written consent. We may assign these Terms at any time
+          without restriction, including in connection with a sale, merger,
+          or change of control of MyRX or Northern Princess LLC.
+        </li>
+        <li>
+          <strong>Force majeure</strong>: neither party is liable for
+          failure to perform due to causes beyond reasonable control
+          (natural disaster, pandemic, internet outage, government action).
+        </li>
+        <li>
+          <strong>Notices</strong>: we may send notices to you by email,
+          in-app message, or by posting them on our website. You may
+          contact us by email at{' '}
+          <a href="mailto:privacy@myrxfit.com">privacy@myrxfit.com</a>.
+        </li>
+      </ul>
+
+      <h2>19. Contact</h2>
+      <p>
+        <strong>Northern Princess LLC</strong><br />
+        Doing business as MyRX<br />
+        Registered in: Michigan, USA<br />
+        Email: <a href="mailto:privacy@myrxfit.com">privacy@myrxfit.com</a>
+      </p>
+    </LegalLayout>
+  )
+}

@@ -1,0 +1,319 @@
+/**
+ * AppShell — port of MyRX/src/components/Navbar.jsx mobile layout.
+ *
+ * Web mobile shell (md:hidden branch):
+ *   – Top bar:  fixed, h-14, border-b, bg-background/90, logo left, signout right
+ *   – Bottom nav: fixed, border-t, bg-background/95, 7 items overflow-x-auto
+ *   – Main:     pt-14 pb-24 with p-4 padding
+ *
+ * RN equivalent uses a flex column with the top bar and bottom nav as inline
+ * fixed-height regions and <Slot/> rendering the active route in between.
+ *
+ * Authenticated guard: redirects unauthenticated users to /(auth)/sign-in.
+ */
+
+import { useState, useEffect, useRef, type ReactNode } from 'react'
+import {
+  View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator, Image,
+} from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import { Slot, Link, Redirect, usePathname, router } from 'expo-router'
+import {
+  LayoutDashboard, Dumbbell, Activity, Flower2, Weight, Flame, History as HistoryIcon,
+  LogOut, Lightbulb, MessageCircle,
+} from 'lucide-react-native'
+import { useAuth } from '../../src/contexts/AuthContext'
+import { supabase } from '../../src/lib/supabase'
+import ChatSheet from '../../src/components/ChatSheet'
+import SuggestionSheet from '../../src/components/SuggestionSheet'
+import { BiometricLockGate } from '../../src/components/BiometricLockGate'
+import { colors, alpha, palette } from '../../src/theme'
+import { isProfileComplete } from '../../src/lib/profile'
+
+// ── Nav config — mirrors `links` array in Navbar.jsx ─────────────────────────
+const NAV_LINKS = [
+  { href: '/(app)/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
+  { href: '/(app)/strength',   label: 'Strength',   icon: Dumbbell        },
+  { href: '/(app)/cardio',     label: 'Cardio',     icon: Activity        },
+  { href: '/(app)/mobility',   label: 'Mobility',   icon: Flower2         },
+  { href: '/(app)/bodyweight', label: 'Bodyweight', icon: Weight          },
+  { href: '/(app)/calories',   label: 'Calories',   icon: Flame           },
+  { href: '/(app)/history',    label: 'History',    icon: HistoryIcon     },
+] as const
+
+// ── Logo ─────────────────────────────────────────────────────────────────────
+// Dark-theme full wordmark — matches web Navbar's `theme === 'dark' ?` branch.
+// Source is 6000×3690 PNG; resizeMode 'contain' keeps the aspect ratio when
+// height-constrained. Tapping returns the user to Dashboard (same as web).
+// Uses the no-slogan wordmark — the slogan version is reserved for the
+// signup welcome screen as a one-shot brand intro. Mirrors web's Navbar +
+// Landing convention.
+const LOGO_DARK = require('../../assets/myrx-wordmark-dark.png')
+
+function Logo() {
+  return (
+    <Pressable onPress={() => router.replace('/(app)/dashboard' as any)} hitSlop={6}>
+      <Image source={LOGO_DARK} style={s.logoImg} resizeMode="contain" />
+    </Pressable>
+  )
+}
+
+// ── Top bar ──────────────────────────────────────────────────────────────────
+function TopBar({
+  isAdmin, chatEnabled, unread, onSuggest, onChat, onSignOut,
+}: {
+  isAdmin: boolean
+  chatEnabled: boolean
+  unread: number
+  onSuggest: () => void
+  onChat: () => void
+  onSignOut: () => void
+}) {
+  return (
+    <View style={s.topBar}>
+      <Logo />
+      <View style={s.topBarRight}>
+        {!isAdmin && (
+          <Pressable onPress={onSuggest} style={s.iconBtnAmber}>
+            <Lightbulb size={16} color={palette.amber[500]} />
+          </Pressable>
+        )}
+        {chatEnabled && (
+          <Pressable onPress={onChat} style={s.iconBtnPrimary}>
+            <MessageCircle size={16} color={colors.primary} />
+            {unread > 0 && (
+              <View style={s.unreadBadge}>
+                <Text style={s.unreadBadgeText}>{unread > 9 ? '9+' : unread}</Text>
+              </View>
+            )}
+          </Pressable>
+        )}
+        <Pressable onPress={onSignOut} style={s.iconBtnDestructive}>
+          <LogOut size={16} color={colors.destructive} />
+        </Pressable>
+      </View>
+    </View>
+  )
+}
+
+// ── Bottom nav (horizontal scroll, 7 items) ──────────────────────────────────
+// Note: expo-router's `usePathname()` strips route groups ("(app)") from the
+// pathname — so when you're on `app/(app)/dashboard.tsx` it returns
+// `/dashboard`, not `/(app)/dashboard`. The NAV_LINKS hrefs include the
+// group for routing, so we strip it before comparing.
+function stripRouteGroups(p: string): string {
+  return p.replace(/\/\([^)]+\)/g, '')
+}
+function BottomNav({ activePath }: { activePath: string }) {
+  return (
+    <View style={s.bottomNav}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.bottomNavContent}
+      >
+        {NAV_LINKS.map(({ href, label, icon: Icon }) => {
+          const cleanHref = stripRouteGroups(href)
+          const active = activePath === cleanHref || activePath.startsWith(cleanHref + '/')
+          return (
+            <Link key={href} href={href as any} asChild>
+              <Pressable style={s.navItem}>
+                <Icon size={24} color={active ? colors.primary : colors.mutedForeground} strokeWidth={2} />
+                <Text style={[s.navLabel, { color: active ? colors.primary : colors.mutedForeground }]}>
+                  {label}
+                </Text>
+              </Pressable>
+            </Link>
+          )
+        })}
+      </ScrollView>
+    </View>
+  )
+}
+
+// ── Main shell ───────────────────────────────────────────────────────────────
+export default function AppShellLayout() {
+  const { user, profile, loading, profileLoading, signOut } = useAuth()
+  const pathname = usePathname()
+  const [unread, setUnread] = useState(0)
+  const [chatOpen,    setChatOpen]    = useState(false)
+  const [suggestOpen, setSuggestOpen] = useState(false)
+
+  // Scroll-to-top on every route change. The shell mounts ONE shared
+  // <ScrollView> that wraps every page via <Slot/>, so its scroll position
+  // would otherwise persist across navigations — opening any deep page
+  // would land you wherever the previous page had scrolled to. This effect
+  // resets the scroll to 0 the instant the pathname changes.
+  const scrollRef = useRef<ScrollView | null>(null)
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ x: 0, y: 0, animated: false })
+  }, [pathname])
+
+  // Match web: chat enabled flag from profile
+  const chatEnabled = (profile as any)?.chat_enabled === true
+  const isAdmin     = (profile as any)?.is_superuser === true
+
+  // ── Unread message subscription (mirrors web Navbar useEffect) ──────────────
+  useEffect(() => {
+    if (!user || !chatEnabled) return
+    let mounted = true
+
+    async function fetchUnread() {
+      const { count } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user!.id)
+        .eq('from_admin', true)
+        .eq('read', false)
+      if (mounted) setUnread(count ?? 0)
+    }
+    fetchUnread()
+
+    const channel = supabase
+      .channel(`unread-client-${user.id}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'messages', filter: `user_id=eq.${user.id}` },
+        () => fetchUnread()
+      )
+      .subscribe()
+
+    return () => { mounted = false; supabase.removeChannel(channel) }
+  }, [user, chatEnabled])
+
+  // Show the spinner ONLY during the initial load (no profile yet).
+  // Subsequent profile refreshes (e.g. after `refreshProfile()` post-save)
+  // also flip `profileLoading=true`, but we already have profile data to
+  // render — switching to the spinner would unmount the entire route
+  // tree (the <Slot /> below) and reset page-level state (scroll position,
+  // active tab, form inputs). That unmount is what made the Settings
+  // page appear to "redirect" to another route after Save. Mirrors web's
+  // ProtectedLayout guard in MyRX/src/App.jsx.
+  if (loading || (!profile && profileLoading)) {
+    return (
+      <View style={s.loading}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    )
+  }
+  if (!user) return <Redirect href={'/(auth)/sign-in' as any} />
+  // User is authenticated but the profile row is missing required fields.
+  // Bounce them back to sign-up — the journey reads sessionStorage state
+  // and resumes from where they left off. Gate is on full_name + gender +
+  // birthdate + current_weight + current_height (see isProfileComplete);
+  // phone + avatar are not strictly required.
+  if (!isProfileComplete(profile)) return <Redirect href={'/(auth)/sign-up' as any} />
+
+  return (
+    <BiometricLockGate>
+      <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
+        <View style={s.container}>
+          <TopBar
+            isAdmin={isAdmin}
+            chatEnabled={chatEnabled}
+            unread={unread}
+            onSuggest={() => setSuggestOpen(true)}
+            onChat={() => setChatOpen(true)}
+            onSignOut={async () => {
+              await signOut()
+              router.replace('/(auth)/sign-in')
+            }}
+          />
+
+          <ScrollView
+            ref={scrollRef}
+            style={s.scroll}
+            contentContainerStyle={s.scrollContent}
+            showsVerticalScrollIndicator={false}
+            // "handled" = taps on touchables fire even when the keyboard is up
+            // (otherwise the first tap on a dropdown row would just dismiss the
+            // keyboard and lose the press). Required for MovementSearch + future
+            // inline overlays.
+            keyboardShouldPersistTaps="handled"
+            // Required on Android API 21+ so that nested ScrollViews inside the
+            // page (notably MovementSearch's dropdown) can claim vertical scroll
+            // gestures instead of the parent stealing them.
+            nestedScrollEnabled
+          >
+            <Slot />
+          </ScrollView>
+
+          <BottomNav activePath={pathname} />
+        </View>
+
+        {/* Sheets — mount once at the shell so they persist across page navigations */}
+        <ChatSheet       isOpen={chatOpen}    onClose={() => setChatOpen(false)} />
+        <SuggestionSheet isOpen={suggestOpen} onClose={() => setSuggestOpen(false)} />
+      </SafeAreaView>
+    </BiometricLockGate>
+  )
+}
+
+// ── Styles ───────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  safe:      { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: colors.background },
+  loading:   { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
+
+  // Top bar — matches web's `h-14 border-b border-border bg-background/90`
+  topBar: {
+    height: 56,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: alpha(colors.background, 0.9),
+  },
+  // No-slogan wordmark — myrx-wordmark-dark.png is 1781×390 (aspect ≈4.57:1).
+  // We give an explicit width budget so the top bar's space-between layout
+  // doesn't collapse the auto-sized Image.
+  logoImg: {
+    height: 28,
+    width: Math.round(28 * (1781 / 390)),  // ≈128
+  },
+  topBarRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+
+  // Icon buttons (top-right) — match web's `h-9 w-9 rounded-full border-2 …`
+  iconBtnAmber: {
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 2, borderColor: '#f59e0b',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  iconBtnPrimary: {
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 2, borderColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+    position: 'relative',
+  },
+  iconBtnDestructive: {
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 2, borderColor: colors.destructive,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  unreadBadge: {
+    position: 'absolute', top: -2, right: -2,
+    minWidth: 16, height: 16, paddingHorizontal: 3,
+    borderRadius: 8, backgroundColor: colors.destructive,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  unreadBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
+
+  // Scroll container — matches web's `pt-14 pb-24 p-4 max-w-6xl`
+  scroll:        { flex: 1 },
+  scrollContent: { padding: 16, paddingBottom: 32 },
+
+  // Bottom nav — matches web's `border-t bg-background/95 overflow-x-auto`
+  bottomNav: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: alpha(colors.background, 0.95),
+  },
+  bottomNavContent: { paddingHorizontal: 4, paddingVertical: 6 },
+  navItem: {
+    paddingHorizontal: 12, paddingVertical: 8,
+    alignItems: 'center', gap: 4,
+    minWidth: 64,
+  },
+  navLabel: { fontSize: 11 },
+})
