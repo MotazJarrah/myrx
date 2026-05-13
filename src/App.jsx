@@ -11,7 +11,6 @@ import CompleteProfile from './components/CompleteProfile'
 const Landing         = lazy(() => import('./pages/Landing'))
 const Auth            = lazy(() => import('./pages/Auth'))
 const AuthConfirm     = lazy(() => import('./pages/AuthConfirm'))
-const OnboardingDemo  = lazy(() => import('./pages/OnboardingDemo'))
 const Dashboard       = lazy(() => import('./pages/Dashboard'))
 const Strength        = lazy(() => import('./pages/Strength'))
 const Cardio          = lazy(() => import('./pages/Cardio'))
@@ -155,11 +154,6 @@ function AppRoutes() {
         <Route path="/auth/confirm" component={AuthConfirm} />
         <Route path="/auth/recovery" component={AuthConfirm} />
         <Route path="/auth" component={Auth} />
-        {/* Standalone testbed for the new onboarding journey. Lives outside
-            the protected route tree so anyone can reach it without auth.
-            Will be folded into the production sign-up flow once the full
-            multi-act journey is built and approved. */}
-        <Route path="/onboarding-demo" component={OnboardingDemo} />
         <Route component={ProtectedLayout} />
       </Switch>
     </Suspense>
