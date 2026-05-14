@@ -1,25 +1,41 @@
--- Food library table (mirrors Supabase schema, SQLite types)
+-- Food library table — complete schema for a fresh install.
 --
--- `data_type` classifies each row as 'branded' (packaged product, has UPC)
--- or 'generic' (canonical ingredient or admin-curated custom entry, no UPC).
--- The rule is derived at INSERT time from UPC presence by both the sync
--- scripts and the Worker's myrx-create handler — see scripts/d1_migrate/
--- lib/normalize.mjs::dataTypeFromUpc for the single source of truth.
+-- Column conventions:
+--   source           top-level provenance: 'usda', 'on', 'myrx'
+--   source_id        unique stable ID within source (USDA fdc_id, ON id, MYRX uuid)
+--   source_subtype   source-specific category (e.g. 'branded_food', 'foundation_food',
+--                    'on_branded', 'admin_custom'). See migration 0006 for full list.
+--   data_type        universal classification: 'branded', 'generic', 'recipe',
+--                    'restaurant', 'aggregated'. Used for cross-source filtering.
+--                    Derived from upc/brand presence by lib/normalize.mjs.
+--   upc              barcode if known
+--   imported_at      ISO timestamp when row first inserted into our DB
+--   last_synced_at   ISO timestamp when row was last refreshed by a sync run
+--   source_version   dataset/API release identifier (e.g. 'FoodData_Central_csv_2026-04-30')
+--   food_category    USDA's text category (e.g. 'Dairy and Egg Products')
+--   servings_per_container  for MYRX entries that store package size
 CREATE TABLE IF NOT EXISTS food_library (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  source      TEXT    NOT NULL DEFAULT 'usda',
-  source_id   TEXT    NOT NULL,
-  name        TEXT    NOT NULL,
-  brand       TEXT,
-  kcal        REAL,
-  protein_g   REAL,
-  fat_g       REAL,
-  carbs_g     REAL,
-  fiber_g     REAL,
-  sodium_mg   REAL,
-  serving_g   REAL,
-  serving_label TEXT,
-  data_type   TEXT,
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  source         TEXT    NOT NULL DEFAULT 'usda',
+  source_id      TEXT    NOT NULL,
+  source_subtype TEXT,
+  name           TEXT    NOT NULL,
+  brand          TEXT,
+  kcal           REAL,
+  protein_g      REAL,
+  fat_g          REAL,
+  carbs_g        REAL,
+  fiber_g        REAL,
+  sodium_mg      REAL,
+  serving_g      REAL,
+  serving_label  TEXT,
+  servings_per_container REAL,
+  data_type      TEXT,
+  upc            TEXT,
+  imported_at    TEXT,
+  last_synced_at TEXT,
+  source_version TEXT,
+  food_category  TEXT,
   UNIQUE(source, source_id)
 );
 

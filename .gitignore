@@ -36,5 +36,18 @@ dist-ssr
 # Keep on disk for re-import but never commit it (kills git push over flaky links).
 opennutrition/
 
+# Bulk-import source data — USDA + OpenNutrition archives, multi-GB.
+# Downloaded fresh each rebuild, then deleted. Never goes in git.
+scripts/bulk_import/data/
+
+# Belt-and-suspenders: any USDA / ON archive anywhere in the tree.
+FoodData_Central_csv_*.zip
+FoodData_Central_csv_*/
+opennutrition-dataset-*.zip
+opennutrition_foods.tsv
+
+# Claude session state — local only
+.claude/scheduled_tasks.lock
+
 # Cloudflare wrangler local cache (account info, build state)
 .wrangler/

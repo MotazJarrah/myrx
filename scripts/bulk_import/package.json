@@ -1,0 +1,11 @@
+{
+  "name": "myrx-bulk-import",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "One-shot bulk-import of USDA + OpenNutrition data into Cloudflare D1 (food_library)",
+  "private": true,
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "unzipper": "^0.12.3"
+  }
+}
