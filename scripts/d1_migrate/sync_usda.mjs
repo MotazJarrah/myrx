@@ -6,7 +6,7 @@
  *   2. Foundation     — lab-tested canonical ingredients, no UPC   → data_type='generic'
  *   3. SR Legacy      — older USDA Standard Reference, no UPC      → data_type='generic'
  *
- * The previous implementation hardcoded `dataType: ['Branded Food']` and
+ * The previous implementation hardcoded `dataType: ['Branded']` and
  * filtered every row through a `shouldSkip` that required a UPC, which is
  * why generic ingredients like "Lettuce, romaine, raw" disappeared from
  * search. Foundation Foods and SR Legacy don't have UPCs by design — they're
@@ -53,11 +53,17 @@ const BATCH_SIZE = 100   // D1 batch limit
 
 // USDA API dataType labels in their canonical form (what we send in the
 // request body). Foundation + SR Legacy together are ~8K rows, branded is
-// ~420K. The branded pass dominates runtime.
+// ~455K. The branded pass dominates runtime.
+//
+// IMPORTANT: these strings are the literal values USDA's /foods/search
+// endpoint accepts. The API does NOT canonicalise variants — "Branded Food"
+// returns zero hits, only "Branded" works. Same for "Foundation" (not
+// "Foundation Food"). This was the source of a months-long invisible bug
+// where the sync's branded pass quietly returned 0 results.
 const PASSES = Object.freeze([
-  { apiLabel: 'Branded Food', shortName: 'branded',    dataType: 'branded' },
-  { apiLabel: 'Foundation',   shortName: 'foundation', dataType: 'generic' },
-  { apiLabel: 'SR Legacy',    shortName: 'sr_legacy',  dataType: 'generic' },
+  { apiLabel: 'Branded',    shortName: 'branded',    dataType: 'branded' },
+  { apiLabel: 'Foundation', shortName: 'foundation', dataType: 'generic' },
+  { apiLabel: 'SR Legacy',  shortName: 'sr_legacy',  dataType: 'generic' },
 ])
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -122,7 +128,7 @@ async function syncBranded(db, dateBegin, dateEnd) {
 
   while (page <= totalPages) {
     process.stdout.write(`\r  Page ${page}/${totalPages}…`)
-    const data = await fetchPage('Branded Food', page, dateBegin, dateEnd)
+    const data = await fetchPage('Branded', page, dateBegin, dateEnd)
 
     totalPages = data.totalPages ?? 1
     const foods = data.foods ?? []
