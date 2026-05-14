@@ -52,7 +52,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
-import { View, TextInput, StyleSheet, type StyleProp, type ViewStyle } from 'react-native'
+import { View, Text, TextInput, StyleSheet, type StyleProp, type ViewStyle } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, {
   useAnimatedStyle, useAnimatedProps, useAnimatedReaction, useSharedValue,
@@ -131,6 +131,34 @@ interface Props {
    *  Default `false` keeps the original geometric-shrink behaviour. */
   noScale?: boolean
   style?: StyleProp<ViewStyle>
+
+  // ── Time-composition mode ──────────────────────────────────────────────
+  // When `time` is set, the wheel renders as separated reels with static
+  // `:` colons between them — minutes+seconds (`'mm:ss'`) or
+  // hours+minutes+seconds (`'hh:mm:ss'`). `value` is total seconds.
+  // The numeric-mode props above (step, min/max, ladder, unit, format,
+  // anchor, noScale) are IGNORED in time mode — the composition wires
+  // those per-reel itself.
+  time?: 'mm:ss' | 'hh:mm:ss'
+  /** mm:ss mode only — minimum minutes the user can scroll to (default 0). */
+  minMinutes?: number
+  /** mm:ss mode only — maximum minutes the user can scroll to (default 60).
+   *  Ignored in hh:mm:ss mode. */
+  maxMinutes?: number
+  /** hh:mm:ss mode only — maximum hours the user can scroll to (default 23).
+   *  Ignored in mm:ss mode. */
+  maxHours?: number
+
+  // ── Decimal-composition mode ───────────────────────────────────────────
+  // When `decimal="XX.X"` is set, renders as TWO reels (whole + tenth)
+  // around a static `.` decimal point, optionally followed by a static
+  // `unit` suffix. The reels move just like time's mm:ss but separated
+  // by a `.` instead of a `:`. `value` is in tenths (integer): 262 means
+  // 26.2, 50 means 5.0. The numeric-mode props (step, ladder, format,
+  // anchor, noScale) are ignored; the composition wires those per-reel.
+  // `min` / `max` are in TENTHS (same unit as value). `unit` becomes the
+  // static suffix Text after the right reel ("km" / "mi" / etc).
+  decimal?: 'XX.X'
 }
 
 // ── Gesture-tuning constants ─────────────────────────────────────────────
@@ -707,7 +735,237 @@ function CenterRow({
   )
 }
 
-export default function PhantomWheel({
+// ─────────────────────────────────────────────────────────────────────────
+//  PhantomWheel (default export) — DISPATCHER. Picks rendering mode:
+//    • If `time` prop is set ('mm:ss' or 'hh:mm:ss'), renders the
+//      split-reel time picker (TimePhantomWheel internally — composes 2
+//      or 3 NumericPhantomWheel reels with static `:` colons between
+//      them). `value` is total seconds in this mode.
+//    • Otherwise, renders a single numeric wheel (NumericPhantomWheel
+//      internally — one rolling reel showing the value, optionally with
+//      a unit suffix or custom `format` function applied).
+//
+//  This used to be two separate files (PhantomWheel.tsx + TimeWheel.tsx).
+//  Merged so every time / numeric input across the app uses the same
+//  component, picking the look via a single prop. The dispatcher itself
+//  is trivially thin; all the gesture logic lives in NumericPhantomWheel
+//  below.
+// ─────────────────────────────────────────────────────────────────────────
+export default function PhantomWheel(props: Props) {
+  if (props.time)    return <TimePhantomWheel {...props} />
+  if (props.decimal) return <DecimalPhantomWheel {...props} />
+  return <NumericPhantomWheel {...props} />
+}
+
+// Pad to two digits with a leading zero. Used by the time reels for
+// "07" instead of "7". Pure JS (not a worklet) — called on JS thread
+// inside `useLayoutEffect` and passed to each reel as its `format`.
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+// ─────────────────────────────────────────────────────────────────────────
+//  TimePhantomWheel — the split-reel time picker. 2 reels for 'mm:ss'
+//  (minutes + seconds) or 3 reels for 'hh:mm:ss' (hours + minutes +
+//  seconds), with static `:` colons between them.
+//
+//  Each reel is an independent NumericPhantomWheel. The composed
+//  `onChange(totalSecs)` fires whenever any reel commits — reassembles
+//  the total from the current (hours, minutes, seconds) tuple and pushes
+//  it upstream. The reels themselves never share state directly.
+//
+//  Reel anchoring:
+//    • Outer reels (hours / minutes-in-mm:ss / seconds) anchor to the
+//      colon's edge so the digits hug the colon as they scale.
+//    • Middle reel (minutes-in-hh:mm:ss) uses `noScale` so it doesn't
+//      shrink — it sits sandwiched between two static colons and the
+//      usual edge-sweep would have nowhere to go.
+// ─────────────────────────────────────────────────────────────────────────
+function TimePhantomWheel({
+  value, onChange,
+  time = 'mm:ss',
+  minMinutes = 0,
+  maxMinutes = 60,
+  maxHours = 23,
+  centerSize = 28,
+  haloRadius = 2,
+  style,
+}: Props) {
+  // Defensive floor — guard against the (unlikely) negative-totalSecs case.
+  const totalSecs = Math.max(0, Math.floor(value))
+
+  const Colon = (
+    <Text
+      style={[
+        s.timeColon,
+        { fontSize: centerSize, lineHeight: centerSize, includeFontPadding: false },
+      ]}
+      pointerEvents="none"
+    >
+      :
+    </Text>
+  )
+
+  if (time === 'hh:mm:ss') {
+    const hours       = Math.floor(totalSecs / 3600)
+    const minutes     = Math.floor((totalSecs % 3600) / 60)
+    const seconds     = totalSecs % 60
+    const setHours   = (h: number)   => onChange(h * 3600 + minutes * 60 + seconds)
+    const setMinutes = (m: number)   => onChange(hours * 3600 + m * 60 + seconds)
+    const setSeconds = (sec: number) => onChange(hours * 3600 + minutes * 60 + sec)
+
+    return (
+      <View style={[s.timeRow, style]}>
+        <NumericPhantomWheel
+          value={hours} onChange={setHours}
+          step={1} min={0} max={maxHours}
+          anchor="right" format={pad2}
+          centerSize={centerSize} haloRadius={haloRadius}
+        />
+        {Colon}
+        <NumericPhantomWheel
+          value={minutes} onChange={setMinutes}
+          step={1} min={0} max={59}
+          anchor="center" noScale format={pad2}
+          centerSize={centerSize} haloRadius={haloRadius}
+        />
+        {Colon}
+        <NumericPhantomWheel
+          value={seconds} onChange={setSeconds}
+          step={1} min={0} max={59}
+          anchor="left" format={pad2}
+          centerSize={centerSize} haloRadius={haloRadius}
+        />
+      </View>
+    )
+  }
+
+  // Default mm:ss — two reels, one colon.
+  const minutes = Math.floor(totalSecs / 60)
+  const seconds = totalSecs % 60
+  const setMinutes = (m: number)   => onChange(m * 60 + seconds)
+  const setSeconds = (sec: number) => onChange(minutes * 60 + sec)
+
+  return (
+    <View style={[s.timeRow, style]}>
+      <NumericPhantomWheel
+        value={minutes} onChange={setMinutes}
+        step={1} min={minMinutes} max={maxMinutes}
+        anchor="right" format={pad2}
+        centerSize={centerSize} haloRadius={haloRadius}
+      />
+      {Colon}
+      <NumericPhantomWheel
+        value={seconds} onChange={setSeconds}
+        step={1} min={0} max={59}
+        anchor="left" format={pad2}
+        centerSize={centerSize} haloRadius={haloRadius}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  DecimalPhantomWheel — split-reel decimal picker. Same pattern as
+//  TimePhantomWheel but with a `.` instead of `:` and an optional static
+//  unit suffix after the right reel ("km" / "mi" / etc).
+//
+//  Two reels:
+//    • Left reel — whole number, anchored RIGHT, formatted with pad2 so
+//      the digits hug the dot's left side and stay aligned (`05.5 km`
+//      instead of `5.5 km` shifting the dot leftward).
+//    • Right reel — single tenths digit, anchored LEFT, no padding (it's
+//      always a single digit anyway).
+//
+//  `value` is in TENTHS (integer). `min` / `max` are also in tenths.
+//  Pass cardio's 5.0 km as `value={50}` with `max={500}`. The unit
+//  suffix is static — doesn't roll, doesn't scale, doesn't receive
+//  touches.
+//
+//  Clamp behaviour (LOCKED — see CLAUDE.md "PhantomWheel decimal mode"):
+//  each reel runs INDEPENDENTLY within its own range. Whole reel spans
+//  `[Math.floor(min/10), Math.floor(max/10)]`. Tenth reel always spans
+//  `[0, 9]`. No combined clamp — the effective scrollable range is
+//  `[minWhole.0, maxWhole.9]`, NOT `[min, max]`. E.g. `min=0 max=500`
+//  → user can reach 0.0 up to 50.9 (one extra tenth beyond 50.0). The
+//  parent's save-validation is expected to enforce any business cap
+//  separately if the literal `max` is meant as a hard ceiling.
+// ─────────────────────────────────────────────────────────────────────────
+function DecimalPhantomWheel({
+  value, onChange,
+  min = 0, max = 999,
+  unit,
+  centerSize = 28,
+  haloRadius = 2,
+  style,
+}: Props) {
+  // Decompose tenths → (whole, tenth).
+  const whole = Math.floor(value / 10)
+  const tenth = value % 10
+
+  // Reel bounds — whole spans the integer range derived from min/max
+  // (treated as tenths); tenths always 0–9 since carry-over isn't
+  // supported. NO combined clamp — each reel runs free within its own
+  // range. Effective scrollable range becomes [minWhole.0, maxWhole.9]
+  // — e.g. cardio's `min=0 max=500` makes the wheel reachable from
+  // 0.0 km up to 50.9 km (one extra tenth past the nominal 50.0 cap).
+  // This is intentional per spec: "values should go as low as 0.0 and
+  // up to x.9, where x is the highest available number".
+  const minWhole = Math.floor(min / 10)
+  const maxWhole = Math.floor(max / 10)
+
+  const setWhole = (w: number) => onChange(w * 10 + tenth)
+  const setTenth = (t: number) => onChange(whole * 10 + t)
+
+  const Dot = (
+    <Text
+      style={[
+        s.timeColon,
+        { fontSize: centerSize, lineHeight: centerSize, includeFontPadding: false },
+      ]}
+      pointerEvents="none"
+    >
+      .
+    </Text>
+  )
+
+  const UnitSuffix = unit ? (
+    <Text
+      style={[
+        s.decimalUnit,
+        { fontSize: centerSize, lineHeight: centerSize, includeFontPadding: false },
+      ]}
+      pointerEvents="none"
+    >
+      {' '}{unit}
+    </Text>
+  ) : null
+
+  return (
+    <View style={[s.timeRow, style]}>
+      <NumericPhantomWheel
+        value={whole} onChange={setWhole}
+        step={1} min={minWhole} max={maxWhole}
+        anchor="right" format={pad2}
+        centerSize={centerSize} haloRadius={haloRadius}
+      />
+      {Dot}
+      <NumericPhantomWheel
+        value={tenth} onChange={setTenth}
+        step={1} min={0} max={9}
+        anchor="left"
+        centerSize={centerSize} haloRadius={haloRadius}
+      />
+      {UnitSuffix}
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  NumericPhantomWheel — the single rolling-reel implementation. All the
+//  gesture / inertia / SharedValue-driven text logic lives here. Used
+//  directly for plain numeric inputs (reps, weight, distance, …) AND
+//  internally by TimePhantomWheel for each of its reels.
+// ─────────────────────────────────────────────────────────────────────────
+function NumericPhantomWheel({
   value, onChange,
   step = 1, min = 0, max = 9999,
   ladder,
@@ -1248,5 +1506,35 @@ const s = StyleSheet.create({
     // on the inline style, this is enough to land the glyph at the same
     // baseline a `<Text>` would.
     textAlignVertical: 'center',
+  },
+
+  // Container for the time-composition mode (TimePhantomWheel). Row of
+  // reels + static colons, centred. Each reel is its own NumericPhantomWheel
+  // so they each handle their own gestures + animations independently.
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Static `:` colon between two reels. Same fontFamily / weight as the
+  // centre digits so the colon sits visually balanced with the digits
+  // beside it. Doesn't roll, doesn't scale, doesn't receive touches.
+  // Also reused by DecimalPhantomWheel for the `.` between whole and
+  // tenth reels.
+  timeColon: {
+    color: colors.foreground,
+    fontFamily: fonts.mono[700],
+    fontVariant: ['tabular-nums'],
+    textAlign: 'center',
+  },
+  // Static unit suffix ("km" / "mi" / etc) used by DecimalPhantomWheel.
+  // Same weight + family as the centre digits — visually treated as
+  // part of the value display, just non-interactive. The leading space
+  // is included inline in the Text child for breathing room from the
+  // right reel.
+  decimalUnit: {
+    color: colors.foreground,
+    fontFamily: fonts.mono[700],
+    fontVariant: ['tabular-nums'],
   },
 })

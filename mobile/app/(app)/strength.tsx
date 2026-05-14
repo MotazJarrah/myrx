@@ -25,7 +25,6 @@ import { estimate1RM, getLadder, type LadderEquipment, type LadderUnit } from '.
 import { useMovements } from '../../src/hooks/useMovements'
 import MovementSearch from '../../src/components/MovementSearch'
 import PhantomWheel from '../../src/components/PhantomWheel'
-import TimeWheel from '../../src/components/TimeWheel'
 import AnimateRise from '../../src/components/AnimateRise'
 import UnitToggle from '../../src/components/UnitToggle'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
@@ -563,15 +562,17 @@ export default function Strength() {
             <View style={s.field}>
               <Text style={s.label}>Duration</Text>
               <WheelInput>
-                {/* Split mm:ss reel: the colon is fixed dead-centre, and
-                    minutes / seconds scroll independently with the digits
-                    anchored to the colon's edges. Replaces the previous
-                    single PhantomWheel that formatted total-seconds as
-                    "mm:ss" — same controlled value (total seconds), new
-                    interaction model. */}
-                <TimeWheel
+                {/* Split mm:ss reels via PhantomWheel's time mode — colon
+                    fixed dead-centre, minutes / seconds scroll
+                    independently with the digits anchored to the colon's
+                    edges. The `time` prop turns PhantomWheel into the
+                    split-reel composition (previously a separate
+                    TimeWheel component; merged in to keep all wheels
+                    behind one file). */}
+                <PhantomWheel
                   value={parseTimeStr(timeStr) || 0}
                   onChange={(secs) => setTimeStr(formatMmSs(secs))}
+                  time="mm:ss"
                   maxMinutes={60}
                 />
               </WheelInput>

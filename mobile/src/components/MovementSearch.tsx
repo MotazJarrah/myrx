@@ -26,7 +26,7 @@ import {
 // the page's parent ScrollView (RN's stock ScrollView loses the gesture race
 // to the outer one on Android, even with nestedScrollEnabled).
 import { ScrollView } from 'react-native-gesture-handler'
-import { ChevronDown } from 'lucide-react-native'
+import { ChevronDown, X } from 'lucide-react-native'
 import { colors, alpha, palette } from '../theme'
 
 interface Props {
@@ -143,6 +143,22 @@ export default function MovementSearch({
   // Web behavior: input shows the typed query while focused; otherwise the
   // selected value (or empty so the placeholder shows).
   const displayValue = focused ? query : (query || value)
+  // Clear-X button is visible whenever the visible string is non-empty.
+  // Tapping it wipes both the typed query AND the selected value so the
+  // field returns to its placeholder state — same UX pattern users expect
+  // from any mobile search input. The chevron remains visible separately.
+  const hasContent = displayValue.length > 0
+
+  function clearAll() {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null }
+    setQuery('')
+    onQueryChange?.('')
+    if (value) onChange('')
+    // Keep the dropdown open + focused so the user can immediately start a
+    // fresh search without re-tapping the field.
+    setOpen(true)
+    inputRef.current?.focus()
+  }
 
   return (
     <View style={s.container}>
@@ -164,8 +180,13 @@ export default function MovementSearch({
           autoCapitalize="words"
           spellCheck={false}
           returnKeyType="search"
-          style={[s.input, isSuggesting && s.inputSuggesting]}
+          style={[s.input, isSuggesting && s.inputSuggesting, hasContent && s.inputWithClear]}
         />
+        {hasContent && (
+          <Pressable onPress={clearAll} hitSlop={6} style={s.clearBtn}>
+            <X size={14} color={colors.mutedForeground} />
+          </Pressable>
+        )}
         <Pressable
           onPress={() => {
             if (open) {
@@ -252,12 +273,26 @@ const s = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    paddingRight: 32,                // room for the chevron
+    paddingRight: 32,                // room for the chevron (when no clear-X)
     color: colors.foreground,
     fontSize: 14,
   },
+  // Extra right-padding when the clear-X button is visible alongside the
+  // chevron, so the typed text doesn't slide under the two icons.
+  inputWithClear: {
+    paddingRight: 56,
+  },
   inputSuggesting: {
     borderColor: palette.red[500],
+  },
+
+  // Clear-X sits to the LEFT of the chevron when the input has any content.
+  // Same hit-area + vertical-centring pattern as the chevron.
+  clearBtn: {
+    position: 'absolute',
+    right: 28, top: 0, bottom: 0,
+    paddingHorizontal: 6,
+    alignItems: 'center', justifyContent: 'center',
   },
 
   chevron: {

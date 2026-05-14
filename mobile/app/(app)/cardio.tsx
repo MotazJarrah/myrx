@@ -25,7 +25,6 @@ import { supabase } from '../../src/lib/supabase'
 import { useMovements } from '../../src/hooks/useMovements'
 import MovementSearch from '../../src/components/MovementSearch'
 import PhantomWheel from '../../src/components/PhantomWheel'
-import TimeWheel from '../../src/components/TimeWheel'
 import AnimateRise from '../../src/components/AnimateRise'
 import UnitToggle from '../../src/components/UnitToggle'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
@@ -57,13 +56,24 @@ function formatMmSs(secs: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+// Shared field height — same value as `strength.tsx` so a row of fields on
+// cardio matches a row of fields on strength pixel-for-pixel. Pairs with
+// the vertical UnitToggle (also 75 tall) and the unit-locked chip below
+// (`unitLockedBox`, future-proof; cardio doesn't currently have any
+// unit-locked activities but the styling exists for parity).
+const FIELD_HEIGHT = 75
+
 function WheelInput({ children }: { children: React.ReactNode }) {
   return (
     <View style={{
-      backgroundColor: alpha(colors.input, 0.30),
+      backgroundColor: alpha(colors.input, 0.10),
       borderColor: colors.border, borderWidth: 1, borderRadius: 6,
-      paddingHorizontal: 12, paddingVertical: 6,
-      minHeight: 44,
+      // No horizontal padding — the wheel needs every pixel for the
+      // JetBrainsMono digits + unit suffix to fit. The wheel's own
+      // container `paddingHorizontal: 8` still gives breathing room
+      // from the border. Matches strength.tsx's WheelInput.
+      paddingHorizontal: 0, paddingVertical: 6,
+      height: FIELD_HEIGHT,
       alignItems: 'center', justifyContent: 'center',
     }}>{children}</View>
   )
@@ -119,12 +129,28 @@ export default function Cardio() {
     ? ((movementRecord.cardio_mode as 'pace' | 'duration' | undefined) || 'pace')
     : 'pace'
 
-  // ── Reset fields when switching modes — pre-populate sensible defaults so
-  // the wheels don't render at "empty" and the user can save immediately if
-  // the defaults match their effort. Mirror of web Cardio.jsx.
+  // Optional per-movement unit lock (km-only / mi-only activities). Mirrors
+  // strength.tsx's `unit_lock` pattern. Cardio doesn't have any unit-locked
+  // activities at the moment, so this almost always resolves to undefined
+  // and the regular toggle renders — but the styling is wired up so the
+  // day a locked-unit activity is added it looks identical to strength.
+  const unitLock = (movementRecord as any)?.unit_lock as ('km' | 'mi' | null | undefined)
   useEffect(() => {
-    if (mode === 'duration') { setDistValue(''); setTimeStr('30:00') }
-    else                     { setDistValue('5'); setTimeStr('25:00') }
+    if (unitLock === 'km' || unitLock === 'mi') setDistUnit(unitLock)
+  }, [unitLock])
+
+  // ── Reset fields when switching modes — every value/time field starts at
+  // its MIN SAVABLE value (NOT min scrollable). The wheels can be scrolled
+  // down to 0 / 0.0, but Save is disabled there (`canSave` requires
+  // distKm > 0 and timeSecs > 0). So defaults sit one notch above zero:
+  //   • Distance → 0.1 (km / mi, the smallest > 0)
+  //   • Time     → 00:01 (one second, the smallest > 0)
+  // Mirrors strength's exercise-load effect (reps 1, weight wheel min,
+  // carry 5 m, isometric 00:01). See CLAUDE.md "Default values: min
+  // savable" for the rule.
+  useEffect(() => {
+    if (mode === 'duration') { setDistValue('');    setTimeStr('00:01') }
+    else                     { setDistValue('0.1'); setTimeStr('00:01') }
   }, [mode])
 
   // ── Clear saved/error on any input change ──────────────────────────────────
@@ -280,16 +306,15 @@ export default function Cardio() {
             <View style={s.field}>
               <Text style={s.label}>Duration</Text>
               <WheelInput>
-                {/* Test bed for the hh:mm:ss split time wheel. Cardio
-                    Duration mode tops out at 3 hours so this is the only
-                    place in the app where the hours reel matters in
-                    practice. The controlled value (total seconds in
-                    `timeStr`) is unchanged — TimeWheel reads/writes via
-                    onChange just like the previous single PhantomWheel. */}
-                <TimeWheel
+                {/* hh:mm:ss split-reel time picker via PhantomWheel's
+                    time mode. Cardio Duration tops out at 3 hours so this
+                    is the only place in the app where the hours reel
+                    matters in practice. Controlled value is total
+                    seconds in `timeStr`. */}
+                <PhantomWheel
                   value={parseTimeStr(timeStr) || 0}
                   onChange={(secs) => setTimeStr(formatMmSs(secs))}
-                  format="hh:mm:ss"
+                  time="hh:mm:ss"
                   maxHours={3}
                 />
               </WheelInput>
@@ -310,30 +335,53 @@ export default function Cardio() {
           /* Pace mode */
           <>
             <View style={s.tripleGrid}>
-              <View style={[s.field, s.gridLarge]}>
+              <View style={[s.field, s.gridPaceDistance]}>
                 <Text style={s.label}>Distance</Text>
                 <WheelInput>
+                  {/* Split-reel decimal picker (whole . tenth + static
+                      unit). Same logic + design as the time wheel but
+                      with a `.` static between the reels instead of a
+                      `:`, and a static km/mi suffix after the right
+                      reel. `value` is in TENTHS — 50 → 5.0 km, 262 →
+                      26.2 km. min/max are also in tenths. */}
                   <PhantomWheel
-                    value={Math.max(1, Math.round((Number(distValue) || 5) * 10))}
+                    // Compute the wheel's tenths value from distValue. CAREFUL:
+                    // can't use `Number(distValue) || 0.1` here — JS treats 0 as
+                    // falsy, so the moment the user scrolls all the way down and
+                    // distValue becomes '0', the `||` would short-circuit to 0.1
+                    // and the wheel would snap back from 0.0 → 0.1. The ternary
+                    // distinguishes "empty string" (default to 0.1 km savable
+                    // min) from "literal zero" (let the wheel sit at 0.0). Save
+                    // stays disabled at 0.0 via the canSave check below.
+                    value={distValue === '' ? 1 : Math.max(0, Math.round(Number(distValue) * 10))}
                     onChange={(tenths) => setDistValue(String(tenths / 10))}
-                    step={1} min={1} max={500}
-                    format={(tenths) => (tenths / 10).toFixed(1)}
+                    decimal="XX.X"
+                    min={0} max={500}
                     unit={distUnit}
                   />
                 </WheelInput>
               </View>
-              <View style={[s.field, s.gridSmall]}>
+              <View style={[s.field, s.gridUnit]}>
                 <Text style={s.label}>Unit</Text>
-                <UnitToggle value={distUnit} options={['km', 'mi'] as const} onChange={setDistUnit} />
+                {unitLock ? (
+                  <View style={s.unitLockedBox}><Text style={s.unitLockedText} numberOfLines={1}>{unitLock}</Text></View>
+                ) : (
+                  <UnitToggle value={distUnit} options={['km', 'mi'] as const} onChange={setDistUnit} vertical />
+                )}
               </View>
-              <View style={[s.field, s.gridLarge]}>
+              <View style={[s.field, s.gridPaceTime]}>
                 <Text style={s.label}>Time</Text>
                 <WheelInput>
+                  {/* Pace-mode Time uses split-reel mm:ss. Cap at 99:59 —
+                      two-digit-minutes ceiling (matches what a user
+                      could plausibly log for a pace-tracked activity;
+                      anything beyond is duration-mode territory).
+                      Seconds reel keeps the standard 0-59 range. */}
                   <PhantomWheel
                     value={parseTimeStr(timeStr) || 0}
                     onChange={(secs) => setTimeStr(formatMmSs(secs))}
-                    step={1} min={0} max={3 * 3600}
-                    format={formatMmSs}
+                    time="mm:ss"
+                    maxMinutes={99}
                   />
                 </WheelInput>
               </View>
@@ -494,9 +542,42 @@ const s = StyleSheet.create({
   tinyText:  { color: colors.mutedForeground, fontSize: 11, lineHeight: 16 },
   errorText: { color: colors.destructive, fontSize: 12, lineHeight: 16 },
 
-  tripleGrid: { flexDirection: 'row', gap: 12, alignItems: 'flex-end' },
-  gridSmall:  { flex: 0.9 },
-  gridLarge:  { flex: 1.35 },
+  // Triple-grid spec — globally-locked values match strength.tsx exactly:
+  //   - tripleGrid.gap        (8 px)
+  //   - gridUnit.width        (48 px — every Unit column on every page)
+  //   - FIELD_HEIGHT          (75 px — every row of fields on every page)
+  //   - vertical UnitToggle   (lb/kg or mi/km stacked, not side-by-side)
+  // The "big" column flex values, however, are PER-PAGE — Distance content
+  // ("26.2 km" / "26.2 mi", 6–8 chars w/ unit) is longer than mm:ss Time
+  // content ("25:00" / "180:00", 5–6 chars), so cardio's pace row uses
+  // ASYMMETRIC larges. Strength's carry row keeps symmetric larges because
+  // its Weight and Distance fields show similar-width content there.
+  // See CLAUDE.md "Field sizing parity (strength ↔ cardio)" for the rule.
+  tripleGrid: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
+  gridSmall:  { flex: 0.85 },           // not used on cardio today, kept for parity
+  gridLarge:  { flex: 2.55 },           // unused on cardio today, kept for parity
+  gridUnit:   { width: 48 },            // fixed-width Unit column (GLOBAL spec)
+  // Pace-mode asymmetric larges — Distance gets the extra room so its
+  // "100.0 km" / "26.2 mi" content has breathing space; Time gives some up.
+  // Math (on a 320-px-wide card after 40 px page padding): 320 - 16 (gaps) -
+  // 48 (Unit) = 256 for the two larges. With 3.0/2.1 ratio that's ~150 px
+  // for Distance, ~106 px for Time — well above the widest content each
+  // wheel can render in JetBrainsMono Bold.
+  gridPaceDistance: { flex: 3.0 },
+  gridPaceTime:     { flex: 2.1 },
+
+  // Read-only unit indicator shown in place of UnitToggle when the selected
+  // activity has `unit_lock` (none today; future-proof). Visual matches the
+  // toggle's active state so the layout doesn't shift, but it's non-interactive.
+  // Locked spec mirrors strength.tsx exactly.
+  unitLockedBox: {
+    height: FIELD_HEIGHT,
+    paddingHorizontal: 8, paddingVertical: 6,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: alpha(colors.input, 0.10),
+    borderColor: colors.border, borderWidth: 1, borderRadius: 6,
+  },
+  unitLockedText: { color: colors.primary, fontSize: 14, fontWeight: '700' },
 
   chipLabel: { color: colors.mutedForeground, fontSize: 12 },
   chipValue: { fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'], fontSize: 16 },
