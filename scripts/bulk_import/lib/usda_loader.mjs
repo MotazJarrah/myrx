@@ -25,6 +25,7 @@
 import fs   from 'fs'
 import path from 'path'
 import { parse } from 'csv-parse'
+import { shouldKeepFood, getFilterReason } from '../../d1_migrate/lib/filters.mjs'
 
 // ── USDA → our schema mappings ───────────────────────────────────────────────
 
@@ -245,14 +246,38 @@ export async function loadUsda(usdaRoot) {
   })
   console.log(`\r    → ${nutrientRowsProcessed.toLocaleString()} streamed · ${nutrientRowsApplied.toLocaleString()} applied to foods`)
 
+  // ── Filter pass — apply per-row audit rules at INSERT-time ──────────────────
+  // See scripts/d1_migrate/lib/filters.mjs for the rule list (Rules 1, 4, 5,
+  // 6, 7 from docs/food_library_filters.md). Dedup rules (2, 3) run as
+  // post-import DELETEs because they need cross-row comparison.
+  console.log('  Pass 6/6 — applying filter rules…')
+  const allRows  = [...foods.values()]
+  const kept     = []
+  const rejected = {}
+  for (const row of allRows) {
+    if (shouldKeepFood(row)) {
+      kept.push(row)
+    } else {
+      const reason = getFilterReason(row) ?? 'unknown'
+      rejected[reason] = (rejected[reason] ?? 0) + 1
+    }
+  }
+  const droppedTotal = allRows.length - kept.length
+  console.log(`    → ${kept.length.toLocaleString()} kept · ${droppedTotal.toLocaleString()} filtered out`)
+  for (const [reason, n] of Object.entries(rejected).sort((a, b) => b[1] - a[1])) {
+    console.log(`        ${reason}: ${n.toLocaleString()}`)
+  }
+
   // ── Final stats ────────────────────────────────────────────────────────────
   const stats = {
-    total:       foods.size,
+    total:       kept.length,
+    filtered:    droppedTotal,
+    by_reason:   rejected,
     by_subtype:  {},
   }
-  for (const food of foods.values()) {
+  for (const food of kept) {
     stats.by_subtype[food.source_subtype] = (stats.by_subtype[food.source_subtype] ?? 0) + 1
   }
 
-  return { rows: [...foods.values()], version, stats }
+  return { rows: kept, version, stats }
 }

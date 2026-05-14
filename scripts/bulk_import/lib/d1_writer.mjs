@@ -28,12 +28,14 @@ const RETRY_DELAY_MS = 5_000
 const TMP_DIR = path.join(os.tmpdir(), 'myrx_bulk_import')
 
 // Column list — must match the order in `toValues()` below.
+// food_category dropped (post-audit decision — coarse USDA category,
+// more detailed info already in `name`).
 const COLS = [
   'source', 'source_id', 'source_subtype', 'name', 'brand',
   'kcal', 'protein_g', 'fat_g', 'carbs_g', 'fiber_g', 'sodium_mg',
   'serving_g', 'serving_label', 'servings_per_container',
   'data_type', 'upc',
-  'imported_at', 'last_synced_at', 'source_version', 'food_category',
+  'imported_at', 'last_synced_at', 'source_version',
 ].join(', ')
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,7 +69,6 @@ function toValues(r) {
     esc(r.imported_at),
     esc(r.last_synced_at),
     esc(r.source_version),
-    esc(r.food_category),
   ].join(',')})`
 }
 

@@ -21,6 +21,7 @@ import fs       from 'fs'
 import path     from 'path'
 import readline from 'readline'
 import unzipper from 'unzipper'
+import { shouldKeepFood, getFilterReason } from '../../d1_migrate/lib/filters.mjs'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -197,15 +198,37 @@ export async function loadOn(onRoot) {
   })
 
   console.log('')
-  console.log(`  → ${rows.length.toLocaleString()} ON rows built · ${skipped_no_name.toLocaleString()} skipped (no name)`)
+  console.log(`  Raw parsed: ${rows.length.toLocaleString()} ON rows · ${skipped_no_name.toLocaleString()} skipped (no name)`)
+
+  // ── Filter pass — apply per-row audit rules at INSERT time ────────────────
+  // Same shared filter library as the USDA loader. See
+  // scripts/d1_migrate/lib/filters.mjs.
+  console.log('  Applying filter rules…')
+  const kept     = []
+  const rejected = {}
+  for (const row of rows) {
+    if (shouldKeepFood(row)) {
+      kept.push(row)
+    } else {
+      const reason = getFilterReason(row) ?? 'unknown'
+      rejected[reason] = (rejected[reason] ?? 0) + 1
+    }
+  }
+  const droppedTotal = rows.length - kept.length
+  console.log(`    → ${kept.length.toLocaleString()} kept · ${droppedTotal.toLocaleString()} filtered out`)
+  for (const [reason, n] of Object.entries(rejected).sort((a, b) => b[1] - a[1])) {
+    console.log(`        ${reason}: ${n.toLocaleString()}`)
+  }
 
   const stats = {
-    total:      rows.length,
+    total:      kept.length,
+    filtered:   droppedTotal,
+    by_reason:  rejected,
     by_subtype: {},
   }
-  for (const r of rows) {
+  for (const r of kept) {
     stats.by_subtype[r.source_subtype] = (stats.by_subtype[r.source_subtype] ?? 0) + 1
   }
 
-  return { rows, version, stats }
+  return { rows: kept, version, stats }
 }

@@ -51,3 +51,7 @@ opennutrition_foods.tsv
 
 # Cloudflare wrangler local cache (account info, build state)
 .wrangler/
+
+# Bulk-import intermediate artifacts
+scripts/bulk_import/myrx_backup.json
+scripts/bulk_import/data/
