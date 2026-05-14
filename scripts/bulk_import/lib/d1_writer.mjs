@@ -75,7 +75,7 @@ async function executeFile(filePath) {
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
     try {
       execSync(
-        `npx wrangler d1 execute ${DB_NAME} --remote --file="${filePath}" --config="${WRANGLER_CONFIG}"`,
+        `npx wrangler d1 execute ${DB_NAME} --remote --file="${filePath}" --config="${WRANGLER_CONFIG}" --json`,
         { stdio: 'pipe' }
       )
       return
@@ -103,23 +103,34 @@ export async function executeSql(sql) {
 }
 
 /**
- * Execute SQL and return parsed JSON results.
- * Wrangler outputs JSON when its stdout is captured; we extract the results array.
+ * Execute a single SQL query and return its rows.
+ *
+ * Uses `wrangler d1 execute --command --json` rather than `--file --json` —
+ * the latter returns only a summary, while `--command --json` returns the
+ * actual rows for SELECT statements. Authentication uses wrangler's stored
+ * Cloudflare credentials (no env-var dependency).
+ *
+ * @param {string} sql  — short single SQL statement (fits in CLI arg length)
+ * @returns {Promise<Array<object>>}
  */
 export async function querySql(sql) {
-  fs.mkdirSync(TMP_DIR, { recursive: true })
-  const fp = path.join(TMP_DIR, `_q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.sql`)
-  fs.writeFileSync(fp, sql + '\n')
-  try {
-    const output = execSync(
-      `npx wrangler d1 execute ${DB_NAME} --remote --file="${fp}" --config="${WRANGLER_CONFIG}"`,
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
-    )
-    const match = output.match(/"results":\s*(\[[\s\S]*?\])/)
-    return match ? JSON.parse(match[1]) : []
-  } finally {
-    if (fs.existsSync(fp)) fs.unlinkSync(fp)
-  }
+  // Flatten to single line + escape double-quotes so the SQL survives shell
+  // argument parsing. Multi-line SQL via --command gets mangled.
+  const flat    = sql.replace(/\s+/g, ' ').trim()
+  const escaped = flat.replace(/"/g, '\\"')
+  const cmd = `npx wrangler d1 execute ${DB_NAME} --remote --command="${escaped}" --config="${WRANGLER_CONFIG}" --json`
+
+  const output = execSync(cmd, {
+    encoding: 'utf8',
+    stdio:    ['ignore', 'pipe', 'pipe'],
+  })
+  // wrangler --json sometimes prepends an upload-progress line before the
+  // actual JSON when run with --file; with --command it's typically clean,
+  // but be defensive: find the first '[' and parse from there.
+  const start = output.indexOf('[')
+  if (start === -1) return []
+  const parsed = JSON.parse(output.slice(start).trim())
+  return parsed?.[0]?.results ?? []
 }
 
 /**
