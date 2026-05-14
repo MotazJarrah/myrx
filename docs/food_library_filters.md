@@ -42,7 +42,8 @@ Rules are evaluated in tiers. The first matching rejection wins; later checks ar
 | Rule | What it does |
 |---|---|
 | 9 | Backfill missing kcal from macros (4p + 9f + 4c) |
-| 15 | Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips") |
+| 15 | Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips") with NFS/NS/Mc preservation |
+| 17 | USDA leading-category prefix normalization ("Nuts, cashew nuts, raw" → "Cashew Nuts, Raw") |
 
 ### Tier 2 — REJECT structurally broken
 | Rule | Rejects |
@@ -74,7 +75,7 @@ Rules are evaluated in tiers. The first matching rejection wins; later checks ar
 | 14 | Cross-source UPC dedup (USDA vs ON) on kcal match → prefer ON |
 | 16 | Intra-source UPC dedup on kcal match → keep MAX(id) |
 
-Implementation: `scripts/d1_migrate/lib/filters.mjs` — `enrichFood()` covers Rules 9 + 15, `shouldKeepFood()` covers Tiers 2-4 in the order above. Dedup (Tier 5) lives in `scripts/bulk_import/post_import_dedup.mjs`.
+Implementation: `scripts/d1_migrate/lib/filters.mjs` — `enrichFood()` covers Rules 9 + 15 + 17 (Rule 17 runs before Rule 15 so title-case picks up the rewritten name), `shouldKeepFood()` covers Tiers 2-4 in the order above. Dedup (Tier 5) lives in `scripts/bulk_import/post_import_dedup.mjs`.
 
 ---
 
@@ -279,7 +280,7 @@ WHERE id NOT IN (
 
 ## Second pass — audit + cleanup 2026-05-14
 
-After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pass surfaced five more cohorts worth filtering. All approved and applied on the same day. Net result:
+After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pass surfaced six more cohorts worth filtering / normalising. All approved and applied on the same day. Net result:
 
 | Metric | Before pass | After pass |
 |---|---|---|
@@ -289,6 +290,45 @@ After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pas
 | Cross-source UPC dupes | 259,693 | 0 (safe subset cleared) |
 | Intra-source UPC dupes | 63,656 | safe subset (44K UPCs) cleared |
 | myrx admin entries | 6 | 6 (preserved) |
+
+### Rule 17 — USDA leading-category prefix normalization
+**Status:** approved + applied 2026-05-14
+**Source:** generic-only (`brand IS NULL`); mostly hits `sr_legacy_food`, `survey_fndds_food`, `foundation_food`, `on_generic`.
+**Action:** rewrite USDA SR-Legacy / FNDDS names where the first comma-segment is a single broad category word (e.g. `Nuts, cashew nuts, raw`) into natural English (`Cashew Nuts, Raw`).
+**Algorithm:**
+  - Skip if first segment has a space (already a specific food).
+  - Skip if first segment ends with `'s` (brand-as-prefix).
+  - Skip if the rest is exactly a known acronym qualifier (`NFS`, `NS`).
+  - **Whitelist guard (final state):** only proceed if the first word is in an explicit set of food category nouns (`nuts`, `beans`, `cheese`, `bread`, `pasta`, etc.). This is the post-audit correction — an earlier broader version that acted on any single-word leading segment incorrectly rotated 1-word BRAND prefixes (`Pillsbury`, `Kraft`, `Nestle`, `Quaker`, `Gerber`, `Heinz`); those were reversed and the whitelist locked in.
+  - Drop the prefix in three cases:
+    1. First word is in `RULE17_DROP_ONLY` (`spices`, `beverages`) — always-drop.
+    2. Second segment already contains the category word (singular or plural).
+    3. Second segment is exactly one plural noun (`almonds`, `biscuits`, `wafers`), excluding `-less`/`-ous`/`-ious`/`-eous` adjectives.
+  - Otherwise rotate: append the category word to the first remaining segment (`Pickles, dill` → `Dill Pickles`).
+  - After Rule 17 fires, Rule 15 title-case is applied with acronym + Mc/Mac preservation.
+**Example transformations:**
+  - `Nuts, cashew nuts, raw` → `Cashew Nuts, Raw` (drop; second contains category)
+  - `Nuts, almonds, dry roasted, with salt added` → `Almonds, Dry Roasted, With Salt Added` (drop; plural noun)
+  - `Beans, kidney, royal red, mature seeds, cooked, boiled, without salt` → `Kidney Beans, Royal Red, Mature Seeds, Cooked, Boiled, Without Salt` (rotate)
+  - `Pickles, dill` → `Dill Pickles` (rotate)
+  - `Spices, garlic powder` → `Garlic Powder` (always-drop)
+  - `Bacon, meatless` → `Meatless Bacon` (rotate; -less adjective doesn't trigger plural-drop)
+**Skipped cases:**
+  - `Tortilla chips, low fat, …` (multi-word first segment)
+  - `APPLEBEE'S, Double Crunch Shrimp` (brand-as-prefix)
+  - `McDONALD'S, BIG MAC` (brand-as-prefix; later normalised separately to `McDonald's, Big Mac`)
+  - `Milk, NFS` / `Yogurt, NFS` (NFS qualifier)
+  - `Pillsbury, Cinnamon Rolls with Icing, …` (not in whitelist — treated as brand, left alone)
+**Title-case helper hardened:** after the first sweep, two regressions were noted and patched:
+  1. `NFS` → `Nfs` (acronym damage). Fixed by a `PRESERVE_ACRONYMS` post-replace that restores `Nfs`/`Ns`/`Nfsmi` back to all-caps.
+  2. `McDonald's` → `Mcdonald's` (lost Mc capitalisation). Fixed by a `MC_REPAIRS` post-replace that restores `Mcdonald`/`Mckee`/`Mcgriddles`/`Mcmuffin`/`Mcnuggets`/`Mcflurry`/`Mcchicken`/`Mcrib` to their proper Mc capitalisation.
+**Actual impact (final state):**
+  - First run (1,740-row cohort with over-restrictive SQL filter): 1,739 updated.
+  - Second run (full 7,574-row cohort with corrected `INSTR(name,',') > 0 AND SUBSTR(...) NOT LIKE '% %'` filter): 7,406 updated.
+  - Repair of brand-prefix damage: 18 rows reverted via `reverse_brand_rotation.mjs` + 28 double-comma artifacts cleaned via `REPLACE(name, ',, ', ', ')`.
+  - Repair of title-case acronym damage: 503 NFS + 245 NS + 1 NFSMI rows restored.
+  - Repair of Mc-prefix capitalisation: 42 rows fixed (McDonald's, McKee, etc.) + 6 mixed-case `McDONALD'S` rows manually rewritten.
+**Decided:** 2026-05-14 by user
 
 ### Rule 16 — Intra-source UPC dedup (kcal match within source)
 **Status:** approved + applied 2026-05-14

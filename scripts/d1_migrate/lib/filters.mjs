@@ -15,6 +15,9 @@
  *   Tier 1 — REPAIR
  *     Rule 9   Backfill missing kcal from macros (4p + 9f + 4c)
  *     Rule 15  Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips")
+ *              with NFS/NS/Mc preservation
+ *     Rule 17  USDA leading-category prefix normalization
+ *              ("Nuts, cashew nuts, raw" → "Cashew Nuts, Raw")
  *
  *   Tier 2 — REJECT structurally broken
  *     Rule 5   Wrong-category subtypes (sub_sample_food, agricultural_acquisition)
@@ -59,21 +62,162 @@
  * bracket. Apostrophe is NOT a boundary, so "Trader Joe's" survives (the
  * "s" after the apostrophe stays lowercase).
  *
- * Tradeoff accepted: acronyms ("BBQ", "USDA", "NFS") become title case
- * ("Bbq", "Usda", "Nfs"). Low frequency, acceptable.
+ * Tradeoff accepted: most acronyms ("BBQ", "USDA") become title case
+ * ("Bbq", "Usda"). Low frequency. We DO preserve specific high-value USDA
+ * tokens (NFS, NS, NFSMI) and Mc/Mac brand prefixes via a post-pass.
  *
  * Touches ONLY names where the input was entirely uppercase
  * (`UPPER(name) === name` AND at least one ASCII letter present). Mixed-case
  * names are left as-is — we trust the source's casing.
  */
 const TITLE_CASE_BOUNDARY = /(^|[\s,/()\-&.\[])(\p{L})/gu
+
+// USDA acronyms that we restore after the naive title-case lowercases them.
+const PRESERVE_ACRONYMS = [
+  [/(^|[\s,(])Nfsmi(\b)/g, '$1NFSMI$2'],
+  [/(^|[\s,(])Nfs(\b)/g,   '$1NFS$2'],
+  // " Ns " / ", Ns " / "(Ns " contextual qualifier (avoid touching real
+  // words ending in "ns" — only act on word-boundary single-token Ns).
+  [/(^|[\s,(])Ns(\b)/g,    '$1NS$2'],
+]
+
+// Mc/Mac brand fragments that lose their inner capital after lowercase +
+// title-case. Whitelist on purpose so legitimate "Macaroni" / "Machine"
+// stay correctly lowercased after the "M".
+const MC_REPAIRS = [
+  [/\bMcdonald\b/g,    'McDonald'],
+  [/\bMckee\b/g,       'McKee'],
+  [/\bMcgriddles?\b/g, 'McGriddles'],
+  [/\bMcmuffin\b/g,    'McMuffin'],
+  [/\bMcnuggets\b/g,   'McNuggets'],
+  [/\bMcflurry\b/g,    'McFlurry'],
+  [/\bMcchicken\b/g,   'McChicken'],
+  [/\bMcrib\b/g,       'McRib'],
+]
+
 function titleCaseName(name) {
   if (name == null) return name
   const s = String(name)
-  // Only act on entirely-uppercase strings that actually contain letters.
   if (s.toUpperCase() !== s) return name
   if (!/[A-Z]/.test(s)) return name
-  return s.toLowerCase().replace(TITLE_CASE_BOUNDARY, (_, sep, c) => sep + c.toUpperCase())
+  let out = s.toLowerCase().replace(TITLE_CASE_BOUNDARY, (_, sep, c) => sep + c.toUpperCase())
+  // Restore acronyms and Mc prefixes that the naive title-case damaged.
+  for (const [re, sub] of PRESERVE_ACRONYMS) out = out.replace(re, sub)
+  for (const [re, sub] of MC_REPAIRS)        out = out.replace(re, sub)
+  return out
+}
+
+/**
+ * Rule 17 — USDA leading-category prefix normalization.
+ *
+ * Rewrites SR-Legacy / FNDDS / Foundation names where the first
+ * comma-segment is a single broad category word into natural English:
+ *
+ *   "Nuts, cashew nuts, raw"      →  "Cashew Nuts, Raw"     (drop, category in second)
+ *   "Nuts, almonds, dry roasted"  →  "Almonds, Dry Roasted" (drop, plural noun)
+ *   "Beans, kidney, royal red,…"  →  "Kidney Beans, Royal Red,…" (rotate)
+ *   "Pickles, dill"               →  "Dill Pickles"           (rotate)
+ *   "Spices, garlic powder"       →  "Garlic Powder"          (always-drop)
+ *
+ * Skipped on purpose:
+ *   "Tortilla chips, low fat, …"     multi-word first segment
+ *   "APPLEBEE'S, mozzarella sticks"  brand-as-prefix
+ *   "Milk, NFS" / "Soup, NFS"        single short-acronym qualifier
+ */
+const RULE17_DROP_ONLY     = new Set(['spices', 'beverages'])
+const RULE17_QUALIFIER     = /^(NFS|NS)$/
+const RULE17_ADJECTIVE_S   = /(less|ous|ious|eous)$/
+
+// CATEGORY WHITELIST — only single-word leading segments in this set get
+// rewritten by Rule 17. This is the post-audit guard: an open "any single
+// word is a category" approach incorrectly rotated 1-word brand names
+// (Pillsbury, Kraft, Nestle, etc.). Restricting to a whitelist eliminates
+// that false-positive class entirely.
+const RULE17_CATEGORIES = new Set([
+  // grains, breads, pasta
+  'bread', 'breads', 'bagel', 'bagels', 'bun', 'buns', 'roll', 'rolls',
+  'crepe', 'crepes', 'waffle', 'waffles', 'pancake', 'pancakes',
+  'tortilla', 'tortillas', 'pasta', 'macaroni', 'noodle', 'noodles',
+  'pretzel', 'pretzels', 'cracker', 'crackers', 'chip', 'chips',
+  'cereal', 'cereals', 'rice', 'flour', 'oat', 'oats', 'oatmeal',
+  'granola', 'pita', 'naan',
+  // proteins
+  'fish', 'beef', 'pork', 'lamb', 'chicken', 'turkey', 'veal', 'duck',
+  'goose', 'venison', 'rabbit', 'bacon', 'ham', 'sausage', 'sausages',
+  'shrimp', 'lobster', 'crab', 'crayfish', 'oyster', 'oysters',
+  'scallop', 'scallops', 'mussel', 'mussels', 'clam', 'clams',
+  'egg', 'eggs', 'tofu', 'tempeh', 'seitan',
+  // produce
+  'mushroom', 'mushrooms', 'pepper', 'peppers', 'cassava', 'kale',
+  'cabbage', 'broccoli', 'cauliflower', 'spinach', 'lettuce',
+  'celery', 'onion', 'onions', 'potato', 'potatoes', 'tomato',
+  'tomatoes', 'carrot', 'carrots', 'beet', 'beets', 'turnip',
+  'turnips', 'snowpeas', 'cowpeas', 'olives', 'gherkins', 'apple',
+  'apples', 'banana', 'bananas', 'orange', 'oranges', 'mango',
+  'pineapple', 'strawberry', 'strawberries', 'meyer',
+  // dairy
+  'cheese', 'cheeses', 'milk', 'yogurt', 'yogurts', 'butter', 'cream',
+  'margarine', 'sherbet', 'sorbet', 'sherbets',
+  // nuts and legumes
+  'nuts', 'nut', 'seeds', 'seed', 'beans', 'bean', 'peas', 'lentils',
+  'chickpeas', 'almond', 'almonds', 'cashews', 'walnuts', 'pecans',
+  'pistachios', 'hazelnuts',
+  // sweets
+  'candy', 'candies', 'cookie', 'cookies', 'pie', 'pies', 'cake',
+  'cakes', 'muffin', 'muffins', 'doughnut', 'doughnuts', 'donut',
+  'donuts', 'pastry', 'pastries', 'frostings', 'frosting',
+  'chocolate', 'chocolates', 'pudding', 'puddings', 'custard',
+  'cheesecake', 'brownie', 'brownies', 'sundae', 'sundaes',
+  // savory dishes
+  'soup', 'soups', 'stew', 'stews', 'salad', 'salads', 'sandwich',
+  'sandwiches', 'pizza', 'pizzas', 'sauce', 'sauces', 'dressing',
+  'dressings', 'relish', 'pickles', 'pickle', 'mustard', 'mayonnaise',
+  'ketchup', 'jam', 'jams', 'jelly', 'jellies', 'honey', 'syrup',
+  'syrups',
+  // beverages / oils / spices
+  'coffee', 'tea', 'soda', 'sodas', 'water', 'juice', 'juices',
+  'oil', 'oils', 'vinegar', 'spices', 'spice', 'salt',
+  // misc generic
+  'snacks', 'snack', 'beverages', 'beverage', 'vegetable', 'vegetables',
+  'fruit', 'fruits', 'meat', 'meats', 'poultry', 'shellfish', 'seafood',
+  'babyfood', 'game',
+])
+
+function rule17PrefixNormalize(name) {
+  if (name == null) return name
+  const segs = String(name).split(', ')
+  if (segs.length < 2) return name
+
+  const first = segs[0]
+  const rest  = segs.slice(1)
+
+  if (first.includes(' '))            return name  // multi-word leading segment
+  if (/'s$/i.test(first))             return name  // brand prefix (apostrophe-s)
+  if (rest.length === 1 && RULE17_QUALIFIER.test(rest[0])) return name
+
+  const firstLower  = first.toLowerCase()
+
+  // Whitelist guard — only proceed if the first word is a known food category.
+  if (!RULE17_CATEGORIES.has(firstLower)) return name
+
+  const singular    = firstLower.replace(/s$/, '')
+  const plural      = singular + 's'
+  const secondLower = rest[0].toLowerCase()
+  const secondWords = secondLower.split(/[\s,]+/).filter(Boolean)
+
+  if (RULE17_DROP_ONLY.has(firstLower)) return rest.join(', ')
+  if (secondWords.includes(singular) || secondWords.includes(plural)) return rest.join(', ')
+
+  if (secondWords.length === 1) {
+    const w = secondWords[0]
+    if (w.endsWith('s') && w.length > 3 && !RULE17_ADJECTIVE_S.test(w)) {
+      return rest.join(', ')
+    }
+  }
+
+  const newRest = [...rest]
+  newRest[0] = newRest[0] + ' ' + first
+  return newRest.join(', ')
 }
 
 /**
@@ -92,10 +236,19 @@ function titleCaseName(name) {
  * @returns {object} — same row, possibly with kcal filled in / name normalized
  */
 export function enrichFood(row) {
-  const { kcal, protein_g, fat_g, carbs_g, name } = row
+  const { kcal, protein_g, fat_g, carbs_g, name, brand } = row
 
-  // Rule 15 — title-case all-caps names (cheap; runs first)
-  const normalizedName = titleCaseName(name)
+  // Rule 17 — USDA leading-category prefix rewrite (only when no brand,
+  // since brand-as-prefix patterns aren't applicable to genuinely branded
+  // products). Runs BEFORE title-case so any newly-introduced lowercase
+  // from the drop/rotate gets capitalised by titleCaseName().
+  let workingName = name
+  if (workingName != null && brand == null) {
+    workingName = rule17PrefixNormalize(workingName)
+  }
+
+  // Rule 15 — title-case all-caps names (cheap; runs after Rule 17 rewrite)
+  const normalizedName = titleCaseName(workingName)
 
   // Rule 9 — backfill kcal
   let backfilledKcal = kcal
