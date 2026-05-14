@@ -296,21 +296,81 @@ export default {
       const srcClause = source ? 'AND f.source = ?' : ''
       const srcArgs   = source ? [source] : []
 
-      // Short-query generics-first rule:
-      //   1-2 search terms (e.g. "lettuce", "tomato sauce") → user is probably
-      //   looking for a canonical ingredient, so we surface generics first.
-      //   3+ terms (e.g. "great value mac and cheese") → user is looking for
-      //   a specific product, so we trust FTS5's BM25 ranking unmodified.
-      // The term count comes from the same tokenisation buildFtsQuery uses.
+      // ── Ranking heuristics ────────────────────────────────────────────────
+      //
+      // The audit observed two systemic search-result problems:
+      //   1. Generic ingredient queries (e.g. "lettuce") were dominated by
+      //      branded products that repeated the word multiple times in the
+      //      name. Pure foods like "Romaine Lettuce" got buried.
+      //   2. Searches for a food (e.g. "grilled chicken breast") returned
+      //      composite dishes containing that food (pasta-with-chicken,
+      //      chicken-salads, wraps) ahead of the food itself.
+      //
+      // Three ranking signals address these, applied as ORDER BY tiers:
+      //   A. Composite-dish demotion — if the name contains a dish marker
+      //      word (with, and, salad, pasta, wrap, sandwich, etc.) AND the
+      //      query itself doesn't have that marker, push the row to the end.
+      //      A user searching "pasta" still sees pasta dishes; a user
+      //      searching "chicken" doesn't see "pasta with chicken" first.
+      //   B. Canonical subtype priority — foundation_food (lab-tested
+      //      reference) > sr_legacy_food (older reference) > survey_fndds_food
+      //      (aggregated meal estimates) > everything else.
+      //   C. Short-query generics-first — for 1-2 term queries (likely a
+      //      generic ingredient search), prefer data_type='generic'. For 3+
+      //      term queries, trust the BM25 textual match.
+      //
+      // Final tiebreak: FTS5 `rank` (BM25).
+
       const termCount = raw
         .replace(/[^\w\s]/g, ' ')
         .trim()
         .split(/\s+/)
         .filter(t => t.length >= 2)
         .length
-      const orderBy = termCount <= 2
-        ? `ORDER BY CASE WHEN f.data_type = 'generic' THEN 0 ELSE 1 END, rank`
-        : `ORDER BY rank`
+
+      // Detect dish-marker words in the query so we can disable demotion when
+      // they're what the user is searching for.
+      const queryHasDishMarker = /\b(with|and|salad|pasta|wrap|sandwich|burrito|pizza|patty|soup|stew|casserole|taco|burger|bowl)\b/i.test(raw)
+      const demoteCompound = queryHasDishMarker ? 0 : 1  // 1 = enable demotion
+
+      const genericsFirstClause = termCount <= 2
+        ? `CASE WHEN f.data_type = 'generic' THEN 0 ELSE 1 END,`
+        : ''
+
+      const orderBy = `
+        ORDER BY
+          -- A. Composite-dish demotion (skipped if query has dish-marker words)
+          CASE
+            WHEN ? = 1 AND (
+              LOWER(f.name) LIKE '% with %'   OR
+              LOWER(f.name) LIKE '% and %'    OR
+              LOWER(f.name) LIKE '%salad%'    OR
+              LOWER(f.name) LIKE '%pasta%'    OR
+              LOWER(f.name) LIKE '%wrap%'     OR
+              LOWER(f.name) LIKE '%sandwich%' OR
+              LOWER(f.name) LIKE '%burrito%'  OR
+              LOWER(f.name) LIKE '%pizza%'    OR
+              LOWER(f.name) LIKE '%patty%'    OR
+              LOWER(f.name) LIKE '%soup%'     OR
+              LOWER(f.name) LIKE '%stew%'     OR
+              LOWER(f.name) LIKE '%casserole%' OR
+              LOWER(f.name) LIKE '%taco%'     OR
+              LOWER(f.name) LIKE '%burger%'   OR
+              LOWER(f.name) LIKE '% bowl%'
+            ) THEN 1 ELSE 0
+          END,
+          -- B. Canonical subtype priority
+          CASE f.source_subtype
+            WHEN 'foundation_food'    THEN 0
+            WHEN 'sr_legacy_food'     THEN 1
+            WHEN 'survey_fndds_food'  THEN 2
+            ELSE                           3
+          END,
+          -- C. Short-query generics-first
+          ${genericsFirstClause}
+          -- Final tiebreak: FTS5 BM25 rank
+          rank
+      `
 
       try {
         if (ftsQuery) {
@@ -321,7 +381,7 @@ export default {
             WHERE food_fts MATCH ? ${srcClause}
             ${orderBy}
             LIMIT ?
-          `).bind(ftsQuery, ...srcArgs, limit)
+          `).bind(ftsQuery, ...srcArgs, demoteCompound, limit)
           const { results } = await stmt.all()
           return json(results ?? [])
         }

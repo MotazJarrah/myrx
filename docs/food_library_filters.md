@@ -34,7 +34,84 @@ Each proposed rule looks like:
 
 ---
 
+## Evaluation hierarchy (which order rules run in)
+
+Rules are evaluated in tiers. The first matching rejection wins; later checks are skipped for that row. Repair (Tier 1) runs BEFORE rejection so rows get their best chance.
+
+### Tier 1 — REPAIR
+| Rule | What it does |
+|---|---|
+| 9 | Backfill missing kcal from macros (4p + 9f + 4c) |
+
+### Tier 2 — REJECT structurally broken
+| Rule | Rejects |
+|---|---|
+| 5 | Wrong-category subtypes (sub_sample_food, agricultural_acquisition) |
+| 1 | All four primary macros null or zero (after Rule 9 attempt) |
+| 6 | kcal > 900 per 100g (impossible density) |
+| 10 | Macro sum > 105g per 100g (impossible mass) |
+| 11 | Any single macro > 100g per 100g (impossible mass) |
+
+### Tier 3 — REJECT internally inconsistent
+| Rule | Rejects |
+|---|---|
+| 4 | kcal vs (4p + 9f + 4c) differ by > 50% (with safety floor pred ≥ 20) |
+| 7 | Per-serving kcal > 3,000 |
+
+### Tier 4 — REJECT negligible
+| Rule | Rejects |
+|---|---|
+| 8 | Branded entries with per-serving < 5 kcal |
+
+### Tier 5 — DEDUP (post-import, cross-row)
+| Rule | Method |
+|---|---|
+| 2 | Exact dedup on name + brand + macros + serving_label + upc → keep MAX(id) |
+| 3 | Brand-product dedup on name + brand + macros + serving_g → highest source_id |
+
+Implementation: `scripts/d1_migrate/lib/filters.mjs` — `enrichFood()` is Rule 9, `shouldKeepFood()` covers Tiers 2-4 in the order above. Dedup (Tier 5) lives in `scripts/bulk_import/post_import_dedup.mjs`.
+
+---
+
 ## Approved rules (becomes the cleanup migration)
+
+### Rule 11 — Any single macro > 100g per 100g
+**Status:** approved + applied 2026-05-14
+**Source:** all
+**Condition:** `protein_g > 100 OR fat_g > 100 OR carbs_g > 100`
+**Why:** Physically impossible. You can't have, e.g., 125g of protein in 100g of food. Examples caught: "APPLE MELON ZERO CARB PROTEIN DRINK" with 125g protein, "MEDIUM BRAZIL NUTS" with 93g protein but a total macro mass of 173g.
+**Actual impact:** 149 additional rows deleted (most rows with a single macro > 100 also had sum > 105 and were already caught by Rule 10).
+**Decided:** 2026-05-14 by user
+
+### Rule 10 — Macro sum > 105g per 100g (physically impossible mass)
+**Status:** approved + applied 2026-05-14
+**Source:** all
+**Condition:** `(COALESCE(protein_g,0) + COALESCE(fat_g,0) + COALESCE(carbs_g,0)) > 105`
+**Why:** A food can't contain more macro mass than its own total mass. Sum > 100 g per 100 g of food is impossible. Threshold 105 (vs 100) allows rounding artifacts — pure-sugar candy can legitimately sum to 100-104g when each macro is rounded independently. Rows above 105g are definitive errors (e.g. "Mountain Man Brazil Nuts" at sum=173g, "Korean Seaweed Snacks" at sum=160g, "Apple Melon Protein Drink" at sum=125g — clearly data-entry errors, possibly unit confusion like percentages-vs-grams).
+**Why not 100:** Sample inspection of the 100-105g band (5,301 rows) showed every entry was a real food (Sugar Cookies, Lollipops, Potato Chips, Cereal, Tortilla Chips, etc.) where rounded macros sum slightly over 100. Deleting them would be a false positive.
+**Where Rule 4 misses these:** Rule 4 (kcal mismatch) caught cases where kcal disagrees with macros. But a row like "111g carbs, 0 protein, 0 fat, kcal=556" has predicted=444 and recorded=556 → 25% mismatch, below Rule 4's 50% threshold. The 111g carb value is physically impossible but Rule 4 didn't flag it. Rule 10 is the catch.
+**Actual impact:** 4,720 rows deleted.
+**Decided:** 2026-05-14 by user
+
+### Rule 9 — Backfill missing kcal from macros
+**Status:** approved + applied 2026-05-14
+**Source:** all (REPAIR, not REJECT)
+**Action:** `kcal = ROUND(protein_g*4 + fat_g*9 + carbs_g*4, 1)` when `kcal IS NULL` AND at least one macro is non-null AND the computed sum > 0.
+**Why:** Many rows (including USDA Foundation Foods like "Chicken, breast, boneless, skinless, raw") have NULL kcal but populated macros. They display as "0 cal" in the table UI even though the macros are real. Computing kcal from the 4/9/4 formula recovers them. Rule 4 (kcal vs macros mismatch) won't false-flag these because they match by construction.
+**Risk:** If macros themselves are wrong, the computed kcal will be wrong too — and Rule 4 won't catch it. Mitigations: Rules 6, 10, 11 still apply to backfilled rows and catch impossible computed values. Real-world risk: low (USDA branded data comes from FDA labels; Foundation/SR Legacy is lab-tested).
+**Actual impact:** 19,364 rows had kcal backfilled.
+**Decided:** 2026-05-14 by user
+
+### Rule 8 — Branded entries with negligible per-serving kcal
+**Status:** approved + applied 2026-05-14
+**Source:** branded only (`branded_food`, `on_branded`)
+**Condition:** `kcal IS NOT NULL AND serving_g IS NOT NULL AND (kcal * serving_g / 100.0) < 5 AND source_subtype IN ('branded_food', 'on_branded')`
+**Why:** A branded product at < 5 calories per serving is almost always one of: sugar-free gum, sweeteners, salt-free seasonings, diet sodas, zero-cal flavored waters, or a data error like a 0.5g cottage cheese serving. None of these contribute meaningfully to calorie tracking; they only add search noise.
+**Why branded only:** Canonical reference subtypes (foundation_food, sr_legacy_food, survey_fndds_food) include legitimate low-cal entries with real natural servings — yellow mustard (1 tsp = 3.7 cal), 1 stuffed olive (4.2 cal), 1 dill pickle spear (4.9 cal), fresh basil (2.5g), babyfood — that ARE real foods users might log. Sample inspection of the 143 SR Legacy + 3 Foundation rows that would have been deleted confirmed they're legitimate reference data.
+**Actual impact:** 9,015 rows deleted (~0.9% of pre-rule DB):
+  - `branded_food`: -7,301
+  - `on_branded`: -1,714
+**Decided:** 2026-05-14 by user
 
 ### Rule 6 — Impossible kcal density (>900 per 100g)
 **Status:** approved + applied 2026-05-14

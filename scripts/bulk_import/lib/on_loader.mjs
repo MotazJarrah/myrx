@@ -21,7 +21,7 @@ import fs       from 'fs'
 import path     from 'path'
 import readline from 'readline'
 import unzipper from 'unzipper'
-import { shouldKeepFood, getFilterReason } from '../../d1_migrate/lib/filters.mjs'
+import { shouldKeepFood, getFilterReason, enrichFood } from '../../d1_migrate/lib/filters.mjs'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -203,10 +203,15 @@ export async function loadOn(onRoot) {
   // ── Filter pass — apply per-row audit rules at INSERT time ────────────────
   // Same shared filter library as the USDA loader. See
   // scripts/d1_migrate/lib/filters.mjs.
-  console.log('  Applying filter rules…')
+  console.log('  Applying enrichment + filter rules…')
   const kept     = []
   const rejected = {}
-  for (const row of rows) {
+  let enriched_count = 0
+  for (const rawRow of rows) {
+    // Rule 9 — backfill missing kcal from macros BEFORE running rejection rules
+    const row = enrichFood(rawRow)
+    if (row !== rawRow) enriched_count++
+
     if (shouldKeepFood(row)) {
       kept.push(row)
     } else {
@@ -214,6 +219,7 @@ export async function loadOn(onRoot) {
       rejected[reason] = (rejected[reason] ?? 0) + 1
     }
   }
+  if (enriched_count > 0) console.log(`    ⓘ Rule 9 backfilled kcal on ${enriched_count.toLocaleString()} rows`)
   const droppedTotal = rows.length - kept.length
   console.log(`    → ${kept.length.toLocaleString()} kept · ${droppedTotal.toLocaleString()} filtered out`)
   for (const [reason, n] of Object.entries(rejected).sort((a, b) => b[1] - a[1])) {

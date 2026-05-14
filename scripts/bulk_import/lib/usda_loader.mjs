@@ -25,7 +25,7 @@
 import fs   from 'fs'
 import path from 'path'
 import { parse } from 'csv-parse'
-import { shouldKeepFood, getFilterReason } from '../../d1_migrate/lib/filters.mjs'
+import { shouldKeepFood, getFilterReason, enrichFood } from '../../d1_migrate/lib/filters.mjs'
 
 // ── USDA → our schema mappings ───────────────────────────────────────────────
 
@@ -250,11 +250,16 @@ export async function loadUsda(usdaRoot) {
   // See scripts/d1_migrate/lib/filters.mjs for the rule list (Rules 1, 4, 5,
   // 6, 7 from docs/food_library_filters.md). Dedup rules (2, 3) run as
   // post-import DELETEs because they need cross-row comparison.
-  console.log('  Pass 6/6 — applying filter rules…')
+  console.log('  Pass 6/6 — applying enrichment + filter rules…')
   const allRows  = [...foods.values()]
   const kept     = []
   const rejected = {}
-  for (const row of allRows) {
+  let enriched_count = 0
+  for (const rawRow of allRows) {
+    // Rule 9 — backfill missing kcal from macros BEFORE running rejection rules
+    const row = enrichFood(rawRow)
+    if (row !== rawRow) enriched_count++
+
     if (shouldKeepFood(row)) {
       kept.push(row)
     } else {
@@ -262,6 +267,7 @@ export async function loadUsda(usdaRoot) {
       rejected[reason] = (rejected[reason] ?? 0) + 1
     }
   }
+  if (enriched_count > 0) console.log(`    ⓘ Rule 9 backfilled kcal on ${enriched_count.toLocaleString()} rows`)
   const droppedTotal = allRows.length - kept.length
   console.log(`    → ${kept.length.toLocaleString()} kept · ${droppedTotal.toLocaleString()} filtered out`)
   for (const [reason, n] of Object.entries(rejected).sort((a, b) => b[1] - a[1])) {
