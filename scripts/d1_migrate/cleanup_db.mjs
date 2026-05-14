@@ -8,6 +8,13 @@
  *   4. Parse ON food names — "Product Name by Brand" → split into name + brand columns
  *   5. Rebuild FTS5 index
  *
+ * SAFETY: every dedup step in this script targets rows with a UPC. Generic
+ * USDA entries (Foundation Foods, SR Legacy) have no UPC and are NEVER
+ * touched by the WHERE upc IS NOT NULL guards below. If you add a new
+ * cleanup step, keep that invariant — generics are precious data, the
+ * original sync filter killed them once already, do not let cleanup do it
+ * a second time.
+ *
  * Usage:
  *   node cleanup_db.mjs
  */
@@ -171,11 +178,16 @@ async function step1_deleteUsdaDuplicates() {
 
   let fileIndex = 0, totalDeleted = 0
 
+  // The fdc_ids in `toDelete` come from branded_food.csv rows that had
+  // a UPC (normalizeUpc + the gtin_upc filter above), so by construction
+  // every row we touch here has a UPC. We add `AND upc IS NOT NULL` as a
+  // belt-and-suspenders guard so that any future contributor who adds
+  // ids from a different source can't accidentally wipe generic rows.
   for (let i = 0; i < toDelete.length; i += STMTS_PER_FILE * DELETE_BATCH) {
     const stmts = []
     for (let j = i; j < Math.min(i + STMTS_PER_FILE * DELETE_BATCH, toDelete.length); j += DELETE_BATCH) {
       const chunk = toDelete.slice(j, j + DELETE_BATCH)
-      stmts.push(`DELETE FROM food_library WHERE source='usda' AND source_id IN (${chunk.map(esc).join(',')});`)
+      stmts.push(`DELETE FROM food_library WHERE source='usda' AND upc IS NOT NULL AND source_id IN (${chunk.map(esc).join(',')});`)
     }
     const fp = path.join(TMP_DIR, `step1_delete_${fileIndex}.sql`)
     fs.writeFileSync(fp, stmts.join('\n') + '\n')

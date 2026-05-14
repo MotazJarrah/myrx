@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+#
+# Pre-commit hook — scans staged changes for secret-like patterns
+# and blocks the commit if any match.
+#
+# This is the LOCAL layer of the three-layer secret-leak prevention:
+#   1. This pre-commit hook         (your machine, before the commit lands)
+#   2. .gitignore (.env*)           (your machine, prevents staging in the first place)
+#   3. GitHub Push Protection       (GitHub's server, scans every push)
+#
+# Activated automatically once `git config core.hooksPath scripts/git-hooks` is set.
+#
+# Bypass (use ONLY when you are absolutely sure it's a false positive,
+# e.g. you're committing a regex example to this very hook file):
+#   git commit --no-verify
+#
+
+set -e
+
+# ── Collect staged changes (added lines only) ──────────────────────────────────
+# -U0      = zero context lines, only changed lines
+# grep '^\+[^+]' = added lines, excluding '+++' file headers
+DIFF=$(git diff --cached -U0 2>/dev/null | grep -E '^\+[^+]' || true)
+
+# Nothing staged or nothing added → let the commit through
+[ -z "$DIFF" ] && exit 0
+
+# ── Secret patterns ────────────────────────────────────────────────────────────
+# Format: "Human label|regex"
+# Order matters only for which is reported first; all are checked.
+declare -a PATTERNS=(
+  "Cloudflare API token|cfut_[A-Za-z0-9_-]{30,}"
+  "AWS access key ID|AKIA[0-9A-Z]{16}"
+  "OpenAI API key|sk-[A-Za-z0-9]{40,}"
+  "OpenAI project key|sk-proj-[A-Za-z0-9_-]{20,}"
+  "Stripe live secret|sk_live_[A-Za-z0-9]{20,}"
+  "GitHub PAT (classic)|ghp_[A-Za-z0-9]{30,}"
+  "GitHub PAT (fine-grained)|github_pat_[A-Za-z0-9_]{50,}"
+  "USDA key in URL|api\\.data\\.gov.*api_key=[A-Za-z0-9]{20,}"
+  "Hardcoded USDA_API_KEY|USDA_API_KEY[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9]{20,}"
+  "Hardcoded CLOUDFLARE_API_TOKEN|CLOUDFLARE_API_TOKEN[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9_-]{30,}"
+  "Hardcoded TWILIO_AUTH_TOKEN|TWILIO_AUTH_TOKEN[[:space:]]*=[[:space:]]*['\"]?[a-f0-9]{30,}"
+  "Hardcoded SUPABASE_SERVICE_KEY|SUPABASE_SERVICE_(ROLE_)?KEY[[:space:]]*=[[:space:]]*['\"]?eyJ"
+  "JWT-shaped token|eyJ[A-Za-z0-9_-]{20,}\\.eyJ[A-Za-z0-9_-]{20,}\\.[A-Za-z0-9_-]{10,}"
+  "Private key block|BEGIN (RSA |EC |OPENSSH |DSA |)PRIVATE KEY"
+  "Long Bearer token|Bearer[[:space:]]+[A-Za-z0-9_.\\-=]{30,}"
+)
+
+# ── Scan ───────────────────────────────────────────────────────────────────────
+FOUND=0
+for entry in "${PATTERNS[@]}"; do
+  label="${entry%%|*}"
+  regex="${entry#*|}"
+  if matches=$(echo "$DIFF" | grep -E "$regex" 2>/dev/null); then
+    if [ $FOUND -eq 0 ]; then
+      echo ""
+      echo "  ╔══════════════════════════════════════════════════════════════╗"
+      echo "  ║  COMMIT BLOCKED — secret-like pattern in staged changes      ║"
+      echo "  ╚══════════════════════════════════════════════════════════════╝"
+      echo ""
+    fi
+    echo "  ❌ $label"
+    echo "$matches" | head -2 | sed 's/^/       /'
+    echo ""
+    FOUND=1
+  fi
+done
+
+if [ $FOUND -eq 1 ]; then
+  echo "  ────────────────────────────────────────────────────────────────"
+  echo "  Secrets must live in:"
+  echo "    • GitHub Actions Secrets        (for CI/CD workflows)"
+  echo "    • Supabase Edge Function Secrets (for server-side keys)"
+  echo "    • \$env:VAR in your PowerShell profile (for local tooling)"
+  echo "    • wrangler secret put NAME       (for Cloudflare Workers)"
+  echo ""
+  echo "  Code reads them at runtime via process.env.NAME — never inline."
+  echo ""
+  echo "  False positive? Bypass with: git commit --no-verify"
+  echo "  ────────────────────────────────────────────────────────────────"
+  exit 1
+fi
+
+exit 0

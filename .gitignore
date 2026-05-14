@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Environment files — NEVER commit. All secrets live in GHA / shell env / wrangler / Supabase.
+# `*.local` above already catches `.env.local`, but be explicit for the rest.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

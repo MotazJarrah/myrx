@@ -85,14 +85,35 @@ export function extractServing(food) {
 }
 
 /**
+ * Universal data-type classifier for the food_library table.
+ * Rule: any row with a UPC is branded; any row without is generic.
+ * Applies uniformly across USDA, OpenNutrition, and MYRX sources.
+ * @param {string | null | undefined} upc
+ * @returns {'branded' | 'generic'}
+ */
+export function dataTypeFromUpc(upc) {
+  return upc ? 'branded' : 'generic'
+}
+
+/**
  * Decide whether a food should be excluded from the DB.
- * @param {{ upc: string | null, kcal: number | null, discontinued?: boolean }} food
+ *
+ * The UPC requirement only applies to BRANDED entries — generic items
+ * (USDA Foundation Foods, SR Legacy, admin-curated custom ingredients)
+ * legitimately have no UPC by design and must still be importable.
+ *
+ * @param {{
+ *   upc:           string | null,
+ *   kcal:          number | null,
+ *   discontinued?: boolean,
+ *   dataType?:     'branded' | 'generic',
+ * }} food
  * @returns {boolean}
  */
-export function shouldSkip({ upc, kcal, discontinued = false }) {
-  if (!upc)           return true   // no barcode = not scannable
-  if (kcal === 0)     return true   // zero-calorie items not tracked
-  if (discontinued)   return true   // discontinued products removed
+export function shouldSkip({ upc, kcal, discontinued = false, dataType = 'branded' }) {
+  if (!upc && dataType === 'branded') return true   // branded products must be scannable
+  if (kcal === 0)                     return true   // zero-calorie items not tracked
+  if (discontinued)                   return true   // discontinued products removed
   return false
 }
 

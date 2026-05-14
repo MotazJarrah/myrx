@@ -68,6 +68,9 @@ MyRX/
 - **Web changes deploy via `wrangler`, never via `git push`.** Read the Deployment section below before running ANY git push. There is no GitHub→Cloudflare auto-deploy on this project — pushing produces zero deployment. This trap has cost real time; do not fall into it.
 - **MIRROR EVERY CHANGE ACROSS WEB AND MOBILE.** Bug fixes, design tweaks, UX changes, copy edits, font/color/spacing adjustments, new features, removed bandaids — anything that exists on both surfaces gets edited on both surfaces in the SAME turn. The full rule with examples lives in **Cross-platform consistency rule (MANDATORY)** further down — read that section before making your first non-trivial edit. Most "but mobile doesn't match web" complaints come from one-sided edits; the cross-check is non-negotiable.
 - **NUMBERED PLANS (MANDATORY).** Whenever the user asks for a plan, or whenever the assistant proposes any multi-item set of changes (revert plans, feature work, refactors, batched fixes, decisions to confirm, etc.) — every item MUST be presented as a numbered list (1, 2, 3...). The user uses these numbers to approve or reject items individually ("go on 1, 3, 5; skip 2, 4"). Never use bullets, sub-headings, or prose paragraphs for items that need an approve/reject decision. Sub-items get nested numbering (1a, 1b, 1c). Open questions are numbered too. This makes the user's review fast and surgical instead of forcing them to re-read full paragraphs.
+- **PLAIN-ENGLISH PLANS (MANDATORY).** When the user asks for a plan or a breakdown, write it in plain language they can read without being a coder. No code snippets, no file paths in the middle of sentences, no formulas, no library names dropped without explanation, no acronyms without a parenthetical. Describe the visible behaviour or end-user outcome, then explain the change in product-manager terms. Save the code/formula/file-path talk for the actual implementation turn. This is a separate rule from the numbered-plan rule — both apply at once.
+- **ONE QUESTION AT A TIME ON COMPLEX REBUILDS (MANDATORY).** For larger design rebuilds where many elements need discussion (multiple visual tweaks, multiple behavioural changes, multiple copy edits, etc.) — when the user says "break it down" / "walk me through it" / asks for the breakdown of a complex change — present ONE numbered question at a time, not the whole list. For each question include: (a) the issue or decision point in plain language, (b) one or two proposals, (c) the assistant's recommendation and why. WAIT for the user's answer before moving to the next question. Do not batch four questions at once and expect the user to answer all of them in one message. The whole-plan-up-front presentation is fine when the user explicitly asks for "the plan" or "all of it"; the one-at-a-time mode is for the explicit break-it-down requests. **The trigger phrase "break it down" ALWAYS refers to the active plan / proposal on the table, even if the same message mentions reading or doing something else first (e.g. "read X, break it down" still means "after reading X, break down the active plan one item at a time" — NOT "summarise the contents of X"). When in doubt about what "it" refers to, default to the active plan; if there's no active plan, ask the user "break down what specifically?" rather than guessing.**
+- **CLAUDE.md MISMATCH AUTO-SYNC (MANDATORY).** This file goes stale fast — the user has been burned by the assistant operating on outdated information about what's in the codebase. Whenever the assistant scans a file, runs a check, or reads a value in the system AND finds that the actual state disagrees with what CLAUDE.md currently states (a value's wrong, a default's changed, a path moved, a behaviour's been edited since the doc was written, etc.) — the assistant MUST update CLAUDE.md immediately to reflect the actual state. Timing: BEFORE making any further change if the assistant is about to act on the mismatched info, or AFTER landing the change if the scan was triggered by the change itself. Never leave CLAUDE.md describing a state that doesn't match the codebase. If multiple mismatches are found in one turn, surface them all in the same edit. The doc is the contract between assistant turns — it has to stay accurate or the next turn starts wrong.
 
 ### Training vocabulary (locked terms — use these names in all UI copy and discussion)
 
@@ -977,12 +980,23 @@ mobile/
 - **Android quirk — `fontFamily` + `fontWeight` don't combine.** When `fontFamily` points at a registered custom font (Geist, JetBrainsMono — the only families this app loads), do NOT also set `fontWeight` on the same style. Android's renderer can't auto-resolve the weight against a custom family, and the dual hint makes the renderer silently fall back to the system default. Encode the weight into the family name instead (`fonts.sans[700]` is `Geist_700Bold`, `fonts.mono[600]` is `JetBrainsMono_600SemiBold`). iOS tolerates the combination, so this is Android-only — but every style in the app must be Android-safe.
 - **Use plain `<Text>` inside `<Animated.View>`, not `<Animated.Text>`, when the text needs custom `fontFamily`.** `Animated.Text` (the Reanimated wrapper) doesn't merge `Text.defaultProps.style` and explicit `fontFamily` the same way plain `Text` does; the custom family silently falls back to the global Geist default. If you need the Text node itself to animate (opacity, transform), wrap a plain `Text` in an `Animated.View` and animate the wrapper.
 
-#### PhantomWheel + TimeWheel — gesture-driven number / time picker primitives
+#### PhantomWheel — gesture-driven number / time picker primitive
 
-Every numeric and time input across the mobile app (Strength reps / weight / distance / Active Hang duration / Cardio duration / Cardio pace time + distance, etc.) goes through one of two components:
+Every numeric and time input across the mobile app — strength reps / weight / distance, isometric duration (Plank Hold, Active Hang), cardio distance, cardio duration, cardio pace time — goes through ONE component:
 
-- `src/components/PhantomWheel.tsx` — the gesture-driven scrolling wheel. Used directly for plain numeric inputs; also the building block underneath every reel of `TimeWheel`.
-- `src/components/TimeWheel.tsx` — split `mm:ss` or `hh:mm:ss` time picker built from two or three `PhantomWheel`s flanking static `:` colons.
+- `src/components/PhantomWheel.tsx` — gesture-driven scrolling wheel with THREE render modes:
+  - **Numeric mode** (default): single rolling reel showing the value (optionally with `unit` suffix or `format` function). Used for reps, weight, time-in-seconds with custom format, etc.
+  - **Time mode** (`time="mm:ss"` or `time="hh:mm:ss"`): split-reel time picker, 2 or 3 NumericPhantomWheel reels flanking static `:` colons. Used for every time field on strength + cardio.
+  - **Decimal mode** (`decimal="XX.X"`): split-reel decimal picker — two reels (whole + tenth) flanking a static `.` decimal point, plus an optional static unit suffix after the right reel. Same logic + design as time mode but with `.` instead of `:`. Used by cardio's Distance field. **Clamp behaviour (LOCKED):** each reel runs INDEPENDENTLY in its own range. The whole reel scrolls across `[Math.floor(min/10), Math.floor(max/10)]`; the tenth reel always scrolls `[0, 9]`. There is NO combined clamp, so the effective scrollable range is `[minWhole.0, maxWhole.9]` — NOT `[min, max]`. Example: cardio passes `min=0 max=500` and the wheel reaches 0.0 up to 50.9 (one extra tenth beyond 50.0). If business logic needs a literal hard cap, the parent's save-validation enforces it; the wheel itself never combined-clamps.
+
+The split-reel time picker used to live in a separate `TimeWheel.tsx` file. It was merged INTO `PhantomWheel.tsx` so every wheel in the app lives behind one file and the mode is a single prop flip. Do not re-split.
+
+**Mode rule (LOCKED for strength + cardio):**
+- Any TIME field uses `<PhantomWheel time="mm:ss" .../>` or `<PhantomWheel time="hh:mm:ss" .../>` — split reels with `:` separators.
+- Any DECIMAL field (cardio Distance currently) uses `<PhantomWheel decimal="XX.X" unit="..." .../>` — split reels with `.` separator, optional static unit suffix.
+- Any plain-integer NUMERIC field uses `<PhantomWheel step={...} ... />` — single rolling wheel.
+- Never combine `time` and `decimal` on the same call. The dispatcher picks `time` first, then `decimal`, else numeric.
+- The user explicitly approved these splits for strength + cardio. If extending to other pages later, the same rules apply.
 
 **Architecture (PhantomWheel):**
 - Single `Gesture.Pan()` inside a `GestureDetector`. Worklet-driven; all per-frame motion runs on the UI thread via Reanimated 4.
@@ -1015,11 +1029,12 @@ Every numeric and time input across the mobile app (Strength reps / weight / dis
 - `anchor: 'center' | 'right' | 'left'` (default `'center'`) — where each row's edge is pinned during scale. `'center'` lets both edges sweep outward (`( )` brackets), used for ordinary numeric wheels. `'right'` pins the right edge (the row's right edge stays at the wrapper's right; left edge traces `(`), used by the minutes reel of a split time wheel so the digits hug the colon's left side. `'left'` mirrors that for the seconds reel. Implementation uses `alignItems` for in-flow positioning and `transformOrigin` for the scale pivot — no translateX math needed.
 - `noScale: boolean` (default `false`) — when `true`, halo rows render at the centre size (no shrink) and spacings become uniform `centerSize` (no overlap). Used by the middle reel of an `hh:mm:ss` time wheel where the digits sit between two static colons.
 
-**`TimeWheel` formats:**
-- `format='mm:ss'` (default) — two reels (minutes anchored `right`, seconds anchored `left`) + one static colon. Used by Active Hang Duration. Combined `onChange(totalSecs)` fires whenever either reel commits.
-- `format='hh:mm:ss'` — three reels (hours anchored `right`, minutes anchored `center` with `noScale`, seconds anchored `left`) + two static colons. Used by Cardio Duration mode (max 3 hours).
+**Time-mode formats (passed via the `time` prop):**
+- `time="mm:ss"` — two reels (minutes anchored `right`, seconds anchored `left`) + one static colon. `value` is total seconds. Used by strength isometric duration (Plank Hold, Active Hang) and cardio pace-mode Time. Combined `onChange(totalSecs)` fires whenever either reel commits.
+- `time="hh:mm:ss"` — three reels (hours anchored `right`, minutes anchored `center` with `noScale`, seconds anchored `left`) + two static colons. `value` is total seconds. Used by cardio duration mode (max 3 hours, set via `maxHours={3}`).
 - The colon is a fixed `<Text>` at the geometric centre rendered in `fonts.mono[700]` at `centerSize` font, identical to a centre-row digit. `pointerEvents='none'` so drags fall through to the reels.
-- Each reel is independent — minutes / seconds / hours have separate internal `value × onChange` pairs; the user scrolls them one at a time. A single `onChange(totalSecs)` from TimeWheel rebuilds the total from the latest pair after any reel commits.
+- Each reel is an independent `NumericPhantomWheel` — minutes / seconds / hours have separate internal `value × onChange` pairs; the user scrolls them one at a time. The composed `onChange(totalSecs)` rebuilds the total from the current (hours, minutes, seconds) tuple after any reel commits.
+- Time mode IGNORES the numeric-mode props (`step`, `min`, `max`, `ladder`, `unit`, `format`, `anchor`, `noScale`) — the composition wires those per-reel itself. Pass only: `value`, `onChange`, `time`, optionally `minMinutes` / `maxMinutes` / `maxHours`, plus the universal `centerSize` / `haloRadius` / `style`.
 
 **Font convention (MANDATORY for numerics):**
 - Numeric text uses `fontFamily: fonts.mono[N]` (JetBrainsMono variants — `JetBrainsMono_500Medium`, `JetBrainsMono_700Bold`, etc.). The font is registered globally by `expo-font` via `useFonts(...)` in `app/_layout.tsx`.
@@ -1054,7 +1069,25 @@ Every numeric and time input across the mobile app (Strength reps / weight / dis
 - `s.textInputReset` (`padding: 0, margin: 0, textAlignVertical: 'center'`) strips the platform defaults that distinguish a TextInput from a Text node — without it, the digits shift a few pixels upward and a phantom caret column appears on some Androids. Combined with `lineHeight === fontSize` and `includeFontPadding: false` on the inline style, the glyph lands on the same baseline a `<Text>` would.
 - Every wrapper from the row's outer `Animated.View` down to the TextInput carries `pointerEvents="none"` — belt and suspenders against the Android TextInput touch capture issue described in the architecture section.
 
-**Field-height + column-flex convention (`strength.tsx`):**
+**Field sizing parity (strength ↔ cardio) — what's locked globally vs per-page:**
+
+The triple-grid row of fields on `strength.tsx` and `cardio.tsx` shares a strict GLOBAL contract — the values below MUST be identical on both files (and on any future page that uses the same row pattern):
+
+- `FIELD_HEIGHT = 75` — every WheelInput / unitLockedBox / vertical UnitToggle in the row is exactly 75 px tall, so the row aligns at the bottom regardless of which fields are present.
+- `tripleGrid.gap = 8` — same 8 px gap between every column on every page.
+- `gridUnit: { width: 48 }` — the Unit column is a FIXED 48 px on every page, every template (standard / assisted / carry on strength, pace on cardio). This is what locks the lb/kg or mi/km toggle to the same visual size everywhere.
+- Vertical `UnitToggle` (`vertical` prop) — units stacked, not side-by-side. Universal across both pages.
+- `WheelInput` chrome — `paddingHorizontal: 0`, `paddingVertical: 6`, background `alpha(colors.input, 0.10)`, border `colors.border`, radius 6. Identical on both pages.
+- `unitLockedBox` / `unitLockedText` styles — `paddingHorizontal: 8`, `fontSize: 14, fontWeight: '700'`, `numberOfLines={1}`. Mirrored into both stylesheets even if a page doesn't have a unit-locked variant yet (cardio doesn't today; the styles are there for future use).
+
+The "big number column" flex values, however, are PER-PAGE because the typical content widths differ:
+
+- Strength's `gridLarge: { flex: 2.55 }` is used for Weight and Distance in the carry layout. Both fields show similar-width content there (e.g. `"250 kg"` and `"15 m"` — both 5–6 chars), so symmetric larges look right.
+- Cardio's pace mode uses `gridPaceDistance: { flex: 3.0 }` for Distance (`"26.2 km"` / `"100.0 km"`, 6–8 chars w/ unit) and `gridPaceTime: { flex: 2.1 }` for Time (`"25:00"` / `"180:00"`, 5–6 chars). Distance gets the extra room because its content is wider; same-flex on both leaves Distance cramped.
+
+If you find yourself tweaking `FIELD_HEIGHT`, `tripleGrid.gap`, `gridUnit.width`, the `WheelInput` chrome, or the `unitLockedBox` / `unitLockedText` styles on ONE of the two pages, stop and apply the same edit to the other before moving on — these are the universal values. The per-page big-column flexes are independent: edit one without touching the other. This rule is the reason the user told us to consolidate the layout in the first place.
+
+**Field-height + column-flex convention (`strength.tsx` + `cardio.tsx`):**
 - `FIELD_HEIGHT = 75`. Matches `UnitToggle.rowVertical` height (75) and the `unitLockedBox` chip height (75) so the triple grid row aligns at the bottom across every variant (Reps + Weight + Unit, Weight + Unit + Distance, etc.).
 - `tripleGrid: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' }`.
 - `gridSmall: { flex: 0.85 }` (Reps — max value `30`, just 2 digits).
@@ -1063,6 +1096,29 @@ Every numeric and time input across the mobile app (Strength reps / weight / dis
 - `unitLockedBox`: `paddingHorizontal: 8`, `paddingVertical: 6`, height `FIELD_HEIGHT`. `unitLockedText`: `fontSize: 14, fontWeight: '700'` (matches the active state of the vertical `UnitToggle` — the previous `fontSize: 18` was wider than the carry Unit column). Always rendered with `numberOfLines={1}` as a safety net.
 - `WheelInput` defaults: `paddingHorizontal: 0`, `paddingVertical: 6`. `WheelInput` accepts an optional `style` prop for per-field overrides (currently unused after the Active-Hang +3 experiment was rolled into the global `FIELD_HEIGHT` bump).
 - `PhantomWheel.container` defaults: `alignSelf: 'stretch'`, `paddingHorizontal: 0`. Stretching is critical — without it the container sized to the centre text's width, which made every HaloRow's `left:0/right:0` wrapper inherit that narrow width and truncate longer halo values (the classic "wider value coming up from below → text wraps and `lb` clips" bug).
+
+**Default values: min savable — LOCKED across strength + cardio:**
+
+Every value/time wheel on strength and cardio sits at its MIN SAVABLE value on page-load (and on exercise-switch / mode-switch). NOT min scrollable. The wheels CAN scroll down to 0 / 0.0 — but Save is disabled at that boundary, so defaults sit one notch above zero where Save would actually enable.
+
+Concrete defaults (verified against current code, NOT to be drifted from without updating this doc and the matching effect in code):
+
+| Wheel | Default | Min scrollable | Why |
+|---|---|---|---|
+| Strength reps | `1` | 1 | `setReps('1')` in the exercise-change effect. Min savable is 1 (1+ reps). |
+| Strength weight (non-bodyweight) | `ladder[0]` if ladder, else `wheelMin` (e.g. barbell 45 lb / 20 kg, dumbbell 5 lb / 2 kg, atlas-stone first rung) | same | `setWeight(String(wheelMin))` in the effect. Min savable is the smallest valid lift. |
+| Strength weight (bodyweight added) | `0` | 0 | Added load is 0 by default; bodyweight itself comes from the profile. |
+| Strength carry distance | `5` (metres) | 5 | `setDistance(isCarry ? '5' : '')`. Min savable distance for carries. |
+| Strength isometric duration | `00:01` (1 second) | 0 | `setTimeStr(isIsometric ? '00:01' : '')`. 00:00 is scrollable; Save disables there. |
+| Cardio pace distance | `0.1` (km / mi) | 0.0 | `setDistValue('0.1')` in mode effect. 0.0 scrollable; Save disables. |
+| Cardio pace time | `00:01` | 0 | `setTimeStr('00:01')`. 00:00 scrollable; Save disables. |
+| Cardio duration time | `00:01` | 0 | `setTimeStr('00:01')` in duration mode. 00:00 scrollable; Save disables. |
+
+The matching state-driving code lives in:
+- Strength: `useEffect` keyed off `exercise` / `unit` / `isIsometric` / `isCarry` / `movementRecord` (mobile/app/(app)/strength.tsx).
+- Cardio: `useEffect` keyed off `mode` (mobile/app/(app)/cardio.tsx).
+
+When adding a new value/time wheel anywhere, the same rule applies: initialise to the lowest value that would still let the user save, NOT to a "sensible mid-range default" and NOT to absolute zero.
 
 **Live-chip label convention (`strength.tsx`):**
 - The "Estimated 1RM" chip below the form drops the "Est." / "Estimated" prefix when reps is exactly `1`: a 1-rep lift IS the 1RM, no `estimate1RM` projection runs in that case, and the prefix would be misleading. For 2+ reps the chip reads "Estimated 1RM" / "Est. 1RM per hand" (dumbbell variant) as before. The stored effort `value` in the DB still uses the `"Est. 1RM N unit"` shape regardless — the `parseOneRM` regex on the read path is just looking for the number; the visible label divergence is UI-only.
@@ -1178,6 +1234,71 @@ Env vars are already set in the shell profile. No need to set them manually.
   see commit history if a token shows up in `cfut_…` form anywhere,
   it must be rotated immediately.)
 
+## Secrets hygiene (MANDATORY)
+
+This repo has been bitten twice by secrets leaking via committed files — once with a Cloudflare API token, once with a USDA FoodData Central API key (the USDA one was auto-detected by GitHub and disabled by USDA IT on 2026-05-06). Both leaks happened because a credential ended up in a tracked file. The defences below close that vector at three independent stages, and **all three must stay enabled**.
+
+### Where secrets live
+
+Every credential MUST live in exactly one of these stores, and nowhere else (no files, no CLAUDE.md, no scratch docs, no chat messages, no inline code):
+
+| Secret class                                    | Storage                                                          |
+|-------------------------------------------------|------------------------------------------------------------------|
+| CI/CD secrets (USDA API key, etc.)              | **GitHub Actions Secrets** — `Settings → Secrets and variables → Actions` |
+| Cloudflare wrangler / deploy                    | **PowerShell profile env var** — `$env:CLOUDFLARE_API_TOKEN`     |
+| Cloudflare Worker runtime secrets               | **`wrangler secret put NAME`** — encrypted in CF, never on disk  |
+| Supabase Edge Function secrets (Twilio etc.)    | **Supabase Dashboard → Edge Functions → Secrets**                |
+| Web/mobile public-tier keys (Supabase anon)     | Plain Vite/Expo env, embedded in client bundle — OK to commit    |
+| Web/mobile **service-role** Supabase keys       | Never used client-side. Server only.                             |
+
+Code reads them at runtime via `process.env.NAME` (or `import.meta.env` for Vite). Never inline.
+
+### Layer 1 — `.gitignore` (.env* family)
+
+`.gitignore` explicitly blocks `.env`, `.env.local`, `.env.production`, etc. so they can't be staged accidentally. The only exception is `.env.example` (an empty template, no real values). If you find yourself wanting to commit anything in the `.env*` family, you're about to leak a secret — stop and rethink.
+
+### Layer 2 — pre-commit hook (`scripts/git-hooks/pre-commit`)
+
+A bash script that scans staged changes for known secret patterns (Cloudflare tokens, AWS keys, OpenAI keys, Stripe keys, GitHub PATs, USDA api.data.gov URLs, JWT triplets, private key blocks, generic Bearer tokens, hardcoded `*_KEY=` / `*_TOKEN=` assignments). Blocks the commit if any pattern matches.
+
+**One-time install** (per clone of the repo):
+
+```bash
+git config core.hooksPath scripts/git-hooks
+# Linux/macOS only:
+chmod +x scripts/git-hooks/pre-commit
+```
+
+**Verify it's wired up:**
+
+```bash
+git config core.hooksPath   # should print: scripts/git-hooks
+```
+
+If you legitimately need to commit something that triggers a false positive (e.g. adding a new regex example to the hook itself):
+
+```bash
+git commit --no-verify
+```
+
+Don't make `--no-verify` a habit. If a real secret matches and you bypass, you've defeated the whole defence.
+
+### Layer 3 — GitHub Push Protection (server-side)
+
+GitHub scans every push for ~200 known credential formats. If it sees one, it blocks the push and tells you which file/line. Free, one-click to enable.
+
+**Enable at:** `Settings → Code security → Secret scanning → Push protection → Enable for this repository`
+
+This is the final net — if a secret somehow makes it past layers 1 and 2, push protection catches it before it becomes public. **Never disable it.** Status must stay enabled across repo transfers, owner changes, etc.
+
+### What to do if a secret leaks anyway
+
+1. **Rotate the secret immediately** — go to the issuing service (Cloudflare, USDA, Supabase, Twilio, …) and revoke + regenerate. The exposed value is dead the moment it leaves your machine.
+2. **Force-rewrite git history** to scrub the secret from past commits. Use `git filter-repo --replace-text <(echo 'SECRET_VALUE==>REMOVED')` then a force-push to `origin/main`. Note: even after history rewrite, the secret may persist in forks, caches, and the Internet Archive — rotation is the only real fix.
+3. **Update the new secret** in its proper store (GHA secret, env var, etc.).
+4. **Add the leaked pattern to `scripts/git-hooks/pre-commit`** so the same shape can't slip through again.
+5. **Audit the rest of the repo** for siblings of the same secret class.
+
 ## Supabase
 - Project ID: `xtxzfhoxyyrlxslgzvty`
 - Site URL: `https://myrxfit.com`
@@ -1241,15 +1362,17 @@ src/pages/admin/AdminMovements.jsx  — Movement library CRUD. Add form hidden b
 src/pages/admin/AdminFoodLibrary.jsx — Food library CRUD for admin-managed ('myrx') foods.
                                        Search bar works on name OR UPC with progressive
                                        UPC results (3+ digits trigger prefix search).
-                                       Scan button opens BarcodeScanner — scan context is
-                                       'panel' (main scan) or 'search' (search-bar scan).
-                                       Scan result cards: found_db (green), found_off
-                                       (violet), not_found (amber), zero_cal (amber),
-                                       error (red). Clear (X) button in search field.
-                                       Clicking a result opens FoodDetail panel with
-                                       per-100g + per-serving nutrition columns; panel
-                                       auto-scrolls into view on open (panelRef +
-                                       scrollIntoView). myrx foods: Edit + Delete actions.
+                                       Add / Edit / Delete via manual form (FoodForm).
+                                       UPC is a text input on the form — entering one
+                                       classifies the row as 'branded'; leaving it blank
+                                       classifies it as 'generic' (universal data_type rule).
+                                       NOTE: a previous iteration of this page had a Scan
+                                       button that opened BarcodeScanner + auto-populated
+                                       the form from OpenFoodFacts. That wiring has been
+                                       removed from this file but the BarcodeScanner.jsx
+                                       component and /api/off-search proxy still exist —
+                                       Phase D of the food-rebuild plan re-attaches them.
+                                       Until then, admin must type UPCs by hand.
 src/pages/admin/tabs/              — AdminUserProfile, AdminUserActivity,
                                       AdminUserBody, AdminUserCalories
 ```
@@ -1480,6 +1603,9 @@ Admins (`is_superuser = true`) see an "Admin Portal" button in the client nav, o
 - **Coach avatar in ChatDrawer**: only in the drawer header, NOT on individual message bubbles. User explicitly rejected per-message photos.
 - **Cloudflare Worker** (`workers/food-search/`): handles `/search` endpoint for USDA D1 food search. UPC detection added — partial prefix LIKE for 3-11 digits, exact for 12+. Deploy with `npx wrangler deploy` from `workers/food-search/`.
 - **Admin Movement Library add form**: hidden behind a dashed button (`addOpen` state). Never render the form inline without user clicking "+ Add movement" first.
+- **USDA sync (three-data-type pattern)**: `scripts/d1_migrate/sync_usda.mjs` fetches USDA's three real-foods data types in separate passes — Branded Food, Foundation, and SR Legacy. Each pass paginates the USDA API at `dataType: [<label>]`. Branded uses UPC-based dedup (handles same-product-different-fdc_id collisions); Foundation + SR Legacy use INSERT OR IGNORE on `(source, source_id)`. The earlier single-pass-branded-only implementation is what caused "lettuce" / "tomato" searches to return zero generics — Foundation Foods don't have UPCs, so the previous `shouldSkip` filter ate them all. Survey FNDDS + Experimental are intentionally NOT imported (FNDDS is aggregated dietary-study data; Experimental is too small to matter).
+- **`food_library.data_type` column** (D1): every row is either `'branded'` (has UPC, packaged product) or `'generic'` (no UPC, canonical ingredient or admin-curated custom entry). The classification is derived from UPC presence at INSERT time by `lib/normalize.mjs::dataTypeFromUpc` — single source of truth, applied uniformly to USDA, ON, and MYRX. Migration `0004_data_type.sql` adds the column + backfills existing rows from current UPC state. The Worker's `/search` doesn't expose `data_type` to clients (internal classifier only); future ranking tweaks can `ORDER BY` it to prefer generics over branded for ingredient-style queries.
+- **`shouldSkip` UPC rule** (`scripts/d1_migrate/lib/normalize.mjs`): rejects rows without a UPC ONLY when `dataType === 'branded'`. Generics legitimately have no UPC and must pass through. If you copy this filter to a new sync path, copy the `dataType` parameter too — otherwise you'll silently re-introduce the original lettuce-disappears bug.
 
 ---
 

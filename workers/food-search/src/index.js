@@ -115,16 +115,20 @@ async function handleCreate(request, env) {
 
   const data      = coerce(body)
   const source_id = crypto.randomUUID()
+  // Universal rule: row with UPC → 'branded' (packaged product),
+  // row without UPC → 'generic' (custom ingredient / recipe).
+  // Same logic the USDA + ON sync scripts use, so the column stays consistent.
+  const data_type = data.upc ? 'branded' : 'generic'
 
   await env.DB.batch([
     env.DB.prepare(`
       INSERT INTO food_library (source, source_id, name, brand, kcal, protein_g, fat_g,
-        carbs_g, fiber_g, sodium_mg, serving_g, serving_label, upc)
-      VALUES ('myrx', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        carbs_g, fiber_g, sodium_mg, serving_g, serving_label, upc, data_type)
+      VALUES ('myrx', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(source_id, data.name, data.brand ?? null, data.kcal ?? null,
         data.protein_g ?? null, data.fat_g ?? null, data.carbs_g ?? null,
         data.fiber_g ?? null, data.sodium_mg ?? null, data.serving_g ?? null,
-        data.serving_label ?? null, data.upc ?? null),
+        data.serving_label ?? null, data.upc ?? null, data_type),
     env.DB.prepare(`
       INSERT INTO food_fts(rowid, name, brand)
       SELECT id, name, brand FROM food_library WHERE source='myrx' AND source_id=?
@@ -156,6 +160,11 @@ async function handleUpdate(request, env, source_id) {
 
   const data = coerce(body)
   if (Object.keys(data).length === 0) return json({ error: 'No fields to update' }, 400)
+
+  // If UPC changed, re-derive data_type from the new UPC (universal rule).
+  if (data.upc !== undefined) {
+    data.data_type = data.upc ? 'branded' : 'generic'
+  }
 
   const setClauses = Object.keys(data).map(k => `${k}=?`).join(', ')
   const setValues  = Object.values(data)

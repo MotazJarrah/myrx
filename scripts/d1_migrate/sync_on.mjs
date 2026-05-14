@@ -257,27 +257,29 @@ async function run() {
   // ── Apply changes ───────────────────────────────────────────────────────────
   console.log('\nStep 5/5  Applying changes to D1…')
 
-  // Inserts
+  // Inserts — all kept ON rows have UPCs (the `if (!upc) return` filter
+  // earlier in this script enforces it), so data_type is always 'branded'.
   for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
     const batch = toInsert.slice(i, i + BATCH_SIZE)
     await db.batch(batch.map(r => ({
       sql: `INSERT OR IGNORE INTO food_library
               (source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
-               fiber_g, sodium_mg, serving_g, serving_label, upc)
-            VALUES ('on',?,?,?,?,?,?,?,?,?,?,?,?)`,
+               fiber_g, sodium_mg, serving_g, serving_label, upc, data_type)
+            VALUES ('on',?,?,?,?,?,?,?,?,?,?,?,?,'branded')`,
       params: [r.source_id, r.name, r.brand, r.kcal, r.protein_g, r.fat_g,
                r.carbs_g, r.fiber_g, r.sodium_mg, r.serving_g, r.serving_label, r.upc],
     })))
     process.stdout.write(`\r  Inserted ${Math.min(i + BATCH_SIZE, toInsert.length).toLocaleString()} / ${toInsert.length.toLocaleString()}`)
   }
 
-  // Updates
+  // Updates — re-assert data_type so any prior null-state gets corrected.
   for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
     const batch = toUpdate.slice(i, i + BATCH_SIZE)
     await db.batch(batch.map(r => ({
       sql: `UPDATE food_library SET
               name=?, brand=?, kcal=?, protein_g=?, fat_g=?, carbs_g=?,
-              fiber_g=?, sodium_mg=?, serving_g=?, serving_label=?, upc=?
+              fiber_g=?, sodium_mg=?, serving_g=?, serving_label=?, upc=?,
+              data_type='branded'
             WHERE source='on' AND source_id=?`,
       params: [r.name, r.brand, r.kcal, r.protein_g, r.fat_g, r.carbs_g,
                r.fiber_g, r.sodium_mg, r.serving_g, r.serving_label, r.upc, r.source_id],
