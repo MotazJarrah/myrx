@@ -86,13 +86,22 @@ export function extractServing(food) {
 
 /**
  * Universal data-type classifier for the food_library table.
- * Rule: any row with a UPC is branded; any row without is generic.
+ *
+ * Rule: a row is BRANDED if it has either a UPC barcode OR a brand name
+ * (older USDA entries are legitimately branded but were imported before
+ * UPC requirements, so brand-only rows still count as branded products).
+ * A row is GENERIC only when both fields are missing — those are canonical
+ * ingredients from USDA Foundation Foods / SR Legacy, or admin-curated
+ * custom entries with no brand attached.
+ *
  * Applies uniformly across USDA, OpenNutrition, and MYRX sources.
+ *
  * @param {string | null | undefined} upc
+ * @param {string | null | undefined} brand
  * @returns {'branded' | 'generic'}
  */
-export function dataTypeFromUpc(upc) {
-  return upc ? 'branded' : 'generic'
+export function dataTypeFromUpc(upc, brand) {
+  return (upc || brand) ? 'branded' : 'generic'
 }
 
 /**

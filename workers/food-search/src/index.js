@@ -115,10 +115,10 @@ async function handleCreate(request, env) {
 
   const data      = coerce(body)
   const source_id = crypto.randomUUID()
-  // Universal rule: row with UPC → 'branded' (packaged product),
-  // row without UPC → 'generic' (custom ingredient / recipe).
-  // Same logic the USDA + ON sync scripts use, so the column stays consistent.
-  const data_type = data.upc ? 'branded' : 'generic'
+  // Universal rule: branded if EITHER upc OR brand is present.
+  // Generic only when both are missing (canonical ingredient / custom entry).
+  // Matches the rule used by the USDA + ON sync scripts.
+  const data_type = (data.upc || data.brand) ? 'branded' : 'generic'
 
   await env.DB.batch([
     env.DB.prepare(`
@@ -146,9 +146,11 @@ async function handleUpdate(request, env, source_id) {
   const authErr = requireAuth(request, env)
   if (authErr) return authErr
 
-  // Fetch existing row
+  // Fetch existing row — include upc so the data_type re-derivation can fall
+  // back to the existing value when only `brand` was provided in the update
+  // payload (and vice versa).
   const existing = await env.DB.prepare(
-    `SELECT id, name, brand FROM food_library WHERE source='myrx' AND source_id=?`
+    `SELECT id, name, brand, upc FROM food_library WHERE source='myrx' AND source_id=?`
   ).bind(source_id).first()
   if (!existing) return json({ error: 'Not found' }, 404)
 
@@ -161,9 +163,11 @@ async function handleUpdate(request, env, source_id) {
   const data = coerce(body)
   if (Object.keys(data).length === 0) return json({ error: 'No fields to update' }, 400)
 
-  // If UPC changed, re-derive data_type from the new UPC (universal rule).
-  if (data.upc !== undefined) {
-    data.data_type = data.upc ? 'branded' : 'generic'
+  // If UPC or brand changed, re-derive data_type (universal rule).
+  if (data.upc !== undefined || data.brand !== undefined) {
+    const nextUpc   = data.upc   !== undefined ? data.upc   : existing.upc
+    const nextBrand = data.brand !== undefined ? data.brand : existing.brand
+    data.data_type  = (nextUpc || nextBrand) ? 'branded' : 'generic'
   }
 
   const setClauses = Object.keys(data).map(k => `${k}=?`).join(', ')
@@ -292,6 +296,22 @@ export default {
       const srcClause = source ? 'AND f.source = ?' : ''
       const srcArgs   = source ? [source] : []
 
+      // Short-query generics-first rule:
+      //   1-2 search terms (e.g. "lettuce", "tomato sauce") → user is probably
+      //   looking for a canonical ingredient, so we surface generics first.
+      //   3+ terms (e.g. "great value mac and cheese") → user is looking for
+      //   a specific product, so we trust FTS5's BM25 ranking unmodified.
+      // The term count comes from the same tokenisation buildFtsQuery uses.
+      const termCount = raw
+        .replace(/[^\w\s]/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(t => t.length >= 2)
+        .length
+      const orderBy = termCount <= 2
+        ? `ORDER BY CASE WHEN f.data_type = 'generic' THEN 0 ELSE 1 END, rank`
+        : `ORDER BY rank`
+
       try {
         if (ftsQuery) {
           const stmt = env.DB.prepare(`
@@ -299,7 +319,7 @@ export default {
             FROM food_fts
             JOIN food_library f ON food_fts.rowid = f.id
             WHERE food_fts MATCH ? ${srcClause}
-            ORDER BY rank
+            ${orderBy}
             LIMIT ?
           `).bind(ftsQuery, ...srcArgs, limit)
           const { results } = await stmt.all()
