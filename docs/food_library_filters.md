@@ -38,12 +38,13 @@ Each proposed rule looks like:
 
 Rules are evaluated in tiers. The first matching rejection wins; later checks are skipped for that row. Repair (Tier 1) runs BEFORE rejection so rows get their best chance.
 
-### Tier 1 — REPAIR
-| Rule | What it does |
-|---|---|
-| 9 | Backfill missing kcal from macros (4p + 9f + 4c) |
-| 15 | Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips") with NFS/NS/Mc preservation |
-| 17 | USDA leading-category prefix normalization ("Nuts, cashew nuts, raw" → "Cashew Nuts, Raw") |
+### Tier 1 — REPAIR (executed in this order inside `enrichFood()`)
+| Order | Rule | What it does |
+|---|---|---|
+| 1 | 18 | Drop redundant tail-comma duplication (`Italian Style Meatballs, Italian Style` → `Italian Style Meatballs`) |
+| 2 | 17 | USDA leading-category prefix normalization (`Nuts, cashew nuts, raw` → `Cashew Nuts, Raw`) — generic-only |
+| 3 | 15 | Title-case all-uppercase names (`POTATO CHIPS` → `Potato Chips`) with NFS/NS/Mc preservation |
+| 4 | 9 | Backfill missing kcal from macros (4p + 9f + 4c) |
 
 ### Tier 2 — REJECT structurally broken
 | Rule | Rejects |
@@ -75,7 +76,7 @@ Rules are evaluated in tiers. The first matching rejection wins; later checks ar
 | 14 | Cross-source UPC dedup (USDA vs ON) on kcal match → prefer ON |
 | 16 | Intra-source UPC dedup on kcal match → keep MAX(id) |
 
-Implementation: `scripts/d1_migrate/lib/filters.mjs` — `enrichFood()` covers Rules 9 + 15 + 17 (Rule 17 runs before Rule 15 so title-case picks up the rewritten name), `shouldKeepFood()` covers Tiers 2-4 in the order above. Dedup (Tier 5) lives in `scripts/bulk_import/post_import_dedup.mjs`.
+Implementation: `scripts/d1_migrate/lib/filters.mjs` — `enrichFood()` covers Rules 18 → 17 → 15 → 9 in that order. Each subsequent rule sees the output of the previous one. Dedup (Tier 5) lives in `scripts/bulk_import/post_import_dedup.mjs`.
 
 ---
 
@@ -280,7 +281,7 @@ WHERE id NOT IN (
 
 ## Second pass — audit + cleanup 2026-05-14
 
-After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pass surfaced six more cohorts worth filtering / normalising. All approved and applied on the same day. Net result:
+After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pass surfaced seven more cohorts worth filtering / normalising. All approved and applied on the same day. Net result:
 
 | Metric | Before pass | After pass |
 |---|---|---|
@@ -290,6 +291,32 @@ After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pas
 | Cross-source UPC dupes | 259,693 | 0 (safe subset cleared) |
 | Intra-source UPC dupes | 63,656 | safe subset (44K UPCs) cleared |
 | myrx admin entries | 6 | 6 (preserved) |
+
+### Rule 18 — Drop redundant tail-comma duplication
+**Status:** approved + applied 2026-05-14
+**Source:** all (any row whose name contains `, `)
+**Action:** if the part of the name after some `, ` boundary (the tail) appears as a substring of the part before that boundary (the head), truncate at that boundary. Pure substring match — no whitelist needed.
+**Algorithm:**
+  - Scan left-to-right for the leftmost `, ` position where `head.includes(tail)` (case-insensitive).
+  - First match wins → yields the LARGEST possible tail dropped (earlier commas give longer tails).
+  - Guards: tail length > 4 chars, head length > 6 chars (avoid trivial coincidental matches and over-aggressive truncation).
+**Why this is safer than Rule 17:** Rule 17 needed a whitelist because the rotate/drop decision depended on whether the leading word was a category vs a brand. Rule 18 is a pure structural substring check — if the head genuinely contains the tail, the tail is redundant regardless of what either part is semantically.
+**Example transformations:**
+  - `Italian Style Meatballs, Italian Style` → `Italian Style Meatballs`
+  - `Sweetened Puffed Wheat Cereal, Sweetened Puffed Wheat Cereal` → `Sweetened Puffed Wheat Cereal`
+  - `Cookies 'n' Creme Bars, Cookies 'n' Creme` → `Cookies 'n' Creme Bars`
+  - `Mango, Carrot & Banana Smoothie Blends, Mango, Carrot & Banana` → `Mango, Carrot & Banana Smoothie Blends`
+  - `Frosted Brown Sugar Cinnamon Toaster Pastries, Frosted Brown Sugar Cinnamon` → `Frosted Brown Sugar Cinnamon Toaster Pastries`
+  - `Old Fashioned Pecan Pie, Old Fashioned Pecan` → `Old Fashioned Pecan Pie`
+**Untouched cases:**
+  - `Cheddar Cheese, Sharp Cheddar` (sharp cheddar isn't a substring of cheddar cheese)
+  - `Snyder's Of Hanover, Gluten Free Pretzel Sticks` (no overlap)
+  - `Pizza with pepperoni, from frozen, medium crust` (no substring redundancy)
+  - `Key Lime, Key Lime Yogurt - Pretzels` (head is too short to contain the tail)
+**Run history:**
+  - First sweep used an over-restrictive SQL pre-filter (only matched when the FIRST whole comma-segment was repeated) and caught 1,936 rows.
+  - Second sweep scanned ALL comma-containing rows (199,147 candidates) and caught the much larger partial-prefix-repetition cohort: **95,185 additional rows** updated, 103,962 untouched. Total: ~97,000 rows cleaned.
+**Decided:** 2026-05-14 by user
 
 ### Rule 17 — USDA leading-category prefix normalization
 **Status:** approved + applied 2026-05-14

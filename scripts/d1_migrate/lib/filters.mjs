@@ -12,12 +12,14 @@
  *
  * ── Rule evaluation hierarchy (see docs/food_library_filters.md) ──────────
  *
- *   Tier 1 — REPAIR
- *     Rule 9   Backfill missing kcal from macros (4p + 9f + 4c)
- *     Rule 15  Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips")
- *              with NFS/NS/Mc preservation
+ *   Tier 1 — REPAIR (executed in this order inside enrichFood)
+ *     Rule 18  Drop redundant tail-comma duplication
+ *              ("Italian Style Meatballs, Italian Style" → "Italian Style Meatballs")
  *     Rule 17  USDA leading-category prefix normalization
  *              ("Nuts, cashew nuts, raw" → "Cashew Nuts, Raw")
+ *     Rule 15  Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips")
+ *              with NFS/NS/Mc preservation
+ *     Rule 9   Backfill missing kcal from macros (4p + 9f + 4c)
  *
  *   Tier 2 — REJECT structurally broken
  *     Rule 5   Wrong-category subtypes (sub_sample_food, agricultural_acquisition)
@@ -183,6 +185,49 @@ const RULE17_CATEGORIES = new Set([
   'babyfood', 'game',
 ])
 
+/**
+ * Rule 18 — Drop redundant tail-comma duplication.
+ *
+ * USDA / ON branded names often concatenate the description with a flavor
+ * variant or subBrand string, producing redundant tail segments:
+ *
+ *   "Italian Style Meatballs, Italian Style"
+ *      → "Italian Style Meatballs"
+ *
+ *   "Cookies 'n' Creme Bars, Cookies 'n' Creme"
+ *      → "Cookies 'n' Creme Bars"
+ *
+ *   "Mango, Carrot & Banana Smoothie Blends, Mango, Carrot & Banana"
+ *      → "Mango, Carrot & Banana Smoothie Blends"
+ *
+ * Algorithm: scan left-to-right for the leftmost ", " position where the
+ * tail (everything after) appears as a substring of the head (everything
+ * before). First match wins, which yields the LARGEST tail dropped.
+ *
+ * Safeguards (avoid trivial coincidental matches):
+ *   - tail length > 4 chars
+ *   - head length > 6 chars (don't truncate result to near-nothing)
+ *   - case-insensitive substring check
+ *
+ * Pure substring check — no whitelist needed. If the head genuinely
+ * contains the tail, it's redundant.
+ */
+function rule18DropRedundantTail(name) {
+  if (name == null) return name
+  const s = String(name)
+  const lower = s.toLowerCase()
+  let pos = lower.indexOf(', ')
+  while (pos !== -1) {
+    const head = lower.substring(0, pos)
+    const tail = lower.substring(pos + 2)
+    if (tail.length > 4 && head.length > 6 && head.includes(tail)) {
+      return s.substring(0, pos)
+    }
+    pos = lower.indexOf(', ', pos + 1)
+  }
+  return s
+}
+
 function rule17PrefixNormalize(name) {
   if (name == null) return name
   const segs = String(name).split(', ')
@@ -238,16 +283,21 @@ function rule17PrefixNormalize(name) {
 export function enrichFood(row) {
   const { kcal, protein_g, fat_g, carbs_g, name, brand } = row
 
+  // Rule 18 — drop redundant tail-comma duplication. Pure substring check,
+  // applies to all rows (branded or not). Runs first so subsequent
+  // rules see the de-duplicated name.
+  let workingName = rule18DropRedundantTail(name)
+
   // Rule 17 — USDA leading-category prefix rewrite (only when no brand,
   // since brand-as-prefix patterns aren't applicable to genuinely branded
-  // products). Runs BEFORE title-case so any newly-introduced lowercase
+  // products). Runs after Rule 18 (so the tail-trimmed name is what gets
+  // analyzed) and BEFORE title-case so any newly-introduced lowercase
   // from the drop/rotate gets capitalised by titleCaseName().
-  let workingName = name
   if (workingName != null && brand == null) {
     workingName = rule17PrefixNormalize(workingName)
   }
 
-  // Rule 15 — title-case all-caps names (cheap; runs after Rule 17 rewrite)
+  // Rule 15 — title-case all-caps names (cheap; runs after Rules 17 + 18)
   const normalizedName = titleCaseName(workingName)
 
   // Rule 9 — backfill kcal
