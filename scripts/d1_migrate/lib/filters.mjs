@@ -14,6 +14,7 @@
  *
  *   Tier 1 — REPAIR
  *     Rule 9   Backfill missing kcal from macros (4p + 9f + 4c)
+ *     Rule 15  Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips")
  *
  *   Tier 2 — REJECT structurally broken
  *     Rule 5   Wrong-category subtypes (sub_sample_food, agricultural_acquisition)
@@ -21,6 +22,8 @@
  *     Rule 6   kcal density > 900 per 100g (physically impossible)
  *     Rule 10  Sum of macros > 105g per 100g (impossible mass)
  *     Rule 11  Any single macro > 100g per 100g (impossible mass)
+ *     Rule 12  Name length < 3 characters (truncation / parsing artifact)
+ *     Rule 13  Name contains QA-leak / discontinued / test phrases
  *
  *   Tier 3 — REJECT internally inconsistent
  *     Rule 4   kcal differs from (4p + 9f + 4c) by > 50%
@@ -32,6 +35,8 @@
  *   Tier 5 — DEDUP (cross-row, runs post-import as DELETEs)
  *     Rule 2   Exact dedup on name + brand + macros + serving_label + upc
  *     Rule 3   Brand-product dedup on name + brand + macros + serving_g
+ *     Rule 14  Cross-source UPC dedup (USDA vs ON), prefer ON on kcal match
+ *     Rule 16  Intra-source UPC dedup, keep highest source_id per kcal match
  *
  * If you change a rule in this file, update docs/food_library_filters.md
  * and re-run the cleanup migration. The doc is the spec; this file is
@@ -41,6 +46,37 @@
 // ── Tier 1: REPAIR ───────────────────────────────────────────────────────────
 
 /**
+ * Rule 15 — Title-case all-uppercase names.
+ *
+ * USDA branded-food entries arrive in ALL CAPS. OpenNutrition uses Title
+ * Case. After cross-source dedup keeps ON's row over USDA's, the surviving
+ * USDA rows still look visually inconsistent — `POTATO CHIPS, SEA SALT`
+ * sitting next to `Roasted Almonds`. This normalises any entirely-uppercase
+ * name to title case.
+ *
+ * Boundary regex: re-uppercase the first unicode letter after start-of-string
+ * or whitespace, comma, slash, paren, hyphen, ampersand, period, opening
+ * bracket. Apostrophe is NOT a boundary, so "Trader Joe's" survives (the
+ * "s" after the apostrophe stays lowercase).
+ *
+ * Tradeoff accepted: acronyms ("BBQ", "USDA", "NFS") become title case
+ * ("Bbq", "Usda", "Nfs"). Low frequency, acceptable.
+ *
+ * Touches ONLY names where the input was entirely uppercase
+ * (`UPPER(name) === name` AND at least one ASCII letter present). Mixed-case
+ * names are left as-is — we trust the source's casing.
+ */
+const TITLE_CASE_BOUNDARY = /(^|[\s,/()\-&.\[])(\p{L})/gu
+function titleCaseName(name) {
+  if (name == null) return name
+  const s = String(name)
+  // Only act on entirely-uppercase strings that actually contain letters.
+  if (s.toUpperCase() !== s) return name
+  if (!/[A-Z]/.test(s)) return name
+  return s.toLowerCase().replace(TITLE_CASE_BOUNDARY, (_, sep, c) => sep + c.toUpperCase())
+}
+
+/**
  * Rule 9 — Backfill missing kcal from macros.
  *
  * Returns a new row with `kcal` set to the 4/9/4 prediction when kcal was
@@ -48,23 +84,65 @@
  * kcal pass through unchanged. Rows with all-null macros pass through
  * unchanged (they'll be caught by Rule 1).
  *
+ * Also applies Rule 15 (title-case) to the name field when applicable.
+ *
  * Runs BEFORE shouldKeepFood so subsequent rules see a complete row.
  *
  * @param {object} row
- * @returns {object} — same row, possibly with kcal filled in
+ * @returns {object} — same row, possibly with kcal filled in / name normalized
  */
 export function enrichFood(row) {
-  const { kcal, protein_g, fat_g, carbs_g } = row
-  if (kcal != null) return row
-  if (protein_g == null && fat_g == null && carbs_g == null) return row
+  const { kcal, protein_g, fat_g, carbs_g, name } = row
 
-  const computed =
-    (protein_g ?? 0) * 4 +
-    (fat_g ?? 0) * 9 +
-    (carbs_g ?? 0) * 4
-  if (computed <= 0) return row
+  // Rule 15 — title-case all-caps names (cheap; runs first)
+  const normalizedName = titleCaseName(name)
 
-  return { ...row, kcal: Math.round(computed * 10) / 10 }
+  // Rule 9 — backfill kcal
+  let backfilledKcal = kcal
+  if (kcal == null && (protein_g != null || fat_g != null || carbs_g != null)) {
+    const computed =
+      (protein_g ?? 0) * 4 +
+      (fat_g ?? 0) * 9 +
+      (carbs_g ?? 0) * 4
+    if (computed > 0) backfilledKcal = Math.round(computed * 10) / 10
+  }
+
+  // Skip the object copy if nothing changed.
+  if (normalizedName === name && backfilledKcal === kcal) return row
+  return { ...row, name: normalizedName, kcal: backfilledKcal }
+}
+
+// ── Tier 2: name-based rejection helpers ─────────────────────────────────────
+
+/**
+ * Rule 13 — Reject QA-leak / discontinued / test phrases inside the name.
+ *
+ * Patterns observed in USDA branded data — rows that survive the dataset
+ * pipeline despite the brand or USDA having marked the product as dead or
+ * never-real. Examples:
+ *   "CAMPBELL'S SOUP DISCONTINUED"
+ *   "DISCONTINUED STOUFFER'S Mac & Cheese 4×64oz"
+ *   "This product has been discontinued. 1979: Breakfast Bun..."
+ *   "TEST FLAVOR: 855" (Frito-Lay)
+ *   "Training Supplier Test Item" (Training Supplier Company)
+ *   "SLTEST_DISCONTINUED_USI_NESTLE POPPIN' POPS"
+ *
+ * Patterns are kept narrow on purpose so legitimate brands stay in
+ * ("Testify Sweet & Savory BBQ Sauce" survives — Testify is a real brand).
+ */
+function nameLooksLikeQaLeak(name) {
+  if (!name) return false
+  const lower = String(name).toLowerCase()
+  // Starts with the word "discontinued"
+  if (/^discontinued[\s_]/i.test(name)) return true
+  // Embedded "This product has been discontinued."
+  if (lower.includes('this product has been discontinued')) return true
+  // USDA QA-suite leftovers
+  if (/\btest flavor\b/i.test(name)) return true
+  if (lower.startsWith('training supplier test')) return true
+  if (/^sltest/i.test(name)) return true
+  if (lower.includes('sprinkle test tube')) return true
+  return false
 }
 
 // ── Tier 2-4: PER-ROW REJECTION ──────────────────────────────────────────────
@@ -78,6 +156,7 @@ export function enrichFood(row) {
  * already happened by the time we evaluate the rejection rules.
  *
  * @param {{
+ *   name:           string | null,
  *   kcal:           number | null,
  *   protein_g:      number | null,
  *   fat_g:          number | null,
@@ -88,13 +167,19 @@ export function enrichFood(row) {
  * @returns {boolean}  true if row should be kept, false to filter out
  */
 export function shouldKeepFood(row) {
-  const { kcal, protein_g, fat_g, carbs_g, serving_g, source_subtype } = row
+  const { name, kcal, protein_g, fat_g, carbs_g, serving_g, source_subtype } = row
 
   // ── Tier 2: REJECT structurally broken ─────────────────────────────────
 
   // Rule 5 — wrong-category subtypes (USDA research artifacts)
   if (source_subtype === 'sub_sample_food')         return false
   if (source_subtype === 'agricultural_acquisition') return false
+
+  // Rule 12 — name length < 3 chars (truncation / parsing artifact)
+  if (name != null && String(name).trim().length < 3) return false
+
+  // Rule 13 — name is a discontinued/test/QA-leak placeholder
+  if (nameLooksLikeQaLeak(name)) return false
 
   // Rule 1 — all four primary macros missing (after Rule 9's backfill attempt)
   const empty = v => v == null || v === 0
@@ -156,11 +241,14 @@ export function shouldKeepFood(row) {
  * @returns {string | null}
  */
 export function getFilterReason(row) {
-  const { kcal, protein_g, fat_g, carbs_g, serving_g, source_subtype } = row
+  const { name, kcal, protein_g, fat_g, carbs_g, serving_g, source_subtype } = row
 
   // Tier 2
   if (source_subtype === 'sub_sample_food')         return 'rule5_sub_sample'
   if (source_subtype === 'agricultural_acquisition') return 'rule5_agricultural'
+
+  if (name != null && String(name).trim().length < 3) return 'rule12_short_name'
+  if (nameLooksLikeQaLeak(name))                       return 'rule13_qa_leak'
 
   const empty = v => v == null || v === 0
   if (empty(kcal) && empty(protein_g) && empty(fat_g) && empty(carbs_g)) {

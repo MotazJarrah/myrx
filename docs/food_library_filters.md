@@ -42,11 +42,14 @@ Rules are evaluated in tiers. The first matching rejection wins; later checks ar
 | Rule | What it does |
 |---|---|
 | 9 | Backfill missing kcal from macros (4p + 9f + 4c) |
+| 15 | Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips") |
 
 ### Tier 2 — REJECT structurally broken
 | Rule | Rejects |
 |---|---|
 | 5 | Wrong-category subtypes (sub_sample_food, agricultural_acquisition) |
+| 12 | Name length < 3 chars (truncation / parsing artifact) |
+| 13 | Name is a QA-leak / discontinued / test placeholder |
 | 1 | All four primary macros null or zero (after Rule 9 attempt) |
 | 6 | kcal > 900 per 100g (impossible density) |
 | 10 | Macro sum > 105g per 100g (impossible mass) |
@@ -68,8 +71,10 @@ Rules are evaluated in tiers. The first matching rejection wins; later checks ar
 |---|---|
 | 2 | Exact dedup on name + brand + macros + serving_label + upc → keep MAX(id) |
 | 3 | Brand-product dedup on name + brand + macros + serving_g → highest source_id |
+| 14 | Cross-source UPC dedup (USDA vs ON) on kcal match → prefer ON |
+| 16 | Intra-source UPC dedup on kcal match → keep MAX(id) |
 
-Implementation: `scripts/d1_migrate/lib/filters.mjs` — `enrichFood()` is Rule 9, `shouldKeepFood()` covers Tiers 2-4 in the order above. Dedup (Tier 5) lives in `scripts/bulk_import/post_import_dedup.mjs`.
+Implementation: `scripts/d1_migrate/lib/filters.mjs` — `enrichFood()` covers Rules 9 + 15, `shouldKeepFood()` covers Tiers 2-4 in the order above. Dedup (Tier 5) lives in `scripts/bulk_import/post_import_dedup.mjs`.
 
 ---
 
@@ -272,6 +277,159 @@ WHERE id NOT IN (
 
 ---
 
+## Second pass — audit + cleanup 2026-05-14
+
+After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pass surfaced five more cohorts worth filtering. All approved and applied on the same day. Net result:
+
+| Metric | Before pass | After pass |
+|---|---|---|
+| Row count | 1,012,361 | **482,666** (-52.3%) |
+| DB size | 401 MB | **222 MB** (-44.6%) |
+| All-caps name rows | 659,494 | **1** |
+| Cross-source UPC dupes | 259,693 | 0 (safe subset cleared) |
+| Intra-source UPC dupes | 63,656 | safe subset (44K UPCs) cleared |
+| myrx admin entries | 6 | 6 (preserved) |
+
+### Rule 16 — Intra-source UPC dedup (kcal match within source)
+**Status:** approved + applied 2026-05-14
+**Source:** any source (`usda`, `on`, `myrx`)
+**Match key:** `source`, `upc`, `ROUND(COALESCE(kcal,-1), 0)`
+**Winner:** `MAX(id)` per group.
+**SQL:**
+```sql
+DELETE FROM food_library
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id, ROW_NUMBER() OVER (
+      PARTITION BY source, upc, ROUND(COALESCE(kcal,-1), 0)
+      ORDER BY id DESC
+    ) AS rn
+    FROM food_library
+    WHERE upc IS NOT NULL
+  ) ranked WHERE rn > 1
+);
+```
+**Why:** USDA frequently lists the same UPC under multiple `brand_owner` records — the real brand + co-packer + distributor — all with identical macros. Observed cluster sizes up to **18 rows for one product**. Examples: `TRADER GIOTTO'S, IMPORTED OLIVE OIL` UPC `000000014373` listed under brand="TRADER GIOTTO'S" AND brand="Ciel De Bleu, Inc."; `NAPA VALLEY NATURALS, ORGANIC EXTRA VIRGIN OLIVE OIL` UPC `000000035071` listed under brand="NAPA VALLEY NATURALS" AND brand="Edward Leeds & Company". These are the same physical product distributed by different packagers; collapsing them removes search noise.
+**Rule 3 didn't catch these** because brand was different. Rule 2 didn't either because UPC+macros matched but the case-folded name string differed slightly (`TRADER JOE'S, MUESLI CEREAL, BLUEBURRY` vs `TRADER JOE'S, MUESLI CEREAL, BLUEBURRY, BLUEBURRY`).
+**Kcal-only match (not kcal+serving_g):** matches Rule 14's logic. Per the audit, ~50% of intra-USDA dupe clusters have *some* serving_g variation across the duplicate rows even when kcal is identical — typical pattern is one row with serving_g and one without. Using kcal-only catches both.
+**Unsafe excluded subset:** clusters where rounded kcal differs across the duplicate rows are NOT collapsed — those represent genuine data conflicts (e.g. "SWEET RELISH" UPC `000001313703` has 100 cal under brand "HEINZ" but 67 cal under brand "Kraft Heinz Foods Company"; "COTTO SALAMI" UPC `000001592431` has 50 vs 219 cal — 4× discrepancy). ~19K UPCs left in place for future investigation.
+**Actual impact:** 78,881 rows deleted in 11.5s (single window-function DELETE, no chunking needed — the `idx_food_library_source_upc` index from Rule 14 made the partitioning cheap).
+**Decided:** 2026-05-14 by user
+
+### Rule 15 — Title-case all-uppercase names
+**Status:** approved + applied 2026-05-14
+**Source:** all (`usda`, `on`, `myrx`)
+**Action:** for any row where `UPPER(name) = name AND name GLOB '*[A-Z]*'` (entirely-uppercase name with at least one ASCII letter), rewrite `name` to title case.
+**Title-case rule:** lowercase the whole string, then re-uppercase the first unicode letter after start-of-string or any of: whitespace, comma, slash, paren, hyphen, ampersand, period, opening bracket. Apostrophes are NOT word boundaries (so "Trader Joe's" stays correct — the "s" after the apostrophe stays lowercase).
+**Why:** USDA branded-food entries arrive in ALL CAPS while OpenNutrition uses Title Case. After Rule 14 dedup keeps ON over USDA, the surviving USDA rows look visually inconsistent (e.g. `POTATO CHIPS, SEA SALT` next to `Sea Salt Potato Chips`). Normalising to Title Case makes the entire library read uniformly.
+**Tradeoff accepted:** Acronyms ("BBQ", "USDA", "NFS") become title case ("Bbq", "Usda", "Nfs"). Low frequency, acceptable.
+**Mixed-case names are NOT touched** — we trust the source's casing when it already varied.
+**Actual impact:** 211,008 rows updated in place across two passes (11,000 in the first run + 200,042 in the second — the second pass added concurrency + a `shell:true` fix for Windows `spawn`). No row count change. Total wall time: ~5 minutes including a Windows spawn-ENOENT bug fix between runs.
+**Decided:** 2026-05-14 by user
+
+### Rule 14 — Cross-source UPC dedup (USDA vs ON, prefer ON)
+**Status:** approved + applied 2026-05-14
+**Source:** USDA + ON (rows with UPC present)
+**Match key:** `upc` AND `ROUND(COALESCE(kcal,-1), 0)` between a USDA row and an ON row.
+**Winner:** ON (the USDA row is deleted).
+**SQL** (chunked — D1 CPU limit forces LIMIT-driven loop):
+```sql
+-- Index required for the join to be cheap.
+CREATE INDEX IF NOT EXISTS idx_food_library_source_upc
+  ON food_library(source, upc);
+
+DELETE FROM food_library
+WHERE id IN (
+  SELECT u.id
+  FROM food_library u
+  JOIN food_library o ON o.upc = u.upc AND o.source = 'on'
+  WHERE u.source = 'usda'
+    AND u.upc IS NOT NULL
+    AND ROUND(COALESCE(o.kcal,-1),0) = ROUND(COALESCE(u.kcal,-1),0)
+  LIMIT 50000
+);
+-- Loop until 0 changes.
+```
+**Why:** 259,693 UPCs were present in BOTH USDA and OpenNutrition before this rule ran — same physical product listed once per source. For 91% of those (~235K UPCs), the rounded kcal matched across both sources, confirming they describe the same food. Examples: `Trader Joe's Sea Salt Potato Chips` UPC `000000005487` existed THREE times (2× USDA: `POTATO CHIPS` and `POTATO CHIPS, SEA SALT` + 1× ON: `Sea Salt Potato Chips`), all at 536 kcal / 28g.
+**Why prefer ON:** ON's names are Title Case and well-formed ("Sea Salt Potato Chips") vs USDA's all-caps + multi-segment format ("POTATO CHIPS, SEA SALT"). After dedup the visible search-results look immediately cleaner.
+**Unsafe excluded subset:** UPCs where rounded kcal differs across sources (~24K) are NOT collapsed — those need investigation, not dedup.
+**Why the index was needed:** the original DELETE without an index on `(source, upc)` exceeded D1's per-query CPU budget on a 1M-row table. Building the composite index (5.8s, 25MB DB growth) made each 50K-row chunk run in 1-2s.
+**Actual impact:** 450,769 rows deleted across 11 chunks (more than the 235K UPC count because each UPC often had multiple USDA brand_owner duplicates — see Rule 16 for the within-source equivalent).
+**Decided:** 2026-05-14 by user
+
+### Rule 13 — QA-leak / discontinued / test names
+**Status:** approved + applied 2026-05-14
+**Source:** all (mostly USDA branded)
+**Condition** (narrow on purpose so legitimate brands stay in):
+- `LOWER(name) GLOB 'discontinued*'` (starts with the word "discontinued")
+- OR `LOWER(name) LIKE '%this product has been discontinued%'`
+- OR `name LIKE '%TEST FLAVOR%'`
+- OR `LOWER(name) LIKE 'training supplier test%'`
+- OR `LOWER(name) GLOB 'sltest%'`
+- OR `LOWER(name) LIKE '%sprinkle test tube%'`
+**Why:** Real USDA QA-suite leftovers and brand-marked-dead entries. Examples caught:
+  - `CAMPBELL'S SOUP DISCONTINUED`
+  - `TEST FLAVOR: 855` (Frito-Lay Company)
+  - `Training Supplier Test Item` (Training Supplier Company)
+  - `SLTEST_DISCONTINUED_USI_NESTLE POPPIN' POPS` (Wonka)
+  - `This product has been discontinued. 1979: Breakfast Bun...` (Bake Crafters)
+  - Dozens of `DISCONTINUED STOUFFER'S ...`, `DISCONTINUED DIGIORNO ...`, `DISCONTINUED_LEAN CUISINE ...`
+**False-positive safety:** brand "Testify" (e.g. `TESTIFY SWEET & SAVORY BBQ SAUCE`) is preserved — we don't match arbitrary occurrences of "test" inside a name, only the explicit `TEST FLAVOR` phrase and the leading-`discontinued` / leading-`sltest` patterns.
+**Actual impact:** 34 rows deleted.
+**Decided:** 2026-05-14 by user
+
+### Rule 12 — Ultra-short names (truncation / parsing artifact)
+**Status:** approved + applied 2026-05-14
+**Source:** all
+**Condition:** `LENGTH(TRIM(name)) < 3`
+**Why:** Names shorter than 3 characters are parsing artifacts, not real foods. Every observed example:
+  - `name="A"` (Dole Packaged Goods, LLC)
+  - `name="V8"` (Campbell Soup Company)
+  - `name="X"` (Wilton / Slimfast / McCormick / Taste Of Inspirations)
+  - `name="0"` (Tyson Foods Inc.)
+  - `name="Ix"` (M&M's)
+  - `name="Ts"` (Kellogg's)
+There's no real food with a 1- or 2-character name. The closest case ("V8") has the proper longer entry elsewhere in USDA.
+**Actual impact:** 11 rows deleted.
+**Decided:** 2026-05-14 by user
+
+---
+
 ## Rejected proposals
 
 *(Track rules we considered but decided NOT to apply, with reasoning. So we don't keep re-suggesting the same idea.)*
+
+### Reject single-word generic names (1,165 rows)
+**Considered:** filter `name NOT LIKE '% %' AND brand IS NULL AND source_subtype IN ('foundation_food','sr_legacy_food','on_generic')`.
+**Rejected** — these turned out to be **legitimate international cuisine** names: Sosaties, Tequeños, Yakisoba, Kombu, Schiacciata, Escargot, Cassava, Beigli, Dondurma, Almdudler, Pilsner, Spekkoek, Hazelnuts, Tempache, Tindora, Francesinha, Butter, Éclair, Pempek, Arayes, Longaniza, Bamya, Mahalabiya, Gherkins, Mansaf, Siomay, Ribollita, Popara, etc. Macros sane. High-value reference data. **Keep.**
+**Decided:** 2026-05-14 by user
+
+### Reject the `on_generic` cohort (8,922 rows)
+**Considered:** drop the chef-style / homestyle entries entirely.
+**Rejected** — sample showed these are quality reference data: Jollof Rice with Beef, Steak Pie, Bebek Betutu, Saucisson Sec, Pacific Mackerel, Curly Fries, Bibimbap, Whole Buttermilk, Cooked Mixed Vegetables with Oil, etc. This is the recipe/homestyle backbone of OpenNutrition. **Keep.**
+**Decided:** 2026-05-14 by user
+
+### Reject `(0% moisture)` USDA Foundation Food rows (17 rows)
+**Considered:** `name LIKE '%(0% moisture)%'`.
+**Rejected** — these are real Foundation Food science data (dried-bean nutrition under USDA's 0%-moisture analysis). Tiny count (17), no impact, real data. **Keep.**
+**Decided:** 2026-05-14 by user
+
+### Reject all-caps generic names (994 rows)
+**Considered:** delete rows where `name GLOB '*[A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z]*' AND brand IS NULL` (8+ consecutive uppercase letters in a generic).
+**Rejected** — these are legitimate SR Legacy entries where USDA stored the brand IN THE NAME in all-caps (e.g. `Candies, TWIZZLERS CHERRY BITES`, `Candies, NESTLE, BUTTERFINGER Bar`, `Snacks, KRAFT, CORNNUTS, plain`). Real data, just USDA's older casing convention. Rule 15 (title-case) normalises them automatically. **Keep.**
+**Decided:** 2026-05-14 by user
+
+### Reject branded rows with `serving_g IS NULL` (147,711 rows)
+**Considered:** drop branded entries that lack a per-serving gram weight.
+**Rejected** — the macro data is still correct; users can log by grams. Lacking a portion is a search-UX problem (the result row looks incomplete), better solved by demoting in search ranking than by deletion. Flagged for a future ranking pass. **Keep for now.**
+**Decided:** 2026-05-14 by user
+
+### Reject "kcal differs across cross-source UPCs" subset (~24K UPCs)
+**Considered:** for the ~24K UPCs that exist in both USDA and ON but with mismatched kcal, pick a winner.
+**Rejected** — these are real data conflicts, not duplicates. Picking the wrong source per UPC would propagate a wrong nutrition value. Leave them as-is; surface for manual review later if it becomes a search problem. **Keep both.**
+**Decided:** 2026-05-14 by user
+
+### Reject "kcal differs within-USDA" subset (~19K UPCs)
+**Considered:** for the ~19K USDA UPCs whose duplicates have differing kcal (e.g. "SWEET RELISH" 100 vs 67 cal under different brand_owners), auto-pick a winner.
+**Rejected** — these represent genuine data errors that need investigation, not auto-merge. Examples: `COTTO SALAMI` 50 vs 219 cal (4× discrepancy); `PHILADELPHIA CREAM CHEESE SPREAD, BLUEBERRY` listed under brand "Royal Metal Industrial Co. Ltd" (a metal company, not a food brand). **Keep both pending manual review.**
+**Decided:** 2026-05-14 by user
