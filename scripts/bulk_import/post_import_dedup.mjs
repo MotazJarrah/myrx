@@ -35,6 +35,14 @@
  *              identical macros. Worst observed cluster had 18 rows per UPC.
  *   Winner:    MAX(id) per (source, upc, rounded_kcal) group.
  *
+ * Rule 19 — UPC dedup with ≤5 kcal tolerance (label-rounding cleanup)
+ *   Tolerance-widened version of Rules 14 + 16. Catches the ~10K UPC
+ *   clusters where the same product is reported with slightly-different
+ *   kcal values across brand_owner records (label rounding artifacts).
+ *   Two passes:
+ *     19a — cross-source (USDA loses to ON within 5 kcal). Chunked.
+ *     19b — intra-source (within cluster, if max-min ≤ 5, keep MAX(id)).
+ *
  * Usage:
  *   node scripts/bulk_import/post_import_dedup.mjs
  */
@@ -123,6 +131,42 @@ WHERE id IN (
 )
 `.trim()
 
+// ── Rule 19 — UPC dedup with ≤5 kcal tolerance (label-rounding artifacts) ──
+// Generalises Rules 14 + 16 by allowing the kcal values to differ by up to
+// 5 (label-rounding by different brand_owner records for the same product).
+// Two passes mirror Rules 14 + 16:
+//   Pass A (cross-source) — chunked; loops until drained.
+//   Pass B (intra-source) — single window-function pass.
+
+const RULE_19A_CHUNK_SQL = `
+DELETE FROM food_library
+WHERE id IN (
+  SELECT u.id
+  FROM food_library u
+  JOIN food_library o ON o.upc = u.upc AND o.source = 'on'
+  WHERE u.source = 'usda'
+    AND u.upc IS NOT NULL
+    AND u.kcal IS NOT NULL AND o.kcal IS NOT NULL
+    AND ABS(o.kcal - u.kcal) <= 5
+  LIMIT 50000
+)
+`.trim()
+
+const RULE_19B_SQL = `
+DELETE FROM food_library
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id,
+      MAX(kcal) OVER (PARTITION BY source, upc) AS max_k,
+      MIN(kcal) OVER (PARTITION BY source, upc) AS min_k,
+      ROW_NUMBER() OVER (PARTITION BY source, upc ORDER BY id DESC) AS rn
+    FROM food_library
+    WHERE upc IS NOT NULL AND kcal IS NOT NULL
+  ) ranked
+  WHERE rn > 1 AND (max_k - min_k) <= 5
+)
+`.trim()
+
 async function rowCount() {
   const r = await querySql('SELECT COUNT(*) AS n FROM food_library;')
   return r[0]?.n ?? 0
@@ -174,8 +218,32 @@ async function main() {
   const after16 = await rowCount()
   console.log(`  → ${fmt(after14 - after16)} rows removed in ${fmtMs(Date.now() - t16)}`)
 
+  console.log('\nRule 19a — cross-source UPC dedup (≤5 kcal tolerance)…')
+  const t19a = Date.now()
+  let after19a = after16
+  let chunkRun19a = 0
+  while (true) {
+    const beforeChunk = await rowCount()
+    await executeSql(RULE_19A_CHUNK_SQL)
+    const afterChunk = await rowCount()
+    chunkRun19a++
+    if (beforeChunk === afterChunk) break
+    if (chunkRun19a > 100) {
+      console.warn('  ⚠ Rule 19a chunked DELETE ran 100 times — bailing')
+      break
+    }
+    after19a = afterChunk
+  }
+  console.log(`  → ${fmt(after16 - after19a)} rows removed in ${fmtMs(Date.now() - t19a)} (${chunkRun19a} chunks)`)
+
+  console.log('\nRule 19b — intra-source UPC dedup (≤5 kcal spread within cluster)…')
+  const t19b = Date.now()
+  await executeSql(RULE_19B_SQL)
+  const after19b = await rowCount()
+  console.log(`  → ${fmt(after19a - after19b)} rows removed in ${fmtMs(Date.now() - t19b)}`)
+
   console.log('\n══════════════════════════════════')
-  console.log(`  Final row count: ${fmt(after16)} (removed ${fmt(before - after16)} dups)`)
+  console.log(`  Final row count: ${fmt(after19b)} (removed ${fmt(before - after19b)} dups)`)
   console.log('══════════════════════════════════')
 }
 

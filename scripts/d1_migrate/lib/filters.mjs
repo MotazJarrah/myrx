@@ -42,6 +42,7 @@
  *     Rule 3   Brand-product dedup on name + brand + macros + serving_g
  *     Rule 14  Cross-source UPC dedup (USDA vs ON), prefer ON on kcal match
  *     Rule 16  Intra-source UPC dedup, keep highest source_id per kcal match
+ *     Rule 19  UPC dedup with ≤5 kcal tolerance (label-rounding cleanup)
  *
  * If you change a rule in this file, update docs/food_library_filters.md
  * and re-run the cleanup migration. The doc is the spec; this file is

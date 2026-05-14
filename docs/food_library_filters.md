@@ -73,8 +73,9 @@ Rules are evaluated in tiers. The first matching rejection wins; later checks ar
 |---|---|
 | 2 | Exact dedup on name + brand + macros + serving_label + upc → keep MAX(id) |
 | 3 | Brand-product dedup on name + brand + macros + serving_g → highest source_id |
-| 14 | Cross-source UPC dedup (USDA vs ON) on kcal match → prefer ON |
-| 16 | Intra-source UPC dedup on kcal match → keep MAX(id) |
+| 14 | Cross-source UPC dedup (USDA vs ON) on exact kcal match → prefer ON |
+| 16 | Intra-source UPC dedup on exact kcal match → keep MAX(id) |
+| 19 | UPC dedup with ≤5 kcal tolerance (label-rounding cleanup) — both directions |
 
 Implementation: `scripts/d1_migrate/lib/filters.mjs` — `enrichFood()` covers Rules 18 → 17 → 15 → 9 in that order. Each subsequent rule sees the output of the previous one. Dedup (Tier 5) lives in `scripts/bulk_import/post_import_dedup.mjs`.
 
@@ -281,7 +282,7 @@ WHERE id NOT IN (
 
 ## Second pass — audit + cleanup 2026-05-14
 
-After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pass surfaced seven more cohorts worth filtering / normalising. All approved and applied on the same day. Net result:
+After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pass surfaced eight more cohorts worth filtering / normalising. All approved and applied on the same day. Net result:
 
 | Metric | Before pass | After pass |
 |---|---|---|
@@ -291,6 +292,48 @@ After the clean rebuild stabilised at 1.01M rows / 384 MB, a follow-up audit pas
 | Cross-source UPC dupes | 259,693 | 0 (safe subset cleared) |
 | Intra-source UPC dupes | 63,656 | safe subset (44K UPCs) cleared |
 | myrx admin entries | 6 | 6 (preserved) |
+
+### Rule 19 — UPC dedup with ≤5 kcal tolerance
+**Status:** approved + applied 2026-05-14
+**Source:** all (`usda`, `on`)
+**Pass A (cross-source — USDA vs ON, prefer ON):**
+```sql
+DELETE FROM food_library
+WHERE id IN (
+  SELECT u.id
+  FROM food_library u
+  JOIN food_library o ON o.upc = u.upc AND o.source = 'on'
+  WHERE u.source = 'usda'
+    AND u.upc IS NOT NULL
+    AND u.kcal IS NOT NULL AND o.kcal IS NOT NULL
+    AND ABS(o.kcal - u.kcal) <= 5
+);
+```
+**Pass B (intra-source — collapse clusters where max−min ≤ 5):**
+```sql
+DELETE FROM food_library
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id,
+      MAX(kcal) OVER (PARTITION BY source, upc) AS max_k,
+      MIN(kcal) OVER (PARTITION BY source, upc) AS min_k,
+      ROW_NUMBER() OVER (PARTITION BY source, upc ORDER BY id DESC) AS rn
+    FROM food_library
+    WHERE upc IS NOT NULL AND kcal IS NOT NULL
+  ) ranked
+  WHERE rn > 1 AND (max_k - min_k) <= 5
+);
+```
+**Why this rule exists:** Rules 14 and 16 used an EXACT rounded-kcal match. The audit found ~10,225 UPC clusters where the same product was reported with slightly-different kcal values (label-rounding artifacts by different brand_owner records — e.g. Trader Joe's Broccoli & Cheddar Cheese Quiche listed as 276 cal under brand "Trader Joe's" and 271 cal under brand "Napoli's Italian Bakery"). Widening the tolerance to ≤5 collapses these safely.
+**Why 5 and not wider:**
+  - Distribution map of conflict deltas: 4.4% are 0-1 kcal, 20.7% are 2-5, 37.4% are 6-20, 23% are 21-50, 11% are 51-200, 3.5% are >200.
+  - Sample inspection of 6-20 band: mostly same product but mixed with some bad-data attribution (e.g. UPC listed under "Koplow Games Inc." which makes board games). Risky to auto-merge.
+  - Sample inspection of >200 band: one side correct, one side wrong (e.g. olive oil at 800 cal correctly per-100g vs 239 cal which is per-serving error). Auto-merging would destroy correct data.
+  - ≤5 is the band where both rows describe the same product with rounding-only differences. Zero risk of merging genuinely different foods.
+**Actual impact:** 12,424 rows deleted across the two passes.
+  - Pass A (cross-source): 5,777 USDA rows deleted (single chunk; second chunk found 0).
+  - Pass B (intra-source): 6,647 rows deleted (single window-function pass).
+**Decided:** 2026-05-14 by user
 
 ### Rule 18 — Drop redundant tail-comma duplication
 **Status:** approved + applied 2026-05-14
