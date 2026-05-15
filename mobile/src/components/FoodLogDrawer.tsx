@@ -1135,6 +1135,20 @@ export default function FoodLogDrawer({
                     placeholderTextColor={alpha(colors.mutedForeground, 0.6)}
                     style={s.searchInput}
                   />
+                  {/* Clear-text X — only when the input has content. Replaces
+                      the old standalone close button in the search header;
+                      drawer dismissal now relies on the chevron-back to log
+                      view + the X there, or the swipe-down gesture. */}
+                  {searchQuery.length > 0 && (
+                    <Pressable
+                      onPress={() => { setSearchQuery(''); setSearchResults([]) }}
+                      style={s.searchClearBtn}
+                      hitSlop={6}
+                      accessibilityLabel="Clear search"
+                    >
+                      <X size={14} color={colors.mutedForeground} />
+                    </Pressable>
+                  )}
                   <Pressable
                     onPress={() => setScanning(true)}
                     style={s.scanBtn}
@@ -1143,7 +1157,6 @@ export default function FoodLogDrawer({
                     <ScanLine size={16} color={colors.primary} />
                   </Pressable>
                 </View>
-                <CloseBtn onPress={onClose} />
               </View>
             )}
             {view === 'portion' && (
@@ -1556,6 +1569,14 @@ const s = StyleSheet.create({
     fontSize: 14,
     color: colors.foreground,
     padding: 0,
+  },
+  searchClearBtn: {
+    // Same 28×28 tap target as scanBtn so the two trailing buttons read
+    // as visual siblings inside the pill. Only rendered when the input has
+    // text, so when it appears it pushes the scan icon slightly leftward —
+    // expected behavior, mirrors iOS / Material clear-text affordances.
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
   },
   scanBtn: {
     // Tap target: 28 px square inside the pill, right-aligned.
