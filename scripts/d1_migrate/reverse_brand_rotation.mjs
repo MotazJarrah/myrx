@@ -1,7 +1,7 @@
 /**
- * Reverse the brand-prefix damage from Rule 17's second pass.
+ * Reverse the brand-prefix damage from Rule 2's second pass.
  *
- * The second Rule 17 run with the corrected SQL filter accidentally rotated
+ * The second Rule 2 run with the corrected SQL filter accidentally rotated
  * 1-word brand prefixes (Pillsbury, Kellogg, Tyson, Kraft, etc.) to the end
  * of the food name. That's wrong — those are brands, not categories.
  *

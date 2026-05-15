@@ -1,5 +1,5 @@
 /**
- * Rule 17 — USDA leading-category prefix normalization.
+ * Rule 2 — USDA leading-category prefix normalization.
  *
  * Rewrites USDA SR-Legacy / FNDDS / Foundation style names where the first
  * comma-segment is a single broad category word (e.g. "Nuts, ...", "Beans,
@@ -95,7 +95,7 @@ const CATEGORIES = new Set([
   'fruits','meat','meats','poultry','shellfish','seafood','babyfood','game',
 ])
 
-function rule17(name) {
+function rule2(name) {
   if (name == null) return name
   const segs = String(name).split(', ')
   if (segs.length < 2) return name
@@ -145,7 +145,7 @@ function rule17(name) {
   return newRest.join(', ')
 }
 
-// Same title-case helper as Rule 15. Applied after Rule 17's drop/rotate so
+// Same title-case helper as Rule 3. Applied after Rule 2's drop/rotate so
 // any lowercase introduced by the source data becomes proper Title Case.
 // Preserves USDA acronyms (NFS, NS, NFSMI) and Mc/Mac brand prefixes so we
 // don't damage rows that ALREADY had those tokens in the source.
@@ -174,13 +174,13 @@ function titleCase(s) {
   return out
 }
 
-// Run Rule 17 first, then title-case the result so any lowercase introduced
+// Run Rule 2 first, then title-case the result so any lowercase introduced
 // by the source data becomes proper Title Case. Only act on rows where
-// Rule 17 itself changed something OR the input was entirely uppercase —
+// Rule 2 itself changed something OR the input was entirely uppercase —
 // avoid touching already-good mixed-case names (e.g. "McDONALD'S, …").
 function transform(name) {
-  const transformed = rule17(name)
-  // If Rule 17 didn't change anything AND the name isn't entirely uppercase,
+  const transformed = rule2(name)
+  // If Rule 2 didn't change anything AND the name isn't entirely uppercase,
   // leave it alone — title-case would damage mixed-case brands.
   if (transformed === name && name.toUpperCase() !== name) return name
   return titleCase(transformed)
@@ -270,7 +270,7 @@ async function pmap(items, concurrency, task) {
 
 async function main() {
   const t0 = Date.now()
-  console.log('Rule 17 — USDA leading-category prefix normalization')
+  console.log('Rule 2 — USDA leading-category prefix normalization')
   console.log('────────────────────────────────────────────────────────────────')
 
   // Target: first comma-segment is a single word, generic row

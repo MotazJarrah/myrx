@@ -1,5 +1,5 @@
 /**
- * Repair script — fix two patterns that Rule 15 (title-case) damaged:
+ * Repair script — fix two patterns that Rule 3 (title-case) damaged:
  *
  *   1. NFS-family acronyms: `Nfs`, `Nfsmi`, contextual `Ns` (USDA's
  *      "Not Further Specified" / "National Food Service Management Institute"
@@ -10,7 +10,7 @@
  *      `McKee`, `McGriddles` etc. became `Mcdonald's`, `Mckee`, `Mcgriddles`
  *      after title-case lowercased + re-capitalised only the first letter.
  *
- * The root cause was the title-case helper in filters.mjs / Rule 17 wrapper
+ * The root cause was the title-case helper in filters.mjs / Rule 2 wrapper
  * being too naive — it does `s.toLowerCase().replace(boundary, upper)`
  * without preserving known acronyms or Mc/Mac prefixes. That's been patched
  * in filters.mjs; this script repairs the rows that were already damaged.

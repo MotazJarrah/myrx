@@ -5,6 +5,10 @@
  * Single source of truth for the per-row rules that came out of the
  * 2026-05-14 audit. Approved rules from docs/food_library_filters.md.
  *
+ * Rule numbers reflect EXECUTION ORDER, not chronological history. Rule 1
+ * runs first, Rule 19 last. See `docs/food_library_filters.md` for the
+ * history of when each rule was added.
+ *
  * ── Usage in loaders ───────────────────────────────────────────────────────
  *   const enriched = enrichFood(rawRow)
  *   if (!shouldKeepFood(enriched)) continue
@@ -13,35 +17,35 @@
  * ── Rule evaluation hierarchy (see docs/food_library_filters.md) ──────────
  *
  *   Tier 1 — REPAIR (executed in this order inside enrichFood)
- *     Rule 18  Drop redundant tail-comma duplication
+ *     Rule 1   Drop redundant tail-comma duplication
  *              ("Italian Style Meatballs, Italian Style" → "Italian Style Meatballs")
- *     Rule 17  USDA leading-category prefix normalization
+ *     Rule 2   USDA leading-category prefix normalization
  *              ("Nuts, cashew nuts, raw" → "Cashew Nuts, Raw")
- *     Rule 15  Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips")
+ *     Rule 3   Title-case all-uppercase names ("POTATO CHIPS" → "Potato Chips")
  *              with NFS/NS/Mc preservation
- *     Rule 9   Backfill missing kcal from macros (4p + 9f + 4c)
+ *     Rule 4   Backfill missing kcal from macros (4p + 9f + 4c)
  *
  *   Tier 2 — REJECT structurally broken
  *     Rule 5   Wrong-category subtypes (sub_sample_food, agricultural_acquisition)
- *     Rule 1   All four macros null or zero (after Rule 9 repair)
- *     Rule 6   kcal density > 900 per 100g (physically impossible)
+ *     Rule 6   Name length < 3 characters (truncation / parsing artifact)
+ *     Rule 7   Name contains QA-leak / discontinued / test phrases
+ *     Rule 8   All four macros null or zero (after Rule 4 repair)
+ *     Rule 9   kcal density > 900 per 100g (physically impossible)
  *     Rule 10  Sum of macros > 105g per 100g (impossible mass)
  *     Rule 11  Any single macro > 100g per 100g (impossible mass)
- *     Rule 12  Name length < 3 characters (truncation / parsing artifact)
- *     Rule 13  Name contains QA-leak / discontinued / test phrases
  *
  *   Tier 3 — REJECT internally inconsistent
- *     Rule 4   kcal differs from (4p + 9f + 4c) by > 50%
- *     Rule 7   Per-serving kcal > 3,000 (single-serving impossibility)
+ *     Rule 12  kcal differs from (4p + 9f + 4c) by > 50%
+ *     Rule 13  Per-serving kcal > 3,000 (single-serving impossibility)
  *
  *   Tier 4 — REJECT negligible
- *     Rule 8   Branded entries with per-serving < 5 kcal
+ *     Rule 14  Branded entries with per-serving < 5 kcal
  *
  *   Tier 5 — DEDUP (cross-row, runs post-import as DELETEs)
- *     Rule 2   Exact dedup on name + brand + macros + serving_label + upc
- *     Rule 3   Brand-product dedup on name + brand + macros + serving_g
- *     Rule 14  Cross-source UPC dedup (USDA vs ON), prefer ON on kcal match
- *     Rule 16  Intra-source UPC dedup, keep highest source_id per kcal match
+ *     Rule 15  Exact dedup on name + brand + macros + serving_label + upc
+ *     Rule 16  Brand-product dedup on name + brand + macros + serving_g
+ *     Rule 17  Cross-source UPC dedup (USDA vs ON), prefer ON on kcal match
+ *     Rule 18  Intra-source UPC dedup, keep highest source_id per kcal match
  *     Rule 19  UPC dedup with ≤5 kcal tolerance (label-rounding cleanup)
  *
  * If you change a rule in this file, update docs/food_library_filters.md
@@ -52,7 +56,7 @@
 // ── Tier 1: REPAIR ───────────────────────────────────────────────────────────
 
 /**
- * Rule 15 — Title-case all-uppercase names.
+ * Rule 3 — Title-case all-uppercase names.
  *
  * USDA branded-food entries arrive in ALL CAPS. OpenNutrition uses Title
  * Case. After cross-source dedup keeps ON's row over USDA's, the surviving
@@ -111,7 +115,7 @@ function titleCaseName(name) {
 }
 
 /**
- * Rule 17 — USDA leading-category prefix normalization.
+ * Rule 2 — USDA leading-category prefix normalization.
  *
  * Rewrites SR-Legacy / FNDDS / Foundation names where the first
  * comma-segment is a single broad category word into natural English:
@@ -127,16 +131,16 @@ function titleCaseName(name) {
  *   "APPLEBEE'S, mozzarella sticks"  brand-as-prefix
  *   "Milk, NFS" / "Soup, NFS"        single short-acronym qualifier
  */
-const RULE17_DROP_ONLY     = new Set(['spices', 'beverages'])
-const RULE17_QUALIFIER     = /^(NFS|NS)$/
-const RULE17_ADJECTIVE_S   = /(less|ous|ious|eous)$/
+const RULE2_DROP_ONLY     = new Set(['spices', 'beverages'])
+const RULE2_QUALIFIER     = /^(NFS|NS)$/
+const RULE2_ADJECTIVE_S   = /(less|ous|ious|eous)$/
 
 // CATEGORY WHITELIST — only single-word leading segments in this set get
-// rewritten by Rule 17. This is the post-audit guard: an open "any single
+// rewritten by Rule 2. This is the post-audit guard: an open "any single
 // word is a category" approach incorrectly rotated 1-word brand names
 // (Pillsbury, Kraft, Nestle, etc.). Restricting to a whitelist eliminates
 // that false-positive class entirely.
-const RULE17_CATEGORIES = new Set([
+const RULE2_CATEGORIES = new Set([
   // grains, breads, pasta
   'bread', 'breads', 'bagel', 'bagels', 'bun', 'buns', 'roll', 'rolls',
   'crepe', 'crepes', 'waffle', 'waffles', 'pancake', 'pancakes',
@@ -187,7 +191,7 @@ const RULE17_CATEGORIES = new Set([
 ])
 
 /**
- * Rule 18 — Drop redundant tail-comma duplication.
+ * Rule 1 — Drop redundant tail-comma duplication.
  *
  * USDA / ON branded names often concatenate the description with a flavor
  * variant or subBrand string, producing redundant tail segments:
@@ -213,7 +217,7 @@ const RULE17_CATEGORIES = new Set([
  * Pure substring check — no whitelist needed. If the head genuinely
  * contains the tail, it's redundant.
  */
-function rule18DropRedundantTail(name) {
+function rule1DropRedundantTail(name) {
   if (name == null) return name
   const s = String(name)
   const lower = s.toLowerCase()
@@ -229,7 +233,7 @@ function rule18DropRedundantTail(name) {
   return s
 }
 
-function rule17PrefixNormalize(name) {
+function rule2PrefixNormalize(name) {
   if (name == null) return name
   const segs = String(name).split(', ')
   if (segs.length < 2) return name
@@ -239,24 +243,24 @@ function rule17PrefixNormalize(name) {
 
   if (first.includes(' '))            return name  // multi-word leading segment
   if (/'s$/i.test(first))             return name  // brand prefix (apostrophe-s)
-  if (rest.length === 1 && RULE17_QUALIFIER.test(rest[0])) return name
+  if (rest.length === 1 && RULE2_QUALIFIER.test(rest[0])) return name
 
   const firstLower  = first.toLowerCase()
 
   // Whitelist guard — only proceed if the first word is a known food category.
-  if (!RULE17_CATEGORIES.has(firstLower)) return name
+  if (!RULE2_CATEGORIES.has(firstLower)) return name
 
   const singular    = firstLower.replace(/s$/, '')
   const plural      = singular + 's'
   const secondLower = rest[0].toLowerCase()
   const secondWords = secondLower.split(/[\s,]+/).filter(Boolean)
 
-  if (RULE17_DROP_ONLY.has(firstLower)) return rest.join(', ')
+  if (RULE2_DROP_ONLY.has(firstLower)) return rest.join(', ')
   if (secondWords.includes(singular) || secondWords.includes(plural)) return rest.join(', ')
 
   if (secondWords.length === 1) {
     const w = secondWords[0]
-    if (w.endsWith('s') && w.length > 3 && !RULE17_ADJECTIVE_S.test(w)) {
+    if (w.endsWith('s') && w.length > 3 && !RULE2_ADJECTIVE_S.test(w)) {
       return rest.join(', ')
     }
   }
@@ -267,14 +271,14 @@ function rule17PrefixNormalize(name) {
 }
 
 /**
- * Rule 9 — Backfill missing kcal from macros.
+ * Rule 4 — Backfill missing kcal from macros.
  *
  * Returns a new row with `kcal` set to the 4/9/4 prediction when kcal was
  * null but at least one macro is present. Idempotent: rows with a non-null
  * kcal pass through unchanged. Rows with all-null macros pass through
- * unchanged (they'll be caught by Rule 1).
+ * unchanged (they'll be caught by Rule 8).
  *
- * Also applies Rule 15 (title-case) to the name field when applicable.
+ * Also applies Rules 1, 2, and 3 to the name field when applicable.
  *
  * Runs BEFORE shouldKeepFood so subsequent rules see a complete row.
  *
@@ -284,24 +288,24 @@ function rule17PrefixNormalize(name) {
 export function enrichFood(row) {
   const { kcal, protein_g, fat_g, carbs_g, name, brand } = row
 
-  // Rule 18 — drop redundant tail-comma duplication. Pure substring check,
+  // Rule 1 — drop redundant tail-comma duplication. Pure substring check,
   // applies to all rows (branded or not). Runs first so subsequent
   // rules see the de-duplicated name.
-  let workingName = rule18DropRedundantTail(name)
+  let workingName = rule1DropRedundantTail(name)
 
-  // Rule 17 — USDA leading-category prefix rewrite (only when no brand,
+  // Rule 2 — USDA leading-category prefix rewrite (only when no brand,
   // since brand-as-prefix patterns aren't applicable to genuinely branded
-  // products). Runs after Rule 18 (so the tail-trimmed name is what gets
+  // products). Runs after Rule 1 (so the tail-trimmed name is what gets
   // analyzed) and BEFORE title-case so any newly-introduced lowercase
   // from the drop/rotate gets capitalised by titleCaseName().
   if (workingName != null && brand == null) {
-    workingName = rule17PrefixNormalize(workingName)
+    workingName = rule2PrefixNormalize(workingName)
   }
 
-  // Rule 15 — title-case all-caps names (cheap; runs after Rules 17 + 18)
+  // Rule 3 — title-case all-caps names (cheap; runs after Rules 1 + 2)
   const normalizedName = titleCaseName(workingName)
 
-  // Rule 9 — backfill kcal
+  // Rule 4 — backfill kcal
   let backfilledKcal = kcal
   if (kcal == null && (protein_g != null || fat_g != null || carbs_g != null)) {
     const computed =
@@ -319,7 +323,7 @@ export function enrichFood(row) {
 // ── Tier 2: name-based rejection helpers ─────────────────────────────────────
 
 /**
- * Rule 13 — Reject QA-leak / discontinued / test phrases inside the name.
+ * Rule 7 — Reject QA-leak / discontinued / test phrases inside the name.
  *
  * Patterns observed in USDA branded data — rows that survive the dataset
  * pipeline despite the brand or USDA having marked the product as dead or
@@ -356,7 +360,7 @@ function nameLooksLikeQaLeak(name) {
  * Rules are checked in the hierarchy documented at the top of this file.
  * The first matching rule wins; later checks are skipped for that row.
  *
- * NOTE: callers should run `enrichFood()` first so Rule 9's backfill has
+ * NOTE: callers should run `enrichFood()` first so Rule 4's backfill has
  * already happened by the time we evaluate the rejection rules.
  *
  * @param {{
@@ -379,19 +383,19 @@ export function shouldKeepFood(row) {
   if (source_subtype === 'sub_sample_food')         return false
   if (source_subtype === 'agricultural_acquisition') return false
 
-  // Rule 12 — name length < 3 chars (truncation / parsing artifact)
+  // Rule 6 — name length < 3 chars (truncation / parsing artifact)
   if (name != null && String(name).trim().length < 3) return false
 
-  // Rule 13 — name is a discontinued/test/QA-leak placeholder
+  // Rule 7 — name is a discontinued/test/QA-leak placeholder
   if (nameLooksLikeQaLeak(name)) return false
 
-  // Rule 1 — all four primary macros missing (after Rule 9's backfill attempt)
+  // Rule 8 — all four primary macros missing (after Rule 4's backfill attempt)
   const empty = v => v == null || v === 0
   if (empty(kcal) && empty(protein_g) && empty(fat_g) && empty(carbs_g)) {
     return false
   }
 
-  // Rule 6 — kcal density > 900 per 100g (physically impossible; pure fat ≈ 884)
+  // Rule 9 — kcal density > 900 per 100g (physically impossible; pure fat ≈ 884)
   if (kcal != null && kcal > 900) return false
 
   // Rule 10 — macro sum > 105g per 100g (more macro mass than food mass)
@@ -407,14 +411,14 @@ export function shouldKeepFood(row) {
 
   // ── Tier 3: REJECT internally inconsistent ─────────────────────────────
 
-  // Rule 4 — kcal mismatch > 50% from 4/9/4 prediction (safety floor pred ≥ 20)
-  //   Won't fire on Rule-9-backfilled rows (they match by construction).
+  // Rule 12 — kcal mismatch > 50% from 4/9/4 prediction (safety floor pred ≥ 20)
+  //   Won't fire on Rule-4-backfilled rows (they match by construction).
   if (kcal != null && protein_g != null && fat_g != null && carbs_g != null) {
     const pred = protein_g * 4 + fat_g * 9 + carbs_g * 4
     if (pred >= 20 && Math.abs(kcal - pred) / pred > 0.50) return false
   }
 
-  // Rule 7 — per-serving kcal > 3,000 (single-serving impossibility)
+  // Rule 13 — per-serving kcal > 3,000 (single-serving impossibility)
   if (kcal != null && serving_g != null) {
     const perServing = (kcal * serving_g) / 100
     if (perServing > 3000) return false
@@ -422,7 +426,7 @@ export function shouldKeepFood(row) {
 
   // ── Tier 4: REJECT negligible ──────────────────────────────────────────
 
-  // Rule 8 — branded entries with per-serving < 5 kcal
+  // Rule 14 — branded entries with per-serving < 5 kcal
   //   Canonical reference subtypes are exempt: real low-cal foods with tiny
   //   natural servings (mustard, olives, herbs) are kept.
   if ((source_subtype === 'branded_food' || source_subtype === 'on_branded')
@@ -451,15 +455,15 @@ export function getFilterReason(row) {
   if (source_subtype === 'sub_sample_food')         return 'rule5_sub_sample'
   if (source_subtype === 'agricultural_acquisition') return 'rule5_agricultural'
 
-  if (name != null && String(name).trim().length < 3) return 'rule12_short_name'
-  if (nameLooksLikeQaLeak(name))                       return 'rule13_qa_leak'
+  if (name != null && String(name).trim().length < 3) return 'rule6_short_name'
+  if (nameLooksLikeQaLeak(name))                       return 'rule7_qa_leak'
 
   const empty = v => v == null || v === 0
   if (empty(kcal) && empty(protein_g) && empty(fat_g) && empty(carbs_g)) {
-    return 'rule1_no_macros'
+    return 'rule8_no_macros'
   }
 
-  if (kcal != null && kcal > 900) return 'rule6_density'
+  if (kcal != null && kcal > 900) return 'rule9_density'
 
   const macroSum = (protein_g ?? 0) + (fat_g ?? 0) + (carbs_g ?? 0)
   if (macroSum > 105) return 'rule10_macro_sum'
@@ -470,19 +474,19 @@ export function getFilterReason(row) {
   // Tier 3
   if (kcal != null && protein_g != null && fat_g != null && carbs_g != null) {
     const pred = protein_g * 4 + fat_g * 9 + carbs_g * 4
-    if (pred >= 20 && Math.abs(kcal - pred) / pred > 0.50) return 'rule4_kcal_mismatch'
+    if (pred >= 20 && Math.abs(kcal - pred) / pred > 0.50) return 'rule12_kcal_mismatch'
   }
 
   if (kcal != null && serving_g != null) {
     const perServing = (kcal * serving_g) / 100
-    if (perServing > 3000) return 'rule7_per_serving_ceiling'
+    if (perServing > 3000) return 'rule13_per_serving_ceiling'
   }
 
   // Tier 4
   if ((source_subtype === 'branded_food' || source_subtype === 'on_branded')
       && kcal != null && serving_g != null) {
     const perServing = (kcal * serving_g) / 100
-    if (perServing < 5) return 'rule8_branded_negligible'
+    if (perServing < 5) return 'rule14_branded_negligible'
   }
 
   return null

@@ -213,7 +213,7 @@ async function main() {
   console.log(`  ✓ ${myrx.length} myrx rows restored`)
 
   banner('Post-import dedup')
-  console.log('Step 8/9 — Apply Rules 2 + 3 (dedup passes)')
+  console.log('Step 8/9 — Apply Rules 15-19 (dedup passes)')
   // Use the dedup module directly
   const { default: depmod } = await import('child_process')
   depmod.execSync(`node "${path.resolve(__dirname, 'post_import_dedup.mjs')}"`, { stdio: 'inherit' })

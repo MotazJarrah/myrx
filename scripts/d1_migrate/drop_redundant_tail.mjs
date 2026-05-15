@@ -1,5 +1,5 @@
 /**
- * Rule 18 — Drop redundant tail-comma variant duplication.
+ * Rule 1 — Drop redundant tail-comma variant duplication.
  *
  * Many USDA / ON branded names concatenate the description with a flavor
  * variant or subBrand string, producing redundant tail segments:
@@ -20,7 +20,7 @@
  * before). When found, truncate at that comma. First match wins, which
  * yields the LARGEST tail dropped (since earlier commas yield longer tails).
  *
- * Pure substring check — safer than Rule 17's whitelist-driven rotation
+ * Pure substring check — safer than Rule 2's whitelist-driven rotation
  * because there's no brand-vs-category ambiguity. If the head genuinely
  * contains the tail, it's redundant.
  *
@@ -157,7 +157,7 @@ async function pmap(items, concurrency, task) {
 
 async function main() {
   const t0 = Date.now()
-  console.log('Rule 18 — Drop redundant tail-comma duplication')
+  console.log('Rule 1 — Drop redundant tail-comma duplication')
   console.log('────────────────────────────────────────────────────────────────')
 
   const targetSql = `

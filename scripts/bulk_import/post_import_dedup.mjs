@@ -1,26 +1,27 @@
 #!/usr/bin/env node
 /**
- * Post-import dedup — applies Rules 2, 3, 14, 16 from
+ * Post-import dedup — applies Rules 15, 16, 17, 18, 19 from
  * docs/food_library_filters.md.
  *
  * These rules can't run during the bulk import because they need cross-row
  * comparison. They run AFTER the import, against the already-filtered table.
- * Because Rules 1, 4, 5, 6, 7, 12, 13 dropped most junk during INSERT, this
- * dedup pass operates on a smaller table and runs cleanly without OOMs.
+ * Because Rules 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 dropped most junk during
+ * INSERT, this dedup pass operates on a smaller table and runs cleanly
+ * without OOMs.
  *
- * Rule 2 — exact cross-source dedup
+ * Rule 15 — exact cross-source dedup
  *   Match key: LOWER(TRIM(name)), LOWER(TRIM(brand)), kcal, protein_g,
  *              fat_g, carbs_g, LOWER(TRIM(serving_label)), upc
  *              (NULL=NULL via COALESCE).
  *   Winner: MAX(id).
  *
- * Rule 3 — brand-product dedup
+ * Rule 16 — brand-product dedup
  *   Match key: LOWER(TRIM(name)), LOWER(TRIM(brand)), kcal, protein_g,
  *              fat_g, carbs_g, serving_g (NULL=NULL via COALESCE).
  *   Required (non-NULL): name, brand, kcal, protein_g, fat_g, carbs_g.
  *   Winner: CAST(source_id AS INTEGER) DESC, then source_id DESC.
  *
- * Rule 14 — cross-source UPC dedup
+ * Rule 17 — cross-source UPC dedup
  *   Match key: upc AND ROUND(kcal,0) match across USDA + ON.
  *   Winner:    ON over USDA (ON has cleaner names like "Sea Salt Potato
  *              Chips" vs USDA's "POTATO CHIPS, SEA SALT").
@@ -28,7 +29,7 @@
  *              exists. Requires composite index on (source, upc); created
  *              here if missing.
  *
- * Rule 16 — intra-source UPC dedup
+ * Rule 18 — intra-source UPC dedup
  *   Match key: upc AND ROUND(kcal,0) match within a single source.
  *   Catches:   The same UPC listed under multiple brand_owner records in
  *              USDA (real brand + co-packer + distributor), all with
@@ -36,7 +37,7 @@
  *   Winner:    MAX(id) per (source, upc, rounded_kcal) group.
  *
  * Rule 19 — UPC dedup with ≤5 kcal tolerance (label-rounding cleanup)
- *   Tolerance-widened version of Rules 14 + 16. Catches the ~10K UPC
+ *   Tolerance-widened version of Rules 17 + 18. Catches the ~10K UPC
  *   clusters where the same product is reported with slightly-different
  *   kcal values across brand_owner records (label rounding artifacts).
  *   Two passes:
@@ -59,9 +60,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const fmt   = n => n.toLocaleString()
 const fmtMs = ms => `${(ms / 1000).toFixed(1)}s`
 
-// ── Rule 2 ───────────────────────────────────────────────────────────────────
+// ── Rule 15 ──────────────────────────────────────────────────────────────────
 
-const RULE_2_SQL = `
+const RULE_15_SQL = `
 DELETE FROM food_library
 WHERE id NOT IN (
   SELECT MAX(id) FROM food_library
@@ -72,9 +73,9 @@ WHERE id NOT IN (
 )
 `.trim()
 
-// ── Rule 3 ───────────────────────────────────────────────────────────────────
+// ── Rule 16 ──────────────────────────────────────────────────────────────────
 
-const RULE_3_SQL = `
+const RULE_16_SQL = `
 DELETE FROM food_library
 WHERE id IN (
   SELECT id FROM (
@@ -92,9 +93,9 @@ WHERE id IN (
 )
 `.trim()
 
-// ── Rule 14 — cross-source UPC dedup (prefer ON over USDA) ─────────────────
+// ── Rule 17 — cross-source UPC dedup (prefer ON over USDA) ─────────────────
 
-const RULE_14_INDEX_SQL = `
+const RULE_17_INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_food_library_source_upc
   ON food_library(source, upc)
 `.trim()
@@ -102,7 +103,7 @@ CREATE INDEX IF NOT EXISTS idx_food_library_source_upc
 // Chunked to stay under D1's per-query CPU budget. Caller loops until 0
 // changes. LIMIT 50000 was the largest size we observed running cleanly
 // against a 1M-row table on 2026-05-14 (~2s per chunk).
-const RULE_14_CHUNK_SQL = `
+const RULE_17_CHUNK_SQL = `
 DELETE FROM food_library
 WHERE id IN (
   SELECT u.id
@@ -115,9 +116,9 @@ WHERE id IN (
 )
 `.trim()
 
-// ── Rule 16 — intra-source UPC dedup (keep highest id per kcal match) ──────
+// ── Rule 18 — intra-source UPC dedup (keep highest id per kcal match) ──────
 
-const RULE_16_SQL = `
+const RULE_18_SQL = `
 DELETE FROM food_library
 WHERE id IN (
   SELECT id FROM (
@@ -132,9 +133,9 @@ WHERE id IN (
 `.trim()
 
 // ── Rule 19 — UPC dedup with ≤5 kcal tolerance (label-rounding artifacts) ──
-// Generalises Rules 14 + 16 by allowing the kcal values to differ by up to
+// Generalises Rules 17 + 18 by allowing the kcal values to differ by up to
 // 5 (label-rounding by different brand_owner records for the same product).
-// Two passes mirror Rules 14 + 16:
+// Two passes mirror Rules 17 + 18:
 //   Pass A (cross-source) — chunked; loops until drained.
 //   Pass B (intra-source) — single window-function pass.
 
@@ -174,53 +175,53 @@ async function rowCount() {
 
 async function main() {
   console.log('═══════════════════════════════')
-  console.log('  Post-import dedup (Rules 2+3)')
+  console.log('  Post-import dedup (Rules 15-19)')
   console.log('═══════════════════════════════\n')
 
   const before = await rowCount()
   console.log(`  Starting row count: ${fmt(before)}`)
 
-  console.log('\nRule 2 — exact cross-source dedup (name+brand+macros+serving_label+upc)…')
-  const t2 = Date.now()
-  await executeSql(RULE_2_SQL)
-  const after2 = await rowCount()
-  console.log(`  → ${fmt(before - after2)} rows removed in ${fmtMs(Date.now() - t2)}`)
+  console.log('\nRule 15 — exact cross-source dedup (name+brand+macros+serving_label+upc)…')
+  const t15 = Date.now()
+  await executeSql(RULE_15_SQL)
+  const after15 = await rowCount()
+  console.log(`  → ${fmt(before - after15)} rows removed in ${fmtMs(Date.now() - t15)}`)
 
-  console.log('\nRule 3 — brand-product dedup (name+brand+macros+serving_g)…')
-  const t3 = Date.now()
-  await executeSql(RULE_3_SQL)
-  const after3 = await rowCount()
-  console.log(`  → ${fmt(after2 - after3)} rows removed in ${fmtMs(Date.now() - t3)}`)
-
-  console.log('\nRule 14 — cross-source UPC dedup (prefer ON, kcal match)…')
-  const t14 = Date.now()
-  await executeSql(RULE_14_INDEX_SQL)
-  // Loop until the chunked DELETE drains.
-  let after14 = after3
-  let chunkRun = 0
-  while (true) {
-    const beforeChunk = await rowCount()
-    await executeSql(RULE_14_CHUNK_SQL)
-    const afterChunk = await rowCount()
-    chunkRun++
-    if (beforeChunk === afterChunk) break
-    if (chunkRun > 100) {
-      console.warn('  ⚠ chunked DELETE ran 100 times — bailing to avoid infinite loop')
-      break
-    }
-    after14 = afterChunk
-  }
-  console.log(`  → ${fmt(after3 - after14)} rows removed in ${fmtMs(Date.now() - t14)} (${chunkRun} chunks)`)
-
-  console.log('\nRule 16 — intra-source UPC dedup (kcal match within source)…')
+  console.log('\nRule 16 — brand-product dedup (name+brand+macros+serving_g)…')
   const t16 = Date.now()
   await executeSql(RULE_16_SQL)
   const after16 = await rowCount()
-  console.log(`  → ${fmt(after14 - after16)} rows removed in ${fmtMs(Date.now() - t16)}`)
+  console.log(`  → ${fmt(after15 - after16)} rows removed in ${fmtMs(Date.now() - t16)}`)
+
+  console.log('\nRule 17 — cross-source UPC dedup (prefer ON, kcal match)…')
+  const t17 = Date.now()
+  await executeSql(RULE_17_INDEX_SQL)
+  // Loop until the chunked DELETE drains.
+  let after17 = after16
+  let chunkRun17 = 0
+  while (true) {
+    const beforeChunk = await rowCount()
+    await executeSql(RULE_17_CHUNK_SQL)
+    const afterChunk = await rowCount()
+    chunkRun17++
+    if (beforeChunk === afterChunk) break
+    if (chunkRun17 > 100) {
+      console.warn('  ⚠ chunked DELETE ran 100 times — bailing to avoid infinite loop')
+      break
+    }
+    after17 = afterChunk
+  }
+  console.log(`  → ${fmt(after16 - after17)} rows removed in ${fmtMs(Date.now() - t17)} (${chunkRun17} chunks)`)
+
+  console.log('\nRule 18 — intra-source UPC dedup (kcal match within source)…')
+  const t18 = Date.now()
+  await executeSql(RULE_18_SQL)
+  const after18 = await rowCount()
+  console.log(`  → ${fmt(after17 - after18)} rows removed in ${fmtMs(Date.now() - t18)}`)
 
   console.log('\nRule 19a — cross-source UPC dedup (≤5 kcal tolerance)…')
   const t19a = Date.now()
-  let after19a = after16
+  let after19a = after18
   let chunkRun19a = 0
   while (true) {
     const beforeChunk = await rowCount()
@@ -234,7 +235,7 @@ async function main() {
     }
     after19a = afterChunk
   }
-  console.log(`  → ${fmt(after16 - after19a)} rows removed in ${fmtMs(Date.now() - t19a)} (${chunkRun19a} chunks)`)
+  console.log(`  → ${fmt(after18 - after19a)} rows removed in ${fmtMs(Date.now() - t19a)} (${chunkRun19a} chunks)`)
 
   console.log('\nRule 19b — intra-source UPC dedup (≤5 kcal spread within cluster)…')
   const t19b = Date.now()

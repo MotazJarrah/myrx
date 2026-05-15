@@ -256,7 +256,7 @@ export async function loadUsda(usdaRoot) {
   const rejected = {}
   let enriched_count = 0
   for (const rawRow of allRows) {
-    // Rule 9 — backfill missing kcal from macros BEFORE running rejection rules
+    // Rule 4 — backfill missing kcal from macros BEFORE running rejection rules
     const row = enrichFood(rawRow)
     if (row !== rawRow) enriched_count++
 
@@ -267,7 +267,7 @@ export async function loadUsda(usdaRoot) {
       rejected[reason] = (rejected[reason] ?? 0) + 1
     }
   }
-  if (enriched_count > 0) console.log(`    ⓘ Rule 9 backfilled kcal on ${enriched_count.toLocaleString()} rows`)
+  if (enriched_count > 0) console.log(`    ⓘ Rule 4 backfilled kcal on ${enriched_count.toLocaleString()} rows`)
   const droppedTotal = allRows.length - kept.length
   console.log(`    → ${kept.length.toLocaleString()} kept · ${droppedTotal.toLocaleString()} filtered out`)
   for (const [reason, n] of Object.entries(rejected).sort((a, b) => b[1] - a[1])) {
