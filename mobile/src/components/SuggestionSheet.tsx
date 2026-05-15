@@ -381,16 +381,23 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
                 dismisses the sheet (the only dismiss gestures are: this
                 swipe, or tapping the X button). */}
             <GestureDetector gesture={headerCloseGesture}>
-              <View style={s.header}>
-                <View style={s.headerLeft}>
-                  <View style={s.headerIcon}>
-                    <Lightbulb size={14} color={palette.amber[400]} />
-                  </View>
-                  <Text style={s.headerTitle}>Suggestions</Text>
+              <View>
+                {/* Drag-handle pill — matches the food drawer + chat sheet
+                    swipe affordance (40 × 4 px iOS-style grabber). */}
+                <View style={s.dragHandleArea}>
+                  <View style={s.dragHandlePill} />
                 </View>
-                <Pressable onPress={onClose} style={s.headerClose} hitSlop={8}>
-                  <X size={16} color={colors.mutedForeground} />
-                </Pressable>
+                <View style={s.header}>
+                  <View style={s.headerLeft}>
+                    <View style={s.headerIcon}>
+                      <Lightbulb size={14} color={palette.amber[400]} />
+                    </View>
+                    <Text style={s.headerTitle}>Suggestions</Text>
+                  </View>
+                  <Pressable onPress={onClose} style={s.headerClose} hitSlop={8}>
+                    <X size={16} color={colors.mutedForeground} />
+                  </Pressable>
+                </View>
               </View>
             </GestureDetector>
 
@@ -564,6 +571,21 @@ const s = StyleSheet.create({
   // shrink within the sheet's maxHeight. flex: 1 forces fill which made
   // the sheet stay at 0 height when sheet had no fixed height.
   kav: { flexShrink: 1 },
+
+  // Drag-handle pill at the very top of the sheet — matches the food
+  // drawer + chat sheet swipe affordance.
+  dragHandleArea: {
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 6,
+    backgroundColor: withAlpha(palette.amber[500], 0.05),
+  },
+  dragHandlePill: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: alpha(colors.mutedForeground, 0.35),
+  },
 
   // Header
   header: {

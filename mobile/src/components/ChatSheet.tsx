@@ -745,30 +745,37 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
                 the chat (the only dismiss gestures are: this swipe, or
                 tapping the X button). */}
             <GestureDetector gesture={headerCloseGesture}>
-              <View style={s.header}>
-                <View style={s.headerLeft}>
-                  <View style={s.avatarWrap}>
-                    {coach.avatar_url ? (
-                      <Image source={{ uri: coach.avatar_url }} style={s.avatar} />
-                    ) : (
-                      <View style={s.avatarFallback}>
-                        <MessageCircle size={14} color={colors.primary} />
-                      </View>
-                    )}
-                    {coachOnline ? <View style={s.onlineDot} /> : null}
-                  </View>
-                  <View>
-                    <Text style={s.coachName}>{coachDisplayName}</Text>
-                    {coachOnline ? (
-                      <Text style={s.coachStatus}>Active now</Text>
-                    ) : lastSeenTs ? (
-                      <Text style={s.coachStatusMuted}>Last seen {formatLastSeen(lastSeenTs)}</Text>
-                    ) : null}
-                  </View>
+              <View>
+                {/* Drag-handle pill — visible iOS-style swipe affordance.
+                    Same 40 × 4 px pill we use on the food drawer. */}
+                <View style={s.dragHandleArea}>
+                  <View style={s.dragHandlePill} />
                 </View>
-                <Pressable onPress={onClose} style={s.headerClose} hitSlop={8}>
-                  <X size={16} color={colors.mutedForeground} />
-                </Pressable>
+                <View style={s.header}>
+                  <View style={s.headerLeft}>
+                    <View style={s.avatarWrap}>
+                      {coach.avatar_url ? (
+                        <Image source={{ uri: coach.avatar_url }} style={s.avatar} />
+                      ) : (
+                        <View style={s.avatarFallback}>
+                          <MessageCircle size={14} color={colors.primary} />
+                        </View>
+                      )}
+                      {coachOnline ? <View style={s.onlineDot} /> : null}
+                    </View>
+                    <View>
+                      <Text style={s.coachName}>{coachDisplayName}</Text>
+                      {coachOnline ? (
+                        <Text style={s.coachStatus}>Active now</Text>
+                      ) : lastSeenTs ? (
+                        <Text style={s.coachStatusMuted}>Last seen {formatLastSeen(lastSeenTs)}</Text>
+                      ) : null}
+                    </View>
+                  </View>
+                  <Pressable onPress={onClose} style={s.headerClose} hitSlop={8}>
+                    <X size={16} color={colors.mutedForeground} />
+                  </Pressable>
+                </View>
               </View>
             </GestureDetector>
 
@@ -943,6 +950,20 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   kav: { flex: 1 },
+
+  // Drag-handle pill at the very top of the sheet — matches the food
+  // drawer's swipe affordance.
+  dragHandleArea: {
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  dragHandlePill: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: alpha(colors.mutedForeground, 0.35),
+  },
 
   // Header
   header: {
