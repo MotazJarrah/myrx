@@ -186,16 +186,25 @@ function MarqueeText({
       style={{ overflow: 'hidden' }}
       onLayout={e => setContainerW(e.nativeEvent.layout.width)}
     >
-      {/* flexDirection: row + alignSelf: flex-start lets the Animated.View
-          size to its natural Text width instead of being clamped by the
-          outer View's width — that's what makes the Text overflow into the
-          clipped zone instead of truncating. */}
-      <Animated.View style={[{ flexDirection: 'row', alignSelf: 'flex-start' }, animStyle]}>
-        <Text
-          style={style}
-          numberOfLines={1}
-          onLayout={e => setTextW(e.nativeEvent.layout.width)}
-        >
+      {/* Invisible mirror Text — renders unconstrained so onLayout reports
+          the NATURAL single-line width. Without this, measuring the visible
+          (numberOfLines=1, parent-constrained) Text returns its truncated
+          width, which always equals containerW and produces overflow=0. */}
+      <Text
+        style={[style, { position: 'absolute', opacity: 0, top: -9999, left: 0 }]}
+        numberOfLines={1}
+        onLayout={e => setTextW(e.nativeEvent.layout.width)}
+      >
+        {text}
+      </Text>
+
+      {/* Visible scrolling text. alignSelf: flex-start lets the
+          Animated.View size to its natural Text content width (not get
+          stretched to the parent's width), so the text physically extends
+          past the parent's right edge. The parent's overflow:hidden clips
+          it, and translateX reveals the tail. */}
+      <Animated.View style={[{ alignSelf: 'flex-start' }, animStyle]}>
+        <Text style={style} numberOfLines={1}>
           {text}
         </Text>
       </Animated.View>
