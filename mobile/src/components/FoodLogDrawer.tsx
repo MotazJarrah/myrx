@@ -178,32 +178,34 @@ function MarqueeText({
     transform: [{ translateX: tx.value }],
   }))
 
-  // Layout chain that lets the Text actually overflow:
-  //   - Outer View: clips with overflow:hidden, takes parent's flex width.
-  //   - Animated.View: flexDirection:row + the transform. As a flex child
-  //     of the (column-flex) outer View it defaults to stretch — that's
-  //     fine, it's just a positioning shell, not what limits the text.
-  //   - Text inside: flexShrink:0 + numberOfLines:1 is the magic combo.
-  //     numberOfLines:1 keeps it single-line; flexShrink:0 stops flexbox
-  //     from squeezing it to fit the parent. So the Text renders at its
-  //     full natural width and overflows the row — clipped by the outer
-  //     View, then revealed via translateX.
-  //   - onLayout on the Text reports the natural width (because we
-  //     disabled the shrink) — that's what drives the overflow math.
+  // Why a horizontal ScrollView wraps the Text:
+  // The straightforward flexbox approaches (alignSelf:flex-start,
+  // flexShrink:0, etc.) all failed because RN's Text-truncation logic
+  // happens at the render layer, not the flex layer — numberOfLines:1
+  // truncates AS LONG AS the Text's laid-out width is less than its
+  // natural width, regardless of flex shrink rules.
+  // A horizontal ScrollView naturally allows its content to be wider
+  // than itself — that's its whole purpose. With scrollEnabled:false
+  // it doesn't actually scroll; we just borrow the "child can be wider
+  // than parent" layout behaviour. onContentSizeChange gives us the
+  // natural width directly. The translateX on the inner Animated.View
+  // then moves the text within the ScrollView's clip area.
   return (
     <View
       style={{ overflow: 'hidden' }}
       onLayout={e => setContainerW(e.nativeEvent.layout.width)}
     >
-      <Animated.View style={[{ flexDirection: 'row' }, animStyle]}>
-        <Text
-          style={[style, { flexShrink: 0 }]}
-          numberOfLines={1}
-          onLayout={e => setTextW(e.nativeEvent.layout.width)}
-        >
-          {text}
-        </Text>
-      </Animated.View>
+      <ScrollView
+        horizontal
+        scrollEnabled={false}
+        showsHorizontalScrollIndicator={false}
+        bounces={false}
+        onContentSizeChange={(w) => setTextW(w)}
+      >
+        <Animated.View style={animStyle}>
+          <Text style={style} numberOfLines={1}>{text}</Text>
+        </Animated.View>
+      </ScrollView>
     </View>
   )
 }
