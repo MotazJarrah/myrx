@@ -56,13 +56,14 @@
 // ── Tier 1: REPAIR ───────────────────────────────────────────────────────────
 
 /**
- * Rule 3 — Title-case all-uppercase names.
+ * Rule 3 — Title-case all-uppercase text (applied to both name + brand).
  *
- * USDA branded-food entries arrive in ALL CAPS. OpenNutrition uses Title
- * Case. After cross-source dedup keeps ON's row over USDA's, the surviving
- * USDA rows still look visually inconsistent — `POTATO CHIPS, SEA SALT`
- * sitting next to `Roasted Almonds`. This normalises any entirely-uppercase
- * name to title case.
+ * USDA branded-food entries arrive in ALL CAPS in both the description AND
+ * the brand_owner field. OpenNutrition uses Title Case. After cross-source
+ * dedup keeps ON's row over USDA's, the surviving USDA rows still look
+ * visually inconsistent — `POTATO CHIPS, SEA SALT` (or brand `CAMPBELL SOUP
+ * COMPANY`) sitting next to `Roasted Almonds` (brand `Good & Gather`). This
+ * normalises any entirely-uppercase string to title case.
  *
  * Boundary regex: re-uppercase the first unicode letter after start-of-string
  * or whitespace, comma, slash, paren, hyphen, ampersand, period, opening
@@ -70,22 +71,36 @@
  * "s" after the apostrophe stays lowercase).
  *
  * Tradeoff accepted: most acronyms ("BBQ", "USDA") become title case
- * ("Bbq", "Usda"). Low frequency. We DO preserve specific high-value USDA
- * tokens (NFS, NS, NFSMI) and Mc/Mac brand prefixes via a post-pass.
+ * ("Bbq", "Usda"). Low frequency. We DO preserve specific high-value
+ * tokens via post-pass:
+ *   - USDA name qualifiers: NFS, NS, NFSMI
+ *   - Mc/Mac brand prefixes: McDonald's, McKee, McGriddles, etc.
+ *   - Corporate suffixes in brand strings: LLC, USA, US, GmbH
+ *     (Inc., Co., Ltd., Corp., S.A. handle themselves because the period
+ *      is already a title-case boundary)
  *
- * Touches ONLY names where the input was entirely uppercase
- * (`UPPER(name) === name` AND at least one ASCII letter present). Mixed-case
- * names are left as-is — we trust the source's casing.
+ * Touches ONLY strings where the input was entirely uppercase
+ * (`UPPER(x) === x` AND at least one ASCII letter present). Mixed-case
+ * inputs are left as-is — we trust the source's casing.
  */
 const TITLE_CASE_BOUNDARY = /(^|[\s,/()\-&.\[])(\p{L})/gu
 
-// USDA acronyms that we restore after the naive title-case lowercases them.
+// USDA acronyms and corporate-suffix tokens we restore after the naive
+// title-case lowercases them. Each entry is `[regex, replacement]`.
 const PRESERVE_ACRONYMS = [
+  // USDA name qualifiers (only fire on word boundary so "Insulators" isn't broken).
   [/(^|[\s,(])Nfsmi(\b)/g, '$1NFSMI$2'],
   [/(^|[\s,(])Nfs(\b)/g,   '$1NFS$2'],
-  // " Ns " / ", Ns " / "(Ns " contextual qualifier (avoid touching real
-  // words ending in "ns" — only act on word-boundary single-token Ns).
   [/(^|[\s,(])Ns(\b)/g,    '$1NS$2'],
+  // Corporate suffixes (live mostly in brand strings).
+  //   LLC / Llc → LLC
+  //   USA / Usa → USA
+  //   US / Us   → US (rare false-positive risk; word boundary + acceptable tradeoff)
+  //   GmbH      → GmbH (mixed-case German corporate suffix)
+  [/(^|[\s,(])Llc(\b)/g,   '$1LLC$2'],
+  [/(^|[\s,(])Usa(\b)/g,   '$1USA$2'],
+  [/(^|[\s,(])Us(\b)/g,    '$1US$2'],
+  [/(^|[\s,(])Gmbh(\b)/g,  '$1GmbH$2'],
 ]
 
 // Mc/Mac brand fragments that lose their inner capital after lowercase +
@@ -102,17 +117,23 @@ const MC_REPAIRS = [
   [/\bMcrib\b/g,       'McRib'],
 ]
 
-function titleCaseName(name) {
-  if (name == null) return name
-  const s = String(name)
-  if (s.toUpperCase() !== s) return name
-  if (!/[A-Z]/.test(s)) return name
-  let out = s.toLowerCase().replace(TITLE_CASE_BOUNDARY, (_, sep, c) => sep + c.toUpperCase())
-  // Restore acronyms and Mc prefixes that the naive title-case damaged.
+// Title-case any all-uppercase string. Used for both the `name` and `brand`
+// fields of food_library — same logic, same preservation lists.
+function titleCaseAllCaps(s) {
+  if (s == null) return s
+  const str = String(s)
+  if (str.toUpperCase() !== str) return s
+  if (!/[A-Z]/.test(str)) return s
+  let out = str.toLowerCase().replace(TITLE_CASE_BOUNDARY, (_, sep, c) => sep + c.toUpperCase())
+  // Restore acronyms, corporate suffixes, and Mc prefixes that the naive
+  // title-case damaged.
   for (const [re, sub] of PRESERVE_ACRONYMS) out = out.replace(re, sub)
   for (const [re, sub] of MC_REPAIRS)        out = out.replace(re, sub)
   return out
 }
+
+// Backward-compatible alias — keeps any existing callers working.
+const titleCaseName = titleCaseAllCaps
 
 /**
  * Rule 2 — USDA leading-category prefix normalization.
@@ -302,8 +323,12 @@ export function enrichFood(row) {
     workingName = rule2PrefixNormalize(workingName)
   }
 
-  // Rule 3 — title-case all-caps names (cheap; runs after Rules 1 + 2)
-  const normalizedName = titleCaseName(workingName)
+  // Rule 3 — title-case all-caps strings (applied to BOTH name and brand).
+  // Same helper, same preservation list. Brand strings benefit too:
+  // "CAMPBELL SOUP COMPANY" → "Campbell Soup Company",
+  // "WAL-MART STORES, INC." → "Wal-Mart Stores, Inc.", etc.
+  const normalizedName  = titleCaseAllCaps(workingName)
+  const normalizedBrand = titleCaseAllCaps(brand)
 
   // Rule 4 — backfill kcal
   let backfilledKcal = kcal
@@ -316,8 +341,8 @@ export function enrichFood(row) {
   }
 
   // Skip the object copy if nothing changed.
-  if (normalizedName === name && backfilledKcal === kcal) return row
-  return { ...row, name: normalizedName, kcal: backfilledKcal }
+  if (normalizedName === name && normalizedBrand === brand && backfilledKcal === kcal) return row
+  return { ...row, name: normalizedName, brand: normalizedBrand, kcal: backfilledKcal }
 }
 
 // ── Tier 2: name-based rejection helpers ─────────────────────────────────────
