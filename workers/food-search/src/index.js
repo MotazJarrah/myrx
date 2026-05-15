@@ -306,7 +306,11 @@ export default {
       //      composite dishes containing that food (pasta-with-chicken,
       //      chicken-salads, wraps) ahead of the food itself.
       //
-      // Three ranking signals address these, applied as ORDER BY tiers:
+      // Four ranking signals address these, applied as ORDER BY tiers:
+      //   0. MYRX always leads — any row with source='myrx' (admin-curated
+      //      custom food) ranks above everything else. Coach overrides the
+      //      database. Only fires if MYRX has a textual match for the query;
+      //      otherwise the rest of the ranking takes over naturally.
       //   A. Composite-dish demotion — if the name contains a dish marker
       //      word (with, and, salad, pasta, wrap, sandwich, etc.) AND the
       //      query itself doesn't have that marker, push the row to the end.
@@ -339,6 +343,8 @@ export default {
 
       const orderBy = `
         ORDER BY
+          -- 0. MYRX always leads — coach-curated foods override everything
+          CASE WHEN f.source = 'myrx' THEN 0 ELSE 1 END,
           -- A. Composite-dish demotion (skipped if query has dish-marker words)
           CASE
             WHEN ? = 1 AND (
@@ -394,7 +400,10 @@ export default {
         SELECT ${SELECT_COLS}
         FROM food_library
         WHERE name LIKE ? ${likeClause}
-        ORDER BY kcal
+        ORDER BY
+          -- MYRX always leads (same rule as the FTS path)
+          CASE WHEN source = 'myrx' THEN 0 ELSE 1 END,
+          kcal
         LIMIT ?
       `).bind(`%${raw}%`, ...(source ? [source] : []), limit).all()
 
