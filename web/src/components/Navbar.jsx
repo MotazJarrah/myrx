@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import {
   Dumbbell, Activity, Weight, Flame, History,
   LayoutDashboard, LogOut, Flower2, ShieldCheck,
-  MessageCircle, X, Lightbulb, Beaker,
+  MessageCircle, Lightbulb,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import ChatDrawer from './ChatDrawer'
@@ -21,10 +21,6 @@ const links = [
   { href: '/history',   label: 'History',   icon: History },
 ]
 
-const BETA_KEY = 'myrx_beta_dismissed'
-
-const BANNER_TEXT = 'MyRX is currently in beta phase. Your feedback is highly appreciated — click the suggestion button (top right) to share your ideas and help shape what comes next.'
-
 function Logo() {
   const { theme } = useTheme()
   const src = theme === 'dark' ? '/logo-dark.png?v=5' : '/logo-light.png?v=5'
@@ -35,7 +31,6 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
   const { user, profile, signOut } = useAuth()
   const [location] = useLocation()
 
-  const [betaDismissed, setBetaDismissed] = useState(() => !!localStorage.getItem(BETA_KEY))
   const [chatOpen,      setChatOpen]      = useState(false)
   const [suggOpen,      setSuggOpen]      = useState(false)
   const [unreadCount,   setUnreadCount]   = useState(0)
@@ -69,45 +64,11 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
     return () => { supabase.removeChannel(channel) }
   }, [user, chatEnabled])
 
-  function dismissBeta() {
-    localStorage.setItem(BETA_KEY, '1')
-    setBetaDismissed(true)
-  }
-
-  const bannerVisible = !betaDismissed
-  const topOffset = bannerVisible ? 'top-9' : 'top-0'
-
   return (
     <div className="min-h-dvh bg-background text-foreground">
 
-      {/* Scrolling beta banner */}
-      {bannerVisible && (
-        <>
-          <style>{`
-            @keyframes myrx-marquee {
-              0%   { transform: translateX(100vw) }
-              100% { transform: translateX(-100%) }
-            }
-          `}</style>
-          <div className="fixed inset-x-0 top-0 z-50 flex h-9 items-center overflow-hidden border-b border-primary/20 bg-primary/10 px-2">
-            <span
-              className="whitespace-nowrap text-xs text-primary font-medium"
-              style={{ display: 'inline-block', animation: 'myrx-marquee 28s linear infinite' }}
-            >
-              🧪 &nbsp; {BANNER_TEXT} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 🧪 &nbsp; {BANNER_TEXT}
-            </span>
-            <button
-              onClick={dismissBeta}
-              className="absolute right-2 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-primary/60 hover:text-primary hover:bg-primary/10 transition-colors bg-primary/10 backdrop-blur-sm"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        </>
-      )}
-
       {/* Desktop sidebar */}
-      <aside className={`fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar md:flex ${bannerVisible ? 'top-9' : ''}`}>
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-sidebar-border bg-sidebar md:flex">
         <div className="flex h-16 items-center border-b border-sidebar-border px-5">
           <Link href="/dashboard" className="inline-flex"><Logo /></Link>
         </div>
@@ -162,7 +123,7 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
       </aside>
 
       {/* Mobile top bar */}
-      <div className={`fixed inset-x-0 z-40 flex h-14 items-center justify-between border-b border-border bg-background/90 px-4 backdrop-blur md:hidden ${bannerVisible ? 'top-9' : 'top-0'}`}>
+      <div className="fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b border-border bg-background/90 px-4 backdrop-blur md:hidden">
         <Link href="/dashboard"><Logo /></Link>
         <div className="flex items-center gap-2">
           {/* Suggestion button — hidden for admins */}
@@ -228,7 +189,7 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
       </nav>
 
       {/* Main */}
-      <main className={`pb-24 md:pb-0 md:pl-60 md:pt-0 ${bannerVisible ? 'pt-[calc(3.5rem+2.25rem)]' : 'pt-14'}`}>
+      <main className="pb-24 md:pb-0 md:pl-60 md:pt-0 pt-14">
         <div className="p-4 md:p-8">
           <div className="mx-auto max-w-6xl">
             {children}

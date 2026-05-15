@@ -1310,7 +1310,7 @@ This is the final net — if a secret somehow makes it past layers 1 and 2, push
 
 ### End-user shell & components
 ```
-src/components/Navbar.jsx          — AppShell wrapper: sidebar, mobile nav, beta banner,
+src/components/Navbar.jsx          — AppShell wrapper: sidebar, mobile nav,
                                      floating chat + suggestion buttons, drawers
 src/components/ChatDrawer.jsx      — Slide-up chat panel (only when chat_enabled)
 src/components/SuggestionDrawer.jsx — Slide-up suggestion panel (always available)
@@ -1524,7 +1524,6 @@ Use `<TickerNumber value={n} />` for any count/stat display that should animate 
 - When `true`: client sees both Suggestion button (amber) and Chat button (blue).
 
 ### End-user UI (Navbar.jsx)
-- **Beta banner**: scrolling marquee at very top (dismissible, stored in `localStorage` key `myrx_beta_dismissed`)
 - **Suggestion button**: amber circle, always shown, opens `SuggestionDrawer`
 - **Chat button**: blue circle, only when `chat_enabled`, opens `ChatDrawer`, shows unread badge
 - Both drawers slide up from the bottom
@@ -1582,7 +1581,6 @@ Admins (`is_superuser = true`) see an "Admin Portal" button in the client nav, o
 ## LocalStorage Keys
 | Key | Purpose |
 |-----|---------|
-| `myrx_beta_dismissed` | Beta banner dismissed flag |
 | `myrx_enter_to_send` | `'false'` = Enter for new line; default = Enter sends |
 | `admin-user-tab-{id}` | Last active tab per user in AdminUserDetail |
 
@@ -1653,7 +1651,6 @@ Admins (`is_superuser = true`) see an "Admin Portal" button in the client nav, o
 ### Chat & suggestions
 - [x] `messages` table with RLS
 - [x] `chat_enabled` column on profiles
-- [x] Beta banner (scrolling marquee, dismissible)
 - [x] Suggestion button (amber, always visible)
 - [x] Chat button (blue, gated by chat_enabled)
 - [x] ChatDrawer with Coach [FirstName] header + coach avatar (header only, not on bubbles), realtime
