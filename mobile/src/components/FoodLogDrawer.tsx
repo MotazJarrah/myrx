@@ -154,16 +154,15 @@ function MarqueeText({
   const [textW, setTextW]           = useState(0)
   const tx = useSharedValue(0)
 
-  const overflow = Math.max(0, textW - containerW)
-
   useEffect(() => {
     cancelAnimation(tx)
-    if (overflow <= 0 || containerW === 0) {
-      tx.value = 0
-      return
-    }
-    const slideDuration = Math.max(1200, Math.round((overflow / 35) * 1000))
     tx.value = 0
+
+    if (containerW === 0 || textW === 0) return
+    const overflow = textW - containerW
+    if (overflow <= 0) return
+
+    const slideDuration = Math.max(1200, Math.round((overflow / 35) * 1000))
     tx.value = withRepeat(
       withSequence(
         withDelay(1000, withTiming(-overflow, { duration: slideDuration })),
@@ -173,31 +172,38 @@ function MarqueeText({
       false,
     )
     return () => { cancelAnimation(tx) }
-  }, [overflow, containerW, tx])
+  }, [textW, containerW, tx])
 
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }],
   }))
 
-  // Parent uses flexDirection: 'row' so its single Animated.Text child gets
-  // its NATURAL single-line width (intrinsic main-axis size in flexbox).
-  // The parent's own width is whatever the search row gives us; overflow:
-  // hidden clips the part of the text that extends past the right edge.
-  // onLayout on the Animated.Text reports the natural width (not the
-  // clipped width) because in flexDirection:row a child without explicit
-  // width sizes to its content's intrinsic dimensions.
+  // Layout chain that lets the Text actually overflow:
+  //   - Outer View: clips with overflow:hidden, takes parent's flex width.
+  //   - Animated.View: flexDirection:row + the transform. As a flex child
+  //     of the (column-flex) outer View it defaults to stretch — that's
+  //     fine, it's just a positioning shell, not what limits the text.
+  //   - Text inside: flexShrink:0 + numberOfLines:1 is the magic combo.
+  //     numberOfLines:1 keeps it single-line; flexShrink:0 stops flexbox
+  //     from squeezing it to fit the parent. So the Text renders at its
+  //     full natural width and overflows the row — clipped by the outer
+  //     View, then revealed via translateX.
+  //   - onLayout on the Text reports the natural width (because we
+  //     disabled the shrink) — that's what drives the overflow math.
   return (
     <View
-      style={{ overflow: 'hidden', flexDirection: 'row' }}
+      style={{ overflow: 'hidden' }}
       onLayout={e => setContainerW(e.nativeEvent.layout.width)}
     >
-      <Animated.Text
-        style={[style, animStyle]}
-        numberOfLines={1}
-        onLayout={e => setTextW(e.nativeEvent.layout.width)}
-      >
-        {text}
-      </Animated.Text>
+      <Animated.View style={[{ flexDirection: 'row' }, animStyle]}>
+        <Text
+          style={[style, { flexShrink: 0 }]}
+          numberOfLines={1}
+          onLayout={e => setTextW(e.nativeEvent.layout.width)}
+        >
+          {text}
+        </Text>
+      </Animated.View>
     </View>
   )
 }
