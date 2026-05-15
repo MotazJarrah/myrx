@@ -775,9 +775,12 @@ const pad2 = (n: number) => String(n).padStart(2, '0')
 //  Reel anchoring:
 //    • Outer reels (hours / minutes-in-mm:ss / seconds) anchor to the
 //      colon's edge so the digits hug the colon as they scale.
-//    • Middle reel (minutes-in-hh:mm:ss) uses `noScale` so it doesn't
-//      shrink — it sits sandwiched between two static colons and the
-//      usual edge-sweep would have nowhere to go.
+//    • Middle reel (minutes-in-hh:mm:ss) uses the default centred
+//      scaling — halo rows shrink toward the periphery and both edges
+//      of the digits sweep outward toward the two flanking colons at
+//      full size (rank 0), then back inward as they roll past.
+//      Symmetric with the outer reels' rolling motion, just bounded on
+//      both sides.
 // ─────────────────────────────────────────────────────────────────────────
 function TimePhantomWheel({
   value, onChange,
@@ -824,7 +827,7 @@ function TimePhantomWheel({
         <NumericPhantomWheel
           value={minutes} onChange={setMinutes}
           step={1} min={0} max={59}
-          anchor="center" noScale format={pad2}
+          anchor="center" format={pad2}
           centerSize={centerSize} haloRadius={haloRadius}
         />
         {Colon}
