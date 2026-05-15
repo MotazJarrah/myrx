@@ -1099,13 +1099,22 @@ export default function FoodLogDrawer({
               above the keyboard on Android Modals; shifting the
               sheet itself does. */}
 
-          {/* Header — wrapped in GestureDetector so a downward swipe
-              dismisses the drawer (the only dismiss gestures are: this
-              swipe, or tapping the X button). The Pan's failOffsetX
-              constraint means horizontal taps inside the header (back
-              button, search input) still register normally. */}
+          {/* Drag handle + Header — both wrapped in GestureDetector so a
+              downward swipe dismisses the drawer.
+              The drag-handle pill is the unambiguous swipe affordance
+              (matches iOS / Material sheet patterns). The header itself
+              also responds to swipes EXCEPT where a TextInput sits (the
+              input grabs the touch responder before our 8 px threshold
+              fires — known limitation, the drag handle is the workaround).
+              The Pan's failOffsetX constraint means horizontal taps inside
+              the header (back button, search input) still register
+              normally. */}
           <GestureDetector gesture={headerCloseGesture}>
-            <View style={s.sheetHeader}>
+            <View>
+              <View style={s.dragHandleArea}>
+                <View style={s.dragHandlePill} />
+              </View>
+              <View style={s.sheetHeader}>
             {view === 'log' && (
               <>
                 <View>
@@ -1171,6 +1180,7 @@ export default function FoodLogDrawer({
                 <CloseBtn onPress={cancelEdit} />
               </View>
             )}
+              </View>
             </View>
           </GestureDetector>
 
@@ -1525,6 +1535,21 @@ const s = StyleSheet.create({
   },
 
   // Sheet header
+  // Drag-handle pill at the very top of the sheet. The 12-px vertical
+  // padding gives the user a generous hit area to grab the handle without
+  // making the visual indicator itself huge. Matches the iOS sheet grabber
+  // size convention (~40 px wide, ~4 px tall).
+  dragHandleArea: {
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  dragHandlePill: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: alpha(colors.mutedForeground, 0.35),
+  },
   sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
