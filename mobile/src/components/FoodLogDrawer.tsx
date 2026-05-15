@@ -162,11 +162,17 @@ function MarqueeText({
     const overflow = textW - containerW
     if (overflow <= 0) return
 
+    // Sequence per iteration:
+    //   1. Hold at 0 for 2 s  (let the user read the beginning of the name)
+    //   2. Slide to -overflow over slideDuration (~35 px/sec)
+    //   3. Hold at -overflow for 2 s  (let the user read the tail)
+    //   4. Snap instantly back to 0  (no back-slide; we just reset)
+    //   → withRepeat loops indefinitely.
     const slideDuration = Math.max(1200, Math.round((overflow / 35) * 1000))
     tx.value = withRepeat(
       withSequence(
-        withDelay(1000, withTiming(-overflow, { duration: slideDuration })),
-        withDelay(1500, withTiming(0,         { duration: slideDuration })),
+        withDelay(2000, withTiming(-overflow, { duration: slideDuration })),
+        withDelay(2000, withTiming(0,         { duration: 0 })),
       ),
       -1,
       false,
