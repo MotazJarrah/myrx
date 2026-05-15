@@ -12,8 +12,10 @@
 --   imported_at      ISO timestamp when row first inserted into our DB
 --   last_synced_at   ISO timestamp when row was last refreshed by a sync run
 --   source_version   dataset/API release identifier (e.g. 'FoodData_Central_csv_2026-04-30')
---   food_category    USDA's text category (e.g. 'Dairy and Egg Products')
 --   servings_per_container  for MYRX entries that store package size
+--
+-- (food_category was removed during the post-audit cleanup — coarse USDA
+--  category column that didn't carry enough signal to warrant the storage.)
 CREATE TABLE IF NOT EXISTS food_library (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   source         TEXT    NOT NULL DEFAULT 'usda',
@@ -35,7 +37,6 @@ CREATE TABLE IF NOT EXISTS food_library (
   imported_at    TEXT,
   last_synced_at TEXT,
   source_version TEXT,
-  food_category  TEXT,
   UNIQUE(source, source_id)
 );
 
