@@ -594,9 +594,28 @@ export default function FoodLogDrawer({
   }))
 
   const headerCloseGesture = useMemo(() => {
-    return Gesture.Pan()
+    // The food drawer's search-view header has a focused TextInput inside
+    // it. Without coordination, the TextInput grabs the touch responder
+    // before our Pan's `activeOffsetY(8)` threshold fires — so dragging
+    // down from the input area silently does nothing.
+    //
+    // Fix: race the Pan against `Gesture.Native()`. The Native gesture
+    // represents any native handlers on descendants (e.g. the TextInput's
+    // tap). Race semantics:
+    //   - Tap / cursor-position on input → Native activates first → input
+    //     focuses normally.
+    //   - Drag down 8+ px → Pan crosses threshold first → Pan claims the
+    //     touch and the sheet starts following the finger.
+    //
+    // Also dismiss the keyboard at pan-start so the sheet has room to
+    // move (otherwise it tries to translate behind the IME).
+    const pan = Gesture.Pan()
       .activeOffsetY(8)
       .failOffsetX([-20, 20])
+      .onStart(() => {
+        'worklet'
+        runOnJS(Keyboard.dismiss)()
+      })
       .onUpdate(e => {
         'worklet'
         dragY.value = Math.max(0, e.translationY)
@@ -614,6 +633,7 @@ export default function FoodLogDrawer({
           dragY.value = withTiming(0, { duration: 180 })
         }
       })
+    return Gesture.Race(pan, Gesture.Native())
   }, [onClose, screenH, dragY])
 
   const [entries, setEntries] = useState<FoodLogEntry[]>([])
