@@ -43,13 +43,25 @@ if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true })
 const TITLE_CASE_BOUNDARY = /(^|[\s,/()\-&.\[])(\p{L})/gu
 
 const PRESERVE_ACRONYMS = [
+  // USDA name qualifiers
   [/(^|[\s,(])Nfsmi(\b)/g, '$1NFSMI$2'],
   [/(^|[\s,(])Nfs(\b)/g,   '$1NFS$2'],
   [/(^|[\s,(])Ns(\b)/g,    '$1NS$2'],
+  // Corporate suffixes
   [/(^|[\s,(])Llc(\b)/g,   '$1LLC$2'],
   [/(^|[\s,(])Usa(\b)/g,   '$1USA$2'],
   [/(^|[\s,(])Us(\b)/g,    '$1US$2'],
   [/(^|[\s,(])Gmbh(\b)/g,  '$1GmbH$2'],
+  // Acronym brand names
+  [/(^|[\s,(])Pb2(\b)/g,   '$1PB2$2'],
+  [/(^|[\s,(])Iga(\b)/g,   '$1IGA$2'],
+  [/(^|[\s,(])Ihop(\b)/g,  '$1IHOP$2'],
+  [/(^|[\s,(])Kfc(\b)/g,   '$1KFC$2'],
+  [/(^|[\s,(])Gnc(\b)/g,   '$1GNC$2'],
+  [/(^|[\s,(])Eas(\b)/g,   '$1EAS$2'],
+  // Mixed-case brand stylings
+  [/(^|[\s,(])Mio(\b)/g,   '$1MiO$2'],
+  [/(^|[\s,(])Sobe(\b)/g,  '$1SoBe$2'],
 ]
 
 const MC_REPAIRS = [

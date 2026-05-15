@@ -85,10 +85,12 @@
  */
 const TITLE_CASE_BOUNDARY = /(^|[\s,/()\-&.\[])(\p{L})/gu
 
-// USDA acronyms and corporate-suffix tokens we restore after the naive
-// title-case lowercases them. Each entry is `[regex, replacement]`.
+// USDA acronyms, corporate suffixes, and known acronym brand names that we
+// restore after the naive title-case lowercases them. Each entry is
+// `[regex, replacement]`. Only fires on standalone tokens (word boundaries)
+// so we don't damage substrings.
 const PRESERVE_ACRONYMS = [
-  // USDA name qualifiers (only fire on word boundary so "Insulators" isn't broken).
+  // USDA name qualifiers.
   [/(^|[\s,(])Nfsmi(\b)/g, '$1NFSMI$2'],
   [/(^|[\s,(])Nfs(\b)/g,   '$1NFS$2'],
   [/(^|[\s,(])Ns(\b)/g,    '$1NS$2'],
@@ -101,6 +103,17 @@ const PRESERVE_ACRONYMS = [
   [/(^|[\s,(])Usa(\b)/g,   '$1USA$2'],
   [/(^|[\s,(])Us(\b)/g,    '$1US$2'],
   [/(^|[\s,(])Gmbh(\b)/g,  '$1GmbH$2'],
+  // Known acronym brands (would otherwise round-trip to title case and lose
+  // their all-caps form). Examples: PB2, IGA, IHOP, KFC, GNC, EAS.
+  [/(^|[\s,(])Pb2(\b)/g,   '$1PB2$2'],
+  [/(^|[\s,(])Iga(\b)/g,   '$1IGA$2'],
+  [/(^|[\s,(])Ihop(\b)/g,  '$1IHOP$2'],
+  [/(^|[\s,(])Kfc(\b)/g,   '$1KFC$2'],
+  [/(^|[\s,(])Gnc(\b)/g,   '$1GNC$2'],
+  [/(^|[\s,(])Eas(\b)/g,   '$1EAS$2'],
+  // Mixed-case brand stylings (MiO drink mix, SoBe lifewater).
+  [/(^|[\s,(])Mio(\b)/g,   '$1MiO$2'],
+  [/(^|[\s,(])Sobe(\b)/g,  '$1SoBe$2'],
 ]
 
 // Mc/Mac brand fragments that lose their inner capital after lowercase +
