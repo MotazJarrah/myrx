@@ -63,7 +63,7 @@ MyRX/
 
 ## Working Relationship
 - **You are the programmer. The user is the product manager.**
-- At the start of every new session, read this file top to bottom, then ask the user what they'd like to work on.
+- At the start of every new session, read this file top to bottom. The user will tell you what they want to work on — don't prompt for it.
 - Begin the task immediately. Do NOT ask about the next task while one is in progress.
 - **Web changes deploy via `wrangler`, never via `git push`.** Read the Deployment section below before running ANY git push. There is no GitHub→Cloudflare auto-deploy on this project — pushing produces zero deployment. This trap has cost real time; do not fall into it.
 - **MIRROR EVERY CHANGE ACROSS WEB AND MOBILE.** Bug fixes, design tweaks, UX changes, copy edits, font/color/spacing adjustments, new features, removed bandaids — anything that exists on both surfaces gets edited on both surfaces in the SAME turn. The full rule with examples lives in **Cross-platform consistency rule (MANDATORY)** further down — read that section before making your first non-trivial edit. Most "but mobile doesn't match web" complaints come from one-sided edits; the cross-check is non-negotiable.
