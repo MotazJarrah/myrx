@@ -162,8 +162,6 @@ function MarqueeText({
       tx.value = 0
       return
     }
-    // ~35 px/sec slide. Floor at 1200 ms so very short overflows still feel
-    // like a deliberate motion, not a twitch.
     const slideDuration = Math.max(1200, Math.round((overflow / 35) * 1000))
     tx.value = 0
     tx.value = withRepeat(
@@ -171,8 +169,8 @@ function MarqueeText({
         withDelay(1000, withTiming(-overflow, { duration: slideDuration })),
         withDelay(1500, withTiming(0,         { duration: slideDuration })),
       ),
-      -1,    // infinite loop
-      false, // don't reverse on each iteration; the sequence already handles that
+      -1,
+      false,
     )
     return () => { cancelAnimation(tx) }
   }, [overflow, containerW, tx])
@@ -181,33 +179,25 @@ function MarqueeText({
     transform: [{ translateX: tx.value }],
   }))
 
+  // Parent uses flexDirection: 'row' so its single Animated.Text child gets
+  // its NATURAL single-line width (intrinsic main-axis size in flexbox).
+  // The parent's own width is whatever the search row gives us; overflow:
+  // hidden clips the part of the text that extends past the right edge.
+  // onLayout on the Animated.Text reports the natural width (not the
+  // clipped width) because in flexDirection:row a child without explicit
+  // width sizes to its content's intrinsic dimensions.
   return (
     <View
-      style={{ overflow: 'hidden' }}
+      style={{ overflow: 'hidden', flexDirection: 'row' }}
       onLayout={e => setContainerW(e.nativeEvent.layout.width)}
     >
-      {/* Invisible mirror Text — renders unconstrained so onLayout reports
-          the NATURAL single-line width. Without this, measuring the visible
-          (numberOfLines=1, parent-constrained) Text returns its truncated
-          width, which always equals containerW and produces overflow=0. */}
-      <Text
-        style={[style, { position: 'absolute', opacity: 0, top: -9999, left: 0 }]}
+      <Animated.Text
+        style={[style, animStyle]}
         numberOfLines={1}
         onLayout={e => setTextW(e.nativeEvent.layout.width)}
       >
         {text}
-      </Text>
-
-      {/* Visible scrolling text. alignSelf: flex-start lets the
-          Animated.View size to its natural Text content width (not get
-          stretched to the parent's width), so the text physically extends
-          past the parent's right edge. The parent's overflow:hidden clips
-          it, and translateX reveals the tail. */}
-      <Animated.View style={[{ alignSelf: 'flex-start' }, animStyle]}>
-        <Text style={style} numberOfLines={1}>
-          {text}
-        </Text>
-      </Animated.View>
+      </Animated.Text>
     </View>
   )
 }
