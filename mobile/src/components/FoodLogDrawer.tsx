@@ -24,7 +24,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight'
 import Animated, {
-  useSharedValue, useAnimatedStyle, withTiming, runOnJS,
+  useSharedValue, useAnimatedStyle, withTiming, withSequence,
+  withDelay, withRepeat, cancelAnimation, runOnJS,
 } from 'react-native-reanimated'
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -130,6 +131,78 @@ function FoodItemRow({
   )
 }
 
+// ── Marquee text (auto-scroll on overflow) ────────────────────────────────────
+//
+// Standard ticker pattern for long food names that don't fit the row:
+//   - Hold at start for 1 s (let the eye settle on the visible portion)
+//   - Slide left at ~35 px/sec until the tail is exposed
+//   - Hold at end for 1.5 s (read the last word)
+//   - Slide back to start at the same speed
+//   - Loop forever
+//
+// If the text fits the container, no animation runs — the component is a
+// no-cost passthrough.
+
+function MarqueeText({
+  text,
+  style,
+}: {
+  text: string
+  style?: React.ComponentProps<typeof Text>['style']
+}) {
+  const [containerW, setContainerW] = useState(0)
+  const [textW, setTextW]           = useState(0)
+  const tx = useSharedValue(0)
+
+  const overflow = Math.max(0, textW - containerW)
+
+  useEffect(() => {
+    cancelAnimation(tx)
+    if (overflow <= 0 || containerW === 0) {
+      tx.value = 0
+      return
+    }
+    // ~35 px/sec slide. Floor at 1200 ms so very short overflows still feel
+    // like a deliberate motion, not a twitch.
+    const slideDuration = Math.max(1200, Math.round((overflow / 35) * 1000))
+    tx.value = 0
+    tx.value = withRepeat(
+      withSequence(
+        withDelay(1000, withTiming(-overflow, { duration: slideDuration })),
+        withDelay(1500, withTiming(0,         { duration: slideDuration })),
+      ),
+      -1,    // infinite loop
+      false, // don't reverse on each iteration; the sequence already handles that
+    )
+    return () => { cancelAnimation(tx) }
+  }, [overflow, containerW, tx])
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: tx.value }],
+  }))
+
+  return (
+    <View
+      style={{ overflow: 'hidden' }}
+      onLayout={e => setContainerW(e.nativeEvent.layout.width)}
+    >
+      {/* flexDirection: row + alignSelf: flex-start lets the Animated.View
+          size to its natural Text width instead of being clamped by the
+          outer View's width — that's what makes the Text overflow into the
+          clipped zone instead of truncating. */}
+      <Animated.View style={[{ flexDirection: 'row', alignSelf: 'flex-start' }, animStyle]}>
+        <Text
+          style={style}
+          numberOfLines={1}
+          onLayout={e => setTextW(e.nativeEvent.layout.width)}
+        >
+          {text}
+        </Text>
+      </Animated.View>
+    </View>
+  )
+}
+
 // ── Search result row ─────────────────────────────────────────────────────────
 
 function SearchResult({ food, onPress }: { food: FoodItem; onPress: () => void }) {
@@ -150,7 +223,7 @@ function SearchResult({ food, onPress }: { food: FoodItem; onPress: () => void }
   return (
     <Pressable onPress={onPress} style={s.searchRow}>
       <View style={s.searchRowLeft}>
-        <Text style={s.searchName} numberOfLines={1}>{food.name}</Text>
+        <MarqueeText text={food.name} style={s.searchName} />
         <View style={s.searchSub}>
           {food.brand ? <Text style={s.searchBrand} numberOfLines={1}>{food.brand}</Text> : null}
           <View style={[s.srcBadge, { backgroundColor: srcBadge.bg }]}>
