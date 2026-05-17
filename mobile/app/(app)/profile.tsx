@@ -48,6 +48,8 @@ import {
 } from '../../src/components/FoodLogDrawer'
 import { getEnterToSend, setEnterToSend as persistEnterToSend } from '../../src/lib/chatPrefs'
 import { isLockEnabled, setLockEnabled } from '../../src/lib/lockState'
+import { openLegalDoc } from '../../src/lib/openLegalDoc'
+import Constants from 'expo-constants'
 import { colors, alpha, palette } from '../../src/theme'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2008,9 +2010,68 @@ function ConnectTab() {
   )
 }
 
+// ── About tab ─────────────────────────────────────────────────────────────────
+//
+// Inline version of the standalone /(app)/about page. Same content
+// (version card + legal links + entity footer) rendered as a tab slot
+// inside the settings carousel. The /(app)/about route stays intact
+// for any other entry points (signup flow, deep links, etc.) — this
+// tab just gives the user a fifth swipeable slot inside Settings
+// instead of forcing a navigation jump for low-frequency metadata.
+
+const ABOUT_LEGAL_LINKS = [
+  { url: 'https://myrxfit.com/terms',          label: 'Terms of Service' },
+  { url: 'https://myrxfit.com/privacy',        label: 'Privacy Policy' },
+  { url: 'https://myrxfit.com/cookies',        label: 'Cookie Policy' },
+  { url: 'https://myrxfit.com/acceptable-use', label: 'Acceptable Use' },
+]
+
+function AboutTab() {
+  const version = Constants.expoConfig?.version ?? '—'
+
+  return (
+    <View style={s.formGap}>
+
+      {/* Version card */}
+      <AnimateRise delay={0} style={s.aboutCard}>
+        <View style={s.aboutRowInternal}>
+          <Text style={s.aboutRowLabel}>Version</Text>
+          <Text style={s.aboutRowValue}>{version}</Text>
+        </View>
+      </AnimateRise>
+
+      {/* Legal links — each opens the doc in an in-app browser sheet
+          via openLegalDoc (same UX as the dedicated About page). */}
+      <Text style={s.aboutSectionLabel}>Legal</Text>
+      <AnimateRise delay={20} style={s.aboutCard}>
+        {ABOUT_LEGAL_LINKS.map((item, i) => (
+          <Pressable
+            key={item.url}
+            onPress={() => openLegalDoc(item.url)}
+            style={[
+              s.aboutLinkRow,
+              i < ABOUT_LEGAL_LINKS.length - 1 ? s.aboutLinkRowDivider : null,
+            ]}
+          >
+            <Text style={s.aboutLinkLabel}>{item.label}</Text>
+            <ChevronRight size={16} color={colors.mutedForeground} />
+          </Pressable>
+        ))}
+      </AnimateRise>
+
+      {/* Operating-entity footer — required disclosure (the entity the
+          user is contracting with for ToS / Privacy Policy). */}
+      <Text style={s.aboutEntityFooter}>
+        MyRX is operated by Northern Princess LLC, Michigan, USA.{'\n'}
+        © {new Date().getFullYear()} Northern Princess LLC. All rights reserved.
+      </Text>
+    </View>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type SettingsTabKey = 'account' | 'preferences' | 'security' | 'connect'
+type SettingsTabKey = 'account' | 'preferences' | 'security' | 'connect' | 'about'
 
 interface SettingsTabDef {
   key:   SettingsTabKey
@@ -2027,6 +2088,7 @@ const SETTINGS_TABS: readonly SettingsTabDef[] = [
   { key: 'preferences', label: 'Preferences' },
   { key: 'security',    label: 'Security'    },
   { key: 'connect',     label: 'Connect'     },
+  { key: 'about',       label: 'About'       },
 ] as const
 
 export default function EditProfile() {
@@ -2241,27 +2303,12 @@ export default function EditProfile() {
                 {tab.key === 'account'     ? <AccountTab     profile={profile} user={user} />
                  : tab.key === 'preferences' ? <PreferencesTab profile={profile} user={user} />
                  : tab.key === 'security'    ? <SecurityTab    profile={profile} user={user} />
-                 : <ConnectTab />}
+                 : tab.key === 'connect'     ? <ConnectTab />
+                 : <AboutTab />}
               </View>
             ))}
           </ScrollView>
         </View>
-
-        {/* About — standalone row below the tab carousel. NOT nested
-            inside any tab because About is genuinely its own destination
-            (route /(app)/about) — version, legal documents, licenses —
-            not a setting the user toggles. Always visible regardless of
-            which tab is active. */}
-        <Pressable
-          onPress={() => router.push('/(app)/about' as any)}
-          style={s.aboutRow}
-        >
-          <View style={s.chatRowText}>
-            <Text style={s.chatRowTitle}>About MyRX</Text>
-            <Text style={s.chatRowSub}>Version, legal documents, and licenses</Text>
-          </View>
-          <ChevronRight size={16} color={colors.mutedForeground} />
-        </Pressable>
 
       </View>
     </ScrollView>
@@ -2693,18 +2740,42 @@ const s = StyleSheet.create({
     gap: 12,
   },
 
-  // Standalone About row — sits below the tab carousel, always visible
-  // regardless of which tab is active. Same chrome as a chatRowBtn but
-  // with extra top margin so it's visually separated from the tab
-  // content (signals "this is page-level, not part of a tab").
-  aboutRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    gap: 12,
+  // ── About tab styles ──────────────────────────────────────────────────
+  // Inline version of /(app)/about content as a tab slot. Same visual
+  // tokens (card chrome, section labels, link rows with divider, entity
+  // footer) so users coming from the standalone About page see no
+  // visual difference.
+  aboutCard: {
+    backgroundColor: alpha(colors.card, 0.80),
     borderColor: colors.border, borderWidth: 1,
-    backgroundColor: colors.card,
-    borderRadius: 12,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  aboutRowInternal: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 14,
-    marginTop: 12,
+  },
+  aboutRowLabel: { color: colors.foreground, fontSize: 14, fontWeight: '500' },
+  aboutRowValue: { color: colors.mutedForeground, fontSize: 14 },
+  aboutSectionLabel: {
+    color: colors.mutedForeground,
+    fontSize: 12, fontWeight: '600',
+    letterSpacing: 0.8, textTransform: 'uppercase',
+    marginTop: 4, marginBottom: -8, paddingHorizontal: 4,
+  },
+  aboutLinkRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14,
+  },
+  aboutLinkRowDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: alpha(colors.border, 0.5),
+  },
+  aboutLinkLabel: { color: colors.foreground, fontSize: 14, fontWeight: '500' },
+  aboutEntityFooter: {
+    color: colors.mutedForeground,
+    fontSize: 11, lineHeight: 16,
+    textAlign: 'center', marginTop: 16,
   },
   // `labelCls + ' mb-1'` on web — 4px extra below the "Chat" label
   chatCardLabel: { marginBottom: 4 },
