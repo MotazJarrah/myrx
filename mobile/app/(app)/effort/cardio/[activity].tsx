@@ -53,6 +53,14 @@ import {
   SWIMMING_BASE_NAME,
   parseSwimStroke,
   isSwimActivity,
+  // Air Bike calorie-mode helpers — air bike is programmed in calories
+  // (not pace/distance) so it routes to AirBikeDetail with its own
+  // cal/min anchoring and AEROBIC/THRESHOLD/SPRINT zone targets.
+  AIR_BIKE_ACTIVITY,
+  isAirBikeActivity,
+  parseAirBikeLabel,
+  calsPerMinFromEffort,
+  genderBaselineCalsPerMin,
 } from '../../../../src/lib/movements'
 import { colors, palette, alpha, withAlpha, fonts } from '../../../../src/theme'
 
@@ -1328,6 +1336,18 @@ export default function CardioDetailRoute() {
   if (mode === 'duration') {
     return <DurationDetail activity={activity} efforts={efforts} onDelete={handleDeleteEffort} />
   }
+  // Air Bike routes to its own AirBikeDetail because the calorie-based
+  // training model is fundamentally different from pace zones:
+  //   • The user's best metric is cal/min (rate), not per-km pace.
+  //   • Zones are AEROBIC / THRESHOLD / SPRINT (CrossFit / HIIT names),
+  //     anchored on the user's peak cal/min rate.
+  //   • Calorie targets scale linearly with the user's rate — a faster
+  //     athlete gets more cals per interval.
+  //   • Chart Y-axis is NON-reversed (higher rate = trend UP).
+  // See "Air Bike detail card — locked design spec" in CLAUDE.md.
+  if (isAirBikeActivity(activity)) {
+    return <AirBikeDetail efforts={efforts} onDelete={handleDeleteEffort} />
+  }
   // Swimming gets its own consolidated component because:
   //   • Hero card layout is fundamentally different (3 values not 2 —
   //     reps × distance + pace + leaving interval).
@@ -2356,6 +2376,411 @@ function SwimmingDetail({
             const rightVal = paceSecsPerKm !== null
               ? `${fmtPaceSecsPer100m(paceSecsPerKm / 10)}${paceUnitLabel}`
               : '—'
+            return (
+              <DeleteAction
+                key={e.id}
+                onDelete={() => onDelete(e.id)}
+                style={i < arr.length - 1 ? s.listRowDivider : undefined}
+                bg={colors.card}
+              >
+                <View style={s.listRow}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={s.listRowName}>
+                      {e.label.split(' · ').slice(1).join(' · ')}
+                    </Text>
+                    <Text style={s.listRowDate}>
+                      {new Date(e.created_at).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  <Text style={s.valAmber}>{rightVal}</Text>
+                </View>
+              </DeleteAction>
+            )
+          })}
+        </View>
+      </AnimateRise>
+
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AirBikeDetail — calorie-anchored coaching surface (May 17 2026 lock)
+// ─────────────────────────────────────────────────────────────────────────────
+// Air bikes are fan-resistance machines (Assault, Echo, Rogue, Schwinn).
+// Effort is exponential — push harder, get harder resistance — so the
+// entire training methodology is built around short intense intervals
+// measured in CALORIES, not pace or distance. The detail page anchors
+// every zone target on the user's peak cal/min rate; the wheel input
+// on the log form captures Calories + Time (no distance, no speed).
+//
+//   • Best metric: peak cal/min rate (cals ÷ minutes for the user's best
+//     logged effort). Falls back to a gender-aware baseline (18 / 13 /
+//     15 for male / female / other) if no efforts logged yet.
+//   • Zones: AEROBIC (steady aerobic ride), THRESHOLD (sustained hard
+//     intervals), SPRINT (max-effort sprint intervals). Names drawn
+//     from CrossFit / HIIT coaching conventions where "sprint" is
+//     significantly more associated than the generic "VO2 max".
+//   • Calorie targets scale linearly with the user's rate so a faster
+//     athlete gets more cals per interval (each rep stays roughly the
+//     same wall-clock length).
+//
+// Famous benchmarks NOT yet shipped: 100-cal test, EMOM cal ladders,
+// Death by Calories. v2 territory.
+
+type AirBikeZone = 'aerobic' | 'threshold' | 'sprint'
+const AIR_BIKE_ZONE_ORDER: readonly AirBikeZone[] = ['sprint', 'threshold', 'aerobic']
+
+interface AirBikeZoneCfg {
+  label:      string
+  shortLabel: string
+  whyText:    string
+  /** Zone duration multiplier in minutes (per rep, or total for continuous). */
+  durationMin: number
+  /** Intensity factor relative to peak cal/min rate (0–1). */
+  intensity:   number
+  /** Number of reps (1 for continuous zones). */
+  reps:        number
+  /** Rest between reps in seconds (0 for continuous). */
+  restSecs:    number
+}
+
+const AIR_BIKE_ZONE_CONFIG: Record<AirBikeZone, AirBikeZoneCfg> = Object.freeze({
+  sprint: {
+    label:       'SPRINT',
+    shortLabel:  'SPRINT',
+    whyText:     'Max-effort calorie sprints with full recovery. Builds peak power output and trains the body to clear lactate during all-out work. The bread and butter of air bike training — Tabata-style intervals, EMOM cal sprints, and famous benchmark tests like the 100-cal time trial. 1–2 sessions per week with full recovery between.',
+    durationMin: 0.5,    // ~30 sec per rep at peak intensity
+    intensity:   1.0,    // 100% of peak rate
+    reps:        8,
+    restSecs:    45,
+  },
+  threshold: {
+    label:       'THRESHOLD',
+    shortLabel:  'THRESHOLD',
+    whyText:     'Sustained hard intervals at the edge of what you can hold. Trains lactate clearance and the ability to maintain high output past the burn. Longer reps than sprint, less rest. The most productive zone for improving the cal/min rate that anchors every other prescription.',
+    durationMin: 1.0,    // ~1 min per rep
+    intensity:   0.85,   // 85% of peak rate
+    reps:        5,
+    restSecs:    30,
+  },
+  aerobic: {
+    label:       'AEROBIC',
+    shortLabel:  'AEROBIC',
+    whyText:     "Steady continuous ride at a comfortable pace — conversational on dry land. Builds the aerobic engine that supports the harder zones. Air bike doesn't really do 'easy' (fan resistance is exponential), but the lowest-intensity work the machine handles still has training value as recovery + base.",
+    durationMin: 5.0,    // ~5 min continuous
+    intensity:   0.65,   // 65% of peak rate
+    reps:        1,
+    restSecs:    0,
+  },
+})
+
+interface AirBikeZoneRx {
+  /** Cals per rep (for interval zones) or total cals (for continuous). */
+  calsPerRep:        number
+  /** Estimated wall-clock time per rep in seconds. */
+  estimatedSecsPerRep: number
+  /** Number of reps (1 for continuous). */
+  reps:              number
+  /** Rest between reps in seconds (0 for continuous). */
+  restSecs:          number
+  /** Short label for tile display. */
+  shortWork:         string  // "8 × 9 cal"
+  /** Short rate label for tile. */
+  shortRate:         string  // "100% effort"
+}
+
+function buildAirBikeZoneRx(zone: AirBikeZone, peakCalsPerMin: number): AirBikeZoneRx {
+  const cfg = AIR_BIKE_ZONE_CONFIG[zone]
+  // Cal target per rep = peak rate × duration × intensity factor.
+  // Rounded to nearest whole calorie (the machine display shows ints).
+  const rawCals = peakCalsPerMin * cfg.durationMin * cfg.intensity
+  const calsPerRep = Math.max(1, Math.round(rawCals))
+  // Estimated time at the prescribed intensity. The user does each rep
+  // "as fast as they can" but this gives them a rough wall-clock anchor.
+  const estimatedSecsPerRep = Math.round((calsPerRep / (peakCalsPerMin * cfg.intensity)) * 60)
+  const shortWork = cfg.reps > 1
+    ? `${cfg.reps} × ${calsPerRep} cal`
+    : `${calsPerRep} cal`
+  const shortRate = `${Math.round(cfg.intensity * 100)}% effort`
+  return {
+    calsPerRep,
+    estimatedSecsPerRep,
+    reps:     cfg.reps,
+    restSecs: cfg.restSecs,
+    shortWork,
+    shortRate,
+  }
+}
+
+function getAirBikeZoneCue(zone: AirBikeZone, rx: AirBikeZoneRx): string {
+  const cfg = AIR_BIKE_ZONE_CONFIG[zone]
+  if (cfg.reps === 1) {
+    return `Ride continuously and hit ${rx.calsPerRep} cals at a comfortable conversational pace. Aim for about ${Math.round(cfg.durationMin)} minutes of steady output.`
+  }
+  if (zone === 'sprint') {
+    return `Sprint ${rx.calsPerRep} cals as fast as you can — go max effort. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+  }
+  // threshold
+  return `Hold ${rx.calsPerRep} cals at a sustained hard pace — uncomfortable but doable. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+}
+
+function AirBikeDetail({
+  efforts, onDelete,
+}: {
+  efforts:  Effort[]
+  onDelete: (id: string) => void
+}) {
+  const { profile } = useAuth()
+
+  // Peak cal/min rate across all efforts. Each effort's rate is
+  // calsPerMinFromEffort(cals, timeSecs) computed from the label. The
+  // user's "best" is the MAX rate they've ever achieved.
+  const peakCalsPerMin = useMemo(() => {
+    let peak = 0
+    for (const e of efforts) {
+      const parsed = parseAirBikeLabel(e.label)
+      if (!parsed || !parsed.timeSecs) continue
+      const rate = calsPerMinFromEffort(parsed.cals, parsed.timeSecs)
+      if (rate > peak) peak = rate
+    }
+    return peak
+  }, [efforts])
+
+  // If the user hasn't logged any air bike efforts yet, bootstrap with
+  // a gender-aware baseline cal/min so the zone prescriptions show
+  // reasonable starting targets. Once they log any effort, their actual
+  // rate replaces the baseline (peak > 0 takes precedence).
+  const baselineCalsPerMin = useMemo(
+    () => genderBaselineCalsPerMin(profile?.gender ?? null),
+    [profile?.gender],
+  )
+  const effectiveRate = peakCalsPerMin > 0 ? peakCalsPerMin : baselineCalsPerMin
+  const hasLoggedRate = peakCalsPerMin > 0
+
+  // Chart data — cal/min over time. Y-axis NOT reversed (higher rate =
+  // better progress = line trends UP) — distinct from pace charts where
+  // lower-is-better and the axis is reversed.
+  const chartData = useMemo(() => efforts
+    .map(e => {
+      const parsed = parseAirBikeLabel(e.label)
+      if (!parsed || !parsed.timeSecs) return { ts: e.created_at, y: -1 }
+      const rate = calsPerMinFromEffort(parsed.cals, parsed.timeSecs)
+      return { ts: e.created_at, y: rate }
+    })
+    .filter(d => d.y >= 0)
+  , [efforts])
+
+  // UI state — selected zone for hero card display. Default = SPRINT
+  // (slot 0, hardest first per the carousel rule in Pattern 4).
+  const [selectedZone, setSelectedZone] = useState<AirBikeZone>(AIR_BIKE_ZONE_ORDER[0])
+  const [zoneInfoOpen, setZoneInfoOpen] = useState(false)
+  const selectedCfg = AIR_BIKE_ZONE_CONFIG[selectedZone]
+  const selectedRx  = useMemo(
+    () => buildAirBikeZoneRx(selectedZone, effectiveRate),
+    [selectedZone, effectiveRate],
+  )
+  const selectedCue = useMemo(
+    () => getAirBikeZoneCue(selectedZone, selectedRx),
+    [selectedZone, selectedRx],
+  )
+
+  return (
+    <View style={s.page}>
+
+      {/* Header — h1 + best cal/min subtitle */}
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{AIR_BIKE_ACTIVITY}</Text>
+        {hasLoggedRate ? (
+          <View style={s.subRow}>
+            <Text style={s.subText}>Best — </Text>
+            <TickerNumber
+              value={`${effectiveRate.toFixed(1)} cal/min`}
+              fontSize={14}
+              color={palette.amber[400]}
+              fontWeight="600"
+            />
+          </View>
+        ) : (
+          <Text style={s.subText}>
+            No efforts logged yet · using {baselineCalsPerMin} cal/min as a starting estimate
+          </Text>
+        )}
+      </View>
+
+      {/* Progression plan card */}
+      <AnimateRise delay={0} style={s.card}>
+        <Text style={s.h2}>Your progression plan</Text>
+        <Text style={s.helpTextSm}>
+          Three zones to train, each anchored on your cal/min rate. Tap a zone to see its prescription.
+        </Text>
+
+        {/* Zone tile row — 3 fixed zones in hardest-first order
+            (SPRINT → THRESHOLD → AEROBIC). Tappable to switch the
+            hero card content below. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ alignItems: 'center', paddingVertical: 4, paddingHorizontal: 2 }}
+          style={{ marginHorizontal: -2 }}
+        >
+          {AIR_BIKE_ZONE_ORDER.map((zone, idx) => {
+            const isSelected = selectedZone === zone
+            const isLast     = idx === AIR_BIKE_ZONE_ORDER.length - 1
+            const rx         = buildAirBikeZoneRx(zone, effectiveRate)
+            return (
+              <Fragment key={zone}>
+                <Pressable
+                  onPress={() => { setSelectedZone(zone); setZoneInfoOpen(false) }}
+                  style={[s.queueTile, isSelected && s.queueTileSelected]}
+                >
+                  <Text style={[s.queueTileZone, isSelected && s.queueTileZoneSelected]}>
+                    {AIR_BIKE_ZONE_CONFIG[zone].shortLabel}
+                  </Text>
+                  <Text style={[s.queueTileWork, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
+                    {rx.shortWork}
+                  </Text>
+                  <Text style={[s.queueTileTime, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
+                    {rx.shortRate}
+                  </Text>
+                </Pressable>
+                {!isLast && (
+                  <View style={s.queueChevron}>
+                    <ChevronRight
+                      size={22}
+                      color={withAlpha(palette.amber[400], 0.7)}
+                      strokeWidth={2.5}
+                      style={{ transform: [{ scaleY: 1.3 }] }}
+                    />
+                  </View>
+                )}
+              </Fragment>
+            )
+          })}
+        </ScrollView>
+
+        {/* Hero card — three stacked TickerNumber rows.
+            Row 1 = work (reps × cals or "N cal continuous")
+            Row 2 = est wall-clock time per rep
+            Row 3 = rest between reps (or "no rest" for continuous) */}
+        <View style={s.hero}>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+            <Pressable
+              onPress={() => setZoneInfoOpen(o => !o)}
+              style={s.heroZonePillButton}
+            >
+              <Text style={s.heroZonePillText} numberOfLines={1}>
+                {selectedCfg.label}
+              </Text>
+              <Info size={11} color={palette.amber[400]} />
+            </Pressable>
+          </View>
+
+          {zoneInfoOpen && (
+            <Animated.View
+              entering={FadeInUp.duration(200)}
+              exiting={FadeOutUp.duration(180)}
+              style={s.heroInfoPanel}
+            >
+              <Text style={s.heroInfoPanelTitle}>
+                {selectedCfg.label}
+              </Text>
+              <Text style={s.heroInfoPanelBody}>
+                {selectedCfg.whyText}
+              </Text>
+            </Animated.View>
+          )}
+
+          <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+            <View style={s.heroValueRow}>
+              <TickerNumber
+                value={selectedRx.shortWork}
+                fontSize={30}
+                color={palette.amber[400]}
+                fontWeight="700"
+              />
+              <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                the work
+              </Text>
+            </View>
+
+            <View style={s.heroValueRow}>
+              <TickerNumber
+                value={fmtSecs(selectedRx.estimatedSecsPerRep)}
+                fontSize={30}
+                color={palette.amber[400]}
+                fontWeight="700"
+              />
+              <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                {selectedRx.reps > 1 ? 'est. per rep' : 'est. total'}
+              </Text>
+            </View>
+
+            {selectedRx.reps > 1 && (
+              <View style={s.heroValueRow}>
+                <TickerNumber
+                  value={fmtSecs(selectedRx.restSecs)}
+                  fontSize={30}
+                  color={palette.amber[400]}
+                  fontWeight="700"
+                />
+                <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                  rest between
+                </Text>
+              </View>
+            )}
+          </Animated.View>
+
+          <Animated.View
+            layout={LinearTransition.duration(200)}
+            style={s.heroSep}
+          >
+            <Text style={s.heroCue}>{selectedCue}</Text>
+          </Animated.View>
+        </View>
+
+        <Text style={s.tinyText}>Calorie-anchored zones · gender-calibrated baseline</Text>
+      </AnimateRise>
+
+      {/* Chart — cal/min over time. Y-axis NOT reversed (higher = better;
+          line trends UP as the user improves). Renders even with a single
+          data point. */}
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
+          <Text style={s.h2}>Cal/min over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={peakCalsPerMin > 0 ? peakCalsPerMin : null}
+            yWidth={52}
+            yTickFormatter={(v) => v.toFixed(1)}
+            tooltipValueFormatter={(v) => `${v.toFixed(1)} cal/min`}
+            tooltipLabel="Rate"
+            lineColor={palette.amber[400]}
+            yDomain={{
+              min: (mn) => Math.max(0, Math.round(mn * 0.95 * 10) / 10),
+              max: (mx) => Math.round(mx * 1.05 * 10) / 10,
+            }}
+            caption={
+              <Text style={s.tinyText}>Dashed = personal best</Text>
+            }
+          />
+        </AnimateRise>
+      )}
+
+      {/* History — each row shows cal/min on the right (the air-bike
+          canonical rate metric, derived from the stored label). */}
+      <AnimateRise delay={500} style={s.cardNoPad}>
+        <View style={s.listHeader}>
+          <Text style={s.listHeaderText}>All entries</Text>
+        </View>
+        <View>
+          {[...efforts].reverse().map((e, i, arr) => {
+            const parsed = parseAirBikeLabel(e.label)
+            const rate = parsed && parsed.timeSecs
+              ? calsPerMinFromEffort(parsed.cals, parsed.timeSecs)
+              : 0
+            const rightVal = rate > 0 ? `${rate.toFixed(1)} cal/min` : '—'
             return (
               <DeleteAction
                 key={e.id}

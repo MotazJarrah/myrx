@@ -1116,6 +1116,86 @@ The mirror update lives in: the Supabase `movements` table (single source of tru
 
 ---
 
+### Air Bike detail card — locked design spec
+
+This is the spec for the air-bike-native coaching surface on `[activity].tsx` (mobile) — fired when `isAirBikeActivity(activity)` (i.e. `activity === 'Air Bike'`). Routes to its own `AirBikeDetail` component rather than the generic `PaceDetail`, because air bike training mechanics are fundamentally different from running/cycling/etc:
+
+1. **Training is programmed in CALORIES, not distance or pace.** Air bikes (Assault, Echo, Rogue, Schwinn Airdyne) are fan-resistance machines — effort is exponential, you cannot go "easy" because the fan punishes any sustained output. Real workouts: "8 × 10 cal sprint, 45s rest," "Tabata cals," "Death by Calories (1 cal min 1, 2 cal min 2, ...)," "100-cal test for time." Nobody trains air bike at "2.5 km steady-state pace" — that prescription doesn't exist in any real program.
+2. **The user's training-anchor metric is CAL/MIN rate**, not pace. Computed as `total_cals ÷ total_time_min` from any logged effort. The user's "best" is the MAX rate across all their efforts — a single hard session sets the rate; longer easier sessions naturally show lower rates so the MAX stays at the peak.
+3. **Zone names: AEROBIC / THRESHOLD / SPRINT**, not Endurance/Threshold/VO2 Max. CrossFit and HIIT coaching communities use these names for air bike work — "sprint" is significantly more associated with air bike than the generic "VO2 max" sports-science term. Threshold stays (the term spans every cardio discipline). Aerobic replaces Endurance because air bike's "easy" zone is still moderately taxing — "aerobic" reads more accurately than "endurance" for a 5-min steady ride.
+4. **Three slots in HARDEST-FIRST order (per Pattern 4):** SPRINT (slot 0) → THRESHOLD (slot 1) → AEROBIC (slot 2). Default landing on SPRINT — matches the universal "always slot 0" rule.
+
+**Per-zone session prescriptions (LOCKED):**
+
+Each zone target = `peakCalsPerMin × duration × intensityFactor`, rounded to nearest whole calorie (the machine display is integer-only). Numbers below show a worked example for an intermediate-male user at 18 cal/min baseline.
+
+| Zone | Duration (min/rep) | Intensity | Reps | Rest | 18 cal/min example |
+|------|--------------------|-----------|------|------|---------------------|
+| **SPRINT** | 0.5 | 100% | 8 | 45 sec | 8 × 9 cal max effort |
+| **THRESHOLD** | 1.0 | 85% | 5 | 30 sec | 5 × 15 cal sustained hard |
+| **AEROBIC** | 5.0 continuous | 65% | 1 | 0 | 59 cal continuous easy |
+
+A faster user (e.g. 25 cal/min advanced) gets bigger targets: 8 × 13 cal sprints, 5 × 21 cal threshold, 81 cal aerobic. A slower user (e.g. 13 cal/min) gets smaller targets: 8 × 7 cal sprints, 5 × 11 cal threshold, 42 cal aerobic. The targets scale linearly with the rate so each rep stays roughly the same wall-clock duration regardless of fitness level.
+
+**Cold-start (gender-aware baseline cal/min):**
+
+Users with no logged air bike efforts get bootstrapped with a gender-aware baseline so the zone prescriptions show reasonable starting targets:
+
+- `profile.gender === 'male'` → 18 cal/min baseline (typical intermediate-male output on an Assault Bike at normal resistance)
+- `profile.gender === 'female'` → 13 cal/min baseline (typical intermediate-female output — power-based scaling reflects average watt differences)
+- Other / unset → 15 cal/min (averaged)
+
+The baseline only affects the page on first visit. After the first logged effort, the user's actual `peakCalsPerMin` replaces the baseline (peak > 0 always takes precedence). The page header reads "No efforts logged yet · using N cal/min as a starting estimate" until the user logs their first effort.
+
+**Layout — single page, top to bottom (LOCKED):**
+
+1. **Header** — back chevron + "Air Bike" title + subtitle: `Best — N cal/min` (TickerNumber on the rate value). When no efforts: `No efforts logged yet · using N cal/min as a starting estimate`.
+2. **Progression plan card** (`<AnimateRise delay={0}>`):
+   - Title `Your progression plan` + helper text "Three zones to train, each anchored on your cal/min rate. Tap a zone to see its prescription."
+   - **Zone tile row** — 3 fixed tiles in HARDEST-FIRST order (SPRINT → THRESHOLD → AEROBIC), each showing zone label + work shape (`8 × 9 cal` or `59 cal`) + intensity (`100% effort`). Tappable to switch the hero card content below. Chevrons between tiles match cardio pattern (Pattern 3).
+   - **Hero card** (amber chrome): top-right info pill (zone label + Info icon, tappable for inline "why this zone" panel — Pattern 5). Three stacked TickerNumber rows:
+     - Row 1 = work (`8 × 9 cal` for intervals, `59 cal` for continuous AEROBIC)
+     - Row 2 = estimated wall-clock time (per rep for intervals, total for continuous)
+     - Row 3 = rest between reps (omitted for AEROBIC since it's continuous)
+   - Full coaching cue underneath the thin separator: e.g. `Sprint 9 cals as fast as you can — go max effort. Rest 45 sec, repeat 8 times. Each rep should take about 30 sec.`
+   - Attribution: `Calorie-anchored zones · gender-calibrated baseline`
+3. **Chart** (`<AnimateRise delay={250}>`) — cal/min rate over time. **Y-axis NOT reversed** — higher rate = better progress = line trends UP. Distinct from pace charts where the Y-axis is reversed (lower = faster = trend down). Reference line at peak rate.
+4. **Log list** (`<AnimateRise delay={500}>`) — each row shows the cal/min rate on the right.
+
+**Log form (`cardio.tsx`) — calorie-input mode (LOCKED):**
+
+When `activity === 'Air Bike'` (`isCalorieMode`):
+- **Distance and Speed are dropped entirely** from the form. Calorie mode is a 2-column grid: **Calories | Time**. Both columns use `gridLarge` (flex 2.55, symmetric) since "150 cal" and "5:00" are similar widths.
+- **Calories wheel**: INTEGER mode, step 1, min 0, max 300. Range covers a 100-cal benchmark test (single rep) up to a long aerobic session (~200+ cal). Step 1 matches the machine display's integer-only readout.
+- **Time wheel**: standard `mm:ss`, max 99 minutes.
+- **Live chip**: `Rate — N.N cal/min` (computed as `calsPerMinFromEffort(cals, timeSecs)`). One chip only, no pace / session-time chips.
+- **Save label format**: `Air Bike · 50 cal in 5:00`. The bracketed activity name + period + cal count + time. `parseAirBikeLabel` on the read side extracts this back into `{cals, timeSecs}`.
+- **Save value format**: `12.0 cal/min` (the derived rate, 1 decimal). Stored in the `value` column for consistency with the pace activities (which store pace strings in `value`). The detail page parses this directly, OR re-computes from the label for redundancy.
+
+**Activities list (`cardio.tsx`):**
+
+The "Your activities" row for Air Bike shows `Best rate — N.N cal/min` on the right, not `Best pace`. Aggregation logic finds the MAX cal/min rate across all logged Air Bike efforts (higher = better) — distinct from the other pace-mode activities where the MIN pace seconds is the best.
+
+**Helpers in `mobile/src/lib/movements.ts`:**
+
+| Function | Purpose |
+|----------|---------|
+| `AIR_BIKE_ACTIVITY` | The literal string `'Air Bike'` |
+| `isAirBikeActivity(name)` | True iff name equals AIR_BIKE_ACTIVITY |
+| `parseAirBikeLabel(label)` | Parse `"Air Bike · N cal in M:SS"` → `{ cals, timeSecs }` |
+| `calsPerMinFromEffort(cals, timeSecs)` | Compute cal/min rate (returns 0 for invalid) |
+| `genderBaselineCalsPerMin(gender)` | Cold-start baseline (18/13/15 for male/female/other) |
+
+**Out of v1 scope (deferred):**
+
+- **100-cal benchmark test** — a famous standalone benchmark ("how fast can you hit 100 cals?"). Would require a separate "test mode" on the log form and a dedicated chart line on the detail page. Defer until users ask for it.
+- **EMOM cal ladders** ("3 cal min 1, 6 cal min 2, 9 cal min 3, ...") — interval programming pattern. Out of scope; one prescription per zone for now.
+- **Watts-based zones** — air bikes also display watts. More precise than calories (calories include drivetrain efficiency assumptions) but requires the user to read a different machine field. Defer until HR / power integration phase.
+- **Test-set tracking** — users who do a 100-cal time trial would want to log that specifically and see their best 100-cal time over time. v2.
+- **AirBikeConsolidatedDetail wrapper** — air bike has only one variant, no consolidation needed. If we ever add variants (e.g., one-arm air bike, seated vs standing), the Sled Drag / Swimming wrapper pattern applies.
+
+---
+
 ### Swimming detail card — locked design spec
 
 This is the spec for the swim-native coaching surface on `[activity].tsx` (mobile) — fired when `isSwimActivity(activity)` (i.e. activity is `'Swimming'`, any `'Swimming [Stroke]'` variant, or a legacy bare `'Swimming · ...'` effort). Routes through `SwimmingConsolidatedDetail` (the stroke-pill wrapper) which then renders `SwimmingDetail` filtered to the active stroke. NOT the generic `PaceDetail`, because swim mechanics differ from running/cycling in five fundamental ways:

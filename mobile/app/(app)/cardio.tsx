@@ -36,6 +36,13 @@ import {
   swimStrokeFromMovementName,
   SWIM_STROKE_LABELS,
   type SwimStroke,
+  // Air Bike calorie-input mode helpers — air bike is programmed in
+  // calories, not distance/speed. The log form swaps Distance+Speed
+  // for Calories+Time when activity = Air Bike.
+  AIR_BIKE_ACTIVITY,
+  isAirBikeActivity,
+  parseAirBikeLabel,
+  calsPerMinFromEffort,
 } from '../../src/lib/movements'
 import MovementSearch from '../../src/components/MovementSearch'
 import PhantomWheel from '../../src/components/PhantomWheel'
@@ -174,6 +181,17 @@ export default function Cardio() {
   // Time wheel for a Speed wheel and computes Time from distance ÷ speed.
   const isSpeedMode = SPEED_INPUT_ACTIVITIES.has(activity)
 
+  // Air Bike calorie-input third column (separate from speedValue —
+  // air bike is no longer in SPEED_INPUT_ACTIVITIES). Stores the
+  // integer calorie count the user has dialed in. Saved label format:
+  // "Air Bike · N cal in M:SS" — distance and pace are not stored.
+  const [calsValue, setCalsValue] = useState('')
+
+  // Air bike mode detection. When the user picks Air Bike, the form
+  // swaps Distance+Speed for Calories+Time. Save label changes shape.
+  // Detail page routes to AirBikeDetail (separate from PaceDetail).
+  const isCalorieMode = isAirBikeActivity(activity)
+
   // Swim-mode detection. Swimming has its own form layout:
   //   • Distance wheel runs in INTEGER mode (step 25) in meters or yards,
   //     not the decimal-km wheel used for running/cycling. Pool distances
@@ -201,24 +219,33 @@ export default function Cardio() {
       setDistValue('')
       setTimeStr('00:00')
       setSpeedValue('')
+      setCalsValue('')
+    } else if (isCalorieMode) {
+      setDistValue('')
+      setSpeedValue('')
+      setCalsValue('0')         // integer calories
+      setTimeStr('00:00')
     } else if (isSpeedMode) {
       setDistValue('0')
       setSpeedValue('0')
       setTimeStr('')           // derived from speed × distance, not user-entered
+      setCalsValue('')
     } else if (isSwimMode) {
       setDistValue('0')        // integer meters/yards
       setTimeStr('00:00')
       setSpeedValue('')
+      setCalsValue('')
     } else {
       setDistValue('0')
       setTimeStr('00:00')
       setSpeedValue('')
+      setCalsValue('')
     }
-  }, [mode, isSpeedMode, isSwimMode])
+  }, [mode, isSpeedMode, isSwimMode, isCalorieMode])
 
   // ── Clear saved/error on any input change ──────────────────────────────────
   useEffect(() => { setSaved(false); setSaveError('') },
-    [activity, distValue, distUnit, timeStr, speedValue])
+    [activity, distValue, distUnit, timeStr, speedValue, calsValue])
 
   // ── Suggestion mode ────────────────────────────────────────────────────────
   const suggestionMode = !isAdmin && !activity && pendingQuery.trim() !== '' &&
@@ -281,7 +308,29 @@ export default function Cardio() {
             })
             return
           }
-          // Non-swim — existing aggregation logic
+          // Air Bike (calorie mode): label = "Air Bike · 50 cal in 5:00",
+          // value = "12.0 cal/min". "Best" = HIGHEST cal/min rate, not
+          // lowest pace. We stash the rate in `secs` (re-used field;
+          // higher = better unlike pace) and the display value reads
+          // "12.0 cal/min" directly from the stored value column.
+          if (isAirBikeActivity(head)) {
+            const parsed = parseAirBikeLabel(e.label)
+            if (!parsed || !parsed.timeSecs) return
+            const rate = calsPerMinFromEffort(parsed.cals, parsed.timeSecs)
+            if (rate <= 0) return
+            const existing = map.get(head)
+            // Higher rate is better — keep the MAX across all efforts.
+            if (!existing || rate > existing.secs) {
+              map.set(head, {
+                name:         head,
+                displayValue: `${rate.toFixed(1)} cal/min`,
+                secs:         rate,
+                mode:         'pace',
+              })
+            }
+            return
+          }
+          // Non-swim / non-airbike — existing aggregation logic
           const name    = head
           const actMode = (dbMovements.find(m => m.name === name)?.cardio_mode as 'pace' | 'duration' | undefined) || 'pace'
           if (actMode === 'pace') {
@@ -379,8 +428,13 @@ export default function Cardio() {
     return `${m}:${String(sc).padStart(2, '0')}/mi`
   })()
 
+  // Air Bike's gate is calories + time (no distance). Other pace-mode
+  // activities require distance + time; duration mode just needs time.
+  const calsNum = Number(calsValue) || 0
   const canSave = !!activity?.trim() && (
-    mode === 'pace' ? (distKm > 0 && effectiveTimeSecs > 0) : effectiveTimeSecs > 0
+    isCalorieMode
+      ? (calsNum > 0 && effectiveTimeSecs > 0)
+      : (mode === 'pace' ? (distKm > 0 && effectiveTimeSecs > 0) : effectiveTimeSecs > 0)
   )
 
   const saveDisabled = suggestionMode
@@ -400,23 +454,34 @@ export default function Cardio() {
     setSaveError('')
 
     // Label format depends on mode:
-    //   • Swim mode:     "Swimming · 1500 m in 25:00" (integer m/yd)
-    //   • Pace mode:     "Running · 5 km in 37:55"
-    //   • Speed mode:    same as pace mode (storage is uniform)
-    //   • Duration mode: "StairMill · 15:00"
-    // The value column is always seconds-per-km pace for pace/swim/speed
-    // activities, or the bare time for duration — uniform on the read side.
+    //   • Air Bike (cal): "Air Bike · 50 cal in 5:00"
+    //   • Swim mode:      "Swimming · 1500 m in 25:00" (integer m/yd)
+    //   • Pace mode:      "Running · 5 km in 37:55"
+    //   • Speed mode:     same as pace mode (storage is uniform)
+    //   • Duration mode:  "StairMill · 15:00"
+    // The value column:
+    //   • Air Bike (cal): "N cal/min" (rounded to 0.1; derived from cals÷min)
+    //   • Pace mode:      seconds-per-km pace
+    //   • Duration mode:  bare time
+    // Uniform on the read side per parseEffortLabel / parseAirBikeLabel.
     let label: string
-    if (mode === 'pace') {
+    let value: string
+    if (isCalorieMode) {
+      const cals = Math.round(Number(calsValue))
+      label = `${activity} · ${cals} cal in ${effectiveTimeStr}`
+      const rate = calsPerMinFromEffort(cals, effectiveTimeSecs)
+      value = `${rate.toFixed(1)} cal/min`
+    } else if (mode === 'pace') {
       if (isSwimMode) {
         label = `${activity} · ${Math.round(Number(distValue))} ${swimUnit} in ${effectiveTimeStr}`
       } else {
         label = `${activity} · ${parseFloat(Number(distValue).toFixed(3))} ${distUnit} in ${effectiveTimeStr}`
       }
+      value = livePaceKm!
     } else {
       label = `${activity} · ${effectiveTimeStr}`
+      value = effectiveTimeStr
     }
-    const value = mode === 'pace' ? livePaceKm! : effectiveTimeStr
 
     const { error } = await supabase.from('efforts').insert({
       user_id: user.id, type: 'cardio', label, value,
@@ -424,7 +489,7 @@ export default function Cardio() {
     if (error) { setSaveError('Failed to save. Try again.'); return }
     setSaved(true)
     setTimeout(() => {
-      setActivity(''); setDistValue(''); setTimeStr(''); setSpeedValue('')
+      setActivity(''); setDistValue(''); setTimeStr(''); setSpeedValue(''); setCalsValue('')
       setPendingQuery(''); setMovementKey(k => k + 1)
     }, 1500)
   }
@@ -505,14 +570,16 @@ export default function Cardio() {
             */
           <>
             <Text style={s.helpText}>
-              {isSwimMode
-                ? "Log your best distance and time from this session — a single rep or a continuous swim, your choice."
-                : isSpeedMode
-                  ? "Log your distance and the speed you set on the machine. We'll compute the time for you."
-                  : 'Log your best distance and time from this session — even a single rep of an interval workout counts.'}
+              {isCalorieMode
+                ? "Log how many calories you hit on the machine display and the time it took. We'll compute your cal/min rate."
+                : isSwimMode
+                  ? "Log your best distance and time from this session — a single rep or a continuous swim, your choice."
+                  : isSpeedMode
+                    ? "Log your distance and the speed you set on the machine. We'll compute the time for you."
+                    : 'Log your best distance and time from this session — even a single rep of an interval workout counts.'}
             </Text>
 
-            {/* Triple grid — three layouts share the same chrome (75 px field
+            {/* Triple grid — FOUR layouts share the same chrome (75 px field
                 height, 8 px gap, 48 px Unit column — all GLOBAL spec from
                 CLAUDE.md). Big-column flex differs by mode:
 
@@ -539,9 +606,47 @@ export default function Cardio() {
                     from profile.swim_unit — not a toggle (the user sets
                     this once in Settings; toggling per-log would be friction).
                   - Time stays mm:ss.
+
+                Calorie mode (Air Bike): Calories | Time (2 columns)
+                  - Calories is INTEGER wheel (step 1, min 0, max 300) — the
+                    user reads cal count off the machine display.
+                  - No distance, no speed, no unit column. Time stays mm:ss.
+                  - Both columns use gridLarge (flex 2.55, symmetric) since
+                    "150 cal" and "5:00" are similar widths. 2-column layout
+                    means the grid is more spacious than the 3-column ones.
             */}
             <View style={s.tripleGrid}>
-              {isSwimMode ? (
+              {isCalorieMode ? (
+                <>
+                  {/* Calories — integer wheel, no unit suffix. Cal count is
+                      what users read off the air bike's console; distance
+                      and pace are barely used in real air-bike programming. */}
+                  <View style={[s.field, s.gridLarge]}>
+                    <Text style={s.label}>Calories</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={Number(calsValue) || 0}
+                        onChange={(v) => setCalsValue(String(v))}
+                        step={1}
+                        min={0}
+                        max={300}
+                        unit="cal"
+                      />
+                    </WheelInput>
+                  </View>
+                  <View style={[s.field, s.gridLarge]}>
+                    <Text style={s.label}>Time</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={parseTimeStr(timeStr) || 0}
+                        onChange={(secs) => setTimeStr(formatMmSs(secs))}
+                        time="mm:ss"
+                        maxMinutes={99}
+                      />
+                    </WheelInput>
+                  </View>
+                </>
+              ) : isSwimMode ? (
                 <>
                   {/* Distance — integer wheel, no inline unit suffix (locked
                       chip in the middle column declares m or yd). */}
@@ -661,12 +766,23 @@ export default function Cardio() {
             </View>
 
             {/* Live chip(s) below the grid.
+                  - Air Bike (calorie mode):          one chip showing cal/min rate.
                   - Pace mode (user entered time):    one chip showing Pace.
                   - Speed mode (user entered speed):  TWO chips — Time
                     (primary, what the user usually wants to see fall out)
                     and Pace (secondary, what the system stores + classifies
                     zone with). Both render once distance + speed are > 0. */}
-            {isSpeedMode ? (
+            {isCalorieMode ? (
+              calsNum > 0 && effectiveTimeSecs > 0 ? (
+                <ChipAmber>
+                  <Activity size={14} color={palette.amber[400]} />
+                  <Text style={s.chipLabel}>Rate</Text>
+                  <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
+                    {calsPerMinFromEffort(calsNum, effectiveTimeSecs).toFixed(1)} cal/min
+                  </Text>
+                </ChipAmber>
+              ) : null
+            ) : isSpeedMode ? (
               effectiveTimeSecs > 0 && livePaceDisplay ? (
                 <>
                   <ChipAmber>
@@ -766,6 +882,14 @@ export default function Cardio() {
                     <>
                       <Text style={s.listRowSub}>Best time</Text>
                       <Text style={s.listRowVal}>{fmtSecs(act.secs)}</Text>
+                    </>
+                  ) : isAirBikeActivity(act.name) ? (
+                    /* Air Bike — calorie mode. Shows "Best rate — N cal/min"
+                       directly from the stored displayValue (set by the
+                       aggregation above). Higher = better, no inversion. */
+                    <>
+                      <Text style={s.listRowSub}>Best rate</Text>
+                      <Text style={s.listRowVal}>{act.displayValue}</Text>
                     </>
                   ) : act.name === SWIMMING_BASE_NAME ? (
                     /* Swimming — 4 stroke variants consolidated into one

@@ -35,9 +35,12 @@ export const SPEED_INPUT_ACTIVITIES = new Set<string>([
   'Running (Treadmill)',
   'Stationary Bike',
   'Bike Erg',
-  'Air Bike',
   'Elliptical',
 ])
+// Note: Air Bike was previously in SPEED_INPUT_ACTIVITIES but was moved
+// to CALORIE_INPUT_ACTIVITIES (May 17 2026) — air bike training is
+// programmed in calories, not speed/distance. See Air Bike detail card
+// spec in CLAUDE.md for the full rationale.
 
 export function isSpeedMachine(activity: string): boolean {
   return SPEED_INPUT_ACTIVITIES.has(activity)
@@ -87,7 +90,6 @@ const SPEED_MAX_KMH: Record<string, number> = {
   'Running (Treadmill)': 30,
   'Stationary Bike':     50,
   'Bike Erg':            50,
-  'Air Bike':            40,
   'Elliptical':          25,
 }
 
@@ -194,6 +196,78 @@ export function isSwimActivity(activity: string | null | undefined): boolean {
   if (activity === SWIMMING_BASE_NAME) return true
   if (activity.startsWith('Swimming [')) return true
   return false
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Air Bike (May 17 2026)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Air bikes (Assault, Echo, Rogue, Schwinn Airdyne) are fan-resistance
+// machines. Effort is exponential — push harder, get harder resistance —
+// so the entire training methodology is built around short intense
+// intervals measured in CALORIES, NOT distance or pace. The log form
+// for Air Bike accepts Calories + Time (not Distance + Speed); the
+// detail page prescribes interval sets in calorie targets (e.g.,
+// "8 × 10 cal sprint, 45 sec rest").
+//
+// The user's "CSS-equivalent" on air bike is their peak cal/min rate
+// — derived from any logged effort as total_cal ÷ total_time_min.
+// Zone targets scale linearly with this rate so a faster user gets
+// bigger calorie targets per rep (their reps still last roughly the
+// same wall-clock time).
+
+export const AIR_BIKE_ACTIVITY = 'Air Bike'
+
+export function isAirBikeActivity(activity: string | null | undefined): boolean {
+  return activity === AIR_BIKE_ACTIVITY
+}
+
+/**
+ * Baseline cal/min rate for users who haven't logged an air bike effort
+ * yet (cold start). Once they log any effort, their actual cal/min
+ * replaces this baseline.
+ *
+ * Numbers reflect typical beginner-to-intermediate cal accumulation
+ * rates on an Assault Bike with the resistance set normally. They're
+ * gender-scaled because cal accumulation is power-dependent (watts),
+ * and men generate more power on average due to muscle mass + leverage.
+ * The Assault Bike's cal meter uses a fixed formula (~3.6 cal per
+ * watt-hour), so faster output → more cals/min.
+ *
+ *   • male   → 18 cal/min — typical intermediate male output
+ *   • female → 13 cal/min — typical intermediate female output
+ *   • other / unset → 15 cal/min — averaged
+ */
+export function genderBaselineCalsPerMin(gender: string | null | undefined): number {
+  if (gender === 'male') return 18
+  if (gender === 'female') return 13
+  return 15
+}
+
+/**
+ * Parse the cal-mode effort label "Air Bike · 50 cal in 5:00" → { cals, timeSecs }.
+ * Returns null for labels that don't match the air-bike format.
+ */
+export function parseAirBikeLabel(label: string | null | undefined): { cals: number; timeSecs: number | null } | null {
+  if (!label) return null
+  const part = label.split(' · ')[1] ?? ''
+  const m = part.match(/^(\d+)\s*cal\s+in\s+(\d+):(\d{2}(?::\d{2})?)$/)
+  if (!m) return null
+  const cals = parseInt(m[1], 10)
+  const timeStr = `${m[2]}:${m[3]}`
+  const timeParts = timeStr.split(':').map(Number)
+  let timeSecs: number | null = null
+  if (timeParts.length === 3) timeSecs = timeParts[0] * 3600 + timeParts[1] * 60 + timeParts[2]
+  else if (timeParts.length === 2) timeSecs = timeParts[0] * 60 + timeParts[1]
+  return { cals, timeSecs }
+}
+
+/**
+ * Convert (cals, timeSecs) to cal/min rate. Returns 0 for invalid input.
+ */
+export function calsPerMinFromEffort(cals: number, timeSecs: number | null): number {
+  if (!cals || !timeSecs || timeSecs <= 0) return 0
+  return cals / (timeSecs / 60)
 }
 
 const ISOMETRIC_LIST = [
