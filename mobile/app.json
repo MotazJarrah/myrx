@@ -69,7 +69,15 @@
         }
       ],
       "react-native-health-connect",
-      "./plugins/withHealthConnectPermissions"
+      "./plugins/withHealthConnectPermissions",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ]
     ],
     "scheme": "myrx",
     "experiments": {
