@@ -1752,19 +1752,17 @@ function SwimmingConsolidatedDetail({
   swimUnit: 'm' | 'yd'
   onDelete: (id: string) => void
 }) {
-  // Determine the HARDEST stroke the user has actually logged. Mirrors
-  // BW's "default landing = highest logged tier" rule. SWIM_STROKE_ORDER
-  // is hardest → easiest (butterfly first), so iterate forward and pick
-  // the first stroke with at least one logged effort. If nothing's
-  // logged, fall back to freestyle (most users start there and the
-  // empty-state card on FREE reads as the most natural "log your first
-  // swim" prompt).
-  const defaultStroke: SwimStroke = useMemo(() => {
-    for (const stroke of SWIM_STROKE_ORDER) {
-      if (efforts.some(e => parseSwimStroke(e.label) === stroke)) return stroke
-    }
-    return 'freestyle'
-  }, [efforts])
+  // Default active stroke = ALWAYS slot 0 (leftmost = butterfly).
+  // Universal rule across every consolidated carousel — see CLAUDE.md
+  // Pattern 4. Even if the user has only logged freestyle, the page
+  // opens on butterfly. Trade-off accepted: a user with one logged
+  // stroke sees an empty-state card on butterfly and has to swipe
+  // right to find their data, BUT every consolidated page opens the
+  // same way (left edge), which is more predictable than per-page
+  // "most-recent" / "hardest logged" heuristics. Empty-state cards on
+  // the other strokes also double as discoverability for "you can train
+  // butterfly too" prompts.
+  const defaultStroke: SwimStroke = SWIM_STROKE_ORDER[0]
 
   const [activeStroke, setActiveStroke] = useState<SwimStroke>(defaultStroke)
 
@@ -1970,7 +1968,7 @@ function SwimmingConsolidatedDetail({
                 fontSize: 11, fontWeight: '700', textTransform: 'uppercase',
                 letterSpacing: 0.5, color: palette.amber[400],
               }}>
-                {SWIM_STROKE_LABELS[activeStroke].short}
+                {SWIM_STROKE_LABELS[activeStroke].full}
               </Text>
             </Animated.View>
 

@@ -3068,19 +3068,14 @@ function SledDragConsolidatedDetail({
     return null
   }
 
-  // Default active variant = whichever has the most recent logged effort.
-  // If neither has efforts, default to push (the more common starting
-  // variant per CrossFit / Prowler programming).
-  const defaultVariant: SledVariant = useMemo(() => {
-    const sorted = [...efforts].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    )
-    for (const e of sorted) {
-      const v = variantOf(e.label)
-      if (v) return v
-    }
-    return 'push'
-  }, [efforts])
+  // Default active variant = ALWAYS slot 0 (leftmost). Universal rule
+  // across every consolidated carousel in the app (BW assist tiers,
+  // Swimming strokes, Sled Drag) — see CLAUDE.md Pattern 4. For Sled
+  // Drag that's PUSH; the user can swipe to PULL once they're on the
+  // page. Most-recent-variant logic was rejected because it produced
+  // surprising "page opens on the right side" behaviour after a single
+  // PULL session.
+  const defaultVariant: SledVariant = SLED_VARIANT_ORDER[0]
 
   const [activeVariant, setActiveVariant] = useState<SledVariant>(defaultVariant)
 

@@ -165,8 +165,22 @@ This is the BIG one — the canonical pattern for switching between variants of 
   - Weighted-standard adp zones: `STRENGTH → HYPERTROPHY → ENDURANCE` (heaviest load hardest, lightest easiest)
   - Swim strokes: `FLY → BREAST → BACK → FREE` (butterfly technically + physiologically hardest; freestyle easiest)
 - When variants are PARALLEL (different muscle groups, equipment configs, or stylistic choices with no clean hardness ordering), the order is arbitrary — pick what's intuitive. Example: Sled Drag `PUSH | PULL` (push is leg-dominant, pull is posterior-chain dominant — different stimuli, neither "harder").
-- **Default landing slot on first mount**: the LEFTMOST variant the user has actually logged. For BW that's the highest LOGGED tier (Full RX if reached, else next-down). For Swimming, the hardest stroke the user has logged (FLY if logged, else BREAST, else BACK, else FREE; fallback to FREE if nothing logged). For Sled Drag, whichever variant has the most-recent effort (since there's no hardness ranking to default to). This is implemented as a forward iteration over `VARIANT_ORDER` returning the first variant with a logged effort.
-- Why "hardest logged" not "always hardest": landing on a variant the user has never trained means they open the page to an empty-state card, which is poor UX. "Hardest logged" surfaces the user's frontier achievement — the most-impressive result they have.
+
+**Default landing slot on first mount (LOCKED — simple universal rule):**
+
+The page ALWAYS opens on **slot 0** (the leftmost pill), regardless of which variant the user logged most recently. Don't try to be clever with "most-recent" or "highest logged" heuristics — they produce surprising behaviour ("why did my Sled Drag page open on PULL?") and inconsistency across surfaces.
+
+Concretely:
+- **BW assist tiers** → slot 0 = highest logged tier (because `loggedTiers` array only contains logged tiers; leftmost = leftmost-of-logged = highest logged). If the user has only logged Band+Knee, the carousel only contains Band+Knee and slot 0 = Band+Knee.
+- **Swimming strokes** → slot 0 = Butterfly. All 4 stroke slots always render (for discoverability — empty-state cards on the strokes the user hasn't logged yet double as "you can train butterfly too" prompts). Trade-off accepted: a user with only freestyle logged opens the page on a butterfly empty-state and has to swipe right to find their data. Predictable over personalised.
+- **Sled Drag variants** → slot 0 = Push. Same reasoning — both PUSH and PULL slots always render; opening on the right side just because the user's last session was PULL is jarring.
+
+**Pill label style:**
+
+- BW assist tiers and Weighted-standard adp zones use SHORT all-caps labels (`FULL RX`, `BAND+KNEE`, `STRENGTH`) — the labels are already short concepts.
+- **Swim strokes use FULL names** (`Freestyle`, `Backstroke`, `Breaststroke`, `Butterfly`) on the carousel pill. The short forms (`FREE`, `BACK`, `BREAST`, `FLY`) are reserved for the small stroke badge on the consolidated "Swimming" row in the cardio index — full names wouldn't fit there. The pill has room for the full name; readability wins.
+- Sled Drag uses `PUSH` / `PULL` everywhere (short by nature).
+- When in doubt, prefer FULL names on pills. Short forms are an optimisation for cramped layouts (index badges, tile labels), not the default.
 
 **Constants (LOCKED — copy verbatim, do not retune):**
 
