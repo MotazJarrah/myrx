@@ -199,6 +199,45 @@ export function isSwimActivity(activity: string | null | undefined): boolean {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Row Erg (Concept2) — May 17 2026
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Concept2 rowing is a well-established sport with its own canonical
+// conventions:
+//   • Distance in METERS, never km / mi (Concept2 community is universally
+//     metric and integer-meter)
+//   • Pace expressed as SPLIT TIME per 500m (e.g., "1:55/500m" — the
+//     industry-standard "split"), never per-km
+//   • Canonical sessions: 2K test, 5K piece, 10K piece, 4×500m intervals,
+//     5×1000m intervals, 8×500m sprints
+//
+// We keep Row Erg in pace-mode storage (cardio_mode='pace', pace stored
+// as "X:XX/km" in the value column) for cross-activity uniformity — the
+// per-500m display is purely a presentation-layer transform. The log
+// form swaps the standard decimal-km distance wheel for an integer-meter
+// wheel (similar to swimming) and writes labels like:
+//   "Row Erg · 5000 m in 18:30"
+
+export const ROW_ERG_ACTIVITY = 'Row Erg'
+
+export function isRowErgActivity(activity: string | null | undefined): boolean {
+  return activity === ROW_ERG_ACTIVITY
+}
+
+/**
+ * Convert seconds-per-km (the universal cardio storage unit) to a
+ * formatted per-500m split. Rowing's pace metric is split per 500m,
+ * so 4:00/km becomes 2:00/500m. Returns "—" for invalid input.
+ */
+export function pacePer500mFromSecsPerKm(secsPerKm: number | null | undefined): string {
+  if (!secsPerKm || secsPerKm <= 0) return '—'
+  const secsPer500m = secsPerKm / 2
+  const m = Math.floor(secsPer500m / 60)
+  const s = Math.round(secsPer500m % 60)
+  return `${m}:${String(s).padStart(2, '0')}/500m`
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Air Bike (May 17 2026)
 // ─────────────────────────────────────────────────────────────────────────────
 //

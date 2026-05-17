@@ -61,6 +61,11 @@ import {
   parseAirBikeLabel,
   calsPerMinFromEffort,
   genderBaselineCalsPerMin,
+  // Row Erg display helpers — distances render in meters, pace as
+  // per-500m split (Concept2 convention). Detail page stays on
+  // PaceDetail with conditional branching for rowing.
+  isRowErgActivity,
+  pacePer500mFromSecsPerKm,
 } from '../../../../src/lib/movements'
 import { colors, palette, alpha, withAlpha, fonts } from '../../../../src/theme'
 
@@ -143,6 +148,17 @@ function fmtDist(distKm: number, distUnit: 'km' | 'mi' = 'km'): string {
   }
   if (distKm < 1) return `${Math.round(distKm * 1000)} m`
   return `${distKm < 5 ? distKm.toFixed(2).replace(/\.?0+$/, '') : distKm.toFixed(1).replace(/\.0$/, '')} km`
+}
+
+// Activity-aware distance formatter — used by buildPlanStep + PaceDetail
+// so per-activity conventions override the default fmtDist behaviour:
+//   • Row Erg → always integer meters ("5000 m", "500 m") regardless of
+//     distance magnitude. Concept2 convention is universally metric and
+//     never uses km / mi.
+//   • Everything else → fmtDist (sub-1km/mi in meters, larger in km/mi).
+function fmtDistForActivity(activity: string, distKm: number, distUnit: 'km' | 'mi'): string {
+  if (isRowErgActivity(activity)) return `${Math.round(distKm * 1000)} m`
+  return fmtDist(distKm, distUnit)
 }
 
 function parseEffortLabel(label: string | null | undefined): { distKm: number; timeSecs: number | null } | null {
@@ -381,10 +397,16 @@ const PACE_ZONE_SESSIONS: Record<string, Partial<Record<CardioZone, PaceZoneSess
     threshold: [{ distanceKm: 1.2, intervalReps: 3 }, { distanceKm: 1.5, intervalReps: 3 }],
     vo2:       [{ distanceKm: 0.75, intervalReps: 5 }, { distanceKm: 1, intervalReps: 5 }],
   },
+  // Rowing — Row Erg specifically uses Concept2-canonical distances and
+  // intervals. The 2K test, 5K piece, and 10K piece are the textbook
+  // endurance distances; 4×500m / 5×1000m are the classic threshold
+  // sets; 8×500m / 6×500m are the standard vo2 sprint sets. Distance
+  // display is in meters on RowErg pages (5K shows as "5000 m" in the
+  // tile), and pace is presented as per-500m split (Concept2 convention).
   rowing: {
-    endurance: [{ distanceKm: 3 }, { distanceKm: 4 }, { distanceKm: 5 }],
-    threshold: [{ distanceKm: 2, intervalReps: 2 }, { distanceKm: 3, intervalReps: 3 }],
-    vo2:       [{ distanceKm: 1.5, intervalReps: 3 }, { distanceKm: 2, intervalReps: 4 }],
+    endurance: [{ distanceKm: 2 }, { distanceKm: 5 }, { distanceKm: 10 }],
+    threshold: [{ distanceKm: 2, intervalReps: 4 }, { distanceKm: 5, intervalReps: 5 }],
+    vo2:       [{ distanceKm: 3, intervalReps: 6 }, { distanceKm: 4, intervalReps: 8 }],
   },
   ski_erg: {
     endurance: [{ distanceKm: 3 }, { distanceKm: 4 }, { distanceKm: 5 }],
@@ -899,14 +921,25 @@ function buildPlanStep(
       ? 'then take 2 days easy before your next step'
       : ''
 
+  // Row Erg uses split-time language ("split" instead of "pace") and
+  // distances always display in meters. Helpers pull together the
+  // per-500m display formatting once here so the cue construction below
+  // stays readable.
+  const isRowErg     = isRowErgActivity(activity)
+  const splitDisplay = isRowErg ? pacePer500mFromSecsPerKm(zonePace) : null
+
   if (!isInterval) {
-    const totalDist = fmtDist(rx.totalKm, distUnit)
+    const totalDist = fmtDistForActivity(activity, rx.totalKm, distUnit)
     const totalTime = fmtSecs(rx.totalSecs)
     // Speed-machine cue reads "set speed, run distance, time falls out"
     // (matching how the user actually operates the machine).
+    // Row Erg cue references the per-500m split — the canonical rowing
+    // pace metric — instead of generic "conversation pace" language.
     const cue = speedMachine
       ? `${verb.imperative} ${totalDist} at ${shortSpeed} — should take ${totalTime}.`
-      : `${verb.imperative} ${totalDist} in ${totalTime} at steady conversation pace${pacingSentence}.`
+      : isRowErg
+        ? `${verb.imperative} ${totalDist} in ${totalTime} at a steady ${splitDisplay} split${pacingSentence}.`
+        : `${verb.imperative} ${totalDist} in ${totalTime} at steady conversation pace${pacingSentence}.`
     return {
       zone, rx, restDays, restLabel, pacingCheckpoint, shortSpeed,
       shortWork: totalDist,
@@ -916,7 +949,7 @@ function buildPlanStep(
     }
   }
 
-  const repDist  = fmtDist(rx.repKm, distUnit)
+  const repDist  = fmtDistForActivity(activity, rx.repKm, distUnit)
   const repTime  = fmtSecs(Math.round(rx.repKm * zonePace))
   // For speed machines, the between-interval recovery isn't "jog" (you can't
   // jog on a stationary machine) — it's an easy-pace continuation of the
@@ -928,15 +961,24 @@ function buildPlanStep(
     : (zone === 'threshold'
         ? 'Jog 60 sec between cruise intervals'
         : 'Equal-time jog recovery between intervals')
+  // Row Erg interval cue uses "split" language and the rowing-standard
+  // rest convention ("paddle easy between" instead of "jog between").
+  const rowRestNote = isRowErg
+    ? (zone === 'threshold'
+        ? 'Paddle easy 60 sec between cruise intervals'
+        : 'Equal-time paddle recovery between intervals')
+    : restNote
   const cue = speedMachine
     ? `${verb.imperative} ${rx.numReps} × ${repDist} at ${shortSpeed} — should take ${repTime} each.`
-    : `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each${pacingSentence}.`
+    : isRowErg
+      ? `${verb.imperative} ${rx.numReps} × ${repDist} at ${splitDisplay} split (${repTime} each).`
+      : `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each${pacingSentence}.`
   return {
     zone, rx, restDays, restLabel, pacingCheckpoint, shortSpeed,
     shortWork: `${rx.numReps} × ${repDist}`,
     shortTime: repTime,
     cue,
-    restLine: `${restNote} · ${restTail}`,
+    restLine: `${rowRestNote} · ${restTail}`,
   }
 }
 
@@ -1446,6 +1488,7 @@ function PaceDetail({
 
       {/* Header — for speed machines, show "Best speed — N km/h" (matches
           what the user enters on the log form and reads off the console);
+          for Row Erg, show "Best split — m:ss/500m" (Concept2 standard);
           for everyone else, show "Best pace — m:ss/km" as before. */}
       <View>
         <BackButton />
@@ -1458,6 +1501,20 @@ function PaceDetail({
                 value={
                   bestPaceSecs > 0 && bestPaceSecs !== Infinity
                     ? formatSpeed(bestPaceSecs, distUnit)
+                    : '—'
+                }
+                fontSize={14}
+                color={palette.amber[400]}
+                fontWeight="600"
+              />
+            </>
+          ) : isRowErgActivity(activity) ? (
+            <>
+              <Text style={s.subText}>Best split — </Text>
+              <TickerNumber
+                value={
+                  bestPaceSecs > 0 && bestPaceSecs !== Infinity
+                    ? pacePer500mFromSecsPerKm(bestPaceSecs)
                     : '—'
                 }
                 fontSize={14}
@@ -1687,13 +1744,21 @@ function PaceDetail({
             }
             reversed={!chartIsSpeed}
             yWidth={chartIsSpeed ? 56 : 52}
-            yTickFormatter={(v) => chartIsSpeed ? v.toFixed(1) : fmtPaceTick(v)}
-            tooltipValueFormatter={(v) =>
-              chartIsSpeed
-                ? `${v.toFixed(1)} ${distUnit === 'mi' ? 'mph' : 'km/h'}`
-                : fmtPaceStr(v, distUnit)
+            yTickFormatter={(v) =>
+              chartIsSpeed       ? v.toFixed(1)
+              : isRowErgActivity(activity) ? fmtPaceTick(v / 2)  // per-500m for rowing
+              : fmtPaceTick(v)
             }
-            tooltipLabel={chartIsSpeed ? 'Speed' : 'Pace'}
+            tooltipValueFormatter={(v) =>
+              chartIsSpeed       ? `${v.toFixed(1)} ${distUnit === 'mi' ? 'mph' : 'km/h'}`
+              : isRowErgActivity(activity) ? pacePer500mFromSecsPerKm(v)
+              : fmtPaceStr(v, distUnit)
+            }
+            tooltipLabel={
+              chartIsSpeed       ? 'Speed'
+              : isRowErgActivity(activity) ? 'Split'
+              : 'Pace'
+            }
             lineColor={palette.amber[400]}
             yDomain={{
               min: (mn) => Math.max(0, Math.round(mn * 0.95)),
@@ -1707,7 +1772,8 @@ function PaceDetail({
       )}
 
       {/* History — for speed machines, each row's right-side metric shows
-          the speed equivalent of the stored pace; for everyone else, the
+          the speed equivalent of the stored pace; for Row Erg, the
+          per-500m split (Concept2 standard); for everyone else, the
           stored pace value (converted to mi if needed). */}
       <AnimateRise delay={500} style={s.cardNoPad}>
         <View style={s.listHeader}>
@@ -1718,7 +1784,9 @@ function PaceDetail({
             const paceSecs = parsePaceToSecs(e.value)
             const rightVal = isSpeedMachine(activity)
               ? (paceSecs ? formatSpeed(paceSecs, distUnit) : '—')
-              : convertStoredPace(e.value, distUnit)
+              : isRowErgActivity(activity)
+                ? (paceSecs ? pacePer500mFromSecsPerKm(paceSecs) : '—')
+                : convertStoredPace(e.value, distUnit)
             return (
               <DeleteAction
                 key={e.id}

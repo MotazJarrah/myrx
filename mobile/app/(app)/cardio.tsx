@@ -43,6 +43,12 @@ import {
   isAirBikeActivity,
   parseAirBikeLabel,
   calsPerMinFromEffort,
+  // Row Erg (Concept2) — distance always in integer meters, pace
+  // displayed as split per 500m. The log form swaps the decimal-km
+  // distance wheel for an integer-meter wheel (similar to swimming).
+  ROW_ERG_ACTIVITY,
+  isRowErgActivity,
+  pacePer500mFromSecsPerKm,
 } from '../../src/lib/movements'
 import MovementSearch from '../../src/components/MovementSearch'
 import PhantomWheel from '../../src/components/PhantomWheel'
@@ -192,6 +198,13 @@ export default function Cardio() {
   // Detail page routes to AirBikeDetail (separate from PaceDetail).
   const isCalorieMode = isAirBikeActivity(activity)
 
+  // Row Erg mode detection. Concept2 rowing is logged in integer
+  // meters (not decimal km) and the pace is presented as a per-500m
+  // split. The form swaps the decimal-km distance wheel for an
+  // integer-meter wheel (same shape as swim mode). Detail page stays
+  // on PaceDetail but with rowing-specific display formatting.
+  const isRowMode = isRowErgActivity(activity)
+
   // Swim-mode detection. Swimming has its own form layout:
   //   • Distance wheel runs in INTEGER mode (step 25) in meters or yards,
   //     not the decimal-km wheel used for running/cycling. Pool distances
@@ -230,8 +243,8 @@ export default function Cardio() {
       setSpeedValue('0')
       setTimeStr('')           // derived from speed × distance, not user-entered
       setCalsValue('')
-    } else if (isSwimMode) {
-      setDistValue('0')        // integer meters/yards
+    } else if (isSwimMode || isRowMode) {
+      setDistValue('0')        // integer meters
       setTimeStr('00:00')
       setSpeedValue('')
       setCalsValue('')
@@ -241,7 +254,7 @@ export default function Cardio() {
       setSpeedValue('')
       setCalsValue('')
     }
-  }, [mode, isSpeedMode, isSwimMode, isCalorieMode])
+  }, [mode, isSpeedMode, isSwimMode, isCalorieMode, isRowMode])
 
   // ── Clear saved/error on any input change ──────────────────────────────────
   useEffect(() => { setSaved(false); setSaveError('') },
@@ -363,9 +376,11 @@ export default function Cardio() {
     ? (swimUnit === 'yd'
         ? (Number(distValue) || 0) * 0.0009144   // yd → km
         : (Number(distValue) || 0) / 1000)        // m  → km
-    : (distUnit === 'mi'
-        ? (Number(distValue) || 0) * 1.60934
-        : (Number(distValue) || 0))
+    : isRowMode
+      ? (Number(distValue) || 0) / 1000           // integer m → km
+      : (distUnit === 'mi'
+          ? (Number(distValue) || 0) * 1.60934
+          : (Number(distValue) || 0))
 
   // Speed mode: user-entered speed → km/h (convert from mph if needed).
   const speedKmh = isSpeedMode
@@ -409,8 +424,10 @@ export default function Cardio() {
   })()
 
   // Display pace — adapts to mode:
-  //   • Swim mode: per-100m (per-100yd in yards mode). The user thinks
-  //     in per-100m, never per-km.
+  //   • Swim mode:   per-100m (per-100yd in yards mode). The user thinks
+  //                  in per-100m, never per-km.
+  //   • Row Erg:     per-500m "split" (Concept2 convention). Same data
+  //                  as the per-km storage, just divided by 2 for display.
   //   • Mile-unit non-swim: per-mile.
   //   • Everything else: per-km (matches livePaceKm).
   const livePaceDisplay: string | null = (() => {
@@ -420,6 +437,10 @@ export default function Cardio() {
       const m = Math.floor(paceSecPer100 / 60)
       const sc = Math.round(paceSecPer100 % 60)
       return `${m}:${String(sc).padStart(2, '0')}/100${swimUnit}`
+    }
+    if (isRowMode) {
+      const secsPerKm = effectiveTimeSecs / distKm
+      return pacePer500mFromSecsPerKm(secsPerKm)
     }
     if (distUnit !== 'mi') return livePaceKm
     const paceSecPerMi = (effectiveTimeSecs / distKm) * 1.60934
@@ -474,6 +495,11 @@ export default function Cardio() {
     } else if (mode === 'pace') {
       if (isSwimMode) {
         label = `${activity} · ${Math.round(Number(distValue))} ${swimUnit} in ${effectiveTimeStr}`
+      } else if (isRowMode) {
+        // Row Erg always saves distance as integer meters
+        // ("Row Erg · 5000 m in 18:30"). parseEffortLabel's existing
+        // 'm' regex handles the read path.
+        label = `${activity} · ${Math.round(Number(distValue))} m in ${effectiveTimeStr}`
       } else {
         label = `${activity} · ${parseFloat(Number(distValue).toFixed(3))} ${distUnit} in ${effectiveTimeStr}`
       }
@@ -635,6 +661,46 @@ export default function Cardio() {
                     </WheelInput>
                   </View>
                   <View style={[s.field, s.gridLarge]}>
+                    <Text style={s.label}>Time</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={parseTimeStr(timeStr) || 0}
+                        onChange={(secs) => setTimeStr(formatMmSs(secs))}
+                        time="mm:ss"
+                        maxMinutes={99}
+                      />
+                    </WheelInput>
+                  </View>
+                </>
+              ) : isRowMode ? (
+                <>
+                  {/* Row Erg — integer-meter wheel, step 100. Concept2
+                      community is universally metric and tracks rowing
+                      distance in whole meters. Range 0-30000 covers a
+                      10K piece comfortably. */}
+                  <View style={[s.field, s.gridPaceDistance]}>
+                    <Text style={s.label}>Distance</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={Number(distValue) || 0}
+                        onChange={(v) => setDistValue(String(v))}
+                        step={100}
+                        min={0}
+                        max={30000}
+                        unit="m"
+                      />
+                    </WheelInput>
+                  </View>
+                  {/* Locked unit — always 'm' for rowing. Same chrome as
+                      swim mode's locked unit chip. Tap doesn't toggle —
+                      Concept2 standard. */}
+                  <View style={[s.field, s.gridUnit]}>
+                    <Text style={s.label}>Unit</Text>
+                    <View style={s.unitLockedBox}>
+                      <Text style={s.unitLockedText} numberOfLines={1}>m</Text>
+                    </View>
+                  </View>
+                  <View style={[s.field, s.gridPaceTime]}>
                     <Text style={s.label}>Time</Text>
                     <WheelInput>
                       <PhantomWheel
@@ -890,6 +956,14 @@ export default function Cardio() {
                     <>
                       <Text style={s.listRowSub}>Best rate</Text>
                       <Text style={s.listRowVal}>{act.displayValue}</Text>
+                    </>
+                  ) : isRowErgActivity(act.name) ? (
+                    /* Row Erg — Concept2 convention. Shows split per 500m
+                       derived from the stored per-km pace (divide by 2).
+                       Lower split = faster, same direction as pace. */
+                    <>
+                      <Text style={s.listRowSub}>Best split</Text>
+                      <Text style={s.listRowVal}>{pacePer500mFromSecsPerKm(act.secs)}</Text>
                     </>
                   ) : act.name === SWIMMING_BASE_NAME ? (
                     /* Swimming — 4 stroke variants consolidated into one

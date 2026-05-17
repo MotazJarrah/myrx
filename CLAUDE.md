@@ -1116,6 +1116,45 @@ The mirror update lives in: the Supabase `movements` table (single source of tru
 
 ---
 
+### Row Erg detail surface — locked polish spec
+
+Row Erg (Concept2) keeps the generic pace-mode `PaceDetail` component but ships with **Concept2-canonical display formatting** rather than a separate detail component. The pace-zone framework (E/T/V) fits rowing perfectly — rowing IS aerobic / threshold / VO2 work — but the language and units differ from running/cycling:
+
+1. **Distance always renders in INTEGER METERS**, never km/mi. The Concept2 community is universally metric; "5K piece" is logged as `5000 m`, not `5 km`. The log form uses an integer-meter wheel (step 100, min 0, max 30000) — same shape as the Swimming form, but with the unit hardcoded to `m` (not pulled from a profile preference; rowing is universally meters).
+2. **Pace renders as "split per 500m"**, not per-km/mi. The industry-standard rowing pace metric. `4:00/km` becomes `2:00/500m`. Storage stays in seconds-per-km for cross-cardio uniformity; the per-500m is a display-layer transform via `pacePer500mFromSecsPerKm(secsPerKm)`.
+3. **The word "pace" becomes "split"** in user-visible copy. "Best pace —" becomes "Best split —"; "at steady conversation pace" in the cue becomes "at a steady 1:55/500m split"; the chart tooltip label changes from "Pace" to "Split". The word "Pace" doesn't appear on Row Erg surfaces.
+4. **Canonical session distances** in `PACE_ZONE_SESSIONS.rowing` (LOCKED):
+   - **Endurance**: 2K, 5K, 10K (the canonical aerobic distances — 2K is the test, 5K is the standard medium piece, 10K is the long piece)
+   - **Threshold**: 4×500m, 5×1000m (canonical T-pace test sets used at every level from masters to Olympic prep)
+   - **VO2 Max**: 6×500m, 8×500m (Norwegian sprint sets; 8×500m is widely benchmarked)
+   - Stored as `{ distanceKm: total, intervalReps: N }` like every other rowing PACE_ZONE_SESSIONS entry; the per-rep distance falls out as `total ÷ reps`.
+5. **Interval rest cue uses "paddle" instead of "jog"**. Rowers don't "jog 60 seconds between cruise intervals" — they paddle easy. The buildPlanStep cue construction has a Row-Erg-specific restNote: "Paddle easy 60 sec between cruise intervals" / "Equal-time paddle recovery between intervals".
+
+**Implementation summary (LOCKED — what NOT to refactor):**
+
+- **No separate component**: Row Erg stays inside `PaceDetail`. Conditional branching via `isRowErgActivity(activity)` in:
+  - Header subtitle ("Best split — …")
+  - buildPlanStep (distance via `fmtDistForActivity`, cue split-reference, paddle restNote)
+  - Chart yTickFormatter / tooltipValueFormatter / tooltipLabel (per-500m display)
+  - Log list right-side metric (per-500m split)
+- **Helpers in `mobile/src/lib/movements.ts`**:
+  - `ROW_ERG_ACTIVITY` = `'Row Erg'`
+  - `isRowErgActivity(name)` — true iff name equals ROW_ERG_ACTIVITY
+  - `pacePer500mFromSecsPerKm(secsPerKm)` — formats per-500m split string
+- **Log form (`cardio.tsx`)** — new `isRowMode = isRowErgActivity(activity)` mirrors the swim-mode pattern: integer-meter wheel, locked `m` unit chip (no toggle), `mm:ss` time. Save label: `Row Erg · 5000 m in 18:30`. Save value: standard `X:XX/km` pace (same as other pace activities, the per-500m display is a read-time transform).
+- **Activities list** — Row Erg rows show `Best split — N:NN/500m` (uses `pacePer500mFromSecsPerKm(act.secs)`).
+
+**Why polish instead of a separate component:** the pace-zone framework genuinely fits rowing — Concept2 athletes train in exactly the E/T/V structure under their own naming. Building a dedicated `RowErgDetail` would duplicate ~80% of `PaceDetail` for the sake of swapping a few labels and units. The display-layer branching adds ~30 lines to PaceDetail vs ~400 LOC duplication. If rowing-specific features creep in later (stroke rate tracking, watts-based zones, 2K test mode), revisit the architecture then.
+
+**Out of v1 scope (deferred):**
+
+- **Stroke rate (SPM)** — Concept2 Performance Monitor displays stroke rate alongside split. Could be a third log-form field. v2.
+- **Watts** — secondary metric on the PM5 console. Could feed zones. v2 with HR / power integration.
+- **2K benchmark test mode** — the canonical rowing benchmark. Would warrant a dedicated "test mode" log entry + benchmark tracking on the detail page. v2.
+- **Drag factor** — Concept2 setting that affects perceived effort. Out of scope; users self-set this on the machine.
+
+---
+
 ### Air Bike detail card — locked design spec
 
 This is the spec for the air-bike-native coaching surface on `[activity].tsx` (mobile) — fired when `isAirBikeActivity(activity)` (i.e. `activity === 'Air Bike'`). Routes to its own `AirBikeDetail` component rather than the generic `PaceDetail`, because air bike training mechanics are fundamentally different from running/cycling/etc:
