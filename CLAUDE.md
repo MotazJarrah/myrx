@@ -868,7 +868,7 @@ Duration mode: Arc Trainer, StairMill.
 - `Rowing` → `Rowing (Open Water)` to disambiguate from `Row Erg` (the machine).
 - `Cross Country Skiing` → `Skiing` (in a cardio-only context, "Skiing" unambiguously means the cardio variant; downhill skiing isn't tracked here).
 
-**Final cardio movements list (16 activities — May 17 2026 lock, after non-cardio + niche-equipment cleanup):** Air Bike, Bike Erg, Cycling, Cycling (Mountain Bike), Elliptical, Hill Running, Row Erg, Rucking, Running, Running (Treadmill), Ski Erg, Skiing, StairMill, Stationary Bike, Swimming, Trail Running.
+**Final cardio movements list (19 DB rows, 16 visible activities — May 17 2026 lock, after non-cardio + niche-equipment cleanup + swim stroke consolidation):** Air Bike, Bike Erg, Cycling, Cycling (Mountain Bike), Elliptical, Hill Running, Row Erg, Rucking, Running, Running (Treadmill), Ski Erg, Skiing, StairMill, Stationary Bike, **Swimming [Freestyle], Swimming [Backstroke], Swimming [Breaststroke], Swimming [Butterfly]**, Trail Running. The 4 Swimming stroke variants collapse into a single "Swimming" row in the cardio index (so the user-visible activity count is 16 even though the movements table has 19 rows). See "Swimming detail card — locked design spec" further down for the consolidation architecture.
 
 **Removed from cardio (May 17 2026, two passes):**
 - **Pass 1 (recreational/lifestyle — not cardio training):** Walking, Walking (Treadmill), Hiking, Stair Climb (outdoor), Rowing (Open Water), Canoeing, Kayaking, Stand Up Paddleboarding, Inline Skating, Ice Skating. Rationale: transport, leisure, or outdoor activities — the user doesn't pick them with intent to improve cardio fitness, intensity isn't deliberately modulated, and a coaching prescription would be condescending. May come back as part of a separate "activity log" surface (where lifestyle movement counts toward weekly minutes / calories / streaks without a coaching layer).
@@ -892,7 +892,7 @@ The mirror update lives in: the Supabase `movements` table (single source of tru
 
 ### Swimming detail card — locked design spec
 
-This is the spec for the swim-native coaching surface on `[activity].tsx` (mobile) — fired when `activity === 'Swimming'`. Routes to its own `SwimmingDetail` component rather than the generic `PaceDetail`, because swim mechanics differ from running/cycling in five fundamental ways:
+This is the spec for the swim-native coaching surface on `[activity].tsx` (mobile) — fired when `isSwimActivity(activity)` (i.e. activity is `'Swimming'`, any `'Swimming [Stroke]'` variant, or a legacy bare `'Swimming · ...'` effort). Routes through `SwimmingConsolidatedDetail` (the stroke-pill wrapper) which then renders `SwimmingDetail` filtered to the active stroke. NOT the generic `PaceDetail`, because swim mechanics differ from running/cycling in five fundamental ways:
 
 1. **Workouts are interval SETS on a clock.** Not "swim X km at Y pace." Real swim sessions look like "8 × 100m, leave every 1:50" — every rep ends at a wall, the user touches, gets whatever rest is left from the leaving interval, then pushes off for the next rep. The "leaving interval" is the canonical swim concept; running has no equivalent.
 2. **Distances come in pool lengths, not arbitrary km.** Pool lengths are 25m, 50m (Olympic), or 25 yards. Rep distances are always multiples of pool length: 50m, 100m, 200m, etc. The current SWIM_ZONE_SESSIONS data uses 50m and 100m chunks that fit any pool layout.
@@ -900,7 +900,20 @@ This is the spec for the swim-native coaching surface on `[activity].tsx` (mobil
 4. **CSS anchors all zones.** CSS = Critical Swim Speed = swimming's threshold pace (analogous to a runner's lactate threshold). Canonical formula is `(400m_TT_time - 200m_TT_time) ÷ 200`, but v1 uses a Riegel-projected proxy instead (see "CSS proxy" below) to skip the calibration session.
 5. **Hero card stacks THREE values, not two.** Running's hero shows work + pace. Swimming's shows work + pace + leaving interval — the leaving interval is what the swimmer actually reads off the pool clock to know when to push off, so it's a first-class number.
 
-**Stroke selection is intentionally NOT in v1.** ~95% of recreational swimmers only do freestyle; a stroke selector would tax 100% of users to serve 5–10%. The minority training multiple strokes likely uses dedicated swim apps (MySwimPro, TrainingPeaks). When Apple Watch / Garmin integration auto-detects stroke (Phase 2), the stroke split can layer in without user input.
+**Stroke consolidation (May 17 2026 — LOCKED):**
+
+Swimming has 4 stroke variants — Freestyle, Backstroke, Breaststroke, Butterfly — stored as separate movements in the DB (`Swimming [Freestyle]`, `Swimming [Backstroke]`, `Swimming [Breaststroke]`, `Swimming [Butterfly]`). They collapse into a single detail page via `SwimmingConsolidatedDetail`, mirroring the Sled Drag `[Push]` / `[Pull]` pattern from strength. The architecture:
+
+- **DB**: 4 movement rows, all `category='cardio'`, `cardio_mode='pace'`. No `Swimming` row exists; bare `'Swimming · ...'` effort labels from before this consolidation are legacy and default to Freestyle on the parse path.
+- **Cardio index (`cardio.tsx`)**: the "Your activities" aggregation collapses the 4 stroke variants (and legacy bare swim labels) under a single `Swimming` row, with the most-recently-trained stroke shown as a small `FREE` / `BACK` / `BREAST` / `FLY` badge to the right. Best pace shown is the FASTEST per-100m across all strokes.
+- **Cardio log form (`cardio.tsx`)**: the activity search returns all 4 stroke variants as separate hits (consistent with how Sled Drag's strength search returns `Sled Drag [Push]` + `Sled Drag [Pull]` separately). The user picks the stroke they swam. The form recognises any bracketed swim variant as swim mode via `isSwimActivity(activity)`; save label format is `Swimming [Backstroke] · 1500 m in 25:00`.
+- **Detail page route**: `/effort/cardio/Swimming` (base name from the index collapse) and `/effort/cardio/Swimming [Freestyle]` (bracketed deep links) both route to `SwimmingConsolidatedDetail`. The wrapper holds `activeStroke` state (defaults to whichever stroke was logged most recently; falls back to Freestyle if no swim efforts exist yet) and filters efforts to that stroke. Inner `SwimmingDetail` is stroke-agnostic — operates on whatever filtered list it receives.
+- **Pill carousel**: 4-variant version of the same swipe choreography used by Sled Drag and the BW assist tiers. Single amber pill in the center showing the active stroke as a short label (`FREE` / `BACK` / `BREAST` / `FLY`), flanked by pulsing chevrons. Carousel order: `FREE → BACK → BREAST → FLY` (popularity / freestyle-first). No wrap at the ends — left chevron disappears on Freestyle, right chevron disappears on Butterfly.
+- **Pill swipe gesture**: identical mechanics to the Sled Drag pill — Pan gesture, 20px threshold, 220px slide-off, 250ms slide-out / slide-in, 120ms chevron fade. Bounded by `currentIdx + direction` within `[0, SWIM_STROKE_ORDER.length - 1]` so over-swipes at the ends bounce back rather than commit.
+- **Per-stroke fitness**: every stroke has its own CSS estimate (computed only from that stroke's efforts), its own progression chart, and its own plan queue. Switching strokes flips both the data AND the prescription. A user might have a 1:35/100m freestyle CSS and a 2:15/100m butterfly CSS — both tracked independently, no cross-contamination.
+- **Empty states**: each stroke tab computes from only its own efforts. The user who has only swum freestyle sees the normal coaching surface on the FREE tab and an empty-state card on BACK / BREAST / FLY (`"Log your first backstroke effort and your personalized plan will appear here"`). No auto-estimating across strokes — they're physiologically different enough that the user's freestyle CSS tells us nothing about their butterfly CSS.
+
+The 4 stroke movements live in `mobile/src/lib/movements.ts` (`SWIMMING_STROKE_MOVEMENTS`, `SWIM_STROKE_ORDER`, `SWIM_STROKE_LABELS`, `parseSwimStroke`, `isSwimActivity`, `swimStrokeFromMovementName`) so the log form, the index collapse, and the detail page all import from the same authoritative source.
 
 **CSS proxy via Riegel projection (LOCKED):**
 
@@ -979,10 +992,12 @@ When `activity === 'Swimming'`:
 The regex chain in `parseEffortLabel` now handles `m` and `yd` units after the existing `km` and `mi` cases. Critical: the `m` regex requires `\s+in\s+` after the unit so it doesn't accidentally match the `m` in `mi`. Old km-format swim labels still parse correctly for back-compat.
 
 **Out of v1 scope (deferred):**
-- **Stroke selection** — wait for wearable integration to auto-detect.
 - **Pool length input** — currently inferred (all prescriptions use 50m and 100m sets which fit any pool). Could become a profile preference later if needed.
 - **Drill / pull / kick set prescription** — swim coaches differentiate full-stroke vs drill (technique) vs pull (no kick) vs kick (no arms). v1 just prescribes total work; the user picks the technique mix.
 - **Canonical CSS calibration flow** — currently uses Riegel proxy. Add 400m+200m TT onboarding if proxy proves inaccurate in practice.
+- **Cross-stroke CSS estimation** — when a user has logged efforts in only one stroke, we don't estimate their other strokes' CSS via stroke-conversion ratios (e.g. butterfly is typically ~30% slower than freestyle). Each stroke has its own empty state until the user logs an effort there. Cleaner UX, no fake numbers.
+
+**Final cardio movements list update (May 17 2026):** the swimming consolidation replaces the single `Swimming` row with 4 stroke variants in the movements table. Updated catalog: **19 cardio movements** (was 16) — Air Bike, Bike Erg, Cycling, Cycling (Mountain Bike), Elliptical, Hill Running, Row Erg, Rucking, Running, Running (Treadmill), Ski Erg, Skiing, StairMill, Stationary Bike, **Swimming [Freestyle], Swimming [Backstroke], Swimming [Breaststroke], Swimming [Butterfly]**, Trail Running. The cardio index collapses the 4 strokes into a single "Swimming" row at display time so the user sees 16 visible activities.
 
 ---
 

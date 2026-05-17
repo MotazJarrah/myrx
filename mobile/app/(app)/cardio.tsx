@@ -23,7 +23,20 @@ import { Activity, Timer, ChevronRight, Check } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import { useMovements } from '../../src/hooks/useMovements'
-import { SPEED_INPUT_ACTIVITIES, speedMaxTenths } from '../../src/lib/movements'
+import {
+  SPEED_INPUT_ACTIVITIES,
+  speedMaxTenths,
+  // Swim stroke consolidation helpers — the 4 stroke variants collapse
+  // into a single "Swimming" row in the activities list, and the form
+  // recognises any bracketed swim variant as swim mode.
+  SWIMMING_BASE_NAME,
+  SWIMMING_STROKE_MOVEMENTS,
+  parseSwimStroke,
+  isSwimActivity,
+  swimStrokeFromMovementName,
+  SWIM_STROKE_LABELS,
+  type SwimStroke,
+} from '../../src/lib/movements'
 import MovementSearch from '../../src/components/MovementSearch'
 import PhantomWheel from '../../src/components/PhantomWheel'
 import AnimateRise from '../../src/components/AnimateRise'
@@ -100,6 +113,11 @@ interface ActivityBest {
   displayValue: string         // e.g. "5:00/km" or "25:00"
   secs:         number
   mode:         'pace' | 'duration'
+  /** Swimming-only: the most-recently-logged stroke across all 4 variants.
+   *  Drives the small stroke badge (FREE / BACK / BREAST / FLY) on the
+   *  collapsed "Swimming" row in "Your activities". Mirrors the Sled Drag
+   *  pattern where the strength row shows the most-recent variant badge. */
+  swimMostRecentStroke?: SwimStroke
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -163,10 +181,13 @@ export default function Cardio() {
   //   • Unit column shows "m" or "yd" as a locked chip (pulled from the
   //     user's swim_unit profile preference), not the km/mi toggle.
   //   • Time stays mm:ss as usual.
-  //   • Save label format becomes "Swimming · 1500 m in 25:00" instead
-  //     of "Swimming · 1.5 km in 25:00" — parseEffortLabel on the read
-  //     path handles both formats for back-compat with old efforts.
-  const isSwimMode = activity === 'Swimming'
+  //   • Save label format is "Swimming [Backstroke] · 1500 m in 25:00"
+  //     (the bracketed stroke name IS the activity name written to the
+  //     label). parseEffortLabel on the read path handles old bare
+  //     "Swimming · ..." labels for back-compat with pre-May-17 efforts.
+  // Detection matches any of the 4 stroke variants — the user picks
+  // a specific stroke from search and the form recognises swim mode.
+  const isSwimMode = isSwimActivity(activity)
   const swimUnit: 'm' | 'yd' = ((profile as any)?.swim_unit as 'm' | 'yd' | undefined) || 'm'
 
   // ── Reset fields when switching modes — every dial starts at ZERO
@@ -231,14 +252,37 @@ export default function Cardio() {
   // ── Load "Your activities" ────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return
-    supabase.from('efforts').select('label, value')
+    supabase.from('efforts').select('label, value, created_at')
       .eq('user_id', user.id).eq('type', 'cardio')
       .order('created_at', { ascending: true })
       .then(({ data }) => {
         if (!data) return
         const map = new Map<string, ActivityBest>()
         data.forEach((e: any) => {
-          const name    = e.label.split(' · ')[0]
+          const head = e.label.split(' · ')[0]
+          // Swim consolidation: group all 4 stroke variants + legacy bare
+          // "Swimming · ..." labels under a single SWIMMING_BASE_NAME key.
+          // The collapsed row shows the best per-100m pace across all
+          // strokes plus a small badge for the most-recently-trained stroke.
+          if (isSwimActivity(head)) {
+            const stroke = parseSwimStroke(e.label)
+            const secs = parsePaceToSecs(e.value)
+            if (secs === null) return
+            const existing = map.get(SWIMMING_BASE_NAME)
+            const newBest = !existing || secs < existing.secs
+            // Efforts come in chronological order, so the last forEach iter
+            // we hit is the most-recent — always overwrite the stroke field.
+            map.set(SWIMMING_BASE_NAME, {
+              name:         SWIMMING_BASE_NAME,
+              displayValue: newBest ? e.value         : existing!.displayValue,
+              secs:         newBest ? secs            : existing!.secs,
+              mode:         'pace',
+              swimMostRecentStroke: stroke,
+            })
+            return
+          }
+          // Non-swim — existing aggregation logic
+          const name    = head
           const actMode = (dbMovements.find(m => m.name === name)?.cardio_mode as 'pace' | 'duration' | undefined) || 'pace'
           if (actMode === 'pace') {
             const secs = parsePaceToSecs(e.value)
@@ -723,10 +767,12 @@ export default function Cardio() {
                       <Text style={s.listRowSub}>Best time</Text>
                       <Text style={s.listRowVal}>{fmtSecs(act.secs)}</Text>
                     </>
-                  ) : act.name === 'Swimming' ? (
-                    /* Swimming — show best pace per 100m (or 100yd). Stored
-                       value is seconds per km regardless of input unit, so
-                       divide by 10 for per-100 display. */
+                  ) : act.name === SWIMMING_BASE_NAME ? (
+                    /* Swimming — 4 stroke variants consolidated into one
+                       row. Shows best pace per 100m (or 100yd) across all
+                       strokes, plus a small badge for the most-recent
+                       stroke (FREE / BACK / BREAST / FLY). Mirrors the
+                       Sled Drag PUSH / PULL badge pattern from strength. */
                     <>
                       <Text style={s.listRowSub}>Best pace</Text>
                       <Text style={s.listRowVal}>{(() => {
@@ -736,6 +782,13 @@ export default function Cardio() {
                         const ss = Math.round(secsPer100 % 60)
                         return `${mm}:${String(ss).padStart(2, '0')}/100${swimUnit}`
                       })()}</Text>
+                      {act.swimMostRecentStroke && (
+                        <View style={s.swimStrokeBadge}>
+                          <Text style={s.swimStrokeBadgeText}>
+                            {SWIM_STROKE_LABELS[act.swimMostRecentStroke].short}
+                          </Text>
+                        </View>
+                      )}
                     </>
                   ) : SPEED_INPUT_ACTIVITIES.has(act.name) ? (
                     /* Speed machines — show best speed (km/h or mph) instead
@@ -897,5 +950,24 @@ const s = StyleSheet.create({
   listRowVal: {
     fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'],
     fontSize: 14, color: palette.amber[400],
+  },
+
+  // Most-recent-stroke badge on the consolidated Swimming row. Mirrors
+  // the small PUSH / PULL badge that the strength index renders for the
+  // Sled Drag consolidated row.
+  swimStrokeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: withAlpha(palette.amber[500], 0.5),
+    backgroundColor: withAlpha(palette.amber[500], 0.12),
+    marginLeft: 6,
+  },
+  swimStrokeBadgeText: {
+    color: palette.amber[400],
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.4,
   },
 })

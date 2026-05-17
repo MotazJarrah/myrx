@@ -45,6 +45,14 @@ import {
   isSpeedMachine,
   formatSpeed,
   paceSecsPerKmToSpeedDisplay,
+  // Swim stroke consolidation helpers — shared with cardio.tsx (log form +
+  // index) so the 4 stroke variants stay in lockstep across surfaces.
+  type SwimStroke,
+  SWIM_STROKE_ORDER,
+  SWIM_STROKE_LABELS,
+  SWIMMING_BASE_NAME,
+  parseSwimStroke,
+  isSwimActivity,
 } from '../../../../src/lib/movements'
 import { colors, palette, alpha, withAlpha, fonts } from '../../../../src/theme'
 
@@ -148,6 +156,12 @@ function parseEffortLabel(label: string | null | undefined): { distKm: number; t
   if (m5) return { distKm: parseFloat(m5[1]) / 1000, timeSecs: parseTimeStr(m5[2]) }
   return null
 }
+
+// Swim stroke consolidation helpers (SwimStroke type, SWIM_STROKE_ORDER,
+// SWIM_STROKE_LABELS, SWIMMING_BASE_NAME, parseSwimStroke, isSwimActivity)
+// live in `mobile/src/lib/movements.ts` so the cardio log form, the index
+// collapse logic, and this detail page can all import the same authoritative
+// definitions. See that file for the full doc + rationale.
 
 // ── Cardio adaptation zones — locked design spec (see CLAUDE.md) ─────────────
 // THREE zones (May 2026 update): the app's job is to push you to get BETTER,
@@ -1238,15 +1252,37 @@ export default function CardioDetailRoute() {
     setEfforts(prev => [...prev, data as Effort])
   }
 
+  // Swimming consolidates 4 stroke variants + legacy bare-Swimming labels.
+  // The wrapper handles per-stroke filtering at render time, but the FETCH
+  // needs to pull all swim efforts in one query. For other activities,
+  // the standard `ilike` filter is fine.
+  const swimMode = isSwimActivity(activity)
+
   useEffect(() => {
     if (!user || !activity) return
     let alive = true
-    supabase
+    let query = supabase
       .from('efforts')
       .select('*')
       .eq('user_id', user.id)
       .eq('type', 'cardio')
-      .ilike('label', `${activity} ·%`)
+
+    if (swimMode) {
+      // Match all four stroke variants AND the legacy "Swimming · ..."
+      // format (no brackets — labels from before the May 17 2026 stroke
+      // consolidation default to Freestyle on the parse path).
+      query = query.or([
+        'label.ilike.Swimming [Freestyle] ·%',
+        'label.ilike.Swimming [Backstroke] ·%',
+        'label.ilike.Swimming [Breaststroke] ·%',
+        'label.ilike.Swimming [Butterfly] ·%',
+        'label.ilike.Swimming ·%',
+      ].join(','))
+    } else {
+      query = query.ilike('label', `${activity} ·%`)
+    }
+
+    query
       .order('created_at', { ascending: true })
       .then(({ data }) => {
         if (!alive) return
@@ -1254,7 +1290,7 @@ export default function CardioDetailRoute() {
         setLoading(false)
       })
     return () => { alive = false }
-  }, [user, activity])
+  }, [user, activity, swimMode])
 
   if (loading) {
     return (
@@ -1276,7 +1312,11 @@ export default function CardioDetailRoute() {
     )
   }
 
-  if (efforts.length === 0) {
+  // Swimming bypasses the page-level "no efforts" guard so the
+  // consolidated wrapper can render its per-stroke empty state cards
+  // (e.g., "Log your first backstroke effort..."). Every other activity
+  // still short-circuits here.
+  if (!swimMode && efforts.length === 0) {
     return (
       <View style={s.page}>
         <BackButton />
@@ -1288,13 +1328,17 @@ export default function CardioDetailRoute() {
   if (mode === 'duration') {
     return <DurationDetail activity={activity} efforts={efforts} onDelete={handleDeleteEffort} />
   }
-  // Swimming gets its own component because the hero card layout is
-  // fundamentally different (reps × distance + pace + leaving interval = 3
-  // values, not 2) and the CSS-anchored zone math operates in per-100m
-  // space rather than per-km. Same outer chrome (header + plan card +
-  // chart + log list); swimming-specific internals.
-  if (activity === 'Swimming') {
-    return <SwimmingDetail activity={activity} efforts={efforts} swimUnit={swimUnit} onDelete={handleDeleteEffort} />
+  // Swimming gets its own consolidated component because:
+  //   • Hero card layout is fundamentally different (3 values not 2 —
+  //     reps × distance + pace + leaving interval).
+  //   • CSS-anchored zone math operates in per-100m space, not per-km.
+  //   • 4 stroke variants (Freestyle / Backstroke / Breaststroke /
+  //     Butterfly) collapse into one detail page with a stroke pill
+  //     carousel at the top, mirroring Sled Drag's PUSH / PULL pattern.
+  // Same outer chrome (header + plan card + chart + log list); the
+  // wrapper injects the pill row, inner SwimmingDetail renders the rest.
+  if (swimMode) {
+    return <SwimmingConsolidatedDetail efforts={efforts} swimUnit={swimUnit} onDelete={handleDeleteEffort} />
   }
   return <PaceDetail activity={activity} efforts={efforts} distUnit={distUnit} onDelete={handleDeleteEffort} onAddEffort={handleAddEffort} />
 }
@@ -1684,6 +1728,216 @@ function PaceDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SwimmingConsolidatedDetail — 4-stroke wrapper around SwimmingDetail
+// ─────────────────────────────────────────────────────────────────────────────
+// The 4 stroke variants (Swimming [Freestyle/Backstroke/Breaststroke/
+// Butterfly]) collapse into a single detail page with a stroke pill
+// carousel at the top. Mirrors the SledDragConsolidatedDetail pattern
+// from strength: the wrapper holds activeStroke state, filters efforts
+// to that stroke, and renders the inner SwimmingDetail with
+// `extraHeaderContent` (the pill row) injected. Pill swipe choreography
+// matches the BW tier carousel and Sled Drag exactly:
+//   • Single pill in the center showing the active stroke
+//   • Pulsing chevrons on both sides (only present where there's a stroke
+//     to navigate to — no wrap-around at the ends FREE / FLY)
+//   • Pan gesture: chevrons fade out, pill follows finger, slides off
+//     on commit, state flips via runOnJS, pill teleports + slides back in
+// Default active stroke = whichever was logged most recently. If no
+// efforts exist yet, defaults to Freestyle (the most common stroke).
+
+function SwimmingConsolidatedDetail({
+  efforts, swimUnit, onDelete,
+}: {
+  efforts:  Effort[]
+  swimUnit: 'm' | 'yd'
+  onDelete: (id: string) => void
+}) {
+  // Determine the most-recent stroke from the combined efforts list.
+  // Falls back to freestyle if nothing's logged yet.
+  const defaultStroke: SwimStroke = useMemo(() => {
+    const sorted = [...efforts].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )
+    for (const e of sorted) {
+      const stroke = parseSwimStroke(e.label)
+      if (stroke) return stroke
+    }
+    return 'freestyle'
+  }, [efforts])
+
+  const [activeStroke, setActiveStroke] = useState<SwimStroke>(defaultStroke)
+
+  // Filter efforts to the active stroke. SwimmingDetail computes
+  // everything (CSS, plan queue, chart, history) from this filtered list,
+  // so the stroke switch is the single trigger that drives the whole page.
+  const filteredEfforts = useMemo(
+    () => efforts.filter(e => parseSwimStroke(e.label) === activeStroke),
+    [efforts, activeStroke],
+  )
+
+  const currentIdx = SWIM_STROKE_ORDER.indexOf(activeStroke)
+  const hasPrev    = currentIdx > 0
+  const hasNext    = currentIdx < SWIM_STROKE_ORDER.length - 1
+
+  // Navigate one stroke in the requested direction. Bounded — no wrap.
+  // Called via runOnJS from the gesture worklet, and directly from
+  // chevron Pressables.
+  const navigateStroke = (direction: -1 | 1) => {
+    const newIdx = currentIdx + direction
+    if (newIdx < 0 || newIdx >= SWIM_STROKE_ORDER.length) return
+    setActiveStroke(SWIM_STROKE_ORDER[newIdx])
+  }
+
+  // ── Pill swipe gesture (BW-style choreography) ──────────────────────────
+  // Same constants as Sled Drag's choreography. The reason both files
+  // duplicate these magic numbers instead of sharing a constant: the
+  // wrapper components own their own swipe behaviour and the values are
+  // tuned per-page (mostly the same, but explicit-per-page leaves room
+  // for divergence without a refactor).
+  const SWIM_SWIPE_THRESHOLD_PX = 20
+  const SWIM_SLIDE_OFFSCREEN_PX = 220
+  const SWIM_SLIDE_DURATION_MS  = 250
+
+  const swimPillTranslateX        = useSharedValue(0)
+  const swimChevronOpacityOverride = useSharedValue(1)
+
+  const swimPillSwipeGesture = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-25, 25])
+      .onStart(() => {
+        'worklet'
+        swimChevronOpacityOverride.value = withTiming(0, { duration: 120 })
+      })
+      .onUpdate((event) => {
+        'worklet'
+        swimPillTranslateX.value = event.translationX
+      })
+      .onEnd((event) => {
+        'worklet'
+        // Finger swipes right (translationX positive) → expose what's on
+        // the LEFT → navigate LEFT in the carousel (direction = -1).
+        // Same convention as Sled Drag.
+        const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
+        const past = Math.abs(event.translationX) > SWIM_SWIPE_THRESHOLD_PX
+
+        // Check there's a valid stroke in the requested direction (no
+        // wrap at the ends). Without this guard the swipe would commit
+        // and the state-flip would be a no-op, leaving the pill
+        // off-screen until next pan.
+        const targetIdx = currentIdx + direction
+        const validDirection = targetIdx >= 0 && targetIdx < SWIM_STROKE_ORDER.length
+
+        if (!past || !validDirection) {
+          // Bounce back to center; chevrons re-appear.
+          swimPillTranslateX.value = withTiming(0, { duration: 200 })
+          swimChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          return
+        }
+
+        // Slide off, flip stroke, teleport, slide back in.
+        const slideOff = direction === 1 ? -SWIM_SLIDE_OFFSCREEN_PX : SWIM_SLIDE_OFFSCREEN_PX
+        swimPillTranslateX.value = withTiming(slideOff, { duration: SWIM_SLIDE_DURATION_MS }, (finished) => {
+          'worklet'
+          if (!finished) return
+          runOnJS(navigateStroke)(direction)
+          swimPillTranslateX.value = -slideOff
+          swimPillTranslateX.value = withTiming(0, { duration: SWIM_SLIDE_DURATION_MS }, (settled) => {
+            'worklet'
+            if (settled) {
+              swimChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+            }
+          })
+        })
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeStroke, currentIdx],
+  )
+
+  const swimPillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: swimPillTranslateX.value }] }))
+  const swimChevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: swimChevronOpacityOverride.value }))
+
+  const pillRow = (
+    <GestureDetector gesture={swimPillSwipeGesture}>
+      <View style={s.swimStrokeRow}>
+        {/* Left chevron — only visible if there's a stroke to the left.
+            Tappable to navigate directly without swiping. */}
+        {hasPrev ? (
+          <Animated.View style={[s.swimStrokeChevronSlotLeft, swimChevronAnimatedStyle]}>
+            <Pressable
+              onPress={() => navigateStroke(-1)}
+              style={s.swimStrokeChevronPressable}
+              hitSlop={8}
+              accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[SWIM_STROKE_ORDER[currentIdx - 1]].full}`}
+            >
+              <AmberAnimatedChevron direction="left" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+              <View style={{ marginLeft: -6 }}>
+                <AmberAnimatedChevron direction="left" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+              </View>
+            </Pressable>
+          </Animated.View>
+        ) : (
+          // Spacer of equal width so the pill stays centered in the row.
+          <View style={s.swimStrokeChevronSlotLeft} />
+        )}
+
+        {/* Active stroke pill — follows finger during pan, slides off /
+            back on commit. Same amber chrome as the cardio zone pill. */}
+        <Animated.View
+          style={[
+            {
+              paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9999,
+              borderWidth: 1, borderColor: palette.amber[500],
+              backgroundColor: withAlpha(palette.amber[500], 0.15),
+            },
+            swimPillAnimatedStyle,
+          ]}
+        >
+          <Text style={{
+            fontSize: 11, fontWeight: '700', textTransform: 'uppercase',
+            letterSpacing: 0.5, color: palette.amber[400],
+          }}>
+            {SWIM_STROKE_LABELS[activeStroke].short}
+          </Text>
+        </Animated.View>
+
+        {/* Right chevron — only visible if there's a stroke to the right. */}
+        {hasNext ? (
+          <Animated.View style={[s.swimStrokeChevronSlotRight, swimChevronAnimatedStyle]}>
+            <Pressable
+              onPress={() => navigateStroke(1)}
+              style={s.swimStrokeChevronPressable}
+              hitSlop={8}
+              accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[SWIM_STROKE_ORDER[currentIdx + 1]].full}`}
+            >
+              <AmberAnimatedChevron direction="right" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+              <View style={{ marginLeft: -6 }}>
+                <AmberAnimatedChevron direction="right" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+              </View>
+            </Pressable>
+          </Animated.View>
+        ) : (
+          <View style={s.swimStrokeChevronSlotRight} />
+        )}
+      </View>
+    </GestureDetector>
+  )
+
+  return (
+    <SwimmingDetail
+      key={activeStroke}
+      activity={`${SWIMMING_BASE_NAME} [${SWIM_STROKE_LABELS[activeStroke].full}]`}
+      displayName={SWIMMING_BASE_NAME}
+      efforts={filteredEfforts}
+      swimUnit={swimUnit}
+      onDelete={onDelete}
+      extraHeaderContent={pillRow}
+      emptyStateLabel={`${SWIM_STROKE_LABELS[activeStroke].full.toLowerCase()}`}
+    />
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SwimmingDetail — swim-native coaching surface (May 17 2026 lock)
 // ─────────────────────────────────────────────────────────────────────────────
 // Swimming has fundamentally different mechanics from running/cycling:
@@ -1699,10 +1953,11 @@ function PaceDetail({
 //      two — the leaving interval is what the swimmer reads off the pool
 //      clock to know when to push off for the next rep.
 //
-// Stroke selection is intentionally NOT included in v1. ~95% of recreational
-// swimmers only do freestyle; adding a stroke selector taxes 100% of users
-// to serve maybe 5–10%. Will add when wearable integration auto-detects
-// stroke (Apple Watch / Garmin) — Phase 2.
+// Stroke selection IS supported in v1 via the SwimmingConsolidatedDetail
+// wrapper above — 4 strokes (Freestyle, Backstroke, Breaststroke, Butterfly)
+// stored as separate `Swimming [X]` movement rows in the DB. The wrapper
+// filters efforts by stroke; SwimmingDetail itself is stroke-agnostic
+// and operates on whatever filtered list it receives.
 //
 // See CLAUDE.md "Swimming detail card — locked design spec" for the full
 // design rationale, science sources (Maglischo, Counsilman, Costill), and
@@ -1710,11 +1965,27 @@ function PaceDetail({
 
 function SwimmingDetail({
   activity, efforts, swimUnit, onDelete,
+  displayName,
+  extraHeaderContent,
+  emptyStateLabel,
 }: {
   activity: string
   efforts:  Effort[]
   swimUnit: 'm' | 'yd'
   onDelete: (id: string) => void
+  /** Override for the header h1 — used by the consolidated wrapper to
+   *  show "Swimming" instead of "Swimming [Backstroke]". */
+  displayName?:        string
+  /** Optional content rendered directly under the subtitle. Used by the
+   *  consolidated wrapper to inject the FREE / BACK / BREAST / FLY stroke
+   *  pill row with its swipe gesture. Same pattern as Sled Drag's
+   *  CarryDetail wrapper injecting the PUSH / PULL toggle. */
+  extraHeaderContent?: React.ReactNode
+  /** Override for the empty-state cue ("Log your first ___ effort and
+   *  your personalized plan will appear here"). Used by the wrapper to
+   *  say "backstroke effort" / "butterfly effort" rather than the
+   *  generic activity name. */
+  emptyStateLabel?:    string
 }) {
   // CSS proxy via Riegel projection — the lowest projected per-100m pace
   // across all efforts. Improves automatically as the user logs faster
@@ -1758,10 +2029,15 @@ function SwimmingDetail({
     <View style={s.page}>
 
       {/* Header — subtitle reads "Best — 1:38/100m" (per-100m, swim
-          convention) rather than the per-km used for running/cycling. */}
+          convention) rather than the per-km used for running/cycling.
+          When `displayName` is provided by the consolidated wrapper, the
+          h1 reads the base name ("Swimming") rather than the underlying
+          bracketed movement name ("Swimming [Backstroke]"). The pill row
+          (or any other content the wrapper wants under the subtitle)
+          renders via `extraHeaderContent`. */}
       <View>
         <BackButton />
-        <Text style={s.h1}>{activity}</Text>
+        <Text style={s.h1}>{displayName ?? activity}</Text>
         <View style={s.subRow}>
           <Text style={s.subText}>Best — </Text>
           <TickerNumber
@@ -1771,6 +2047,7 @@ function SwimmingDetail({
             fontWeight="600"
           />
         </View>
+        {extraHeaderContent}
       </View>
 
       {/* Progression plan card */}
@@ -1913,12 +2190,14 @@ function SwimmingDetail({
         </AnimateRise>
       )}
 
-      {/* Empty-state hint when no efforts logged yet. */}
+      {/* Empty-state hint when no efforts logged yet. `emptyStateLabel`
+          lets the consolidated wrapper say "backstroke effort" rather
+          than the generic "Swimming [Backstroke] effort". */}
       {!hasCSS && (
         <AnimateRise delay={0} style={s.card}>
           <Text style={s.h2}>Progression plan</Text>
           <Text style={s.helpTextSm}>
-            Log your first {activity} effort and your personalized plan will appear here.
+            Log your first {emptyStateLabel ?? activity} effort and your personalized plan will appear here.
             Every step adapts to your latest pace.
           </Text>
         </AnimateRise>
@@ -2090,6 +2369,35 @@ const s = StyleSheet.create({
   // optical padding). marginBottom keeps spacing parity with the old
   // text-label version.
   backBtn:  { alignSelf: 'flex-start', marginLeft: -6, marginBottom: 8, padding: 4 },
+
+  // Swim stroke pill carousel (SwimmingConsolidatedDetail) — single pill
+  // centered between two pulsing chevrons. Mirrors the sledVariantRow
+  // pattern from strength's Sled Drag wrapper but uses amber chrome to
+  // match the cardio theme.
+  swimStrokeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 12,
+    paddingVertical: 6,
+    alignSelf: 'stretch',
+  },
+  swimStrokeChevronSlotLeft: {
+    width: 56,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  swimStrokeChevronSlotRight: {
+    width: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  swimStrokeChevronPressable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
 
   // Headings
   h1:      { color: colors.foreground, fontSize: 20, fontWeight: '600' },

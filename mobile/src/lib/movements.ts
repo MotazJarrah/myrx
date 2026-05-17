@@ -103,6 +103,92 @@ export function speedMaxTenths(activity: string, distUnit: 'km' | 'mi'): number 
   return Math.round(displayMax * 10)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Swimming stroke consolidation (May 17 2026)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Swimming has 4 stroke variants stored as separate movements in the DB:
+//   Swimming [Freestyle], Swimming [Backstroke],
+//   Swimming [Breaststroke], Swimming [Butterfly]
+//
+// They collapse into a single detail page via SwimmingConsolidatedDetail,
+// mirroring the Sled Drag [Push] / [Pull] pattern from strength. Helpers
+// below live in this shared lib so cardio.tsx (log form + index) and the
+// detail page can both reference the same authoritative stroke list.
+
+export type SwimStroke = 'freestyle' | 'backstroke' | 'breaststroke' | 'butterfly'
+
+export const SWIM_STROKE_ORDER: readonly SwimStroke[] =
+  ['freestyle', 'backstroke', 'breaststroke', 'butterfly'] as const
+
+export const SWIM_STROKE_LABELS: Record<SwimStroke, { full: string; short: string }> = Object.freeze({
+  freestyle:    { full: 'Freestyle',    short: 'FREE'   },
+  backstroke:   { full: 'Backstroke',   short: 'BACK'   },
+  breaststroke: { full: 'Breaststroke', short: 'BREAST' },
+  butterfly:    { full: 'Butterfly',    short: 'FLY'    },
+})
+
+export const SWIMMING_BASE_NAME = 'Swimming'
+
+// All 4 stroke-specific movement names. Used by the cardio index to
+// collapse them into a single "Swimming" row, and by the detail page
+// fetch query to pull efforts across all strokes in one shot.
+export const SWIMMING_STROKE_MOVEMENTS: readonly string[] = SWIM_STROKE_ORDER.map(
+  s => `${SWIMMING_BASE_NAME} [${SWIM_STROKE_LABELS[s].full}]`,
+)
+
+/**
+ * True if a movement name is one of the four bracketed swim variants.
+ * False for bare "Swimming" (legacy / synthetic).
+ */
+export function isSwimStrokeMovement(name: string | null | undefined): boolean {
+  if (!name) return false
+  return SWIMMING_STROKE_MOVEMENTS.includes(name)
+}
+
+/**
+ * Map a bracketed movement name back to its SwimStroke.
+ *   "Swimming [Backstroke]"   → 'backstroke'
+ *   "Swimming [Freestyle]"    → 'freestyle'
+ *   "Swimming"                → null (bare, not a stroke variant)
+ *   "Running"                 → null
+ */
+export function swimStrokeFromMovementName(name: string | null | undefined): SwimStroke | null {
+  if (!name) return null
+  const m = name.match(/^Swimming\s+\[(\w+)\]$/i)
+  if (!m) return null
+  const stroke = m[1].toLowerCase() as SwimStroke
+  if (SWIM_STROKE_ORDER.includes(stroke)) return stroke
+  return null
+}
+
+/**
+ * Parse the stroke from an effort label's leading "Swimming [X] · ..."
+ * prefix. Bare "Swimming · ..." labels (logged before the May 17 2026
+ * stroke consolidation) default to Freestyle on the read path.
+ */
+export function parseSwimStroke(label: string | null | undefined): SwimStroke {
+  if (!label) return 'freestyle'
+  const first = label.split(' · ')[0] ?? ''
+  const m = first.match(/^Swimming\s+\[(\w+)\]/i)
+  if (!m) return 'freestyle'
+  const stroke = m[1].toLowerCase() as SwimStroke
+  if (SWIM_STROKE_ORDER.includes(stroke)) return stroke
+  return 'freestyle'
+}
+
+/**
+ * True if the activity is any kind of swim — bracketed stroke variant,
+ * the base "Swimming" name (from the index collapse navigation), or
+ * legacy bare "Swimming" effort labels.
+ */
+export function isSwimActivity(activity: string | null | undefined): boolean {
+  if (!activity) return false
+  if (activity === SWIMMING_BASE_NAME) return true
+  if (activity.startsWith('Swimming [')) return true
+  return false
+}
+
 const ISOMETRIC_LIST = [
   'Active Hang',
   'Back Lever Hold',
