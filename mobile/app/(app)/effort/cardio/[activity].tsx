@@ -17,7 +17,7 @@
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native'
+import { View, Text, Pressable, ScrollView, StyleSheet, useWindowDimensions } from 'react-native'
 import Animated, {
   FadeInUp,
   FadeOutUp,
@@ -1767,33 +1767,79 @@ function SwimmingConsolidatedDetail({
 
   const [activeStroke, setActiveStroke] = useState<SwimStroke>(defaultStroke)
 
-  // Filter efforts to the active stroke. SwimmingDetail computes
-  // everything (CSS, plan queue, chart, history) from this filtered list,
-  // so the stroke switch is the single trigger that drives the whole page.
-  const filteredEfforts = useMemo(
-    () => efforts.filter(e => parseSwimStroke(e.label) === activeStroke),
-    [efforts, activeStroke],
+  // Pre-filter efforts per stroke once so we don't re-filter inside every
+  // ScrollView slot's SwimmingDetail. Each slot just looks up its own list.
+  const effortsByStroke = useMemo(() => {
+    const map: Record<SwimStroke, Effort[]> = {
+      freestyle: [], backstroke: [], breaststroke: [], butterfly: [],
+    }
+    efforts.forEach(e => {
+      const stroke = parseSwimStroke(e.label)
+      map[stroke].push(e)
+    })
+    return map
+  }, [efforts])
+
+  // Header subtitle — show the ACTIVE stroke's CSS. Updates on swipe (just
+  // a TickerNumber re-render, not a wrapper-level animation). The wrapper
+  // header otherwise stays positionally static — only the body inside the
+  // paged ScrollView physically slides. Mirrors the Sled Drag consolidated
+  // wrapper, which also surfaces the active variant's best in its subtitle.
+  const activeStrokeCSS = useMemo(
+    () => riegelProjectCSS(effortsByStroke[activeStroke]),
+    [effortsByStroke, activeStroke],
   )
+  const hasActiveCSS = activeStrokeCSS !== null && activeStrokeCSS > 0
+
+  // ── Paged ScrollView — the BW "whole page slides" pattern ──────────────
+  // Each stroke renders in its own slot inside a horizontal pagingEnabled
+  // ScrollView. The pill row controls navigation via programmatic scrollTo
+  // (smooth slide), and direct body swipes scroll natively then sync state
+  // via onMomentumScrollEnd. Both gestures converge through navigateStroke.
+  //
+  // slotWidth is pre-seeded to (windowWidth − page padding) so the slots
+  // render at near-final width on first paint — eliminates the 0 → N pop
+  // that would otherwise cause LinearTransition jank inside SwimmingDetail.
+  const PAGE_PADDING_HORIZONTAL = 16
+  const winWidth = useWindowDimensions().width
+  const [slotWidth, setSlotWidth] = useState(Math.max(0, winWidth - PAGE_PADDING_HORIZONTAL * 2))
+
+  const scrollRef = useRef<ScrollView>(null)
+
+  // On initial mount, scroll to the active stroke's slot (so the page
+  // doesn't land on slot 0 if the user's most-recent stroke is e.g.
+  // butterfly). animated:false because this is the initial landing.
+  const initialScrollDoneRef = useRef(false)
+  useEffect(() => {
+    if (initialScrollDoneRef.current) return
+    if (slotWidth <= 0) return
+    if (!scrollRef.current) return
+    const idx = SWIM_STROKE_ORDER.indexOf(activeStroke)
+    if (idx < 0) return
+    scrollRef.current.scrollTo({ x: idx * slotWidth, animated: false })
+    initialScrollDoneRef.current = true
+  }, [slotWidth, activeStroke])
+
+  // Navigate to a specific stroke index. Used by both the chevron Pressable
+  // taps and the pill Pan gesture (via runOnJS). Updates state AND
+  // programmatically scrolls the body, so the two animations are
+  // synchronized (pill flies off → body slides → pill comes back in
+  // from opposite side).
+  const navigateStroke = (direction: -1 | 1) => {
+    const currentIdx = SWIM_STROKE_ORDER.indexOf(activeStroke)
+    const newIdx = currentIdx + direction
+    if (newIdx < 0 || newIdx >= SWIM_STROKE_ORDER.length) return
+    setActiveStroke(SWIM_STROKE_ORDER[newIdx])
+    if (slotWidth > 0 && scrollRef.current) {
+      scrollRef.current.scrollTo({ x: newIdx * slotWidth, animated: true })
+    }
+  }
 
   const currentIdx = SWIM_STROKE_ORDER.indexOf(activeStroke)
   const hasPrev    = currentIdx > 0
   const hasNext    = currentIdx < SWIM_STROKE_ORDER.length - 1
 
-  // Navigate one stroke in the requested direction. Bounded — no wrap.
-  // Called via runOnJS from the gesture worklet, and directly from
-  // chevron Pressables.
-  const navigateStroke = (direction: -1 | 1) => {
-    const newIdx = currentIdx + direction
-    if (newIdx < 0 || newIdx >= SWIM_STROKE_ORDER.length) return
-    setActiveStroke(SWIM_STROKE_ORDER[newIdx])
-  }
-
   // ── Pill swipe gesture (BW-style choreography) ──────────────────────────
-  // Same constants as Sled Drag's choreography. The reason both files
-  // duplicate these magic numbers instead of sharing a constant: the
-  // wrapper components own their own swipe behaviour and the values are
-  // tuned per-page (mostly the same, but explicit-per-page leaves room
-  // for divergence without a refactor).
   const SWIM_SWIPE_THRESHOLD_PX = 20
   const SWIM_SLIDE_OFFSCREEN_PX = 220
   const SWIM_SLIDE_DURATION_MS  = 250
@@ -1817,14 +1863,9 @@ function SwimmingConsolidatedDetail({
         'worklet'
         // Finger swipes right (translationX positive) → expose what's on
         // the LEFT → navigate LEFT in the carousel (direction = -1).
-        // Same convention as Sled Drag.
         const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
         const past = Math.abs(event.translationX) > SWIM_SWIPE_THRESHOLD_PX
 
-        // Check there's a valid stroke in the requested direction (no
-        // wrap at the ends). Without this guard the swipe would commit
-        // and the state-flip would be a no-op, leaving the pill
-        // off-screen until next pan.
         const targetIdx = currentIdx + direction
         const validDirection = targetIdx >= 0 && targetIdx < SWIM_STROKE_ORDER.length
 
@@ -1835,7 +1876,8 @@ function SwimmingConsolidatedDetail({
           return
         }
 
-        // Slide off, flip stroke, teleport, slide back in.
+        // Slide off, flip stroke (which also programmatically scrolls the
+        // paged ScrollView via navigateStroke), teleport, slide back in.
         const slideOff = direction === 1 ? -SWIM_SLIDE_OFFSCREEN_PX : SWIM_SLIDE_OFFSCREEN_PX
         swimPillTranslateX.value = withTiming(slideOff, { duration: SWIM_SLIDE_DURATION_MS }, (finished) => {
           'worklet'
@@ -1851,89 +1893,148 @@ function SwimmingConsolidatedDetail({
         })
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeStroke, currentIdx],
+    [activeStroke, currentIdx, slotWidth],
   )
 
   const swimPillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: swimPillTranslateX.value }] }))
   const swimChevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: swimChevronOpacityOverride.value }))
 
-  const pillRow = (
-    <GestureDetector gesture={swimPillSwipeGesture}>
-      <View style={s.swimStrokeRow}>
-        {/* Left chevron — only visible if there's a stroke to the left.
-            Tappable to navigate directly without swiping. */}
-        {hasPrev ? (
-          <Animated.View style={[s.swimStrokeChevronSlotLeft, swimChevronAnimatedStyle]}>
-            <Pressable
-              onPress={() => navigateStroke(-1)}
-              style={s.swimStrokeChevronPressable}
-              hitSlop={8}
-              accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[SWIM_STROKE_ORDER[currentIdx - 1]].full}`}
-            >
-              <AmberAnimatedChevron direction="left" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
-              <View style={{ marginLeft: -6 }}>
-                <AmberAnimatedChevron direction="left" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
-              </View>
-            </Pressable>
-          </Animated.View>
-        ) : (
-          // Spacer of equal width so the pill stays centered in the row.
-          <View style={s.swimStrokeChevronSlotLeft} />
-        )}
-
-        {/* Active stroke pill — follows finger during pan, slides off /
-            back on commit. Same amber chrome as the cardio zone pill. */}
-        <Animated.View
-          style={[
-            {
-              paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9999,
-              borderWidth: 1, borderColor: palette.amber[500],
-              backgroundColor: withAlpha(palette.amber[500], 0.15),
-            },
-            swimPillAnimatedStyle,
-          ]}
-        >
-          <Text style={{
-            fontSize: 11, fontWeight: '700', textTransform: 'uppercase',
-            letterSpacing: 0.5, color: palette.amber[400],
-          }}>
-            {SWIM_STROKE_LABELS[activeStroke].short}
-          </Text>
-        </Animated.View>
-
-        {/* Right chevron — only visible if there's a stroke to the right. */}
-        {hasNext ? (
-          <Animated.View style={[s.swimStrokeChevronSlotRight, swimChevronAnimatedStyle]}>
-            <Pressable
-              onPress={() => navigateStroke(1)}
-              style={s.swimStrokeChevronPressable}
-              hitSlop={8}
-              accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[SWIM_STROKE_ORDER[currentIdx + 1]].full}`}
-            >
-              <AmberAnimatedChevron direction="right" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
-              <View style={{ marginLeft: -6 }}>
-                <AmberAnimatedChevron direction="right" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
-              </View>
-            </Pressable>
-          </Animated.View>
-        ) : (
-          <View style={s.swimStrokeChevronSlotRight} />
-        )}
-      </View>
-    </GestureDetector>
-  )
-
   return (
-    <SwimmingDetail
-      key={activeStroke}
-      activity={`${SWIMMING_BASE_NAME} [${SWIM_STROKE_LABELS[activeStroke].full}]`}
-      displayName={SWIMMING_BASE_NAME}
-      efforts={filteredEfforts}
-      swimUnit={swimUnit}
-      onDelete={onDelete}
-      extraHeaderContent={pillRow}
-      emptyStateLabel={`${SWIM_STROKE_LABELS[activeStroke].full.toLowerCase()}`}
-    />
+    <View style={s.page}>
+
+      {/* Page-level header — stays positionally STATIC during stroke
+          swipes. The subtitle's TickerNumber updates on stroke change
+          (just digit roll, not a layout animation). The visible body
+          below physically slides between strokes via the paged
+          ScrollView. */}
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{SWIMMING_BASE_NAME}</Text>
+        {hasActiveCSS ? (
+          <View style={s.subRow}>
+            <Text style={s.subText}>Best — </Text>
+            <TickerNumber
+              value={`${fmtPaceSecsPer100m(activeStrokeCSS!)}${swimPaceUnitLabel(swimUnit)}`}
+              fontSize={14}
+              color={palette.amber[400]}
+              fontWeight="600"
+            />
+          </View>
+        ) : (
+          <Text style={s.subText}>No {SWIM_STROKE_LABELS[activeStroke].full.toLowerCase()} efforts logged yet</Text>
+        )}
+
+        {/* Pill row — also static, sits between header and the paged
+            body. The pill animates in-place during swipes (slide off /
+            teleport / slide back); the paged ScrollView below is what
+            carries the actual content slide. */}
+        <GestureDetector gesture={swimPillSwipeGesture}>
+          <View style={s.swimStrokeRow}>
+            {hasPrev ? (
+              <Animated.View style={[s.swimStrokeChevronSlotLeft, swimChevronAnimatedStyle]}>
+                <Pressable
+                  onPress={() => navigateStroke(-1)}
+                  style={s.swimStrokeChevronPressable}
+                  hitSlop={8}
+                  accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[SWIM_STROKE_ORDER[currentIdx - 1]].full}`}
+                >
+                  <AmberAnimatedChevron direction="left" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+                  <View style={{ marginLeft: -6 }}>
+                    <AmberAnimatedChevron direction="left" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+                  </View>
+                </Pressable>
+              </Animated.View>
+            ) : (
+              <View style={s.swimStrokeChevronSlotLeft} />
+            )}
+
+            <Animated.View
+              style={[
+                {
+                  paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9999,
+                  borderWidth: 1, borderColor: palette.amber[500],
+                  backgroundColor: withAlpha(palette.amber[500], 0.15),
+                },
+                swimPillAnimatedStyle,
+              ]}
+            >
+              <Text style={{
+                fontSize: 11, fontWeight: '700', textTransform: 'uppercase',
+                letterSpacing: 0.5, color: palette.amber[400],
+              }}>
+                {SWIM_STROKE_LABELS[activeStroke].short}
+              </Text>
+            </Animated.View>
+
+            {hasNext ? (
+              <Animated.View style={[s.swimStrokeChevronSlotRight, swimChevronAnimatedStyle]}>
+                <Pressable
+                  onPress={() => navigateStroke(1)}
+                  style={s.swimStrokeChevronPressable}
+                  hitSlop={8}
+                  accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[SWIM_STROKE_ORDER[currentIdx + 1]].full}`}
+                >
+                  <AmberAnimatedChevron direction="right" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+                  <View style={{ marginLeft: -6 }}>
+                    <AmberAnimatedChevron direction="right" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+                  </View>
+                </Pressable>
+              </Animated.View>
+            ) : (
+              <View style={s.swimStrokeChevronSlotRight} />
+            )}
+          </View>
+        </GestureDetector>
+      </View>
+
+      {/* Paged ScrollView — the actual "whole page slides" mechanism.
+          One slot per stroke; each slot is a full SwimmingDetail body
+          (progression plan + chart + log list) with hideHeader=true.
+          The 4 slots all render at mount; React Native ScrollView doesn't
+          virtualize but the slot content is cheap (memoized CSS + plan
+          computations per stroke). */}
+      <View
+        onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}
+        style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}
+      >
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          decelerationRate="fast"
+          onMomentumScrollEnd={e => {
+            if (slotWidth === 0) return
+            const x = e.nativeEvent.contentOffset.x
+            const idx = Math.round(x / slotWidth)
+            const targetStroke = SWIM_STROKE_ORDER[idx]
+            if (targetStroke && targetStroke !== activeStroke) {
+              setActiveStroke(targetStroke)
+            }
+          }}
+        >
+          {SWIM_STROKE_ORDER.map(stroke => (
+            <View
+              key={stroke}
+              style={{
+                width: slotWidth,
+                paddingHorizontal: PAGE_PADDING_HORIZONTAL,
+              }}
+            >
+              <SwimmingDetail
+                activity={`${SWIMMING_BASE_NAME} [${SWIM_STROKE_LABELS[stroke].full}]`}
+                displayName={SWIMMING_BASE_NAME}
+                efforts={effortsByStroke[stroke]}
+                swimUnit={swimUnit}
+                onDelete={onDelete}
+                emptyStateLabel={SWIM_STROKE_LABELS[stroke].full.toLowerCase()}
+                hideHeader
+              />
+            </View>
+          ))}
+        </ScrollView>
+      </View>
+    </View>
   )
 }
 
@@ -1968,6 +2069,7 @@ function SwimmingDetail({
   displayName,
   extraHeaderContent,
   emptyStateLabel,
+  hideHeader,
 }: {
   activity: string
   efforts:  Effort[]
@@ -1986,6 +2088,11 @@ function SwimmingDetail({
    *  say "backstroke effort" / "butterfly effort" rather than the
    *  generic activity name. */
   emptyStateLabel?:    string
+  /** When true, skip rendering the page-level header (h1 + best subtitle).
+   *  The consolidated wrapper renders that header itself OUTSIDE the
+   *  paged ScrollView so it stays static while the body slides between
+   *  strokes — matches BW's "whole page slides" pattern. */
+  hideHeader?:         boolean
 }) {
   // CSS proxy via Riegel projection — the lowest projected per-100m pace
   // across all efforts. Improves automatically as the user logs faster
@@ -2034,21 +2141,26 @@ function SwimmingDetail({
           h1 reads the base name ("Swimming") rather than the underlying
           bracketed movement name ("Swimming [Backstroke]"). The pill row
           (or any other content the wrapper wants under the subtitle)
-          renders via `extraHeaderContent`. */}
-      <View>
-        <BackButton />
-        <Text style={s.h1}>{displayName ?? activity}</Text>
-        <View style={s.subRow}>
-          <Text style={s.subText}>Best — </Text>
-          <TickerNumber
-            value={bestSubtitle}
-            fontSize={14}
-            color={palette.amber[400]}
-            fontWeight="600"
-          />
+          renders via `extraHeaderContent`. The whole header is omitted
+          when `hideHeader` is true (consolidated wrapper renders its
+          own header outside the paged ScrollView so it stays static
+          during stroke transitions). */}
+      {!hideHeader && (
+        <View>
+          <BackButton />
+          <Text style={s.h1}>{displayName ?? activity}</Text>
+          <View style={s.subRow}>
+            <Text style={s.subText}>Best — </Text>
+            <TickerNumber
+              value={bestSubtitle}
+              fontSize={14}
+              color={palette.amber[400]}
+              fontWeight="600"
+            />
+          </View>
+          {extraHeaderContent}
         </View>
-        {extraHeaderContent}
-      </View>
+      )}
 
       {/* Progression plan card */}
       {hasCSS && selectedStep && (

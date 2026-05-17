@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, Pressable, ScrollView, StyleSheet, type LayoutChangeEvent } from 'react-native'
+import { View, Text, Pressable, ScrollView, StyleSheet, useWindowDimensions, type LayoutChangeEvent } from 'react-native'
 import Animated, {
   FadeInUp,
   FadeOutUp,
@@ -457,6 +457,19 @@ const CARRY_BENCHMARKS: Record<string, CarryBenchmarkCfg> = Object.freeze({
   "Keg Carry":                  { mode: 'abs',   tiers: { beginner: [30, 10],   intermediate: [60, 10],   advanced: [100, 10],  strongman: [130, 10] } },
   "Sandbag Carry":              { mode: 'abs',   tiers: { beginner: [25, 10],   intermediate: [50, 10],   advanced: [ 80, 10],  strongman: [110, 10] } },
   "Shield Carry":               { mode: 'abs',   tiers: { beginner: [30, 10],   intermediate: [50, 10],   advanced: [ 75, 10],  strongman: [100, 10] } },
+
+  // Sled Drag variants — May 2026 cleanup consolidated cardio's Sled Pull/Push
+  // and strength's Sled Drag / Sled Push (Prowler) into a single `Sled Drag`
+  // with two variants tagged `[Push]` and `[Pull]`. Push is leg-dominant
+  // (Prowler-style, quad/glute concentric drive) so higher loads are possible;
+  // Pull is posterior-chain dominant (strap or harness, hams/glutes pull)
+  // and typically carries less weight. Ratios benchmarked against GoRuck,
+  // Strongman Corporation, and tactical-fitness programs (Brian Alsruhe,
+  // Bryce Lewis). Ratio-mode (vs BW) makes more sense than absolute because
+  // a 250 lb athlete pushing 200 lb is not equivalent to a 130 lb athlete
+  // pushing the same.
+  "Sled Drag [Push]":           { mode: 'ratio', tiers: { beginner: [1.00, 15], intermediate: [1.50, 15], advanced: [2.00, 15], strongman: [2.50, 15] } },
+  "Sled Drag [Pull]":           { mode: 'ratio', tiers: { beginner: [0.75, 15], intermediate: [1.25, 15], advanced: [1.75, 15], strongman: [2.25, 15] } },
 })
 
 const CARRY_TIER_ORDER:  CarryTier[]                  = ['beginner', 'intermediate', 'advanced', 'strongman']
@@ -622,7 +635,25 @@ interface TileGridProps<T> {
 }
 
 function TileGrid<T>({ items, cols = 5, gap = 8, renderTile }: TileGridProps<T>) {
-  const [w, setW] = useState(0)
+  // Pre-seed the measured width with the standard page-inside-card layout:
+  //   window − 16 page padding × 2 − 20 card padding × 2 − 1 card border × 2
+  //   = window − 74
+  // The border-width terms MATTER: RN uses border-box sizing, so the card's
+  // CONTENT area is the outer width minus padding AND border. Without that
+  // subtraction the fallback is 2 dp too large; tileW gets rounded up by 1
+  // each, and 5 × tileW + 4 × gap exceeds the actual width by ~1 dp →  the
+  // 5th tile wraps to row 2 (4-column layout) on the first paint. Then
+  // onLayout fires with the real width, tileW shrinks by 1, 5 columns fit
+  // — the user sees a visible reflow from 4 cols → 5 cols.
+  // Every place TileGrid renders today sits inside an `s.card` on a strength
+  // detail page, so this formula matches the actual width exactly (no
+  // sub-pixel mismatch). onLayout still refines for atypical contexts.
+  const winWidth = useWindowDimensions().width
+  const PAGE_PADDING = 16
+  const CARD_PADDING = 20
+  const CARD_BORDER  = 1
+  const fallbackW = Math.max(0, winWidth - PAGE_PADDING * 2 - CARD_PADDING * 2 - CARD_BORDER * 2)
+  const [w, setW] = useState(fallbackW)
   // Math.floor avoids fractional widths that RN can round in a way that
   // pushes the last column to wrap. Using explicit marginRight per child
   // (instead of `gap` on the parent) keeps the layout deterministic.
@@ -712,7 +743,38 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
     weightedProgression,
   } = props
 
-  const [slotWidth, setSlotWidth] = useState(0)
+  // Pre-seed slotWidth with the screen width minus page padding so the
+  // BW pager's tier slots render at near-final width on the very first
+  // paint — instead of starting at 0 and popping in after onLayout fires.
+  // Page padding (from `app/(app)/_layout.tsx`'s scrollContent style) is
+  // 16 each side; subtract 32 total. onLayout still refines if the actual
+  // measured width differs (e.g., split-view, orientation, dynamic island
+  // cutouts), but the difference is sub-pixel typically — the visible
+  // 0 → N jump that caused the "hero card lags the rest of the page" is
+  // gone. Paired with layoutAnimEnabled below: if onLayout DOES refine
+  // by more than a pixel on first paint, the refinement still won't
+  // animate because LinearTransition is gated off until 2 RAFs after mount.
+  const PAGE_PADDING_HORIZONTAL = 16
+  const winWidth = useWindowDimensions().width
+  const [slotWidth, setSlotWidth] = useState(Math.max(0, winWidth - PAGE_PADDING_HORIZONTAL * 2))
+
+  // Disable LinearTransition on the very first paint of the hero body. The BW
+  // pager's slotWidth gets re-measured via onLayout — even with pre-seeding
+  // there can be a small adjustment, and we don't want the wrapper animating
+  // that adjustment as a layout change. After 2 requestAnimationFrames,
+  // layoutAnimEnabled flips true so subsequent layout changes (info panel
+  // open/close) still get the smooth slide.
+  const [layoutAnimEnabled, setLayoutAnimEnabled] = useState(false)
+  useEffect(() => {
+    let raf2: number | null = null
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setLayoutAnimEnabled(true))
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      if (raf2 != null) cancelAnimationFrame(raf2)
+    }
+  }, [])
 
   // Bodyweight consolidated: on first paint after the active tier is resolved
   // and the swipe carousel has measured itself, scroll to the active tier's
@@ -1110,7 +1172,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                       </Animated.View>
                     )}
 
-                    <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 2 }}>
+                    <Animated.View layout={layoutAnimEnabled ? LinearTransition.duration(200) : undefined} style={{ gap: 2 }}>
                       {isGradT ? (
                         /* Graduated past this tier — simple one-liner; the
                            peak reps + graduation date + session count are
@@ -1176,7 +1238,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                             return (
                               <>
                                 <View style={s.calloutValueRow}>
-                                  <Text style={s.calloutValue}>{selectedBWTile.reps}</Text>
+                                  <TickerNumber value={selectedBWTile.reps} fontSize={36} color={palette.blue[400]} fontWeight="700" />
                                   <Text style={s.calloutSubText}>{selectedBWTile.reps > 1 ? 'reps cleared' : 'rep cleared'}</Text>
                                 </View>
                                 <Text style={s.tinyText}>
@@ -1190,7 +1252,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                           })() : selectedBWTile?.mode === 'push' ? (
                             <>
                               <View style={s.calloutValueRow}>
-                                <Text style={s.calloutValue}>{selectedBWTile.reps}</Text>
+                                <TickerNumber value={selectedBWTile.reps} fontSize={36} color={palette.blue[400]} fontWeight="700" />
                                 <Text style={s.calloutSubText}>{selectedBWTile.reps > 1 ? 'reps next' : 'rep next'}</Text>
                               </View>
                               <Text style={s.tinyText}>
@@ -1201,7 +1263,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                             <>
                               <Text style={s.calloutLabel}>Target</Text>
                               <View style={s.calloutValueRow}>
-                                <Text style={s.calloutValue}>{selectedBWTile?.reps ?? selectedRM}</Text>
+                                <TickerNumber value={selectedBWTile?.reps ?? selectedRM} fontSize={36} color={palette.blue[400]} fontWeight="700" />
                                 <Text style={s.calloutSubText}>{(selectedBWTile?.reps ?? selectedRM) > 1 ? 'reps' : 'rep'}</Text>
                               </View>
                               <Text style={s.tinyText}>
@@ -1213,7 +1275,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                           <>
                             <Text style={s.calloutLabel}>Target</Text>
                             <View style={s.calloutValueRow}>
-                              <Text style={s.calloutValue}>{selectedRM}</Text>
+                              <TickerNumber value={selectedRM} fontSize={36} color={palette.blue[400]} fontWeight="700" />
                               <Text style={s.calloutSubText}>max attempts</Text>
                             </View>
                             <Text style={s.tinyText}>
@@ -1223,7 +1285,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                         ) : selectedBWTile.mode === 'push' ? (
                           <>
                             <View style={s.calloutValueRow}>
-                              <Text style={s.calloutValue}>{selectedBWTile.nextRep}</Text>
+                              <TickerNumber value={selectedBWTile.nextRep ?? 0} fontSize={36} color={palette.blue[400]} fontWeight="700" />
                               <Text style={s.calloutSubText}>reps next at bodyweight</Text>
                             </View>
                             <Text style={s.tinyText}>
@@ -1236,7 +1298,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                               <View>
                                 <Text style={s.calloutLabel}>attempt {selectedRM} {repWord(selectedRM)}</Text>
                                 <View style={[s.calloutValueRow, { marginTop: 2 }]}>
-                                  <Text style={s.calloutValue}>+{selectedBWTile.addedWeight}</Text>
+                                  <TickerNumber value={`+${selectedBWTile.addedWeight}`} fontSize={36} color={palette.blue[400]} fontWeight="700" />
                                   <Text style={s.calloutSubText}>{profileUnit} added</Text>
                                 </View>
                               </View>
@@ -1318,14 +1380,17 @@ function EffortsHistorySection({
   renderRight,
   onDelete,
   renderLeft,
+  delay = 0,
 }: {
   efforts: Effort[]
   renderRight: (e: Effort) => React.ReactNode
   onDelete: (id: string) => void
   renderLeft?: (e: Effort) => React.ReactNode
+  /** AnimateRise delay so the log slides in AFTER the main content + chart. */
+  delay?: number
 }) {
   return (
-    <AnimateRise style={s.cardNoPad}>
+    <AnimateRise delay={delay} style={s.cardNoPad}>
       <View style={s.listHeader}>
         <Text style={s.listHeaderText}>Efforts history</Text>
       </View>
@@ -1417,9 +1482,10 @@ function IsometricDetail({
       <View>
         <BackButton />
         <Text style={s.h1}>{exercise}</Text>
-        <Text style={s.subText}>
-          Personal best — <Text style={s.subValueBlue}>{fmtDurationLong(bestSecs)}</Text>
-        </Text>
+        <View style={s.subRow}>
+          <Text style={s.subText}>Personal best — </Text>
+          <TickerNumber value={fmtDurationLong(bestSecs)} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+        </View>
         <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
           <Text style={s.carryTierBadgeText}>{equipmentPillLabel('bodyweight')}</Text>
         </View>
@@ -1431,7 +1497,7 @@ function IsometricDetail({
         </View>
       </View>
 
-      <AnimateRise style={s.card}>
+      <AnimateRise delay={0} style={s.card}>
         <Text style={s.h2}>Hold time milestones</Text>
 
         {/* 3-6-3 milestone grid, rows centered horizontally. Tiles are
@@ -1508,7 +1574,7 @@ function IsometricDetail({
       </AnimateRise>
 
       {chartData.length >= 1 && (
-        <AnimateRise style={s.card}>
+        <AnimateRise delay={250} style={s.card}>
           <Text style={s.h2}>Hold time over time</Text>
           <LineChart
             data={chartData}
@@ -1528,6 +1594,7 @@ function IsometricDetail({
       <EffortsHistorySection
         efforts={efforts}
         onDelete={onDelete}
+        delay={500}
         renderLeft={e => (
           <Text style={s.listRowDate}>{fmtDate(e.created_at)}</Text>
         )}
@@ -1842,7 +1909,7 @@ function AssistedMachineDetail({
 
       {/* Bodyweight gate — replaces projection + hero when bw is missing/stale */}
       {bwLoaded && !showProjectionAndHero && (
-        <AnimateRise style={s.assistBwGateCard}>
+        <AnimateRise delay={0} style={s.assistBwGateCard}>
           <Text style={s.h2}>Recent bodyweight required</Text>
           <Text style={s.helpText}>
             We need a recent bodyweight to project assistance accurately. Please log your current weight.
@@ -1859,7 +1926,7 @@ function AssistedMachineDetail({
 
       {/* Reliability warning chip — best effort had effective load < 25 % BW */}
       {showProjectionAndHero && reliabilityWarn && (
-        <AnimateRise style={s.assistWarningChip}>
+        <AnimateRise delay={0} style={s.assistWarningChip}>
           <Text style={s.assistWarningChipText}>
             Heads up — your best effort had the machine carrying most of the load. Projections may be imprecise. Try a set with less assistance.
           </Text>
@@ -1867,7 +1934,7 @@ function AssistedMachineDetail({
       )}
 
       {showProjectionAndHero && (
-        <AnimateRise style={s.card}>
+        <AnimateRise delay={0} style={s.card}>
           <Text style={s.h2}>Rep-max projections</Text>
           <Text style={[s.helpText, { marginTop: -6 }]}>Pick an adaptation zone, then tap a rep target.</Text>
 
@@ -1968,12 +2035,15 @@ function AssistedMachineDetail({
                     {r}RM
                   </Text>
                   <View style={{ marginTop: 2 }}>
-                    <TickerNumber
-                      value={a}
-                      fontSize={16}
-                      color={isSelected ? palette.blue[400] : colors.foreground}
-                      fontWeight="700"
-                    />
+                    {/* Plain Text — tiles must NOT use TickerNumber (see same
+                        rule comment on the weighted-standard tile below). */}
+                    <Text style={{
+                      fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'],
+                      fontSize: 16, fontWeight: '700',
+                      color: isSelected ? palette.blue[400] : colors.foreground,
+                    }}>
+                      {a}
+                    </Text>
                   </View>
                   <Text style={{
                     marginTop: 2,
@@ -2109,10 +2179,15 @@ function AssistedMachineDetail({
         </AnimateRise>
       )}
 
-      {chartData.length >= 1 && (
-        <AnimateRise style={s.card}>
+      {/* Gate chart + log on `bwLoaded` so they mount AT THE SAME TIME as
+          the main card (which also waits for `bwLoaded`). Without this gate
+          the chart/log render immediately on first paint (they only need
+          `efforts`, already loaded), then animate in — while the main card
+          waits for the async BW fetch and mounts ~200 ms later. Result:
+          user sees chart BEFORE main, breaking the cascade order. */}
+      {bwLoaded && chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
           <Text style={s.h2}>Assistance over time</Text>
-          <Text style={[s.helpText, { marginTop: -6 }]}>Lower = better progress</Text>
           <LineChart
             data={chartData}
             referenceY={chartData.length > 1 && bestAssistance !== null ? bestAssistance : null}
@@ -2128,19 +2203,21 @@ function AssistedMachineDetail({
         </AnimateRise>
       )}
 
-      <EffortsHistorySection
-        efforts={efforts}
-        onDelete={onDelete}
-        renderLeft={e => {
-          const repsM = e.label.match(/×\s*(\d+)/)
-          const reps  = repsM ? parseInt(repsM[1]) : null
-          return (
-            <View>
-              <Text style={s.listRowName}>{reps ? `${reps} rep${reps !== 1 ? 's' : ''}` : '—'}</Text>
-              <Text style={s.listRowDateSm}>{fmtDate(e.created_at)}</Text>
-            </View>
-          )
-        }}
+      {bwLoaded && (
+        <EffortsHistorySection
+          efforts={efforts}
+          onDelete={onDelete}
+          delay={500}
+          renderLeft={e => {
+            const repsM = e.label.match(/×\s*(\d+)/)
+            const reps  = repsM ? parseInt(repsM[1]) : null
+            return (
+              <View>
+                <Text style={s.listRowName}>{reps ? `${reps} rep${reps !== 1 ? 's' : ''}` : '—'}</Text>
+                <Text style={s.listRowDateSm}>{fmtDate(e.created_at)}</Text>
+              </View>
+            )
+          }}
         renderRight={e => {
           const p = parseAssistanceFromLabel(e.label)
           return (
@@ -2150,7 +2227,8 @@ function AssistedMachineDetail({
             </View>
           )
         }}
-      />
+        />
+      )}
     </View>
   )
 }
@@ -2160,8 +2238,38 @@ function AssistedMachineDetail({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function CarryDetail({
-  exercise, efforts, onDelete,
-}: { exercise: string; efforts: Effort[]; onDelete: (id: string) => void }) {
+  exercise, efforts, onDelete, displayName, extraHeaderContent, hideHeader,
+}: {
+  exercise: string
+  efforts: Effort[]
+  onDelete: (id: string) => void
+  /**
+   * Optional override for the `<Text style={s.h1}>` title. When passed,
+   * the header shows this instead of `exercise`. Used by SledDrag's
+   * consolidated wrapper to render "Sled Drag" as the title while the
+   * internal `exercise` prop remains the variant-tagged name
+   * ("Sled Drag [Push]" / "Sled Drag [Pull]") so benchmarks + label
+   * parsing still work.
+   */
+  displayName?: string
+  /**
+   * Optional ReactNode injected at the END of the header block, AFTER
+   * the equipment + tier badges. Used by SledDrag's consolidated wrapper
+   * to render the PUSH | PULL variant-toggle pill row here, so the toggle
+   * lives in the same visual cluster as the title + best subtitle.
+   */
+  extraHeaderContent?: React.ReactNode
+  /**
+   * When true, skip the entire header block (back button, h1, subtitle,
+   * equipment badge, tier badge, extraHeaderContent). Used by
+   * SledDragConsolidatedDetail so the wrapper can render the page-level
+   * header ONCE outside the paged ScrollView while each variant's body
+   * (the rep-max projections card + hero + chart + log list) lives as a
+   * sliding slot inside. Matches the BW consolidated-block pattern in
+   * strength's main detail page.
+   */
+  hideHeader?: boolean
+}) {
   const { user, profile } = useAuth()
   // Look up the movement record so we can honour `unit_lock` (strongman / stone
   // carries always render in kg regardless of profile preference — see
@@ -2301,6 +2409,28 @@ function CarryDetail({
     return Math.floor(value / inc) * inc
   }
 
+  // The verb used in the cue line. "Carry" reads right for most carries
+  // (Farmer's, Yoke, Atlas Stone Bear Hug, Husafell, etc.) but not for
+  // sled work — you don't CARRY a sled, you PUSH it (Prowler) or
+  // DRAG it (rope/harness). Per-movement override here keeps the cue
+  // natural for each variant. Default = "Carry".
+  function carryVerb(): string {
+    if (exercise === 'Sled Drag [Push]') return 'Push'
+    if (exercise === 'Sled Drag [Pull]') return 'Drag'
+    return 'Carry'
+  }
+  const verb = carryVerb()
+
+  // Floor for the conditioning weight when no ladder is defined. The
+  // conditioning zone math is `bestWeight × 0.60` snapped down — for a
+  // user with a low bestWeight (e.g. 10 lb), 60% = 6 lb snaps down to
+  // 5 lb, but the carry wheel min is 10 lb / 5 kg. Prescribing a value
+  // the user can't actually input is unactionable, so we floor at the
+  // wheel min. Ladder movements handle this naturally via
+  // `snapDownToLadder` (which already returns the lowest rung when
+  // value < ladder[0]).
+  const conditioningFloor = displayUnit === 'kg' ? 5 : 10
+
   interface CarryZoneMath {
     cfgZone:          CarryZoneCfg
     W_target:         number
@@ -2336,9 +2466,15 @@ function CarryDetail({
         case 'conditioning':
         default: {
           const W_raw = bestWeight * 0.60
-          W_target = ladder
+          const W_snapped = ladder
             ? snapDownToLadder(W_raw, ladder)
             : snapDownToInc(W_raw, wInc)
+          // Clamp to the wheel's realistic minimum for non-ladder movements.
+          // Without this clamp, a user with a 10 lb bestWeight would see a
+          // conditioning prescription of 5 lb — which the carry log wheel
+          // doesn't reach (min = 10 lb). Ladder movements floor naturally
+          // via snapDownToLadder, so they don't need the clamp.
+          W_target = ladder ? W_snapped : Math.max(W_snapped, conditioningFloor)
           D_target = bestDistDisplay * 2
           break
         }
@@ -2360,18 +2496,18 @@ function CarryDetail({
 
       let cueLine: string
       if (!hasTargets) {
-        cueLine = 'Log your first carry to see a target.'
+        cueLine = `Log your first ${verb.toLowerCase()} to see a target.`
       } else {
         switch (zoneId) {
           case 'max_load':
-            cueLine = `Carry ${W_target} ${wUnit} for ${D_target} ${dUnit} — focus on grip and posture`
+            cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — focus on grip and posture`
             break
           case 'distance_build':
-            cueLine = `Carry ${W_target} ${wUnit} for ${D_target} ${dUnit} — maintain posture across the full distance`
+            cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — maintain posture across the full distance`
             break
           case 'conditioning':
           default:
-            cueLine = `Carry ${W_target} ${wUnit} for ${D_target} ${dUnit} — control your breathing through the burn`
+            cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — control your breathing through the burn`
             break
         }
       }
@@ -2441,7 +2577,43 @@ function CarryDetail({
   // `bwTierScrollRef` + `slotWidth` + `bwInitialScrollDoneRef` setup.
   const carryZoneScrollRef = useRef<ScrollView | null>(null)
   const carryZoneInitialScrollDoneRef = useRef(false)
-  const [slotWidth, setSlotWidth] = useState(0)
+  // Pre-seed with the EXACT measured width of the slot's parent View, which
+  // lives INSIDE an `s.card`: window − 16×2 page padding − 20×2 card padding
+  // − 1×2 card border = window − 74. Getting this right matters because the
+  // ScrollView is pagingEnabled — if slotWidth is too wide, two slots
+  // overlap into one viewport and the user sees both at once. If too
+  // narrow, the slot under-fills and shows a strip of empty viewport.
+  // Same formula as TileGrid's fallback width.
+  const carryWinWidth = useWindowDimensions().width
+  const CARRY_PAGE_PADDING_HORIZONTAL = 16
+  const CARRY_CARD_PADDING_HORIZONTAL = 20
+  const CARRY_CARD_BORDER = 1
+  const [slotWidth, setSlotWidth] = useState(Math.max(
+    0,
+    carryWinWidth
+      - CARRY_PAGE_PADDING_HORIZONTAL * 2
+      - CARRY_CARD_PADDING_HORIZONTAL * 2
+      - CARRY_CARD_BORDER * 2,
+  ))
+
+  // Disable LinearTransition on the very first paint of the carry hero. The
+  // carry pager's slotWidth gets re-measured via onLayout — even with
+  // pre-seeding there can be a small adjustment, and we don't want the
+  // inner hero-row LinearTransition wrappers animating that adjustment as
+  // a layout change. After 2 requestAnimationFrames, layoutAnimEnabled
+  // flips true so subsequent layout changes (info panel open/close, zone
+  // swipe slide) still get the smooth slide. Same pattern as BW.
+  const [carryLayoutAnimEnabled, setCarryLayoutAnimEnabled] = useState(false)
+  useEffect(() => {
+    let raf2: number | null = null
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setCarryLayoutAnimEnabled(true))
+    })
+    return () => {
+      cancelAnimationFrame(raf1)
+      if (raf2 != null) cancelAnimationFrame(raf2)
+    }
+  }, [])
   // Tracks the slot index at the start of a manual drag so `onMomentumScrollEnd`
   // can clamp the result to ±1 (lock page swipe to a single page max).
   const dragStartIdxRef = useRef(0)
@@ -2468,6 +2640,17 @@ function CarryDetail({
     const targetZone = CARRY_ZONE_ORDER[targetIdx]
     setCarrySelZone(targetZone)
     setCarryZoneInfoOpen(false)
+    // CRITICAL: refresh dragStartIdxRef to the CURRENT zone before the
+    // programmatic scrollTo below. The hero ScrollView's onMomentumScrollEnd
+    // clamps the landed slot to ±1 from `dragStartIdxRef.current` to prevent
+    // velocity skips on USER drags — but the ref only updates via
+    // `onScrollBeginDrag`, which never fires for programmatic scrolls. Without
+    // this refresh, the clamp would compare the target (e.g. CONDITIONING,
+    // idx 2) against the stale ref (e.g. 0 from initial mount), force the
+    // result back to idx 1 (DISTANCE BUILD), and silently revert the pill
+    // swipe the user just committed. The bug manifested as "pill swipes to
+    // next zone, then immediately bounces back to the previous one".
+    dragStartIdxRef.current = carryZoneIdx
     // Programmatically scroll the hero ScrollView in parallel with the pill's
     // slide animation. Mirrors BW's `navigateTier` calling scrollTo.
     if (slotWidth > 0 && carryZoneScrollRef.current) {
@@ -2539,35 +2722,48 @@ function CarryDetail({
 
   return (
     <View style={s.page}>
-      {/* ── Header ── */}
-      <View>
-        <BackButton />
-        <Text style={s.h1}>{exercise}</Text>
-        {parsed.length === 0 ? (
-          <Text style={s.subText}>No efforts logged yet</Text>
-        ) : (
-          <View style={s.subRow}>
-            <Text style={s.subText}>Best — </Text>
-            <TickerNumber value={bestWeight} fontSize={14} color={palette.blue[400]} fontWeight="600" />
-            <Text style={[s.subText, s.subValueBlue]}> {wUnit}</Text>
-            <Text style={s.subText}> · </Text>
-            <TickerNumber value={bestDistDisplay} fontSize={14} color={palette.blue[400]} fontWeight="600" />
-            <Text style={[s.subText, s.subValueBlue]}> {dUnit}</Text>
-          </View>
-        )}
-        <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
-          <Text style={s.carryTierBadgeText}>{equipmentPillLabel('carry')}</Text>
-        </View>
-        {tierBadge && (
+      {/* ── Header ──
+          When `displayName` is passed (used by SledDragConsolidatedDetail),
+          the h1 shows that instead of `exercise` so the title can be
+          "Sled Drag" while internal logic still works with the variant-
+          tagged name "Sled Drag [Push]" / "Sled Drag [Pull]".
+          `extraHeaderContent` lets the wrapper inject the PUSH | PULL
+          variant-toggle pill row right after the badges.
+          When `hideHeader` is true, the entire block is skipped — the
+          consolidated wrapper renders its own header above the paged
+          ScrollView so it stays static while the body slides between
+          variants. */}
+      {!hideHeader && (
+        <View>
+          <BackButton />
+          <Text style={s.h1}>{displayName ?? exercise}</Text>
+          {parsed.length === 0 ? (
+            <Text style={s.subText}>No efforts logged yet</Text>
+          ) : (
+            <View style={s.subRow}>
+              <Text style={s.subText}>Best — </Text>
+              <TickerNumber value={bestWeight} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+              <Text style={[s.subText, s.subValueBlue]}> {wUnit}</Text>
+              <Text style={s.subText}> · </Text>
+              <TickerNumber value={bestDistDisplay} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+              <Text style={[s.subText, s.subValueBlue]}> {dUnit}</Text>
+            </View>
+          )}
           <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
-            <Text style={s.carryTierBadgeText}>{tierBadge}</Text>
+            <Text style={s.carryTierBadgeText}>{equipmentPillLabel('carry')}</Text>
           </View>
-        )}
-      </View>
+          {tierBadge && (
+            <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
+              <Text style={s.carryTierBadgeText}>{tierBadge}</Text>
+            </View>
+          )}
+          {extraHeaderContent}
+        </View>
+      )}
 
       {/* ── Bodyweight gate (ratio mode, no fresh log) ── */}
       {showBwGate && (
-        <AnimateRise style={s.assistBwGateCard}>
+        <AnimateRise delay={0} style={s.assistBwGateCard}>
           <Text style={s.h2}>Recent bodyweight required</Text>
           <Text style={s.helpText}>
             We need a recent bodyweight to compute your strongman tier accurately. Please log your current weight.
@@ -2587,7 +2783,7 @@ function CarryDetail({
           subtitle. The tier criteria description that used to live on a
           standalone ladder card now lives here as the secondary subtitle. */}
       {showTierAndHero && (
-        <AnimateRise style={s.card}>
+        <AnimateRise delay={0} style={s.card}>
           <Text style={s.h2}>Adaptation zone</Text>
           <Text style={[s.helpText, { marginTop: -6 }]}>Pick a training focus, then aim at the next target.</Text>
           <Text style={[s.tinyText, { marginBottom: 8 }]}>{tierLadderSubtitle}.</Text>
@@ -2722,7 +2918,7 @@ function CarryDetail({
                         )}
 
                         {zm.hasTargets ? (
-                          <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 12 }}>
+                          <Animated.View layout={carryLayoutAnimEnabled ? LinearTransition.duration(200) : undefined} style={{ gap: 12 }}>
                             {/* Weight row — W_target with delta vs. best on the right */}
                             <View style={s.carryHeroDualRow}>
                               <View style={s.calloutValueRow}>
@@ -2749,7 +2945,7 @@ function CarryDetail({
                         )}
 
                         {/* Thin separator + cue line. */}
-                        <Animated.View layout={LinearTransition.duration(200)} style={s.carryHeroCueRow}>
+                        <Animated.View layout={carryLayoutAnimEnabled ? LinearTransition.duration(200) : undefined} style={s.carryHeroCueRow}>
                           <Text style={s.carryHeroCueText}>{zm.cueLine}</Text>
                         </Animated.View>
                       </NextTargetCallout>
@@ -2762,9 +2958,15 @@ function CarryDetail({
         </AnimateRise>
       )}
 
-      {/* ── Weight chart ── */}
-      {weightChartData.length >= 1 && (
-        <AnimateRise style={s.card}>
+      {/* ── Weight chart ──
+          Gated on `isRatio ? bwLoaded : true` so for ratio movements the
+          chart waits for the BW fetch to complete alongside the main card.
+          Without this gate the chart renders immediately on first paint
+          (efforts are already loaded), animates in, and appears BEFORE the
+          main card which is still waiting for `bwLoaded`. Abs movements
+          (Atlas Stone, etc.) don't need bw so the chart renders normally. */}
+      {(isRatio ? bwLoaded : true) && weightChartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
           <Text style={s.h2}>Carry progress over time</Text>
           <View style={s.chartTagBlue}>
             <Text style={s.chartTagText}>Weight</Text>
@@ -2800,10 +3002,14 @@ function CarryDetail({
         </AnimateRise>
       )}
 
-      {/* ── Efforts history ── */}
+      {/* ── Efforts history ──
+          Gated on isRatio ? bwLoaded : true for the same cascade-ordering
+          reason as the chart above. */}
+      {(isRatio ? bwLoaded : true) && (
       <EffortsHistorySection
         efforts={efforts}
         onDelete={onDelete}
+        delay={500}
         renderLeft={e => {
           const p = parseCarryFromLabel(e.label)
           const dDisplay = p
@@ -2828,6 +3034,287 @@ function CarryDetail({
           )
         }}
       />
+      )}
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SledDragConsolidatedDetail
+//
+// Sled Drag has two parallel variants stored as separate movements:
+// `Sled Drag [Push]` and `Sled Drag [Pull]`. They're biomechanically
+// different (Push = leg-dominant Prowler-style; Pull = posterior-chain
+// dominant) but use the same equipment and follow the same Carry detail
+// page model. This wrapper:
+//   1. Renders a PUSH | PULL segmented toggle in the header.
+//   2. Filters the combined efforts list to whichever variant is active.
+//   3. Delegates the actual page render to CarryDetail with a tagged
+//      `exercise` prop (so CARRY_BENCHMARKS / label parsing still works)
+//      plus the `displayName="Sled Drag"` override (so the h1 reads as
+//      the base name) and `extraHeaderContent` for the toggle pills.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SledDragConsolidatedDetail({
+  efforts, onDelete,
+}: { efforts: Effort[]; onDelete: (id: string) => void }) {
+  type SledVariant = 'push' | 'pull'
+  const SLED_VARIANT_ORDER: readonly SledVariant[] = ['push', 'pull'] as const
+
+  const variantOf = (label: string): SledVariant | null => {
+    const head = label.split(' · ')[0]
+    if (head === 'Sled Drag [Push]') return 'push'
+    if (head === 'Sled Drag [Pull]') return 'pull'
+    return null
+  }
+
+  // Default active variant = whichever has the most recent logged effort.
+  // If neither has efforts, default to push (the more common starting
+  // variant per CrossFit / Prowler programming).
+  const defaultVariant: SledVariant = useMemo(() => {
+    const sorted = [...efforts].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )
+    for (const e of sorted) {
+      const v = variantOf(e.label)
+      if (v) return v
+    }
+    return 'push'
+  }, [efforts])
+
+  const [activeVariant, setActiveVariant] = useState<SledVariant>(defaultVariant)
+
+  // Pre-filter efforts per variant once so each slot inside the paged
+  // ScrollView just looks up its own list. CarryDetail does its own
+  // parsing on this filtered list.
+  const effortsByVariant = useMemo(() => {
+    const map: Record<SledVariant, Effort[]> = { push: [], pull: [] }
+    efforts.forEach(e => {
+      const v = variantOf(e.label)
+      if (v) map[v].push(e)
+    })
+    return map
+  }, [efforts])
+
+  // ── Paged ScrollView — the "whole page slides" pattern ──────────────────
+  // Two slots, one per variant. CarryDetail's body content (rep-max
+  // projections, hero, chart, log) lives inside each slot; the wrapper
+  // renders the static page-level header (h1 + pill row) above.
+  //
+  // slotWidth is pre-seeded to (windowWidth − page padding) so the slots
+  // render at near-final width on first paint. Matches the BW pattern.
+  const PAGE_PADDING_HORIZONTAL = 16
+  const winWidth = useWindowDimensions().width
+  const [slotWidth, setSlotWidth] = useState(Math.max(0, winWidth - PAGE_PADDING_HORIZONTAL * 2))
+
+  const scrollRef = useRef<ScrollView>(null)
+
+  // Initial scroll to the default variant's slot (avoids landing on slot 0
+  // when the user's most-recent variant is "pull"). Runs once per mount.
+  const initialScrollDoneRef = useRef(false)
+  useEffect(() => {
+    if (initialScrollDoneRef.current) return
+    if (slotWidth <= 0) return
+    if (!scrollRef.current) return
+    const idx = SLED_VARIANT_ORDER.indexOf(activeVariant)
+    if (idx < 0) return
+    scrollRef.current.scrollTo({ x: idx * slotWidth, animated: false })
+    initialScrollDoneRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotWidth])
+
+  // Direction-aware variant navigation. Used by chevron Pressables AND by
+  // the pill Pan gesture (via runOnJS). State change + programmatic
+  // scrollTo are bundled so the pill animation and body slide stay in
+  // sync (BW's pattern).
+  const navigateVariant = (direction: -1 | 1) => {
+    const currentIdx = SLED_VARIANT_ORDER.indexOf(activeVariant)
+    const newIdx = currentIdx + direction
+    if (newIdx < 0 || newIdx >= SLED_VARIANT_ORDER.length) return
+    setActiveVariant(SLED_VARIANT_ORDER[newIdx])
+    if (slotWidth > 0 && scrollRef.current) {
+      scrollRef.current.scrollTo({ x: newIdx * slotWidth, animated: true })
+    }
+  }
+
+  // Pill swipe + slide animation — same shape as the BW tier pill
+  // choreography (and the Swimming stroke wrapper).
+  const SLED_SWIPE_THRESHOLD_PX = 20
+  const SLED_SLIDE_OFFSCREEN_PX = 220
+  const SLED_SLIDE_DURATION_MS  = 250
+
+  const sledPillTranslateX        = useSharedValue(0)
+  const sledChevronOpacityOverride = useSharedValue(1)
+
+  const sledPillSwipeGesture = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-25, 25])
+      .onStart(() => {
+        'worklet'
+        sledChevronOpacityOverride.value = withTiming(0, { duration: 120 })
+      })
+      .onUpdate((event) => {
+        'worklet'
+        sledPillTranslateX.value = event.translationX
+      })
+      .onEnd((event) => {
+        'worklet'
+        const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
+        const past = Math.abs(event.translationX) > SLED_SWIPE_THRESHOLD_PX
+        const currentIdx = SLED_VARIANT_ORDER.indexOf(activeVariant)
+        const targetIdx = currentIdx + direction
+        const validDirection = targetIdx >= 0 && targetIdx < SLED_VARIANT_ORDER.length
+
+        if (!past || !validDirection) {
+          // Bounce back to centre; chevrons re-appear.
+          sledPillTranslateX.value = withTiming(0, { duration: 200 })
+          sledChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          return
+        }
+
+        // Slide off, flip variant (also scrolls the paged ScrollView via
+        // navigateVariant), teleport, slide back in.
+        const slideOff = direction === 1 ? -SLED_SLIDE_OFFSCREEN_PX : SLED_SLIDE_OFFSCREEN_PX
+        sledPillTranslateX.value = withTiming(slideOff, { duration: SLED_SLIDE_DURATION_MS }, (finished) => {
+          'worklet'
+          if (!finished) return
+          runOnJS(navigateVariant)(direction)
+          sledPillTranslateX.value = -slideOff
+          sledPillTranslateX.value = withTiming(0, { duration: SLED_SLIDE_DURATION_MS }, (settled) => {
+            'worklet'
+            if (settled) {
+              sledChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+            }
+          })
+        })
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeVariant, slotWidth],
+  )
+
+  const sledPillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: sledPillTranslateX.value }] }))
+  const sledChevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: sledChevronOpacityOverride.value }))
+
+  const currentIdx = SLED_VARIANT_ORDER.indexOf(activeVariant)
+  const hasPrev    = currentIdx > 0
+  const hasNext    = currentIdx < SLED_VARIANT_ORDER.length - 1
+
+  return (
+    <View style={s.page}>
+      {/* Page-level header — h1 + pill row stay STATIC during swipes.
+          CarryDetail's complex per-variant subtitle (best weight / dist
+          / tier badge) lives inside the body slot, so the wrapper avoids
+          duplicating that parsing logic. */}
+      <View>
+        <BackButton />
+        <Text style={s.h1}>Sled Drag</Text>
+
+        <GestureDetector gesture={sledPillSwipeGesture}>
+          <View style={s.sledVariantRow}>
+            {hasPrev ? (
+              <Animated.View style={[s.sledVariantChevronSlotLeft, sledChevronAnimatedStyle]}>
+                <Pressable
+                  onPress={() => navigateVariant(-1)}
+                  style={s.sledVariantChevronPressable}
+                  hitSlop={8}
+                  accessibilityLabel="Previous variant"
+                >
+                  <BwAnimatedChevron direction="left" delay={250} color={withAlpha(palette.blue[400], 0.8)} />
+                  <View style={{ marginLeft: -6 }}>
+                    <BwAnimatedChevron direction="left" delay={0} color={withAlpha(palette.blue[400], 0.8)} />
+                  </View>
+                </Pressable>
+              </Animated.View>
+            ) : (
+              <View style={s.sledVariantChevronSlotLeft} />
+            )}
+
+            <Animated.View
+              style={[
+                {
+                  paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9999,
+                  borderWidth: 1, borderColor: palette.blue[500],
+                  backgroundColor: withAlpha(palette.blue[500], 0.15),
+                },
+                sledPillAnimatedStyle,
+              ]}
+            >
+              <Text style={{
+                fontSize: 11, fontWeight: '700', textTransform: 'uppercase',
+                letterSpacing: 0.5, color: palette.blue[400],
+              }}>
+                {activeVariant === 'push' ? 'PUSH' : 'PULL'}
+              </Text>
+            </Animated.View>
+
+            {hasNext ? (
+              <Animated.View style={[s.sledVariantChevronSlotRight, sledChevronAnimatedStyle]}>
+                <Pressable
+                  onPress={() => navigateVariant(1)}
+                  style={s.sledVariantChevronPressable}
+                  hitSlop={8}
+                  accessibilityLabel="Next variant"
+                >
+                  <BwAnimatedChevron direction="right" delay={0} color={withAlpha(palette.blue[400], 0.8)} />
+                  <View style={{ marginLeft: -6 }}>
+                    <BwAnimatedChevron direction="right" delay={250} color={withAlpha(palette.blue[400], 0.8)} />
+                  </View>
+                </Pressable>
+              </Animated.View>
+            ) : (
+              <View style={s.sledVariantChevronSlotRight} />
+            )}
+          </View>
+        </GestureDetector>
+      </View>
+
+      {/* Paged ScrollView — Push and Pull bodies slide in/out. Each slot
+          renders a full CarryDetail with hideHeader=true (so the wrapper
+          header is the only header the user sees). negative
+          marginHorizontal bleeds the slots to the screen edges so the
+          slide travel matches the user's full swipe distance; each slot
+          re-pads internally so the body content lines up with where the
+          page header already sits. */}
+      <View
+        onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}
+        style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}
+      >
+        <ScrollView
+          ref={scrollRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          decelerationRate="fast"
+          onMomentumScrollEnd={e => {
+            if (slotWidth === 0) return
+            const x = e.nativeEvent.contentOffset.x
+            const idx = Math.round(x / slotWidth)
+            const targetVariant = SLED_VARIANT_ORDER[idx]
+            if (targetVariant && targetVariant !== activeVariant) {
+              setActiveVariant(targetVariant)
+            }
+          }}
+        >
+          {SLED_VARIANT_ORDER.map(v => (
+            <View
+              key={v}
+              style={{
+                width: slotWidth,
+                paddingHorizontal: PAGE_PADDING_HORIZONTAL,
+              }}
+            >
+              <CarryDetail
+                exercise={`Sled Drag [${v === 'push' ? 'Push' : 'Pull'}]`}
+                displayName="Sled Drag"
+                efforts={effortsByVariant[v]}
+                onDelete={onDelete}
+                hideHeader
+              />
+            </View>
+          ))}
+        </ScrollView>
+      </View>
     </View>
   )
 }
@@ -2876,16 +3363,18 @@ function RepsOnlyDetail({
       <View>
         <BackButton />
         <Text style={s.h1}>{baseName}</Text>
-        <Text style={s.subText}>
-          {assistLabel} · Best — <Text style={s.subValueBlue}>{bestReps} reps</Text>
-        </Text>
+        <View style={s.subRow}>
+          <Text style={s.subText}>{assistLabel} · Best — </Text>
+          <TickerNumber value={bestReps} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+          <Text style={[s.subText, s.subValueBlue]}> reps</Text>
+        </View>
       </View>
 
-      <AnimateRise style={s.card}>
+      <AnimateRise delay={0} style={s.card}>
         <Text style={s.h2}>Progress</Text>
         <NextTargetCallout title="Personal best">
           <View style={s.calloutValueRow}>
-            <Text style={s.calloutValue}>{bestReps}</Text>
+            <TickerNumber value={bestReps} fontSize={36} color={palette.blue[400]} fontWeight="700" />
             <Text style={s.calloutSubText}>reps</Text>
           </View>
           <Text style={s.tinyText}>{hintText}</Text>
@@ -2893,7 +3382,7 @@ function RepsOnlyDetail({
       </AnimateRise>
 
       {chartData.length >= 1 && (
-        <AnimateRise style={s.card}>
+        <AnimateRise delay={250} style={s.card}>
           <Text style={s.h2}>Reps over time</Text>
           <LineChart
             data={chartData}
@@ -2915,6 +3404,7 @@ function RepsOnlyDetail({
       <EffortsHistorySection
         efforts={efforts}
         onDelete={onDelete}
+        delay={500}
         renderLeft={e => {
           const bandLevel = isBand ? parseBandLevelFromLabel(e.label) : null
           return (
@@ -3037,6 +3527,15 @@ export default function StrengthDetail() {
   const isIsometric       = movementRecord?.strength_type === 'isometric'
   const isAssistedMachine = movementRecord?.equipment === 'assisted'
   const isCarry           = movementRecord?.equipment === 'carry'
+  // Sled Drag consolidated route — the URL is the base name "Sled Drag"
+  // (without [Push] / [Pull] suffix). The actual movements in the DB are
+  // `Sled Drag [Push]` and `Sled Drag [Pull]` — when the user taps the
+  // collapsed row in the strength index, the route lands here with
+  // exercise === "Sled Drag" and no matching movementRecord. The
+  // dispatcher below routes to SledDragConsolidatedDetail, which fetches
+  // both variants (via the or() query branch in the useEffect below) and
+  // renders a PUSH | PULL toggle on top of CarryDetail.
+  const isSledDragConsolidated = exercise === 'Sled Drag'
   const equipmentType     = movementRecord?.equipment ?? 'barbell'
   // Bodyweight now includes ALL four tiers — the assisted suffixes are part
   // of the consolidated bodyweight detail page (see CLAUDE.md spec).
@@ -3087,7 +3586,14 @@ export default function StrengthDetail() {
             `label.ilike.${baseExercise} [Band + Knee] ·%`,
           ].join(',')
         )
-      : query.ilike('label', `${exercise} ·%`)
+      : isSledDragConsolidated
+        ? query.or(
+            [
+              `label.ilike.Sled Drag [Push] ·%`,
+              `label.ilike.Sled Drag [Pull] ·%`,
+            ].join(',')
+          )
+        : query.ilike('label', `${exercise} ·%`)
 
     filtered.then(({ data }) => {
       if (!alive) return
@@ -3318,6 +3824,11 @@ export default function StrengthDetail() {
   }
 
   // ── Type-based routing ────────────────────────────────────────────────────
+  // Sled Drag consolidated route runs FIRST — it doesn't have a matching
+  // movementRecord (the base name "Sled Drag" isn't a DB row; only the
+  // [Push] and [Pull] variants are), so the other isCarry / isAssisted /
+  // etc. checks all fall through here.
+  if (isSledDragConsolidated) return <SledDragConsolidatedDetail efforts={efforts} onDelete={handleDeleteEffort} />
   if (isIsometric)        return <IsometricDetail        exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} />
   if (isAssistedMachine)  return <AssistedMachineDetail  exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} />
   if (isCarry)            return <CarryDetail            exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} />
@@ -3590,15 +4101,17 @@ export default function StrengthDetail() {
         </View>
         {isBodyweightExercise ? (
           bwLoggedTiers.length > 0 ? (
-            <Text style={s.subText}>
-              Best — <Text style={s.subValueBlue}>{bwBestByTier[bwHighestTier]} max attempts</Text>
+            <View style={[s.subRow, { flexWrap: 'wrap' }]}>
+              <Text style={s.subText}>Best — </Text>
+              <TickerNumber value={bwBestByTier[bwHighestTier]} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+              <Text style={[s.subText, s.subValueBlue]}> max attempts</Text>
               {canHaveTiers && (
                 <>
-                  {' on '}
+                  <Text style={s.subText}> on </Text>
                   <Text style={[s.subText, { fontWeight: '600', color: colors.foreground }]}>{bwTierLabel(bwHighestTier)}</Text>
                 </>
               )}
-            </Text>
+            </View>
           ) : (
             <Text style={s.subText}>No efforts logged yet</Text>
           )
@@ -3617,35 +4130,44 @@ export default function StrengthDetail() {
       {/* Bodyweight consolidated branch — see CLAUDE.md spec. */}
       {isBodyweightExercise ? (
         bwLoggedTiers.length === 0 ? (
-          <AnimateRise style={s.card}>
+          <AnimateRise delay={0} style={s.card}>
             <Text style={s.helpText}>Log your first effort to start tracking your progression.</Text>
           </AnimateRise>
         ) : (
-          <BodyweightConsolidatedBlock
-            bwLoggedTiers={bwLoggedTiers}
-            bwActiveTier={bwActiveTier}
-            bwBestByTier={bwBestByTier}
-            bwHighestTier={bwHighestTier}
-            bwTiles={bwTiles}
-            selectedBWTile={selectedBWTile}
-            profileUnit={profileUnit}
-            selectedRM={selectedRM}
-            setSelectedRM={setSelectedRM}
-            bwTierInfoOpen={bwTierInfoOpen}
-            setBwTierInfoOpen={setBwTierInfoOpen}
-            setBwSelectedTier={setBwSelectedTier}
-            bwTierScrollRef={bwTierScrollRef}
-            bwTierSlotWidths={bwTierSlotWidths}
-            bwGraduationDate={bwGraduationDate}
-            bwLatestBandLevel={bwLatestBandLevel}
-            bwEffortsByTier={bwEffortsByTier}
-            canHaveTiers={canHaveTiers}
-            weightedProgression={weightedProgression}
-          />
+          /* AnimateRise wraps the whole tier pager so the BW main content
+             slides in (delay 0) at the same time as the chart (delay 120)
+             and log (delay 240) — matches every other detail page's
+             staggered entrance. Without this the BW page used to render
+             instantly while the chart + log slid in below. No `style` prop
+             so we don't wrap it in another card chrome — the inner
+             per-tier slot already has its own s.card. */
+          <AnimateRise delay={0}>
+            <BodyweightConsolidatedBlock
+              bwLoggedTiers={bwLoggedTiers}
+              bwActiveTier={bwActiveTier}
+              bwBestByTier={bwBestByTier}
+              bwHighestTier={bwHighestTier}
+              bwTiles={bwTiles}
+              selectedBWTile={selectedBWTile}
+              profileUnit={profileUnit}
+              selectedRM={selectedRM}
+              setSelectedRM={setSelectedRM}
+              bwTierInfoOpen={bwTierInfoOpen}
+              setBwTierInfoOpen={setBwTierInfoOpen}
+              setBwSelectedTier={setBwSelectedTier}
+              bwTierScrollRef={bwTierScrollRef}
+              bwTierSlotWidths={bwTierSlotWidths}
+              bwGraduationDate={bwGraduationDate}
+              bwLatestBandLevel={bwLatestBandLevel}
+              bwEffortsByTier={bwEffortsByTier}
+              canHaveTiers={canHaveTiers}
+              weightedProgression={weightedProgression}
+            />
+          </AnimateRise>
         )
       ) : (
         /* Weighted-standard branch — mirror of web. See CLAUDE.md spec. */
-        <AnimateRise style={s.card}>
+        <AnimateRise delay={0} style={s.card}>
           <Text style={s.h2}>Rep-max projections</Text>
           <Text style={[s.helpText, { marginTop: -6 }]}>Pick an adaptation zone, then tap a rep target.</Text>
 
@@ -3754,12 +4276,19 @@ export default function StrengthDetail() {
                     {r}RM
                   </Text>
                   <View style={{ marginTop: 2 }}>
-                    <TickerNumber
-                      value={w}
-                      fontSize={16}
-                      color={isSelected ? palette.blue[400] : colors.foreground}
-                      fontWeight="700"
-                    />
+                    {/* Plain Text — tiles must NOT use TickerNumber per the
+                        locked rule (rolling digits inside a tile-style grid
+                        adds noise; tiles are status indicators that change
+                        wholesale when tapped). See CLAUDE.md "TickerNumber
+                        slot-machine animation" — locked list of where it
+                        lives and where it does not. */}
+                    <Text style={{
+                      fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'],
+                      fontSize: 16, fontWeight: '700',
+                      color: isSelected ? palette.blue[400] : colors.foreground,
+                    }}>
+                      {w}
+                    </Text>
                   </View>
                   <Text style={{
                     marginTop: 2,
@@ -3957,7 +4486,7 @@ export default function StrengthDetail() {
 
       {/* Progress chart */}
       {chartData.length >= 1 && (
-        <AnimateRise style={s.card}>
+        <AnimateRise delay={250} style={s.card}>
           <Text style={s.h2}>
             {isBodyweightExercise ? 'Max attempts over time' : 'Est. 1RM over time'}
           </Text>
@@ -3989,6 +4518,7 @@ export default function StrengthDetail() {
       <EffortsHistorySection
         efforts={efforts}
         onDelete={handleDeleteEffort}
+        delay={500}
         renderLeft={e => {
           const tail = e.label.split(' · ').slice(1).join(' · ')
           return (
@@ -4323,6 +4853,35 @@ const s = StyleSheet.create({
     color: palette.blue[400],
     fontSize: 10, fontWeight: '700',
     textTransform: 'uppercase', letterSpacing: 1.2,
+  },
+
+  // Sled Drag PUSH | PULL variant toggle — mirrors the bodyweight tier
+  // pill choreography exactly (single pill flanked by pulsing chevrons,
+  // swipe to commit with slide-off / state-change / slide-in animation).
+  // See SledDragConsolidatedDetail for the gesture worklet.
+  sledVariantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 12,
+    paddingVertical: 6,
+    alignSelf: 'stretch',
+  },
+  sledVariantChevronSlotLeft: {
+    width: 56,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  sledVariantChevronSlotRight: {
+    width: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sledVariantChevronPressable: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 
   // Tier ladder — 4 horizontal tiles (BEGINNER / INTERMEDIATE / ADVANCED / STRONGMAN).
