@@ -23,7 +23,7 @@ import { Image } from 'expo-image'
 import { Link, router } from 'expo-router'
 import {
   Dumbbell, Activity, Weight, Flower2, Flame,
-  ArrowRight, User, Pencil,
+  ArrowRight, User, Settings as SettingsIcon,
 } from 'lucide-react-native'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
 import { useAuth } from '../../src/contexts/AuthContext'
@@ -483,18 +483,21 @@ export default function Dashboard() {
         </View>
         </AnimateRise>
 
-        {/* Edit pencil — floats OUTSIDE the AnimateRise so its taps don't
-            get swallowed by Reanimated's Animated.View on Android. The
-            wrapping View is `position: relative`, so this absolute pencil
-            lands at the top-right of the card visually. Direct router.push
-            (not Link asChild) for the most reliable nav path. */}
+        {/* Settings gear — floats OUTSIDE the AnimateRise so its taps
+            don't get swallowed by Reanimated's Animated.View on Android.
+            The wrapping View is `position: relative`, so this absolute
+            gear lands at the top-right of the card visually. Direct
+            router.push (not Link asChild) for the most reliable nav path.
+            Was a pencil pre-May-17-2026; rebranded to a gear so the
+            target page reads as Settings (Account / Preferences /
+            Security / Connect tabs) rather than just profile editing. */}
         <Pressable
           onPress={() => router.push('/(app)/profile' as any)}
           style={d.editBtn}
           hitSlop={16}
-          accessibilityLabel="Edit profile"
+          accessibilityLabel="Open settings"
         >
-          <Pencil size={14} color={colors.mutedForeground} />
+          <SettingsIcon size={16} color={colors.mutedForeground} />
         </Pressable>
       </View>
 

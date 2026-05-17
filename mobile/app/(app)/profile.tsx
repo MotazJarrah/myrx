@@ -26,6 +26,7 @@ import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/d
 import {
   ChevronLeft, ChevronRight, Camera, User, Trash2, AlertCircle, Check, Calendar, Plus, X as XIcon,
   CornerDownLeft, Fingerprint, ShieldCheck, ShieldAlert, MailCheck, Phone as PhoneIcon,
+  Heart, Activity, Watch, Cable,
 } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { PasswordInput } from '../../src/components/PasswordInput'
@@ -135,9 +136,9 @@ function formatDateLabel(s: string | null | undefined): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-// ── Profile tab ───────────────────────────────────────────────────────────────
+// ── Account tab ───────────────────────────────────────────────────────────────
 
-function ProfileTab({ profile, user }: { profile: any; user: any }) {
+function AccountTab({ profile, user }: { profile: any; user: any }) {
   const { uploadAvatar, refreshProfile } = useAuth()
 
   const [fullName,  setFullName]  = useState<string>(profile?.full_name ?? '')
@@ -945,13 +946,18 @@ function ProfileTab({ profile, user }: { profile: any; user: any }) {
   )
 }
 
-// ── Settings tab ──────────────────────────────────────────────────────────────
+// ── Preferences tab (was SettingsTab) ─────────────────────────────────────────
+//
+// Pre-May-17-2026 this was the catch-all "Settings" tab containing units,
+// body stats, meal layout, chat prefs, share-with-coach toggles, biometric
+// sign-in, and lock-app. The May 17 restructure split it across 3 tabs:
+//   • Account     → personal details + body stats (moved out)
+//   • Preferences → THIS tab — units, meal layout, enter-to-send only
+//   • Security    → biometric, lock app, share-with-coach, password change
+//   • Connect     → wearable / health-platform integrations (placeholder v1)
 
-function SettingsTab({ profile, user }: { profile: any; user: any }) {
-  const {
-    refreshProfile,
-    isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric,
-  } = useAuth()
+function PreferencesTab({ profile, user }: { profile: any; user: any }) {
+  const { refreshProfile } = useAuth()
 
   // Admins don't have a coach of their own (they ARE the coach), so the two
   // share-with-coach toggles are meaningless when an admin views their own
@@ -995,139 +1001,22 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
   //
   // enterToSend stays per-tap-persisted because it's purely on-device
   // (AsyncStorage) and has no server-side effect.
-  const [shareOnline,    setShareOnline]    = useState<boolean>(profile?.share_online_status ?? true)
-  const [shareLastSeen,  setShareLastSeen]  = useState<boolean>(profile?.share_last_seen     ?? true)
-  const [enterToSend,    setEnterToSendVal] = useState<boolean>(true)
+  // enterToSend is the only chat preference that stays in PreferencesTab.
+  // Share-with-coach toggles moved to SecurityTab (May 17 2026 — they're
+  // privacy ACLs, not preferences). Biometric / lock toggles also moved
+  // to SecurityTab. The share* state references below are kept ONLY so
+  // handleSave's `update({...})` call doesn't crash (it still passes
+  // share_online_status / share_last_seen through, mirroring the saved
+  // profile values — no-op writes from this tab now).
+  const shareOnline   = profile?.share_online_status ?? true
+  const shareLastSeen = profile?.share_last_seen     ?? true
+  const [enterToSend, setEnterToSendVal] = useState<boolean>(true)
   // Hydrate the AsyncStorage value on mount.
   useEffect(() => { getEnterToSend().then(setEnterToSendVal) }, [])
 
   async function toggleEnterToSend(next: boolean) {
     setEnterToSendVal(next)
     await persistEnterToSend(next)
-  }
-
-  // ── Biometric (fingerprint) sign-in toggle ────────────────────────────────
-  // The toggle is ONLY visible when the device has biometric hardware AND has
-  // at least one fingerprint/face enrolled. When the user enables it we ask
-  // for their password (we don't have it cached anywhere — for security) and
-  // store {email, password} encrypted in SecureStore so the sign-in screen
-  // can offer "Sign in with fingerprint" next time.
-  const [bioAvailable, setBioAvailable] = useState(false)
-  const [bioEnabled,   setBioEnabled]   = useState(false)
-  const [bioPasswordModal, setBioPasswordModal] = useState(false)
-  const [bioPasswordInput, setBioPasswordInput] = useState('')
-  const [bioPasswordError, setBioPasswordError] = useState('')
-  const [bioBusy,           setBioBusy]           = useState(false)
-  // The password modal serves two purposes; the mode controls the
-  // copy and the on-confirm side-effect:
-  //   'enroll' → standalone "Sign in with fingerprint" enrollment
-  //              (current behavior).
-  //   'enable_lock' → user toggled lock ON without biometric being
-  //                   enrolled yet; we enroll AND set the lock flag
-  //                   in the same confirm. Per the user's spec
-  //                   (case d), toggle ON should auto-enroll if
-  //                   needed.
-  const [bioModalMode, setBioModalMode] = useState<'enroll' | 'enable_lock'>('enroll')
-
-  // Lock-app-with-fingerprint setting. AsyncStorage-backed and
-  // per-device — see src/lib/lockState.ts for the rationale.
-  const [lockEnabled,    setLockEnabledState] = useState(false)
-  const [lockBusy,       setLockBusy]         = useState(false)
-
-  useEffect(() => {
-    (async () => {
-      const [available, enabled, lock] = await Promise.all([
-        isBiometricAvailable(),
-        isBiometricEnabled(),
-        isLockEnabled(),
-      ])
-      setBioAvailable(available)
-      setBioEnabled(enabled)
-      setLockEnabledState(lock)
-    })()
-  }, [isBiometricAvailable, isBiometricEnabled])
-
-  async function handleBioToggle() {
-    if (bioEnabled) {
-      // Disable — no password needed.
-      await disableBiometric()
-      setBioEnabled(false)
-      // Disabling biometric also disables the lock — locking the app
-      // with no way to unlock it would brick access.
-      if (lockEnabled) {
-        await setLockEnabled(false)
-        setLockEnabledState(false)
-      }
-      return
-    }
-    // Enable — open the password modal in plain "enroll" mode.
-    setBioModalMode('enroll')
-    setBioPasswordInput('')
-    setBioPasswordError('')
-    setBioPasswordModal(true)
-  }
-
-  async function handleLockToggle() {
-    if (lockBusy) return
-    if (lockEnabled) {
-      // Disable — instant, no auth needed.
-      setLockBusy(true)
-      await setLockEnabled(false)
-      setLockEnabledState(false)
-      setLockBusy(false)
-      return
-    }
-    // Enabling.
-    if (bioEnabled) {
-      // Already enrolled — just flip the flag.
-      setLockBusy(true)
-      await setLockEnabled(true)
-      setLockEnabledState(true)
-      setLockBusy(false)
-      return
-    }
-    // Not enrolled yet (case d). Open the modal in 'enable_lock' mode
-    // so confirm enrolls biometric AND saves the lock flag in one go.
-    setBioModalMode('enable_lock')
-    setBioPasswordInput('')
-    setBioPasswordError('')
-    setBioPasswordModal(true)
-  }
-
-  async function confirmBioEnable() {
-    if (!bioPasswordInput) { setBioPasswordError('Enter your password to continue.'); return }
-    setBioBusy(true)
-    setBioPasswordError('')
-    // Verify the password before saving — we do this by attempting a sign-in
-    // call against the same email. If it fails, the password was wrong and
-    // we don't save anything to SecureStore.
-    const { error: signInErr } = await supabase.auth.signInWithPassword({
-      email: user?.email ?? '',
-      password: bioPasswordInput,
-    })
-    if (signInErr) {
-      setBioBusy(false)
-      setBioPasswordError(signInErr.message || 'Incorrect password.')
-      return
-    }
-    // Password is correct. Now save it to SecureStore (gated on biometric
-    // confirmation inside enableBiometric).
-    const { error: e } = await enableBiometric(user.email, bioPasswordInput)
-    if (e) {
-      setBioBusy(false)
-      setBioPasswordError(e.message || 'Could not enable.')
-      return
-    }
-    setBioEnabled(true)
-    // If the user reached this modal by toggling lock ON, also save
-    // the lock flag now that biometric is enrolled.
-    if (bioModalMode === 'enable_lock') {
-      await setLockEnabled(true)
-      setLockEnabledState(true)
-    }
-    setBioBusy(false)
-    setBioPasswordModal(false)
-    setBioPasswordInput('')
   }
 
   // ── Meal layout state ─────────────────────────────────────────────────────
@@ -1546,51 +1435,12 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
         ) : null}
       </AnimateRise>
 
-      {/* Chat — privacy + UX toggles. Each saves immediately on tap; no Save
-          button (matches modern apps' settings UX). Mirrors web's settings-tab
-          Chat card line-by-line: same titles, sub-copy, custom rounded pill
-          toggles, and whole-row pressables (web uses <button> wrapping the row). */}
+      {/* Chat — just the enter-to-send UX toggle. Share-with-coach toggles
+          moved to the Security tab on May 17 2026 (they're privacy ACLs,
+          not preferences). Enter-to-send stays here because it's a UX
+          preference about how a key behaves, not a security setting. */}
       <AnimateRise delay={100} style={s.chatCard}>
         <Text style={[s.cardLabel, s.chatCardLabel]}>Chat</Text>
-
-        {/* Share-with-coach toggles — only relevant for end-users (who HAVE a
-            coach). Admins viewing their own settings don't see these because
-            they don't have a coach of their own. */}
-        {!isAdmin && (
-          <>
-            {/* Share online status */}
-            <Pressable
-              onPress={() => setShareOnline(prev => !prev)}
-              style={s.chatRowBtn}
-            >
-              <View style={s.chatRowText}>
-                <Text style={s.chatRowTitle}>Share online status</Text>
-                <Text style={s.chatRowSub}>
-                  When on, your coach will see when you're active in the chat session.
-                </Text>
-              </View>
-              <View style={[s.togglePill, shareOnline ? s.togglePillOn : s.togglePillOff]}>
-                <View style={[s.toggleThumb, shareOnline ? s.toggleThumbOn : s.toggleThumbOff]} />
-              </View>
-            </Pressable>
-
-            {/* Share last seen */}
-            <Pressable
-              onPress={() => setShareLastSeen(prev => !prev)}
-              style={s.chatRowBtn}
-            >
-              <View style={s.chatRowText}>
-                <Text style={s.chatRowTitle}>Share last seen</Text>
-                <Text style={s.chatRowSub}>
-                  When on, your coach can see when you were last active in the chat session.
-                </Text>
-              </View>
-              <View style={[s.togglePill, shareLastSeen ? s.togglePillOn : s.togglePillOff]}>
-                <View style={[s.toggleThumb, shareLastSeen ? s.toggleThumbOn : s.toggleThumbOff]} />
-              </View>
-            </Pressable>
-          </>
-        )}
 
         {/* Enter to send — purely local (AsyncStorage), controls how the chat
             input's Return key behaves. Mirrors web's localStorage flag. The
@@ -1614,21 +1464,275 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
         </Pressable>
       </AnimateRise>
 
-      {/* Sign-in — biometric toggle (only when device supports it). Tapping
-          this requires the user to enter their password; we encrypt it in
-          SecureStore so the sign-in screen can offer "Sign in with fingerprint"
-          next time. Disabling clears the saved credentials (regular signOut
-          alone does NOT — that's why fingerprint sign-in survives logout).
-          A second toggle below it ("Lock app") gates app entry behind a
-          biometric prompt regardless of whether the session is alive — see
-          BiometricLockGate.tsx. */}
+      {/* Biometric, lock, share-with-coach toggles, password change, and
+          About row all moved to the Security tab on May 17 2026. See
+          SecurityTab in this same file. PreferencesTab keeps only
+          true display / behaviour preferences (units, body stats,
+          meal layout, enter-to-send). */}
+
+      {/* Error */}
+      {error ? (
+        <View style={s.errorBanner}>
+          <AlertCircle size={16} color={colors.destructive} />
+          <Text style={s.errorText}>{error}</Text>
+        </View>
+      ) : null}
+
+      {/* Save */}
+      <Pressable
+        onPress={handleSave}
+        disabled={loading || saved}
+        style={[s.saveBtn, (loading || saved) ? s.saveBtnDisabled : null]}
+      >
+        {saved ? (
+          <View style={s.saveBtnInner}>
+            <Check size={16} color={colors.primaryForeground} />
+            <Text style={s.saveBtnText}>Saved</Text>
+          </View>
+        ) : loading ? (
+          <View style={s.saveBtnInner}>
+            <ActivityIndicator size="small" color={colors.primaryForeground} />
+            <Text style={s.saveBtnText}>Saving…</Text>
+          </View>
+        ) : (
+          <Text style={s.saveBtnText}>Save settings</Text>
+        )}
+      </Pressable>
+    </View>
+  )
+}
+
+// ── Security tab ──────────────────────────────────────────────────────────────
+//
+// Extracted from the old SettingsTab in the May 17 2026 restructure.
+// Houses:
+//   • Share-with-coach toggles (online status, last seen) — privacy ACLs
+//   • Biometric sign-in toggle
+//   • Lock app with fingerprint toggle
+//   • Change password (new — supabase.auth.updateUser flow)
+//
+// Every action saves IMMEDIATELY on tap / submit (no page-level Save
+// button). Matches modern app conventions for security settings —
+// users expect security toggles to take effect right away, not after
+// hunting for a Save button.
+
+function SecurityTab({ profile, user }: { profile: any; user: any }) {
+  const {
+    refreshProfile,
+    isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric,
+  } = useAuth()
+
+  // Admins don't have a coach of their own (they ARE the coach), so the two
+  // share-with-coach toggles are meaningless when an admin views their own
+  // settings. Hidden in that case. Mirrors web's EditProfile.jsx isAdmin
+  // branch and AdminUserProfile.jsx isOwnProfile prop.
+  const isAdmin = profile?.is_superuser === true
+
+  const [shareOnline,   setShareOnline]   = useState<boolean>(profile?.share_online_status ?? true)
+  const [shareLastSeen, setShareLastSeen] = useState<boolean>(profile?.share_last_seen     ?? true)
+
+  // Save-on-tap for the share-coach toggles — no Save button on this tab.
+  // Each toggle fires an immediate UPDATE to the profile row.
+  async function toggleShareOnline() {
+    if (!user) return
+    const next = !shareOnline
+    setShareOnline(next)
+    await supabase.from('profiles').update({ share_online_status: next }).eq('id', user.id)
+    await refreshProfile()
+  }
+  async function toggleShareLastSeen() {
+    if (!user) return
+    const next = !shareLastSeen
+    setShareLastSeen(next)
+    await supabase.from('profiles').update({ share_last_seen: next }).eq('id', user.id)
+    await refreshProfile()
+  }
+
+  // ── Biometric (fingerprint) sign-in toggle ────────────────────────────────
+  // Direct port of the bio logic from the old SettingsTab. Same Password
+  // modal pattern — when enabling, the user must enter their password so
+  // we can encrypt it in SecureStore for the sign-in screen.
+  const [bioAvailable, setBioAvailable] = useState(false)
+  const [bioEnabled,   setBioEnabled]   = useState(false)
+  const [bioPasswordModal, setBioPasswordModal] = useState(false)
+  const [bioPasswordInput, setBioPasswordInput] = useState('')
+  const [bioPasswordError, setBioPasswordError] = useState('')
+  const [bioBusy, setBioBusy] = useState(false)
+  const [bioModalMode, setBioModalMode] = useState<'enroll' | 'enable_lock'>('enroll')
+
+  const [lockEnabled, setLockEnabledState] = useState(false)
+  const [lockBusy,    setLockBusy]         = useState(false)
+
+  useEffect(() => {
+    (async () => {
+      const [available, enabled, lock] = await Promise.all([
+        isBiometricAvailable(),
+        isBiometricEnabled(),
+        isLockEnabled(),
+      ])
+      setBioAvailable(available)
+      setBioEnabled(enabled)
+      setLockEnabledState(lock)
+    })()
+  }, [isBiometricAvailable, isBiometricEnabled])
+
+  async function handleBioToggle() {
+    if (!bioEnabled) {
+      setBioModalMode('enroll')
+      setBioPasswordInput('')
+      setBioPasswordError('')
+      setBioPasswordModal(true)
+      return
+    }
+    // Disable — clears stored credentials.
+    setBioBusy(true)
+    try {
+      await disableBiometric()
+      setBioEnabled(false)
+      // Disabling bio also disables app lock (lock requires bio to exist).
+      if (lockEnabled) {
+        await setLockEnabled(false)
+        setLockEnabledState(false)
+      }
+    } finally {
+      setBioBusy(false)
+    }
+  }
+
+  async function confirmBioEnable() {
+    if (!user?.email || !bioPasswordInput) {
+      setBioPasswordError('Enter your password')
+      return
+    }
+    setBioBusy(true)
+    setBioPasswordError('')
+    try {
+      // Re-auth to verify the password is correct before encrypting it.
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: bioPasswordInput,
+      })
+      if (signInErr) {
+        setBioPasswordError('Password is incorrect')
+        setBioBusy(false)
+        return
+      }
+      await enableBiometric(user.email, bioPasswordInput)
+      setBioEnabled(true)
+      // If the modal was opened to enable lock (which auto-enrolls bio),
+      // turn on the lock flag now that enrollment is done.
+      if (bioModalMode === 'enable_lock') {
+        await setLockEnabled(true)
+        setLockEnabledState(true)
+      }
+      setBioPasswordModal(false)
+      setBioPasswordInput('')
+    } catch (err: any) {
+      setBioPasswordError(err.message || 'Could not enable')
+    } finally {
+      setBioBusy(false)
+    }
+  }
+
+  async function handleLockToggle() {
+    setLockBusy(true)
+    try {
+      if (!lockEnabled) {
+        // Turning ON. If bio isn't enrolled, open the password modal in
+        // enable_lock mode so we can enroll + flip the lock in one step.
+        if (!bioEnabled) {
+          setBioModalMode('enable_lock')
+          setBioPasswordInput('')
+          setBioPasswordError('')
+          setBioPasswordModal(true)
+          return
+        }
+        await setLockEnabled(true)
+        setLockEnabledState(true)
+      } else {
+        await setLockEnabled(false)
+        setLockEnabledState(false)
+      }
+    } finally {
+      setLockBusy(false)
+    }
+  }
+
+  // ── Change password form ──────────────────────────────────────────────────
+  // Two-field new + confirm. We also require the CURRENT password to
+  // re-authenticate before allowing the change — best practice for
+  // password updates so a stolen session can't lock out the real owner.
+  const [pwdCurrent, setPwdCurrent] = useState('')
+  const [pwdNext,    setPwdNext]    = useState('')
+  const [pwdConfirm, setPwdConfirm] = useState('')
+  const [pwdBusy,    setPwdBusy]    = useState(false)
+  const [pwdError,   setPwdError]   = useState('')
+  const [pwdSuccess, setPwdSuccess] = useState(false)
+
+  async function handlePasswordChange() {
+    setPwdError('')
+    setPwdSuccess(false)
+    if (!user?.email) { setPwdError('Not signed in'); return }
+    if (!pwdCurrent || !pwdNext || !pwdConfirm) { setPwdError('Fill in all three fields'); return }
+    if (pwdNext.length < 8) { setPwdError('New password must be at least 8 characters'); return }
+    if (pwdNext !== pwdConfirm) { setPwdError('New passwords do not match'); return }
+    if (pwdNext === pwdCurrent) { setPwdError('New password must differ from current'); return }
+    setPwdBusy(true)
+    try {
+      // Re-auth via signInWithPassword to verify the current password.
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: pwdCurrent,
+      })
+      if (signInErr) { setPwdError('Current password is incorrect'); setPwdBusy(false); return }
+      // Update to the new password.
+      const { error: updateErr } = await supabase.auth.updateUser({ password: pwdNext })
+      if (updateErr) { setPwdError(updateErr.message || 'Could not update password'); setPwdBusy(false); return }
+      setPwdSuccess(true)
+      setPwdCurrent(''); setPwdNext(''); setPwdConfirm('')
+      setTimeout(() => setPwdSuccess(false), 3000)
+    } finally {
+      setPwdBusy(false)
+    }
+  }
+
+  return (
+    <View style={s.formGap}>
+
+      {/* Coach privacy — only for end-users (admins ARE the coach). */}
+      {!isAdmin && (
+        <AnimateRise delay={0} style={s.chatCard}>
+          <Text style={[s.cardLabel, s.chatCardLabel]}>Coach privacy</Text>
+          <Pressable onPress={toggleShareOnline} style={s.chatRowBtn}>
+            <View style={s.chatRowText}>
+              <Text style={s.chatRowTitle}>Share online status</Text>
+              <Text style={s.chatRowSub}>
+                When on, your coach will see when you're active in the chat session.
+              </Text>
+            </View>
+            <View style={[s.togglePill, shareOnline ? s.togglePillOn : s.togglePillOff]}>
+              <View style={[s.toggleThumb, shareOnline ? s.toggleThumbOn : s.toggleThumbOff]} />
+            </View>
+          </Pressable>
+          <Pressable onPress={toggleShareLastSeen} style={s.chatRowBtn}>
+            <View style={s.chatRowText}>
+              <Text style={s.chatRowTitle}>Share last seen</Text>
+              <Text style={s.chatRowSub}>
+                When on, your coach can see when you were last active in the chat session.
+              </Text>
+            </View>
+            <View style={[s.togglePill, shareLastSeen ? s.togglePillOn : s.togglePillOff]}>
+              <View style={[s.toggleThumb, shareLastSeen ? s.toggleThumbOn : s.toggleThumbOff]} />
+            </View>
+          </Pressable>
+        </AnimateRise>
+      )}
+
+      {/* Biometric sign-in + lock — only shown when device supports it */}
       {bioAvailable ? (
-        <AnimateRise delay={120} style={s.chatCard}>
-          <Text style={[s.cardLabel, s.chatCardLabel]}>Security</Text>
-          <Pressable
-            onPress={handleBioToggle}
-            style={s.chatRowBtn}
-          >
+        <AnimateRise delay={20} style={s.chatCard}>
+          <Text style={[s.cardLabel, s.chatCardLabel]}>Sign-in & lock</Text>
+          <Pressable onPress={handleBioToggle} style={s.chatRowBtn}>
             <View style={s.chatRowText}>
               <Text style={s.chatRowTitle}>Sign in with fingerprint</Text>
               <Text style={s.chatRowSub}>
@@ -1641,12 +1745,6 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
               <View style={[s.toggleThumb, bioEnabled ? s.toggleThumbOn : s.toggleThumbOff]} />
             </View>
           </Pressable>
-
-          {/* Lock-app toggle — sits in the same Security card. When OFF,
-              persistent session means cold launch goes straight to the
-              dashboard. When ON, the BiometricLockGate prompts for
-              fingerprint on every cold launch + after >1 min in
-              background, even though the session is still alive. */}
           <Pressable
             onPress={handleLockToggle}
             disabled={lockBusy}
@@ -1667,10 +1765,80 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
         </AnimateRise>
       ) : null}
 
-      {/* Password confirmation modal — only shown while enabling biometric.
-          We need the password to encrypt and save in SecureStore (so the
-          sign-in screen can re-authenticate via fingerprint). Verifying
-          via signInWithPassword first prevents us from saving a wrong one. */}
+      {/* Change password — three-field form (current / new / confirm).
+          Submits via supabase.auth.signInWithPassword (re-auth) then
+          supabase.auth.updateUser({ password }). */}
+      <AnimateRise delay={40} style={s.card}>
+        <Text style={s.cardLabel}>Change password</Text>
+        <View style={s.field}>
+          <Text style={s.label}>Current password</Text>
+          <PasswordInput
+            value={pwdCurrent}
+            onChangeText={setPwdCurrent}
+            placeholder="Your current password"
+          />
+        </View>
+        <View style={s.field}>
+          <Text style={s.label}>New password</Text>
+          <PasswordInput
+            value={pwdNext}
+            onChangeText={setPwdNext}
+            placeholder="At least 8 characters"
+          />
+        </View>
+        <View style={s.field}>
+          <Text style={s.label}>Confirm new password</Text>
+          <PasswordInput
+            value={pwdConfirm}
+            onChangeText={setPwdConfirm}
+            placeholder="Repeat new password"
+          />
+        </View>
+        {pwdError ? (
+          <View style={s.errorBanner}>
+            <AlertCircle size={16} color={colors.destructive} />
+            <Text style={s.errorText}>{pwdError}</Text>
+          </View>
+        ) : null}
+        {pwdSuccess ? (
+          <View style={s.errorBanner}>
+            <Check size={16} color={colors.primary} />
+            <Text style={[s.errorText, { color: colors.primary }]}>Password updated</Text>
+          </View>
+        ) : null}
+        <Pressable
+          onPress={handlePasswordChange}
+          disabled={pwdBusy}
+          style={[s.saveBtn, pwdBusy ? s.saveBtnDisabled : null]}
+        >
+          {pwdBusy ? (
+            <View style={s.saveBtnInner}>
+              <ActivityIndicator size="small" color={colors.primaryForeground} />
+              <Text style={s.saveBtnText}>Updating…</Text>
+            </View>
+          ) : (
+            <Text style={s.saveBtnText}>Update password</Text>
+          )}
+        </Pressable>
+      </AnimateRise>
+
+      {/* About row — version, legal docs. Moved here from the old SettingsTab
+          since "Security" is the natural home for app-metadata / legal-info
+          links (low-frequency, advanced). */}
+      <AnimateRise delay={60} style={s.chatCard}>
+        <Pressable
+          onPress={() => router.push('/(app)/about' as any)}
+          style={s.chatRowBtn}
+        >
+          <View style={s.chatRowText}>
+            <Text style={s.chatRowTitle}>About MyRX</Text>
+            <Text style={s.chatRowSub}>Version, legal documents, and licenses</Text>
+          </View>
+          <ChevronRight size={16} color={colors.mutedForeground} />
+        </Pressable>
+      </AnimateRise>
+
+      {/* Biometric password modal — only shown while enabling biometric */}
       <Modal
         visible={bioPasswordModal}
         transparent
@@ -1682,9 +1850,7 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
             <View style={s.modalIconRow}>
               <Fingerprint size={20} color={colors.primary} />
               <Text style={s.modalTitle}>
-                {bioModalMode === 'enable_lock'
-                  ? 'Enable app lock'
-                  : 'Enable fingerprint sign-in'}
+                {bioModalMode === 'enable_lock' ? 'Enable app lock' : 'Enable fingerprint sign-in'}
               </Text>
             </View>
             <Text style={s.modalSub}>
@@ -1726,63 +1892,91 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
         </View>
       </Modal>
 
-      {/* About — single row that opens a dedicated About screen
-          with version, legal docs, and (later) open-source licenses.
-          Mirrors the Instagram / Spotify pattern: one tap from
-          Settings to a screen that bundles all the rarely-accessed
-          metadata so it doesn't clutter the daily-use settings.
-          The legal docs themselves live behind /(app)/about — see
-          that file for the layout. */}
-      <AnimateRise delay={140} style={s.chatCard}>
-        <Pressable
-          onPress={() => router.push('/(app)/about' as any)}
-          style={s.chatRowBtn}
-        >
-          <View style={s.chatRowText}>
-            <Text style={s.chatRowTitle}>About MyRX</Text>
-            <Text style={s.chatRowSub}>Version, legal documents, and licenses</Text>
-          </View>
-          <ChevronRight size={16} color={colors.mutedForeground} />
-        </Pressable>
+    </View>
+  )
+}
+
+// ── Connect tab ───────────────────────────────────────────────────────────────
+//
+// Placeholder v1 — wearable / health-platform integrations (Apple Health,
+// Google Health Connect, Strava, Garmin, Whoop, Polar) all show as "Coming
+// soon". Each integration will eventually require its own native module +
+// OAuth flow + background sync — multi-week project per platform. For now,
+// the tab exists so the user knows these are on the roadmap.
+
+interface ConnectEntry {
+  name:     string
+  blurb:    string
+  /** Lucide icon name. Generic icons until we ship brand assets. */
+  Icon:     React.ComponentType<any>
+}
+
+const CONNECT_ENTRIES: ConnectEntry[] = [
+  { name: 'Apple Health',         blurb: 'iOS · workouts, heart rate, sleep, weight, activity rings',                Icon: Heart  },
+  { name: 'Google Health Connect',blurb: 'Android · workouts, heart rate, sleep, weight, daily steps',               Icon: Heart  },
+  { name: 'Strava',               blurb: 'Activity feed sync · runs, rides, swims with full GPS + HR data',          Icon: Activity },
+  { name: 'Garmin Connect',       blurb: 'Watches & Edge bike computers · workout details, HR zones, recovery',      Icon: Watch  },
+  { name: 'Whoop',                blurb: 'Strain & recovery · daily readiness, HRV, sleep quality',                  Icon: Activity },
+  { name: 'Polar Flow',           blurb: 'Polar watches & H10 chest strap · workouts, HR, training load',            Icon: Watch  },
+]
+
+function ConnectTab() {
+  return (
+    <View style={s.formGap}>
+      {/* Intro card — sets expectations for what this tab is. */}
+      <AnimateRise delay={0} style={s.card}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Cable size={18} color={colors.primary} />
+          <Text style={[s.cardLabel, { fontSize: 16, color: colors.foreground, fontWeight: '600' }]}>
+            Connect your devices
+          </Text>
+        </View>
+        <Text style={s.helpText}>
+          Sync workouts, heart rate, and sleep data from your favourite wearables and health platforms.
+          We'll automatically pull recent sessions and use the data to refine your training prescriptions.
+        </Text>
       </AnimateRise>
 
-      {/* Error */}
-      {error ? (
-        <View style={s.errorBanner}>
-          <AlertCircle size={16} color={colors.destructive} />
-          <Text style={s.errorText}>{error}</Text>
-        </View>
-      ) : null}
+      {/* Integration rows — all "Coming soon" for v1 */}
+      <AnimateRise delay={20} style={s.cardNoPad}>
+        {CONNECT_ENTRIES.map((entry, idx) => {
+          const Icon = entry.Icon
+          const isLast = idx === CONNECT_ENTRIES.length - 1
+          return (
+            <View
+              key={entry.name}
+              style={[s.connectRow, !isLast ? s.connectRowDivider : null]}
+            >
+              <View style={s.connectIconWrap}>
+                <Icon size={20} color={colors.mutedForeground} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.connectName}>{entry.name}</Text>
+                <Text style={s.connectBlurb} numberOfLines={2}>{entry.blurb}</Text>
+              </View>
+              <View style={s.connectStatusPill}>
+                <Text style={s.connectStatusText}>Coming soon</Text>
+              </View>
+            </View>
+          )
+        })}
+      </AnimateRise>
 
-      {/* Save */}
-      <Pressable
-        onPress={handleSave}
-        disabled={loading || saved}
-        style={[s.saveBtn, (loading || saved) ? s.saveBtnDisabled : null]}
-      >
-        {saved ? (
-          <View style={s.saveBtnInner}>
-            <Check size={16} color={colors.primaryForeground} />
-            <Text style={s.saveBtnText}>Saved</Text>
-          </View>
-        ) : loading ? (
-          <View style={s.saveBtnInner}>
-            <ActivityIndicator size="small" color={colors.primaryForeground} />
-            <Text style={s.saveBtnText}>Saving…</Text>
-          </View>
-        ) : (
-          <Text style={s.saveBtnText}>Save settings</Text>
-        )}
-      </Pressable>
+      <Text style={s.tinyText}>
+        Each integration requires its own setup. We'll roll these out one at a time —
+        Apple Health and Google Health Connect first, then platform-specific apps.
+      </Text>
     </View>
   )
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+type SettingsTabKey = 'account' | 'preferences' | 'security' | 'connect'
+
 export default function EditProfile() {
   const { user, profile } = useAuth()
-  const [activeTab, setActiveTab] = useState<'profile' | 'settings'>('profile')
+  const [activeTab, setActiveTab] = useState<SettingsTabKey>('account')
 
   return (
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -1799,24 +1993,31 @@ export default function EditProfile() {
           </Pressable>
         </View>
 
-        {/* Header */}
+        {/* Header — page-level "Settings" label. Subtitle describes what
+            falls under each tab so the user knows what to expect. The
+            user's name lives in the Account tab now (personal details
+            card), not duplicated at the page header where it implied
+            this was just a profile edit screen. */}
         <View>
-          <Text style={s.h1}>{profile?.full_name || 'Edit profile'}</Text>
-          <Text style={s.sub}>Update your details, units, and stats.</Text>
+          <Text style={s.h1}>Settings</Text>
+          <Text style={s.sub}>Your account, preferences, security, and connected services.</Text>
         </View>
 
-        {/* Tab bar */}
+        {/* Tab bar — 4 tabs, equal width. "Preferences" is the widest
+            label at 11 chars; fits comfortably at fontSize 12 in a
+            quarter-screen pill on phones ≥360 px wide. */}
         <View style={s.tabBar}>
-          <TabBtn active={activeTab === 'profile'}  onPress={() => setActiveTab('profile')}  label="Profile" />
-          <TabBtn active={activeTab === 'settings'} onPress={() => setActiveTab('settings')} label="Settings" />
+          <TabBtn active={activeTab === 'account'}     onPress={() => setActiveTab('account')}     label="Account" />
+          <TabBtn active={activeTab === 'preferences'} onPress={() => setActiveTab('preferences')} label="Preferences" />
+          <TabBtn active={activeTab === 'security'}    onPress={() => setActiveTab('security')}    label="Security" />
+          <TabBtn active={activeTab === 'connect'}     onPress={() => setActiveTab('connect')}     label="Connect" />
         </View>
 
         {/* Tab content */}
-        {activeTab === 'profile' ? (
-          <ProfileTab profile={profile} user={user} />
-        ) : (
-          <SettingsTab profile={profile} user={user} />
-        )}
+        {activeTab === 'account'     ? <AccountTab profile={profile} user={user} />
+         : activeTab === 'preferences' ? <PreferencesTab profile={profile} user={user} />
+         : activeTab === 'security'    ? <SecurityTab profile={profile} user={user} />
+         : <ConnectTab />}
 
       </View>
     </ScrollView>
@@ -1871,7 +2072,45 @@ const s = StyleSheet.create({
     padding: 24,
     gap: 16,
   },
+  // Card variant without padding — used by the ConnectTab's integration
+  // list so each row can render its own padding.
+  cardNoPad: {
+    backgroundColor: colors.card,
+    borderColor: colors.border, borderWidth: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
   cardLabel: { color: colors.mutedForeground, fontSize: 14 },
+
+  // ── ConnectTab styles ──────────────────────────────────────────────────
+  helpText: { color: colors.mutedForeground, fontSize: 13, lineHeight: 19 },
+  tinyText: { color: colors.mutedForeground, fontSize: 11, lineHeight: 16, paddingHorizontal: 4 },
+  connectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 14,
+  },
+  connectRowDivider: { borderBottomColor: colors.border, borderBottomWidth: 1 },
+  connectIconWrap: {
+    width: 36, height: 36,
+    borderRadius: 18,
+    backgroundColor: alpha(colors.primary, 0.1),
+    alignItems: 'center', justifyContent: 'center',
+  },
+  connectName:  { color: colors.foreground, fontSize: 14, fontWeight: '600' },
+  connectBlurb: { color: colors.mutedForeground, fontSize: 12, lineHeight: 16, marginTop: 2 },
+  connectStatusPill: {
+    paddingHorizontal: 8, paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: alpha(colors.mutedForeground, 0.15),
+  },
+  connectStatusText: {
+    color: colors.mutedForeground,
+    fontSize: 10, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 0.5,
+  },
 
   // Field — flex column with label + input
   field: { gap: 6 },
