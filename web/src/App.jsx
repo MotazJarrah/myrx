@@ -23,6 +23,16 @@ const CardioDetail    = lazy(() => import('./pages/CardioDetail'))
 const Mobility        = lazy(() => import('./pages/Mobility'))
 const MobilityDetail  = lazy(() => import('./pages/MobilityDetail'))
 
+// Legal pages — public, unauthenticated. Linked from the mobile app's
+// Settings → About tab (openLegalDoc opens these URLs in an in-app
+// browser sheet). Pre-existing components in pages/legal/* were never
+// routed before; added May 17 2026 after the mobile app started
+// surfacing the links and they fell through to the SPA's catch-all.
+const TermsOfService     = lazy(() => import('./pages/legal/TermsOfService'))
+const PrivacyPolicy      = lazy(() => import('./pages/legal/PrivacyPolicy'))
+const CookiePolicy       = lazy(() => import('./pages/legal/CookiePolicy'))
+const AcceptableUsePolicy = lazy(() => import('./pages/legal/AcceptableUsePolicy'))
+
 const AdminShell          = lazy(() => import('./pages/admin/AdminShell'))
 const AdminOverview       = lazy(() => import('./pages/admin/AdminOverview'))
 const AdminDashboard      = lazy(() => import('./pages/admin/AdminDashboard'))
@@ -154,6 +164,17 @@ function AppRoutes() {
         <Route path="/auth/confirm" component={AuthConfirm} />
         <Route path="/auth/recovery" component={AuthConfirm} />
         <Route path="/auth" component={Auth} />
+
+        {/* Legal docs — public, unauthenticated. Must sit BEFORE the
+            ProtectedLayout catch-all so they don't get swallowed by
+            the SPA's default dashboard redirect. Linked from the
+            mobile app's Settings → About tab via openLegalDoc, and
+            from the signup consent labels on the web side. */}
+        <Route path="/terms"          component={TermsOfService} />
+        <Route path="/privacy"        component={PrivacyPolicy} />
+        <Route path="/cookies"        component={CookiePolicy} />
+        <Route path="/acceptable-use" component={AcceptableUsePolicy} />
+
         <Route component={ProtectedLayout} />
       </Switch>
     </Suspense>
