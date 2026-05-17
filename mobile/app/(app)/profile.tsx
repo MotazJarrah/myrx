@@ -19,7 +19,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet, Image, ActivityIndicator, Platform, Modal,
+  useWindowDimensions,
 } from 'react-native'
+import Animated, {
+  useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence, withDelay, runOnJS,
+} from 'react-native-reanimated'
+import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { router } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker'
@@ -78,20 +83,45 @@ function UnitCard({
   )
 }
 
-// ── TabBtn — Profile / Settings selector pill ─────────────────────────────────
-
-function TabBtn({
-  active, onPress, label,
-}: { active: boolean; onPress: () => void; label: string }) {
+// ── SettingsAnimatedChevron — pulsing arrow flanking the tab pill ────────────
+//
+// Mirrors the BwAnimatedChevron (strength) / AmberAnimatedChevron (cardio)
+// timing exactly — 1.5 s cycle, 250 ms outer-chevron delay, both fade in/
+// out at 0.25 s. Uses `colors.primary` (lime) to match the settings page
+// theme. See CLAUDE.md Pattern 3 for the canonical timing spec.
+function SettingsAnimatedChevron({
+  direction,
+  delay,
+  size = 16,
+  color,
+}: {
+  direction: 'left' | 'right'
+  delay:     number
+  size?:     number
+  color:     string
+}) {
+  const opacity = useSharedValue(0)
+  useEffect(() => {
+    opacity.value = withDelay(
+      delay,
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration: 250 }),
+          withTiming(1, { duration: 750 }),
+          withTiming(0, { duration: 250 }),
+          withTiming(0, { duration: 250 }),
+        ),
+        -1,
+      ),
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const animStyle = useAnimatedStyle(() => ({ opacity: opacity.value }))
+  const Icon = direction === 'left' ? ChevronLeft : ChevronRight
   return (
-    <Pressable
-      onPress={onPress}
-      style={[s.tabBtn, active ? s.tabBtnActive : null]}
-    >
-      <Text style={[s.tabBtnText, active ? s.tabBtnTextActive : s.tabBtnTextIdle]}>
-        {label}
-      </Text>
-    </Pressable>
+    <Animated.View style={animStyle}>
+      <Icon size={size} color={color} />
+    </Animated.View>
   )
 }
 
@@ -1974,9 +2004,128 @@ function ConnectTab() {
 
 type SettingsTabKey = 'account' | 'preferences' | 'security' | 'connect'
 
+interface SettingsTabDef {
+  key:   SettingsTabKey
+  label: string
+}
+
+// Tab order — left → right. Parallel tabs (no hardness ranking), so the
+// order is chosen by usage frequency: Account (most-edited identity stuff)
+// first, then Preferences (units / meal layout), then Security (low-
+// frequency credential management), then Connect (newest, rarest).
+// Pattern 4 default landing = slot 0 = Account.
+const SETTINGS_TABS: readonly SettingsTabDef[] = [
+  { key: 'account',     label: 'Account'     },
+  { key: 'preferences', label: 'Preferences' },
+  { key: 'security',    label: 'Security'    },
+  { key: 'connect',     label: 'Connect'     },
+] as const
+
 export default function EditProfile() {
   const { user, profile } = useAuth()
   const [activeTab, setActiveTab] = useState<SettingsTabKey>('account')
+
+  // ── Pattern 4 (CLAUDE.md) — pill swipe + paged ScrollView ──────────────
+  // Same carousel mechanics used by BW assist tiers, Sled Drag PUSH/PULL,
+  // and Swimming strokes. The 4-tab settings page uses it to avoid the
+  // wrapping issue that the old static 4-button bar had on narrow
+  // phones ("Preferences" is 11 chars and crowded the row).
+  const PAGE_PADDING_HORIZONTAL = 16
+  const winWidth = useWindowDimensions().width
+  // Pre-seed matches the wrapper's eventual measured width (negative-
+  // margin trick below = full screen). See Pattern 4 slotWidth-handling
+  // rule in CLAUDE.md.
+  const [slotWidth, setSlotWidth] = useState(winWidth)
+  const scrollRef = useRef<ScrollView>(null)
+
+  // Initial scrollTo to the active slot (Account = slot 0 by default).
+  // Runs once after slotWidth settles. animated:false so the page lands
+  // on the right slot without a visible auto-scroll.
+  const initialScrollDoneRef = useRef(false)
+  useEffect(() => {
+    if (initialScrollDoneRef.current) return
+    if (slotWidth <= 0) return
+    if (!scrollRef.current) return
+    const idx = SETTINGS_TABS.findIndex(t => t.key === activeTab)
+    if (idx < 0) return
+    scrollRef.current.scrollTo({ x: idx * slotWidth, animated: false })
+    initialScrollDoneRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotWidth])
+
+  const currentIdx = SETTINGS_TABS.findIndex(t => t.key === activeTab)
+  const hasPrev    = currentIdx > 0
+  const hasNext    = currentIdx >= 0 && currentIdx < SETTINGS_TABS.length - 1
+
+  // Direction-aware tab navigation. Called by chevron Pressables AND by
+  // the pill Pan gesture (via runOnJS). Updates state AND programmatically
+  // scrolls the paged ScrollView so the pill animation + body slide stay
+  // synchronised (BW pattern).
+  const navigateTab = (direction: -1 | 1) => {
+    const newIdx = currentIdx + direction
+    if (newIdx < 0 || newIdx >= SETTINGS_TABS.length) return
+    setActiveTab(SETTINGS_TABS[newIdx].key)
+    if (slotWidth > 0 && scrollRef.current) {
+      scrollRef.current.scrollTo({ x: newIdx * slotWidth, animated: true })
+    }
+  }
+
+  // Pill swipe + slide animation — constants from CLAUDE.md Pattern 4
+  // (locked across BW, Sled Drag, Swimming, and now Settings).
+  const SETTINGS_SWIPE_THRESHOLD_PX = 20
+  const SETTINGS_SLIDE_OFFSCREEN_PX = 220
+  const SETTINGS_SLIDE_DURATION_MS  = 250
+
+  const pillTranslateX        = useSharedValue(0)
+  const chevronOpacityOverride = useSharedValue(1)
+
+  const pillSwipeGesture = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-25, 25])
+      .onStart(() => {
+        'worklet'
+        chevronOpacityOverride.value = withTiming(0, { duration: 120 })
+      })
+      .onUpdate((event) => {
+        'worklet'
+        pillTranslateX.value = event.translationX
+      })
+      .onEnd((event) => {
+        'worklet'
+        const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
+        const past = Math.abs(event.translationX) > SETTINGS_SWIPE_THRESHOLD_PX
+        const targetIdx = currentIdx + direction
+        const validDirection = targetIdx >= 0 && targetIdx < SETTINGS_TABS.length
+
+        if (!past || !validDirection) {
+          pillTranslateX.value = withTiming(0, { duration: 200 })
+          chevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          return
+        }
+
+        const slideOff = direction === 1 ? -SETTINGS_SLIDE_OFFSCREEN_PX : SETTINGS_SLIDE_OFFSCREEN_PX
+        pillTranslateX.value = withTiming(slideOff, { duration: SETTINGS_SLIDE_DURATION_MS }, (finished) => {
+          'worklet'
+          if (!finished) return
+          runOnJS(navigateTab)(direction)
+          pillTranslateX.value = -slideOff
+          pillTranslateX.value = withTiming(0, { duration: SETTINGS_SLIDE_DURATION_MS }, (settled) => {
+            'worklet'
+            if (settled) {
+              chevronOpacityOverride.value = withTiming(1, { duration: 200 })
+            }
+          })
+        })
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeTab, currentIdx, slotWidth],
+  )
+
+  const pillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: pillTranslateX.value }] }))
+  const chevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: chevronOpacityOverride.value }))
+
+  const activeLabel = SETTINGS_TABS[currentIdx]?.label ?? 'Account'
 
   return (
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
@@ -1994,30 +2143,101 @@ export default function EditProfile() {
         </View>
 
         {/* Header — page-level "Settings" label. Subtitle describes what
-            falls under each tab so the user knows what to expect. The
-            user's name lives in the Account tab now (personal details
-            card), not duplicated at the page header where it implied
-            this was just a profile edit screen. */}
+            falls under each tab so the user knows what to expect. */}
         <View>
           <Text style={s.h1}>Settings</Text>
           <Text style={s.sub}>Your account, preferences, security, and connected services.</Text>
         </View>
 
-        {/* Tab bar — 4 tabs, equal width. "Preferences" is the widest
-            label at 11 chars; fits comfortably at fontSize 12 in a
-            quarter-screen pill on phones ≥360 px wide. */}
-        <View style={s.tabBar}>
-          <TabBtn active={activeTab === 'account'}     onPress={() => setActiveTab('account')}     label="Account" />
-          <TabBtn active={activeTab === 'preferences'} onPress={() => setActiveTab('preferences')} label="Preferences" />
-          <TabBtn active={activeTab === 'security'}    onPress={() => setActiveTab('security')}    label="Security" />
-          <TabBtn active={activeTab === 'connect'}     onPress={() => setActiveTab('connect')}     label="Connect" />
-        </View>
+        {/* Pill row — single pill showing the active tab, flanked by
+            pulsing chevrons. Pan gesture swipes between tabs via Pattern 4
+            choreography. Replaces the old static 4-button bar which
+            wrapped on narrow phones. */}
+        <GestureDetector gesture={pillSwipeGesture}>
+          <View style={s.settingsPillRow}>
+            {hasPrev ? (
+              <Animated.View style={[s.settingsChevronSlotLeft, chevronAnimatedStyle]}>
+                <Pressable
+                  onPress={() => navigateTab(-1)}
+                  style={s.settingsChevronPressable}
+                  hitSlop={8}
+                  accessibilityLabel={`Switch to ${SETTINGS_TABS[currentIdx - 1].label}`}
+                >
+                  <SettingsAnimatedChevron direction="left" delay={250} color={alpha(colors.primary, 0.8)} />
+                  <View style={{ marginLeft: -6 }}>
+                    <SettingsAnimatedChevron direction="left" delay={0} color={alpha(colors.primary, 0.8)} />
+                  </View>
+                </Pressable>
+              </Animated.View>
+            ) : (
+              <View style={s.settingsChevronSlotLeft} />
+            )}
 
-        {/* Tab content */}
-        {activeTab === 'account'     ? <AccountTab profile={profile} user={user} />
-         : activeTab === 'preferences' ? <PreferencesTab profile={profile} user={user} />
-         : activeTab === 'security'    ? <SecurityTab profile={profile} user={user} />
-         : <ConnectTab />}
+            <Animated.View style={[s.settingsPill, pillAnimatedStyle]}>
+              <Text style={s.settingsPillText} numberOfLines={1}>
+                {activeLabel}
+              </Text>
+            </Animated.View>
+
+            {hasNext ? (
+              <Animated.View style={[s.settingsChevronSlotRight, chevronAnimatedStyle]}>
+                <Pressable
+                  onPress={() => navigateTab(1)}
+                  style={s.settingsChevronPressable}
+                  hitSlop={8}
+                  accessibilityLabel={`Switch to ${SETTINGS_TABS[currentIdx + 1].label}`}
+                >
+                  <SettingsAnimatedChevron direction="right" delay={0} color={alpha(colors.primary, 0.8)} />
+                  <View style={{ marginLeft: -6 }}>
+                    <SettingsAnimatedChevron direction="right" delay={250} color={alpha(colors.primary, 0.8)} />
+                  </View>
+                </Pressable>
+              </Animated.View>
+            ) : (
+              <View style={s.settingsChevronSlotRight} />
+            )}
+          </View>
+        </GestureDetector>
+
+        {/* Paged ScrollView — 4 slots, one per tab. Each slot renders its
+            tab component. All 4 mount at once (no lazy rendering) so the
+            slide is smooth and the active state is instantly available.
+            Negative margin bleeds the slots edge-to-edge; each slot
+            re-pads internally so content lines up with the header. */}
+        <View
+          onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}
+          style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}
+        >
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            decelerationRate="fast"
+            onMomentumScrollEnd={e => {
+              if (slotWidth === 0) return
+              const x = e.nativeEvent.contentOffset.x
+              const idx = Math.round(x / slotWidth)
+              const target = SETTINGS_TABS[idx]
+              if (target && target.key !== activeTab) setActiveTab(target.key)
+            }}
+          >
+            {SETTINGS_TABS.map(tab => (
+              <View
+                key={tab.key}
+                style={{
+                  width: slotWidth,
+                  paddingHorizontal: PAGE_PADDING_HORIZONTAL,
+                }}
+              >
+                {tab.key === 'account'     ? <AccountTab     profile={profile} user={user} />
+                 : tab.key === 'preferences' ? <PreferencesTab profile={profile} user={user} />
+                 : tab.key === 'security'    ? <SecurityTab    profile={profile} user={user} />
+                 : <ConnectTab />}
+              </View>
+            ))}
+          </ScrollView>
+        </View>
 
       </View>
     </ScrollView>
@@ -2043,6 +2263,8 @@ const s = StyleSheet.create({
   sub: { color: colors.mutedForeground, fontSize: 14, marginTop: 2 },
 
   // Tab bar — `flex gap-1 rounded-xl border border-border bg-card p-1`
+  // (legacy — kept for any non-pill tab usage; the settings page itself
+  // moved to a single-pill carousel below).
   tabBar: {
     flexDirection: 'row',
     gap: 4,
@@ -2060,6 +2282,46 @@ const s = StyleSheet.create({
   tabBtnText:        { fontSize: 12, fontWeight: '600' },
   tabBtnTextActive:  { color: colors.primaryForeground },
   tabBtnTextIdle:    { color: colors.mutedForeground },
+
+  // Pattern 4 — pill + chevrons + paged ScrollView carousel for the
+  // settings tabs. Replaces the old 4-button bar which wrapped on narrow
+  // phones. See CLAUDE.md "Animation patterns — locked reference"
+  // Pattern 4 for the canonical constants and gesture spec. Mirrors the
+  // sledVariantRow / swimStrokeRow patterns from strength + cardio.
+  settingsPillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 6,
+    alignSelf: 'stretch',
+  },
+  settingsChevronSlotLeft: {
+    width: 56,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  settingsChevronSlotRight: {
+    width: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingsChevronPressable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingsPill: {
+    paddingHorizontal: 16, paddingVertical: 8,
+    borderRadius: 9999,
+    borderWidth: 1, borderColor: colors.primary,
+    backgroundColor: alpha(colors.primary, 0.15),
+  },
+  settingsPillText: {
+    fontSize: 12, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5,
+    color: colors.primary,
+  },
 
   // Form gap between cards
   formGap: { gap: 20 },
