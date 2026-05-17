@@ -82,6 +82,204 @@ The training-system feature uses three short terms agreed with the user. Always 
 
 These three terms work together: the **eff curve** computes weights for any **rep range**, and the **rep range** determines which **adp zone** the prescription falls in. UI copy can use friendlier phrasing where it improves clarity (e.g., "Build Strength" as a header is fine), but internal naming, comments, and analysis discussion must use the three locked terms.
 
+### Animation patterns — locked reference
+
+Every animated element across the app draws from a SHORT, SHARED set of patterns. They're listed here once with their exact timing constants, gesture rules, and source-code locations so future page builds can just say "use Pattern X" without re-explaining the motion. **If you find yourself inventing a NEW animation pattern, stop and check this list first — almost every UI motion the app needs already has a canonical pattern documented here.** When in doubt, copy the constants verbatim; do not retune by feel.
+
+The patterns are numbered. Cross-platform-consistency rule still applies — when an animation lands on one surface, mirror it on the other (until the web freeze for legacy surfaces, anyway).
+
+---
+
+**Pattern 1 — Staggered entrance cascade (`AnimateRise`)**
+
+What it does: cards on a detail page slide in sequentially from the bottom, each with a small delay so the user perceives the page assembling in front of them.
+
+- Component: `mobile/src/components/AnimateRise.tsx` (web equivalent: `.animate-rise` CSS class).
+- Duration: **500 ms**. Easing: `cubic-bezier(0.16, 1, 0.3, 1)`. Transform: opacity 0 → 1 + translateY 8 → 0.
+- Delays (LOCKED):
+  - **delay 0** — first card (typically the main coaching surface — projections card, BW tier pager, swim plan).
+  - **delay 250** — chart card.
+  - **delay 500** — log list / efforts history.
+- Total entrance: ~1000 ms from skeleton-clear to log fully visible.
+- Anti-pattern: relying on the default `delay = 0` and stacking three `AnimateRise` siblings with no delays — they all fire at once and the cascade disappears. Always pass `delay={0|250|500}` explicitly. Tools like the strength detail page's `EffortsHistorySection` accept a `delay` prop that forwards to its inner `AnimateRise`; pass `delay={500}` whenever you call it.
+- Async-data-gated content rule: if a card depends on a Supabase fetch that happens AFTER `efforts` resolves (e.g., bodyweight gate for ratio carries / assisted machines), gate ALL cascade-eligible content on the SAME async-ready flag (`bwLoaded`). Otherwise the chart and log mount on frame 0 while the main card waits for the BW fetch, and the user sees chart-then-main instead of main-then-chart.
+- Where it's used: every detail page top-to-bottom (Weighted Standard, Bodyweight Consolidated, Assisted Machine, Carry, Isometric, RepsOnly, PaceDetail, SwimmingConsolidatedDetail, DurationDetail). Mandatory on any new detail page.
+
+---
+
+**Pattern 2 — Slot-machine numeric ticker (`TickerNumber`)**
+
+What it does: when a numeric value changes, each digit slot rolls vertically slot-machine-style to the new digit. Non-digit characters (`×`, `m`, `km/h`, `:`, `/`, `%`, `lb`, etc.) render as static `Text` inside the same row, so mixed strings like `"5 × 600 m"` animate just the digits.
+
+- Component: `mobile/src/components/TickerNumber.tsx`.
+- First-mount guarantee: every digit always animates on first paint (the component forces `from = 9` when `targetIdx === 0` for forward columns, `from = 0` otherwise — without this, a digit whose target happened to be 0 would skip the animation and the user would see a static digit while its siblings rolled).
+- **Where it IS used (mandatory on these surfaces):**
+  - Page header "Best — N" subtitle on every detail page (with the right unit suffix). Examples: `Best Est. 1RM — 370 lb`, `Best — 1:38/100m`, `Best speed — 12.5 km/h`, `Best session — 25:00`, `Personal best — 1m 30s`.
+  - Hero card big numbers (the main target value — projected weight, target pace, leaving interval, max-attempt count, isometric duration).
+  - Hero card cue-line embedded numbers — the small numbers INSIDE the cue sentence (e.g., strength's `"Push 6 reps at 135 lb"` tickers both `6` and `135`). Strength uses this; cardio's cue stays plain prose.
+- **Where it is NOT used (and must not be added):**
+  - Tiles (rep-max grid, BW max-attempt grid, iso milestone grid, cardio plan-queue upcoming-step tiles). Tiles are status indicators that change wholesale when the user taps — digit rolling adds noise.
+  - Plate chips (per-side plate breakdown like `25 / 10 / 2.5` on barbell). Plates are categorical labels, not progressive numeric values.
+  - Chart axis labels and tooltip values — the chart's own dot animations carry the visual progression.
+  - Log-list rows (recent efforts on detail page; "Your activities" list on index page). These are read-only history.
+  - Cue lines, descriptors, helper text, captions, attribution lines.
+  - The `—` placeholder shown when a metric has no data yet.
+- Sub-text + value layout pattern: wrap in `<View style={s.subRow}>` and place the label `Text`, the `TickerNumber`, and any trailing unit `Text` as siblings. Do NOT nest `<Text>` inside `<Text>` for these — the inner Text can't be replaced by a TickerNumber View since View can't be a child of Text in React Native.
+
+---
+
+**Pattern 3 — Pulsing chevron (`BwAnimatedChevron`, `AmberAnimatedChevron`)**
+
+What it does: pairs of chevrons flank a swipeable pill, pulsing in/out to telegraph that the user can swipe to navigate. Two chevrons per side (inner + outer), with the inner leading and outer following.
+
+- Components: `BwAnimatedChevron` in `mobile/app/(app)/effort/strength/[exercise].tsx` (blue theme — strength); `AmberAnimatedChevron` in `mobile/app/(app)/effort/cardio/[activity].tsx` (amber theme — cardio). Both have the same timing; they exist as two copies because strength is blue and cardio is amber.
+- **Cycle length: 1.5 seconds**, looping forever.
+- Per-chevron timeline:
+  - 0.00–0.25 s: fade in (opacity 0 → 1)
+  - 0.25–1.00 s: visible (steady)
+  - 1.00–1.25 s: fade out (opacity 1 → 0)
+  - 1.25–1.50 s: invisible gap, then loop
+- **Outer chevron delay: 250 ms** behind the inner. Achieved on RN via `withDelay(250, withRepeat(withSequence(...)))`. On web via `animation-delay: 0.25s` plus `animation-fill-mode: both` (so the outer stays at opacity 0 during its delay — without that, it would show at default opacity 1 until the animation kicked in).
+- Both sides (left chevrons + right chevrons) run in the SAME phase — left-inner and right-inner pulse together, left-outer and right-outer pulse together. This creates a "marching outward" or "marching inward" rhythm depending on direction.
+- Fade in/out durations are exactly **0.25 s** each.
+- Where it's used: BW tier pill row, Weighted Standard adp-zone pill row, Sled Drag PUSH/PULL pill row, Swimming stroke pill row, and any future variant-selector pill row.
+
+---
+
+**Pattern 4 — Consolidated-page swipe ("whole page slides")**
+
+This is the BIG one — the canonical pattern for switching between variants of a consolidated detail page (BW assist tiers, Weighted Standard adp zones, Sled Drag PUSH/PULL, Swimming strokes, and any future N-variant page). Designed to feel as smooth as iOS native page-curl transitions while staying RN-friendly.
+
+- Reference implementation: `BodyweightConsolidatedBlock` in `mobile/app/(app)/effort/strength/[exercise].tsx`. The two cardio/strength wrappers (`SledDragConsolidatedDetail`, `SwimmingConsolidatedDetail`) mirror it byte-for-byte modulo the colour palette and the variant list.
+
+**Structure (top-to-bottom):**
+
+1. Page-level header (h1 + best subtitle + maybe equipment badge) — sits OUTSIDE the paged ScrollView. Stays positionally static during swipes. The subtitle's `TickerNumber` may re-render on variant change (digit roll only — no layout animation).
+2. **Pill row** — single pill in the center showing the active variant's short label (e.g., `PUSH`, `FREE`, `STRENGTH`, `BAND`). Flanked by pulsing chevrons (Pattern 3) on both sides. Wrapped in `<GestureDetector gesture={pillSwipeGesture}>`. Chevrons only render on the side where a navigation target exists (no wrap at the carousel ends).
+3. **Paged ScrollView** — `horizontal pagingEnabled` with `showsHorizontalScrollIndicator={false}` and `decelerationRate="fast"`. One slot per variant. Each slot is a fixed `width: slotWidth` and contains the body content for that variant (rep-max projections + hero + chart + log list, or whatever the page renders).
+
+**Constants (LOCKED — copy verbatim, do not retune):**
+
+```
+SWIPE_THRESHOLD_PX     = 20         // min translation to commit swipe
+SLIDE_OFFSCREEN_PX     = 220        // pill slide distance on commit
+SLIDE_DURATION_MS      = 250        // pill slide off / back duration
+PAN_ACTIVE_OFFSET_X    = [-15, 15]  // pan activates after 15 px horizontal
+PAN_FAIL_OFFSET_Y      = [-25, 25]  // vertical drag past 25 px cancels
+CHEVRON_FADE_OUT_MS    = 120        // chevrons fade on pan start
+CHEVRON_FADE_IN_MS     = 200        // chevrons fade back after slide-in
+BOUNCE_BACK_DURATION_MS = 200        // pill spring-back when below threshold
+PAGE_PADDING_HORIZONTAL = 16        // outer padding of page; used in slotWidth
+```
+
+**Gesture sequence (committed swipe):**
+
+1. **onStart** — `chevronOpacityOverride.value = withTiming(0, { duration: 120 })`. Chevrons fade out so they don't visually compete with the pill slide.
+2. **onUpdate** — `pillTranslateX.value = event.translationX`. Pill physically follows the finger horizontally.
+3. **onEnd (past threshold, direction allowed)**:
+   a. `pillTranslateX.value = withTiming(slideOff, { duration: 250 })` where `slideOff = ±220` based on direction. Pill slides off-screen.
+   b. **Callback fires** when slide-off completes:
+      - `runOnJS(navigateVariant)(direction)` — updates state AND calls `scrollRef.current.scrollTo({ x: newIdx * slotWidth, animated: true })`. Body ScrollView slides to the new slot at the same time the pill is off-screen.
+      - `pillTranslateX.value = -slideOff` — pill teleports to the opposite off-screen position (no animation, just an instant assignment).
+      - `pillTranslateX.value = withTiming(0, { duration: 250 })` — pill slides back to center showing the new variant's label.
+   c. **When the slide-in completes** — `chevronOpacityOverride.value = withTiming(1, { duration: 200 })`. Chevrons fade back in, pulse loop resumes (Pattern 3).
+4. **onEnd (cancelled — below threshold OR direction blocked)**:
+   - `pillTranslateX.value = withTiming(0, { duration: 200 })` — pill springs back to center.
+   - `chevronOpacityOverride.value = withTiming(1, { duration: 200 })` — chevrons re-appear immediately.
+
+**slotWidth handling (CRITICAL — first-paint smoothness):**
+
+- **Pre-seed** the initial `slotWidth` state with `Math.max(0, windowWidth - PAGE_PADDING_HORIZONTAL * 2)`. If you let it start at 0, the slots render as 0-px-wide on first paint and pop to full width when `onLayout` fires, which causes the inner detail content to lag behind the header by one frame.
+- `onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}` on the ScrollView's wrapper View — still wire this up, because the pre-seed isn't perfect (split view, orientation, dynamic-island insets can differ slightly). The measurement refinement happens silently because the pre-seed is sub-pixel accurate.
+- For BW specifically, also gate `LinearTransition` off for the first 2 RAFs after mount so any sub-pixel refinement doesn't animate as a layout change.
+
+**Initial scrollTo (CRITICAL — landing on the right slot):**
+
+After mount, programmatically scroll to the active variant's slot with `animated: false`. Without this, the page lands at slot 0 (the leftmost variant) while the active-variant state already points at e.g. the user's most-recent stroke / variant — visible desync. Guard with a `useRef(false)` flag so this only runs once per mount, not on every navigation.
+
+```ts
+const initialScrollDoneRef = useRef(false)
+useEffect(() => {
+  if (initialScrollDoneRef.current) return
+  if (slotWidth <= 0) return
+  if (!scrollRef.current) return
+  const idx = VARIANT_ORDER.indexOf(activeVariant)
+  if (idx < 0) return
+  scrollRef.current.scrollTo({ x: idx * slotWidth, animated: false })
+  initialScrollDoneRef.current = true
+}, [slotWidth])
+```
+
+**onMomentumScrollEnd sync (direct body swipes):**
+
+When the user swipes the body content directly (not the pill), the ScrollView's native paging takes over. Sync state via `onMomentumScrollEnd`:
+
+```ts
+onMomentumScrollEnd={e => {
+  if (slotWidth === 0) return
+  const x = e.nativeEvent.contentOffset.x
+  const idx = Math.round(x / slotWidth)
+  const target = VARIANT_ORDER[idx]
+  if (target && target !== activeVariant) setActiveVariant(target)
+}}
+```
+
+This ensures the pill label updates when the user swipes the body directly. The pill won't physically animate in this case (only its label re-renders).
+
+**Negative-margin trick for slot width:**
+
+The page padding is 16 px each side from `(app)/_layout.tsx`. The page content normally lives inside that padding. For the paged ScrollView to span edge-to-edge (so slides look full-bleed), wrap it in `<View style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}>` then re-pad inside each slot with `paddingHorizontal: PAGE_PADDING_HORIZONTAL`. The inner content lines up with where the page header sits.
+
+**Anti-patterns (DO NOT DO):**
+
+- `key={activeVariant}` on the inner detail component to force remount. Produces a hard cutover with no slide — the whole reason BW felt smoother than the pre-refactor Sled Drag / Swimming pages.
+- Calling `setActiveVariant` synchronously from `onUpdate` (during the pan). State change should fire AFTER the slide-off animation completes, via `runOnJS` in the slide-off callback.
+- Forgetting the initial scrollTo. Result: page opens on slot 0, pill shows correct variant, body shows wrong variant.
+- Calling `scrollTo` without a `slotWidth > 0` guard. Result: NaN / Infinity scroll positions on first render before onLayout fires.
+
+---
+
+**Pattern 5 — Inline expansion panel (`FadeInUp` / `FadeOutUp` + `LinearTransition`)**
+
+What it does: a panel slides in from below (or fades up into existence) when toggled — used for "why this zone" info panels, band-level sub-progression detail panels, and any other inline expandable content. Adjacent siblings reflow smoothly so the panel doesn't visually shove content around.
+
+- Imports: `import Animated, { FadeInUp, FadeOutUp, LinearTransition } from 'react-native-reanimated'`.
+- **Entering: `FadeInUp.duration(200)`**.
+- **Exiting: `FadeOutUp.duration(180)`**.
+- **Sibling layout: wrap the parent in `<Animated.View layout={LinearTransition.duration(200)}>`** so the big-number rows slide smoothly when the panel opens above/below them.
+- Auto-close on programmatic state change (e.g., navigating to a different zone via Pattern 4) — the wrapper component should `setZoneInfoOpen(false)` in the same `setState` batch that switches the variant.
+- Where it's used: zone info panels on Weighted Standard, Assisted Machine, Carry, Swimming, Cardio Pace detail pages; band sub-state info panels on Bodyweight consolidated.
+
+---
+
+**Pattern 6 — PhantomWheel inertia + cross-fade**
+
+What it does: a numeric / time / decimal picker wheel with iOS-style inertia roll. Each row stacks a halo layer + center layer that cross-fades by `|rank|` so the highlight smoothly transfers between rows as the wheel rolls (no on/off snap at commit).
+
+- Component: `mobile/src/components/PhantomWheel.tsx`. Used by every value/time/distance/speed input in the app (strength reps/weight/distance, isometric duration, cardio distance/time/speed).
+- **Inertia threshold: 250 px/s** finger release velocity. Above → `withDecay` coast. Below → `withTiming` snap.
+- **Deceleration: 0.993** (lower = quicker stop). Tuned away from the iOS default 0.998 which reads as too lazy on a stepped picker.
+- **Halo/center cross-fade opacity**: `absRank >= 1 ? 1 : absRank` for halo, `absRank >= 1 ? 0 : 1 - absRank` for center. At rank 0 only center is visible; at rank ≥ 1 only halo is visible.
+- **Step-boundary commit detection**: `useAnimatedReaction` watching `scrollY`, fires `runOnJS(commitValue)` when `Math.round(scrollY / PITCH)` changes. Works during BOTH drag AND decay phases — the user's `value` prop stays in sync throughout the coast.
+- **Direction contract**: drag DOWN → value INCREASES. Higher values live ABOVE the center line (a new higher value rolls in from above and slides down into center).
+- Atomic text + position update: `formattedTextsSV` (a `SharedValue<readonly string[]>`) is recomputed in the same `useLayoutEffect` as `committedSteps.value = pendingStepsRef.current`. Both reach the UI thread atomically — no flicker.
+- DO NOT change inertia constants without explicit user approval. They've been tuned over many iterations to feel right on physical Android devices.
+
+---
+
+**Pattern 7 — Save button feedback**
+
+What it does: the Save button on log forms gets a brief "✓ Saved" green/amber acknowledgement after a successful insert, then auto-resets to the idle state.
+
+- **Hold duration: 1500 ms** then `setSaved(false)` + clear other form fields.
+- Color: success tint (`palette.amber[400]` for cardio, `palette.blue[400]` for strength save buttons).
+- Disabled state: button is `pressable={false}` and renders muted while `saved === true` so the user can't double-tap during the success display.
+- The 1500 ms is enough for the user to see the confirmation and for the form to clear without the action feeling unfinished. Don't shorten it below 1200 or the success disappears before the eye registers it.
+
+---
+
+**Adding a new animation:** before inventing a new motion, scan this list. If a similar pattern exists (e.g., a slide-in panel — that's Pattern 5), reuse the exact constants. If none of the patterns fit, write the new one INTO this list before merging — add a Pattern 8 entry with timing, gesture rules, source code location, and where it's used. This file is the contract.
+
 ### Weighted Standard next-target card — locked design spec
 
 This is the spec for the "Your next training target" card that appears on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile) for **weighted standard** movements: barbell, dumbbell, kettlebell, machine, strongman. Bodyweight, isometric, assisted, carry, band/knee variants each have their own detail view and are NOT covered by this spec.
