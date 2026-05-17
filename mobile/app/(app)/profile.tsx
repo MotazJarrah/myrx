@@ -16,7 +16,7 @@
  * shared (units, body stats, profile fields).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet, Image, ActivityIndicator, Platform, Modal,
   useWindowDimensions,
@@ -50,6 +50,21 @@ import { getEnterToSend, setEnterToSend as persistEnterToSend } from '../../src/
 import { isLockEnabled, setLockEnabled } from '../../src/lib/lockState'
 import { openLegalDoc } from '../../src/lib/openLegalDoc'
 import Constants from 'expo-constants'
+import {
+  type HealthConnectAvailability,
+  availability        as hcAvailability_check,
+  grantedPermissions  as hcGranted_check,
+  requestPermissions  as hcRequest_permissions,
+  fetchRecentWorkouts as hcFetch_workouts,
+  fetchRecentHeartRate as hcFetch_heartRate,
+  disconnect          as hcDisconnect,
+} from '../../src/lib/healthConnect'
+import {
+  getLastSync,
+  setLastSyncNow,
+  clearLastSync,
+  formatLastSync,
+} from '../../src/lib/lastSyncStorage'
 import { colors, alpha, palette } from '../../src/theme'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1938,11 +1953,18 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
 
 // ── Connect tab ───────────────────────────────────────────────────────────────
 //
-// Placeholder v1 — wearable / health-platform integrations (Apple Health,
-// Google Health Connect, Strava, Garmin, Whoop, Polar) all show as "Coming
-// soon". Each integration will eventually require its own native module +
-// OAuth flow + background sync — multi-week project per platform. For now,
-// the tab exists so the user knows these are on the roadmap.
+// Wearable / health-platform integrations. As of May 17 2026:
+//   • Google Health Connect — FUNCTIONAL on Android. Single funnel for
+//     every Android wearable that supports HC sync (Samsung watches via
+//     Samsung Health, Fitbit, Garmin Connect, Whoop, Polar Flow, Strava).
+//     User taps Connect → Health Connect system UI → grants per-data-
+//     type → "Sync now" pulls workouts + HR. v1 reads only; bidirectional
+//     sync (write MyRX efforts back to HC) is v2.
+//   • Apple HealthKit — placeholder (iOS only, deferred).
+//   • Strava / Garmin / Whoop / Polar — placeholders (each needs its
+//     own OAuth flow, deferred). On Android these can often pipe through
+//     Health Connect anyway, so dedicated integrations come later when
+//     users explicitly ask.
 
 interface ConnectEntry {
   name:     string
@@ -1951,16 +1973,117 @@ interface ConnectEntry {
   Icon:     React.ComponentType<any>
 }
 
-const CONNECT_ENTRIES: ConnectEntry[] = [
-  { name: 'Apple Health',         blurb: 'iOS · workouts, heart rate, sleep, weight, activity rings',                Icon: Heart  },
-  { name: 'Google Health Connect',blurb: 'Android · workouts, heart rate, sleep, weight, daily steps',               Icon: Heart  },
-  { name: 'Strava',               blurb: 'Activity feed sync · runs, rides, swims with full GPS + HR data',          Icon: Activity },
-  { name: 'Garmin Connect',       blurb: 'Watches & Edge bike computers · workout details, HR zones, recovery',      Icon: Watch  },
-  { name: 'Whoop',                blurb: 'Strain & recovery · daily readiness, HRV, sleep quality',                  Icon: Activity },
-  { name: 'Polar Flow',           blurb: 'Polar watches & H10 chest strap · workouts, HR, training load',            Icon: Watch  },
+// Placeholder entries — every integration that isn't Health Connect yet.
+const PLACEHOLDER_ENTRIES: ConnectEntry[] = [
+  { name: 'Apple Health',  blurb: 'iOS · workouts, heart rate, sleep, weight, activity rings',           Icon: Heart  },
+  { name: 'Strava',        blurb: 'Activity feed sync · runs, rides, swims with full GPS + HR data',     Icon: Activity },
+  { name: 'Garmin Connect',blurb: 'Watches & Edge bike computers · workout details, HR zones, recovery', Icon: Watch  },
+  { name: 'Whoop',         blurb: 'Strain & recovery · daily readiness, HRV, sleep quality',             Icon: Activity },
+  { name: 'Polar Flow',    blurb: 'Polar watches & H10 chest strap · workouts, HR, training load',       Icon: Watch  },
 ]
 
 function ConnectTab() {
+  // ── Health Connect state ───────────────────────────────────────────────
+  const [hcAvailability, setHcAvailability] = useState<HealthConnectAvailability>('unavailable')
+  const [hcGranted,      setHcGranted]      = useState<string[]>([])
+  const [hcLastSync,     setHcLastSync]     = useState<string | null>(null)
+  const [hcBusy,         setHcBusy]         = useState<null | 'connect' | 'sync' | 'disconnect'>(null)
+  const [hcMessage,      setHcMessage]      = useState<string | null>(null)
+
+  const hcConnected = hcGranted.length > 0
+
+  // Hydrate availability + permission state on mount. Re-runs after any
+  // state change that could affect "is this currently usable" (connect /
+  // disconnect / sync).
+  const refreshHcState = useCallback(async () => {
+    const avail = await hcAvailability_check()
+    setHcAvailability(avail)
+    const granted = await hcGranted_check()
+    setHcGranted(granted)
+    const last = await getLastSync('healthConnect')
+    setHcLastSync(last)
+  }, [])
+  useEffect(() => { refreshHcState() }, [refreshHcState])
+
+  async function handleHcConnect() {
+    if (hcBusy) return
+    setHcBusy('connect')
+    setHcMessage(null)
+    try {
+      // The native module's request-permission flow opens Health Connect's
+      // system UI. The user picks which data types to grant; we get back
+      // the list they actually granted.
+      const granted = await hcRequest_permissions()
+      setHcGranted(granted)
+      if (granted.length === 0) {
+        setHcMessage('No data types granted — tap Connect again to retry.')
+      } else {
+        setHcMessage(`Granted: ${granted.join(', ')}`)
+      }
+    } finally {
+      setHcBusy(null)
+    }
+  }
+
+  async function handleHcSync() {
+    if (hcBusy) return
+    setHcBusy('sync')
+    setHcMessage(null)
+    try {
+      const [workouts, hrSamples] = await Promise.all([
+        hcFetch_workouts(7),
+        hcFetch_heartRate(7),
+      ])
+      await setLastSyncNow('healthConnect')
+      const last = await getLastSync('healthConnect')
+      setHcLastSync(last)
+      setHcMessage(
+        `Found ${workouts.length} workout${workouts.length === 1 ? '' : 's'} and ${hrSamples.length} heart-rate sample${hrSamples.length === 1 ? '' : 's'} (last 7 days). v1 logs to the console; mapping to MyRX efforts ships next.`,
+      )
+      // For v1, log to the console so the user (and us) can verify what
+      // came through. Once we trust the data shape, we'll map into
+      // MyRX efforts.
+      // eslint-disable-next-line no-console
+      console.log('[Health Connect] workouts:', workouts)
+      // eslint-disable-next-line no-console
+      console.log('[Health Connect] HR samples (first 10):', hrSamples.slice(0, 10))
+    } catch (e: any) {
+      setHcMessage(e?.message || 'Sync failed.')
+    } finally {
+      setHcBusy(null)
+    }
+  }
+
+  async function handleHcDisconnect() {
+    if (hcBusy) return
+    setHcBusy('disconnect')
+    setHcMessage(null)
+    try {
+      await hcDisconnect()
+      await clearLastSync('healthConnect')
+      setHcGranted([])
+      setHcLastSync(null)
+      setHcMessage('Disconnected. Permissions may take a moment to fully revoke on Android 14+.')
+    } finally {
+      setHcBusy(null)
+    }
+  }
+
+  // Sub-text under the Health Connect row — surfaces state to the user.
+  let hcSubText: string
+  if (hcAvailability === 'unavailable') {
+    hcSubText = Platform.OS === 'android'
+      ? 'Android · install Health Connect from Play Store to enable.'
+      : 'Android only — Apple HealthKit support coming for iOS.'
+  } else if (hcAvailability === 'provider-required') {
+    hcSubText = 'Android · update Health Connect from Play Store to continue.'
+  } else if (!hcConnected) {
+    hcSubText = 'Android · workouts, heart rate, sleep, weight, daily steps.'
+  } else {
+    const lastFmt = formatLastSync(hcLastSync)
+    hcSubText = lastFmt ? `Connected · last synced ${lastFmt}` : 'Connected · no sync yet'
+  }
+
   return (
     <View style={s.formGap}>
       {/* Intro card — sets expectations for what this tab is. */}
@@ -1973,15 +2096,80 @@ function ConnectTab() {
         </View>
         <Text style={s.helpText}>
           Sync workouts, heart rate, and sleep data from your favourite wearables and health platforms.
-          We'll automatically pull recent sessions and use the data to refine your training prescriptions.
+          We'll pull recent sessions and use the data to refine your training prescriptions.
         </Text>
       </AnimateRise>
 
-      {/* Integration rows — all "Coming soon" for v1 */}
+      {/* Google Health Connect — the FUNCTIONAL integration. Dedicated
+          card so its action buttons get the space they need (Connect /
+          Sync now / Disconnect). */}
       <AnimateRise delay={20} style={s.cardNoPad}>
-        {CONNECT_ENTRIES.map((entry, idx) => {
+        <View style={s.connectRow}>
+          <View style={s.connectIconWrap}>
+            <Heart size={20} color={hcConnected ? colors.primary : colors.mutedForeground} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.connectName}>Google Health Connect</Text>
+            <Text style={s.connectBlurb} numberOfLines={2}>{hcSubText}</Text>
+          </View>
+          {hcAvailability !== 'available' ? (
+            <View style={s.connectStatusPill}>
+              <Text style={s.connectStatusText}>
+                {hcAvailability === 'provider-required' ? 'Update needed' : 'Unavailable'}
+              </Text>
+            </View>
+          ) : !hcConnected ? (
+            <Pressable
+              onPress={handleHcConnect}
+              disabled={hcBusy !== null}
+              style={[s.connectActionBtn, hcBusy !== null ? { opacity: 0.5 } : null]}
+            >
+              {hcBusy === 'connect'
+                ? <ActivityIndicator size="small" color={colors.primaryForeground} />
+                : <Text style={s.connectActionBtnText}>Connect</Text>}
+            </Pressable>
+          ) : (
+            <View style={s.connectActionRow}>
+              <Pressable
+                onPress={handleHcSync}
+                disabled={hcBusy !== null}
+                style={[s.connectActionBtn, hcBusy !== null ? { opacity: 0.5 } : null]}
+              >
+                {hcBusy === 'sync'
+                  ? <ActivityIndicator size="small" color={colors.primaryForeground} />
+                  : <Text style={s.connectActionBtnText}>Sync now</Text>}
+              </Pressable>
+            </View>
+          )}
+        </View>
+        {/* If connected, render the disconnect link below the row so it's
+            available but not visually competing with the primary action. */}
+        {hcConnected ? (
+          <Pressable
+            onPress={handleHcDisconnect}
+            disabled={hcBusy !== null}
+            style={s.connectSecondaryRow}
+          >
+            <Text style={s.connectSecondaryText}>
+              {hcBusy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
+            </Text>
+          </Pressable>
+        ) : null}
+        {/* Status / error message — shows what just happened on the
+            most recent action. Cleared on next action. */}
+        {hcMessage ? (
+          <View style={s.connectMessageWrap}>
+            <Text style={s.connectMessageText}>{hcMessage}</Text>
+          </View>
+        ) : null}
+      </AnimateRise>
+
+      {/* Placeholder rows — still "Coming soon" until each integration
+          gets its own native module + OAuth flow. */}
+      <AnimateRise delay={40} style={s.cardNoPad}>
+        {PLACEHOLDER_ENTRIES.map((entry, idx) => {
           const Icon = entry.Icon
-          const isLast = idx === CONNECT_ENTRIES.length - 1
+          const isLast = idx === PLACEHOLDER_ENTRIES.length - 1
           return (
             <View
               key={entry.name}
@@ -2003,8 +2191,9 @@ function ConnectTab() {
       </AnimateRise>
 
       <Text style={s.tinyText}>
-        Each integration requires its own setup. We'll roll these out one at a time —
-        Apple Health and Google Health Connect first, then platform-specific apps.
+        Health Connect is the universal Android funnel — any wearable that
+        supports it (Samsung, Fitbit, Garmin, Whoop, Polar, Strava) flows
+        through this single integration. Dedicated apps come later.
       </Text>
     </View>
   )
@@ -2443,6 +2632,48 @@ const s = StyleSheet.create({
     color: colors.mutedForeground,
     fontSize: 10, fontWeight: '600',
     textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+  // Action button on functional integration rows (Connect / Sync now).
+  // Solid primary fill — the affirmative action.
+  connectActionBtn: {
+    paddingHorizontal: 12, paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    minWidth: 76,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  connectActionBtnText: {
+    color: colors.primaryForeground,
+    fontSize: 12, fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  connectActionRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  // Disconnect link — secondary action below the row's main button.
+  // Muted text-only style so the primary action stays visually dominant.
+  connectSecondaryRow: {
+    paddingHorizontal: 20, paddingVertical: 10,
+    borderTopWidth: 1, borderTopColor: alpha(colors.border, 0.5),
+  },
+  connectSecondaryText: {
+    color: colors.mutedForeground,
+    fontSize: 12, fontWeight: '600',
+    textAlign: 'right',
+  },
+  // Status / error message under the Health Connect row. Wrapped in a
+  // muted backdrop so it reads as a "system message" rather than card
+  // body content. Multi-line text-wrap; short messages stay on one
+  // line.
+  connectMessageWrap: {
+    paddingHorizontal: 20, paddingVertical: 10,
+    backgroundColor: alpha(colors.mutedForeground, 0.06),
+    borderTopWidth: 1, borderTopColor: alpha(colors.border, 0.5),
+  },
+  connectMessageText: {
+    color: colors.foreground,
+    fontSize: 12, lineHeight: 18,
   },
 
   // Field — flex column with label + input

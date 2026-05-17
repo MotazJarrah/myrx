@@ -37,7 +37,10 @@
               "pathPrefix": "/auth"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -64,7 +67,9 @@
           "icon": "./assets/icon.png",
           "color": "#84cc16"
         }
-      ]
+      ],
+      "react-native-health-connect",
+      "./plugins/withHealthConnectPermissions"
     ],
     "scheme": "myrx",
     "experiments": {

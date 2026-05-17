@@ -1155,6 +1155,48 @@ Row Erg (Concept2) keeps the generic pace-mode `PaceDetail` component but ships 
 
 ---
 
+### Health Connect integration — Phase 1 spec (May 17 2026)
+
+Android-only wearable / health-platform funnel. Google Health Connect is the universal Android data store that aggregates data from Samsung Health, Fitbit, Garmin Connect, Whoop, Polar Flow, Strava, and any other source that supports the Android Health Connect SDK. By integrating with HC, we get every Android wearable for free — the user's data path is `Watch → Source app (Samsung Health / Fitbit / etc.) → Health Connect → MyRX`.
+
+**Phase 1 scope (LOCKED — what's shipped):**
+
+1. **Read-only**: MyRX reads from HC; writing MyRX efforts back to HC (so logs appear in Samsung Health / Fitbit / etc.) is **Phase 2**.
+2. **Manual sync only**: a "Sync now" button on the Health Connect row in the Connect tab. App-launch auto-sync is Phase 1.1; background sync is Phase 2.
+3. **Permission set requested**: ExerciseSession, HeartRate, Steps, Distance, TotalCaloriesBurned, Weight. All declared in AndroidManifest via `mobile/plugins/withHealthConnectPermissions.js` (a small inline config plugin). The user grants per-data-type in HC's system UI; we read the subset they actually granted.
+4. **Just logs to console**: the v1 "Sync now" pulls last-7-days workouts + HR and `console.log`s them. Mapping HC records → MyRX effort logs is **next** once the plumbing is verified with real data.
+5. **iOS deferred**: HealthKit support comes later. The `healthConnect.ts` module returns safe defaults (empty list / 'unavailable' status) on iOS so the rest of the app can call it unconditionally without platform checks.
+
+**Files:**
+
+- `mobile/plugins/withHealthConnectPermissions.js` — inline config plugin that adds the 6 `<uses-permission android:name="android.permission.health.READ_*">` tags to AndroidManifest.xml during prebuild. The official `react-native-health-connect` config plugin only adds the rationale intent filter, not the data-type permissions — those have to be declared per-app.
+- `mobile/app.json` — `plugins` array includes `react-native-health-connect` first (rationale intent filter) followed by `./plugins/withHealthConnectPermissions` (data-type permissions). Order matters: the second plugin appends to whatever AndroidManifest the first one produced.
+- `mobile/src/lib/healthConnect.ts` — service module. Lazy-requires the native module (so iOS doesn't blow up on module load); exports `availability()`, `initialize()`, `requestPermissions()`, `grantedPermissions()`, `disconnect()`, `fetchRecentWorkouts(days)`, `fetchRecentHeartRate(days)`. All async, all safe-default on iOS.
+- `mobile/src/lib/lastSyncStorage.ts` — per-integration last-sync timestamp persistence in AsyncStorage. Keyed by `myrx.lastSync.<integration>` where integration ∈ `'healthConnect' | 'appleHealthKit' | 'strava' | 'garmin' | 'whoop' | 'polar'`. Also exports `formatLastSync(iso)` for human-friendly "5 min ago" / "yesterday" strings.
+- `mobile/app/(app)/profile.tsx` — `ConnectTab` shows the Health Connect row with Connect / Sync now / Disconnect actions wired up. Other 5 integration rows (Apple Health, Strava, Garmin, Whoop, Polar Flow) remain "Coming soon" placeholders.
+
+**Native rebuild required:**
+
+Adding `react-native-health-connect` is a native-module change, so the dev-client APK must be rebuilt via `npx expo run:android` before the integration works on the user's phone. JS Fast Refresh continues to work for everything else, but the Health Connect surface in `ConnectTab` will show as "unavailable" until the user installs the rebuilt APK.
+
+**User-side prerequisites for Samsung-watch testing:**
+
+1. Samsung Health app installed on the phone, paired with the user's Galaxy Watch.
+2. Samsung Health → Settings → Connected services → **Health Connect** = ON. (Default on One UI 6 / Android 14+; older phones may need manual enable.)
+3. Open MyRX → Settings → Connect → tap **Connect** on the Google Health Connect row → grant the 6 data types in HC's system UI.
+4. Tap **Sync now**. Recent workouts + HR samples are logged to console (`console.log('[Health Connect] workouts:', ...)`) and the last-sync stamp updates in the row's sub-text.
+
+**Phase 1.5 / Phase 2 deferrals:**
+
+- **HC → MyRX effort mapping**: convert ExerciseSession records into strength / cardio effort rows. Sport-type enum mapping (ExerciseType=33 → Running, ExerciseType=11 → Cycling, etc.) lives behind this work.
+- **HR series storage**: figure out where HR samples land in MyRX's schema. Likely a new `hr_samples` table or extended `efforts.hr_avg` column on the effort row. Open question, deferred.
+- **Bidirectional sync**: write MyRX effort logs back to HC so the user's primary health app (Samsung Health / Fitbit) sees them too. Requires permission upgrades to `WRITE_EXERCISE` etc.
+- **Background sync**: native background task (WorkManager on Android) that polls HC every N hours without the user opening the app. Significant native scope.
+- **Apple HealthKit**: separate module, separate config plugin, separate UI affordance. Symmetric to Health Connect on the API surface — when it ships, the `ConnectTab` "Apple Health" row becomes functional.
+- **Per-platform OAuth integrations**: Strava / Garmin / Whoop / Polar all expose their own APIs. For Android users, HC covers them automatically (Strava is in HC, Garmin can be pulled via Garmin Connect Mobile, etc.). Dedicated integrations only add value for iOS users until iOS HK ships.
+
+---
+
 ### Air Bike detail card — locked design spec
 
 This is the spec for the air-bike-native coaching surface on `[activity].tsx` (mobile) — fired when `isAirBikeActivity(activity)` (i.e. `activity === 'Air Bike'`). Routes to its own `AirBikeDetail` component rather than the generic `PaceDetail`, because air bike training mechanics are fundamentally different from running/cycling/etc:
