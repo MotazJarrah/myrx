@@ -964,6 +964,11 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
   const [weightUnit,   setWeightUnit]   = useState<string>(profile?.weight_unit   ?? 'lb')
   const [heightUnit,   setHeightUnit]   = useState<string>(profile?.height_unit   ?? 'imperial')
   const [distanceUnit, setDistanceUnit] = useState<string>(profile?.distance_unit ?? 'km')
+  // Per-user pool-distance preference. Separate from `distance_unit` because
+  // someone running miles outdoors might still swim meters indoors (Olympic
+  // pools are 50m worldwide). Defaults to 'm' to match international
+  // convention. May 17 2026 — see Swimming detail card spec in CLAUDE.md.
+  const [swimUnit,     setSwimUnit]     = useState<string>(((profile as any)?.swim_unit as string | undefined) ?? 'm')
 
   const initHeight = heightToDisplay(profile?.current_height, profile?.height_unit ?? 'imperial')
   const [currentWeight, setCurrentWeight] = useState<string>(
@@ -1263,15 +1268,16 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
         }
       }
 
-      // Persist meal layout + chat privacy toggles — none of these are in
-      // the upsert_profile RPC's parameter list, so we update them directly.
-      // Rolled into the page-level save so every Settings change funnels
-      // through the same Save button (no immediate-save side-effects).
+      // Persist meal layout + chat privacy + swim_unit — none of these are
+      // in the upsert_profile RPC's parameter list, so we update them
+      // directly. Rolled into the page-level save so every Settings change
+      // funnels through the same Save button (no immediate-save side-effects).
       // Skip the share-with-coach flags for admins (no coach to share with).
       await supabase
         .from('profiles')
         .update({
           meal_slots_default:  mealSlots,
+          swim_unit:           swimUnit,
           ...(isAdmin ? {} : {
             share_online_status: shareOnline,
             share_last_seen:     shareLastSeen,
@@ -1299,8 +1305,8 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
         <View style={s.field}>
           <Text style={s.label}>Weight</Text>
           <View style={s.unitGrid}>
-            <UnitCard selected={weightUnit === 'lb'} onPress={() => handleWeightUnitChange('lb')} label="lb" sub="Pounds (imperial)" />
-            <UnitCard selected={weightUnit === 'kg'} onPress={() => handleWeightUnitChange('kg')} label="kg" sub="Kilograms (metric)" />
+            <UnitCard selected={weightUnit === 'lb'} onPress={() => handleWeightUnitChange('lb')} label="lb" sub="Pounds" />
+            <UnitCard selected={weightUnit === 'kg'} onPress={() => handleWeightUnitChange('kg')} label="kg" sub="Kilograms" />
           </View>
         </View>
 
@@ -1315,8 +1321,21 @@ function SettingsTab({ profile, user }: { profile: any; user: any }) {
         <View style={s.field}>
           <Text style={s.label}>Distance</Text>
           <View style={s.unitGrid}>
-            <UnitCard selected={distanceUnit === 'mi'} onPress={() => setDistanceUnit('mi')} label="mi" sub="Miles (imperial)" />
-            <UnitCard selected={distanceUnit === 'km'} onPress={() => setDistanceUnit('km')} label="km" sub="Kilometres (metric)" />
+            <UnitCard selected={distanceUnit === 'mi'} onPress={() => setDistanceUnit('mi')} label="mi" sub="Miles" />
+            <UnitCard selected={distanceUnit === 'km'} onPress={() => setDistanceUnit('km')} label="km" sub="Kilometres" />
+          </View>
+        </View>
+
+        {/* Swimming distance is separate from running/cycling distance —
+            international pools are 25m / 50m, US recreational pools are
+            25 yards. Most users only swim one, so the preference lives
+            on its own row rather than coupling to the outdoor distance
+            toggle. */}
+        <View style={s.field}>
+          <Text style={s.label}>Swim distance</Text>
+          <View style={s.unitGrid}>
+            <UnitCard selected={swimUnit === 'm'}  onPress={() => setSwimUnit('m')}  label="m"  sub="Meters" />
+            <UnitCard selected={swimUnit === 'yd'} onPress={() => setSwimUnit('yd')} label="yd" sub="Yards" />
           </View>
         </View>
       </AnimateRise>

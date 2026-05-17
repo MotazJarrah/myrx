@@ -137,6 +137,15 @@ function parseEffortLabel(label: string | null | undefined): { distKm: number; t
   if (m2) return { distKm: parseFloat(m2[1]) * KM_PER_MI, timeSecs: parseTimeStr(m2[2]) }
   const m3 = part.match(/([\d.]+)\s*km\s+in\s+([\d.]+)\s*min/)
   if (m3) return { distKm: parseFloat(m3[1]), timeSecs: parseFloat(m3[2]) * 60 }
+  // Swimming distance formats (May 17 2026 — swim distances are entered
+  // in meters or yards, not km/mi). Order: try yd first because the
+  // bare-'m' regex would otherwise match the 'm' in 'mi'... actually
+  // it wouldn't (we require '\s+in\s+' after) but ordering yd-then-m
+  // is safer in case someone logs an edge-case label.
+  const m4 = part.match(/([\d.]+)\s*yd\s+in\s+(\d+:\d{2}(?::\d{2})?)/)
+  if (m4) return { distKm: parseFloat(m4[1]) * 0.0009144, timeSecs: parseTimeStr(m4[2]) }
+  const m5 = part.match(/([\d.]+)\s*m\s+in\s+(\d+:\d{2}(?::\d{2})?)/)
+  if (m5) return { distKm: parseFloat(m5[1]) / 1000, timeSecs: parseTimeStr(m5[2]) }
   return null
 }
 
@@ -360,10 +369,16 @@ const PACE_ZONE_SESSIONS: Record<string, Partial<Record<CardioZone, PaceZoneSess
     threshold: [{ distanceKm: 2, intervalReps: 2 }, { distanceKm: 3, intervalReps: 3 }],
     vo2:       [{ distanceKm: 1.5, intervalReps: 3 }, { distanceKm: 2, intervalReps: 4 }],
   },
+  // Swimming has its own session structure (reps × distance + leaving
+  // interval on a pool clock — see SWIM_ZONE_SESSIONS below) and routes
+  // through SwimmingDetail, NOT PaceDetail. The entry below is a
+  // safety-net fallback in case the dispatcher ever misroutes a swim
+  // effort into PaceDetail; the real prescription comes from
+  // SWIM_ZONE_SESSIONS at the swimming detail component level.
   swimming: {
-    endurance: [{ distanceKm: 1 }, { distanceKm: 1.5 }, { distanceKm: 2 }],
-    threshold: [{ distanceKm: 0.6, intervalReps: 3 }, { distanceKm: 0.8, intervalReps: 4 }],
-    vo2:       [{ distanceKm: 0.3, intervalReps: 3 }, { distanceKm: 0.4, intervalReps: 4 }],
+    endurance: [{ distanceKm: 0.8 }, { distanceKm: 1.0 }, { distanceKm: 1.5 }],
+    threshold: [{ distanceKm: 1.0, intervalReps: 10 }, { distanceKm: 1.0, intervalReps: 5 }],
+    vo2:       [{ distanceKm: 0.5, intervalReps: 10 }, { distanceKm: 0.6, intervalReps: 6 }],
   },
   elliptical: {
     endurance: [{ distanceKm: 3 }, { distanceKm: 5 }, { distanceKm: 7 }],
@@ -387,6 +402,60 @@ const DURATION_ZONE_SESSIONS: Record<string, Partial<Record<CardioZone, Duration
   },
 }
 
+// ── Swimming-specific zone sessions (science-backed defaults) ────────────────
+// Swimming workouts are not "swim X km at Y pace" — they're interval SETS on
+// a clock. The canonical structure: reps × distance, leave every (target time
+// + rest). Distances come in 50m or 100m chunks because pool lengths are 25m
+// or 50m. These defaults are from Maglischo "Swimming Even Faster" (1993),
+// Doc Counsilman "Science of Swimming" (1968), and Costill's lactate-
+// threshold research at Indiana — the same canonical sources every serious
+// swim program (USA Swimming, NCAA, MySwimPro) draws from. The plan queue
+// cycles through both variants per zone so consecutive same-zone steps look
+// different (no five identical Endurance tiles in a row).
+interface SwimZoneSession {
+  /** Per-rep distance in meters. */
+  repDistanceM: number
+  /** Number of reps. */
+  reps:         number
+}
+
+const SWIM_ZONE_SESSIONS: Record<CardioZone, readonly SwimZoneSession[]> = Object.freeze({
+  endurance: [
+    { repDistanceM: 100, reps: 8 },   // 8 × 100m — classic aerobic-base set
+    { repDistanceM: 100, reps: 10 },  // 10 × 100m — more volume variant
+  ],
+  threshold: [
+    { repDistanceM: 100, reps: 10 },  // 10 × 100m at T-pace — the canonical "T-pace test set" (Costill)
+    { repDistanceM: 200, reps: 5 },   // 5 × 200m — longer-rep threshold variant
+  ],
+  vo2: [
+    { repDistanceM: 50,  reps: 10 },  // 10 × 50m sprint — canonical short-rep VO2
+    { repDistanceM: 100, reps: 6 },   // 6 × 100m at race pace — longer VO2 variant
+  ],
+})
+
+// Per-100m pace offsets from CSS for each swimming zone. Same shape as
+// the running offset table above, but tuned to swimming's narrower
+// physiological window (water resistance means a 5 sec/100m pace change
+// is a much bigger effort change than 5 sec/km on land). Offsets from
+// Maglischo's training-zone tables.
+const SWIM_ZONE_OFFSETS_SECS_PER_100M: Record<CardioZone, number> = Object.freeze({
+  endurance: +12,  // 12 sec/100m slower than CSS — aerobic conversational pace
+  threshold:  0,   // CSS itself — sustained moderate-hard
+  vo2:        -7,  // 7 sec/100m faster than CSS — race-pace work
+})
+
+// Rest offset per zone — seconds added on top of target swim time to
+// produce the leaving interval. Pool clocks tick at 5-second granularity,
+// so leaving intervals get rounded to nearest 5s.
+const SWIM_ZONE_REST_SECS: Record<CardioZone, number> = Object.freeze({
+  endurance: 10,
+  threshold: 10,
+  vo2:       20,
+})
+
+const RIEGEL_EXPONENT = 1.06
+
 // Lookup helpers — fall back to running / stair_climber if category is missing.
 // Returns the FULL array of variants for the (activity, zone). The queue
 // generator decides which variant to use based on its cycle counter.
@@ -394,6 +463,210 @@ function getPaceZoneSessionVariants(activity: string, zone: CardioZone): PaceZon
   const cat = categorizeActivity(activity)
   return PACE_ZONE_SESSIONS[cat]?.[zone]
       ?? PACE_ZONE_SESSIONS.running[zone]!
+}
+
+// ── Swimming CSS proxy (Riegel-projected 1000m-equivalent pace) ──────────────
+//
+// CSS = Critical Swim Speed = swimming's equivalent of a runner's threshold
+// pace. The canonical formula requires a 400m time trial + 200m time trial:
+// CSS = (400m time - 200m time) ÷ 200. That's friction we don't want at v1
+// (forces an onboarding calibration session before the user sees a
+// prescription). The Riegel-projection proxy below skips the calibration:
+//
+//   1. For each logged effort, project its time to a 1000m equivalent using
+//      Riegel's law: T2 = T1 × (D2/D1)^1.06
+//   2. Divide by 10 to get the projected pace per 100m
+//   3. Take the MIN across all efforts — the user's best CSS-equivalent
+//      fitness ever achieved
+//
+// Why MIN? An off-day at easy pace shouldn't downgrade the user's CSS — that
+// would make next session's prescription artificially easy. CSS only improves
+// when they swim faster than projected fitness. If the user genuinely detrains,
+// the prescription will be too aggressive until they log a new harder effort —
+// accepted divergence for v1. Each new effort can lower the CSS estimate
+// (improve it), making the proxy more accurate over time.
+//
+// The MIN-of-projections approach also handles distance bias automatically:
+// a 50m sprint projects to a SLOWER 1000m pace than a 1500m steady swim does,
+// so cross-distance comparisons work without per-distance weighting.
+function riegelProjectCSS(efforts: Effort[]): number | null {
+  let bestCSS: number | null = null
+  for (const e of efforts) {
+    const parsed = parseEffortLabel(e.label)
+    if (!parsed || parsed.timeSecs == null || parsed.timeSecs <= 0 || parsed.distKm <= 0) continue
+    const distM = parsed.distKm * 1000
+    const projected1000mTime = parsed.timeSecs * Math.pow(1000 / distM, RIEGEL_EXPONENT)
+    const projectedPer100m   = projected1000mTime / 10
+    if (bestCSS === null || projectedPer100m < bestCSS) {
+      bestCSS = projectedPer100m
+    }
+  }
+  return bestCSS
+}
+
+function getSwimZonePaceSecsPer100m(zone: CardioZone, cssSecsPer100m: number): number {
+  // Floor at 40 s/100m — faster than the world record swim pace, so a
+  // sanity guard against absurd projections for ultra-fast users.
+  return Math.max(40, cssSecsPer100m + SWIM_ZONE_OFFSETS_SECS_PER_100M[zone])
+}
+
+function fmtPaceSecsPer100m(secsPer100m: number): string {
+  const m = Math.floor(secsPer100m / 60)
+  const s = Math.round(secsPer100m % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+// Format a swim distance with the user's unit preference. Defaults to
+// rounding to nearest integer (no decimals — swim distances always come
+// in whole numbers of meters or yards on a pool clock).
+function fmtSwimDist(distM: number, swimUnit: 'm' | 'yd'): string {
+  if (swimUnit === 'yd') {
+    return `${Math.round(distM / 0.9144)} yd`
+  }
+  return `${Math.round(distM)} m`
+}
+
+function swimPaceUnitLabel(swimUnit: 'm' | 'yd'): string {
+  return swimUnit === 'yd' ? '/100yd' : '/100m'
+}
+
+// Build a single swim plan step (one entry in the queue). The plan queue
+// generator below cycles through SWIM_ZONE_SESSIONS variants the same way
+// running's generatePlanQueue cycles through PACE_ZONE_SESSIONS variants.
+interface SwimPlanStep {
+  zone:                 CardioZone
+  reps:                 number
+  repDistanceM:         number
+  zonePaceSecsPer100m:  number
+  repTimeSecs:          number
+  leavingIntervalSecs:  number
+  restPerRepSecs:       number
+  shortWork:            string    // "8 × 100m"
+  shortPace:            string    // "1:38/100m"
+  shortLeaving:         string    // "1:50"
+  cue:                  string
+}
+
+function buildSwimPlanStep(
+  zone:           CardioZone,
+  cssSecsPer100m: number,
+  swimUnit:       'm' | 'yd',
+  session:        SwimZoneSession,
+): SwimPlanStep {
+  const zonePace = getSwimZonePaceSecsPer100m(zone, cssSecsPer100m)
+  const repTime  = zonePace * session.repDistanceM / 100
+  const restSecs = SWIM_ZONE_REST_SECS[zone]
+  // Round leaving interval to nearest 5 seconds — pool clocks tick at 5s
+  // granularity (5/10 second-hand intervals), and swimmers think in those
+  // units ("leave on the :30" / "leave on the :45").
+  const leavingInterval = Math.max(5, Math.round((repTime + restSecs) / 5) * 5)
+  const restPerRep      = Math.max(0, leavingInterval - repTime)
+
+  const repDistFormatted = fmtSwimDist(session.repDistanceM, swimUnit)
+  const shortWork    = `${session.reps} × ${repDistFormatted}`
+  const shortPace    = `${fmtPaceSecsPer100m(zonePace)}${swimPaceUnitLabel(swimUnit)}`
+  const shortLeaving = fmtSecs(leavingInterval)
+
+  const feelByZone: Record<CardioZone, string> = {
+    endurance: 'easy aerobic effort',
+    threshold: 'comfortably hard',
+    vo2:       'race pace',
+  }
+  const cue = `Swim ${shortWork} at ${shortPace} pace (${feelByZone[zone]}). Leave every ${shortLeaving} — about ${Math.round(restPerRep)}s rest between reps.`
+
+  return {
+    zone,
+    reps: session.reps,
+    repDistanceM: session.repDistanceM,
+    zonePaceSecsPer100m: zonePace,
+    repTimeSecs: repTime,
+    leavingIntervalSecs: leavingInterval,
+    restPerRepSecs: restPerRep,
+    shortWork,
+    shortPace,
+    shortLeaving,
+    cue,
+  }
+}
+
+// Swim effort zone classification. Same shape as running's classifier but
+// works in per-100m space instead of per-km.
+function classifySwimEffortZone(effortValue: string | null | undefined, cssSecsPer100m: number): CardioZone {
+  const paceSecsPerKm = parsePaceToSecs(effortValue)
+  if (paceSecsPerKm === null || cssSecsPer100m <= 0) return 'endurance'
+  const paceSecsPer100m = paceSecsPerKm / 10
+  if (paceSecsPer100m <= cssSecsPer100m - 4) return 'vo2'
+  if (paceSecsPer100m <= cssSecsPer100m + 5) return 'threshold'
+  return 'endurance'
+}
+
+function daysSinceLastSwimEffortInZone(efforts: Effort[], zone: CardioZone, cssSecsPer100m: number): number {
+  for (let i = efforts.length - 1; i >= 0; i--) {
+    if (classifySwimEffortZone(efforts[i].value, cssSecsPer100m) === zone) {
+      return (Date.now() - new Date(efforts[i].created_at).getTime()) / 86_400_000
+    }
+  }
+  return 999
+}
+
+// Plan queue generator for swimming. Same polarized rules as running's
+// generatePlanQueue (no hard back-to-back, freshness checks at 7d/10d,
+// anti-stagnation interleave at 3 endurance in a row, default to endurance
+// for ~80% volume share), but operates on per-100m pace and pulls from
+// SWIM_ZONE_SESSIONS instead of PACE_ZONE_SESSIONS.
+function generateSwimPlanQueue(
+  efforts:        Effort[],
+  cssSecsPer100m: number,
+  swimUnit:       'm' | 'yd',
+  count:          number = 8,
+): SwimPlanStep[] {
+  if (cssSecsPer100m <= 0) return []
+
+  const lastEffort  = efforts[efforts.length - 1]
+  const lastZone    = lastEffort ? classifySwimEffortZone(lastEffort.value, cssSecsPer100m) : null
+  const daysSinceT0 = daysSinceLastSwimEffortInZone(efforts, 'threshold', cssSecsPer100m)
+  const daysSinceV0 = daysSinceLastSwimEffortInZone(efforts, 'vo2',       cssSecsPer100m)
+
+  const zoneQueue: CardioZone[] = []
+  let virtualLast    = lastZone
+  let virtualDaysT   = daysSinceT0
+  let virtualDaysV   = daysSinceV0
+  let endurStreak    = 0
+  let lastHard: CardioZone | null = null
+
+  for (let i = 0; i < count; i++) {
+    let next: CardioZone
+    if (virtualLast === 'threshold' || virtualLast === 'vo2') {
+      next = 'endurance'
+    } else if (virtualDaysV >= 10) {
+      next = 'vo2'
+    } else if (virtualDaysT >= 7) {
+      next = 'threshold'
+    } else if (endurStreak >= 3) {
+      next = lastHard === 'threshold' ? 'vo2' : 'threshold'
+    } else {
+      next = 'endurance'
+    }
+    zoneQueue.push(next)
+    virtualLast = next
+    if (next === 'endurance') {
+      endurStreak++
+    } else {
+      endurStreak = 0
+      lastHard = next
+    }
+    const gapDays = next === 'endurance' ? 1 : 2
+    virtualDaysT = next === 'threshold' ? 0 : virtualDaysT + gapDays
+    virtualDaysV = next === 'vo2'       ? 0 : virtualDaysV + gapDays
+  }
+
+  const variantIdxByZone: Record<CardioZone, number> = { endurance: 0, threshold: 0, vo2: 0 }
+  return zoneQueue.map(zone => {
+    const variants    = SWIM_ZONE_SESSIONS[zone]
+    const variantIdx  = variantIdxByZone[zone] % variants.length
+    variantIdxByZone[zone]++
+    return buildSwimPlanStep(zone, cssSecsPer100m, swimUnit, variants[variantIdx])
+  })
 }
 
 // ── Plan queue (the dynamic progression — locked, see CLAUDE.md) ─────────────
@@ -923,6 +1196,10 @@ export default function CardioDetailRoute() {
   const activity = typeof rawActivity === 'string' ? decodeURIComponent(rawActivity) : ''
   const { user, profile } = useAuth()
   const profileDistUnit = ((profile as any)?.distance_unit as 'km' | 'mi' | undefined) || 'km'
+  // Swimming distance preference — separate from run/cycle distance unit
+  // because someone running miles outdoors can still swim meters indoors.
+  // Defaults to 'm' (international convention + Olympic / 25m pools).
+  const swimUnit: 'm' | 'yd' = ((profile as any)?.swim_unit as 'm' | 'yd' | undefined) || 'm'
 
   const dbMovements = useMovements()
   const movementRecord = dbMovements.find(m => m.name === activity) ?? null
@@ -1010,6 +1287,14 @@ export default function CardioDetailRoute() {
 
   if (mode === 'duration') {
     return <DurationDetail activity={activity} efforts={efforts} onDelete={handleDeleteEffort} />
+  }
+  // Swimming gets its own component because the hero card layout is
+  // fundamentally different (reps × distance + pace + leaving interval = 3
+  // values, not 2) and the CSS-anchored zone math operates in per-100m
+  // space rather than per-km. Same outer chrome (header + plan card +
+  // chart + log list); swimming-specific internals.
+  if (activity === 'Swimming') {
+    return <SwimmingDetail activity={activity} efforts={efforts} swimUnit={swimUnit} onDelete={handleDeleteEffort} />
   }
   return <PaceDetail activity={activity} efforts={efforts} distUnit={distUnit} onDelete={handleDeleteEffort} onAddEffort={handleAddEffort} />
 }
@@ -1370,6 +1655,310 @@ function PaceDetail({
             const rightVal = isSpeedMachine(activity)
               ? (paceSecs ? formatSpeed(paceSecs, distUnit) : '—')
               : convertStoredPace(e.value, distUnit)
+            return (
+              <DeleteAction
+                key={e.id}
+                onDelete={() => onDelete(e.id)}
+                style={i < arr.length - 1 ? s.listRowDivider : undefined}
+                bg={colors.card}
+              >
+                <View style={s.listRow}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={s.listRowName}>
+                      {e.label.split(' · ').slice(1).join(' · ')}
+                    </Text>
+                    <Text style={s.listRowDate}>
+                      {new Date(e.created_at).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  <Text style={s.valAmber}>{rightVal}</Text>
+                </View>
+              </DeleteAction>
+            )
+          })}
+        </View>
+      </AnimateRise>
+
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SwimmingDetail — swim-native coaching surface (May 17 2026 lock)
+// ─────────────────────────────────────────────────────────────────────────────
+// Swimming has fundamentally different mechanics from running/cycling:
+//
+//   1. Workouts are INTERVAL SETS on a clock — "8 × 100m, leave every 1:50"
+//      not "swim 1.5 km at 1:40/100m pace continuous".
+//   2. Distances come in pool lengths (25m or 50m chunks) — so prescriptions
+//      use 50/100/200m reps, never arbitrary km.
+//   3. Pace is per 100m, not per km — universal swim convention.
+//   4. CSS (Critical Swim Speed) anchors all zones, computed via Riegel
+//      projection from the user's best effort to a 1000m-equivalent pace.
+//   5. Hero card stacks THREE values (work + pace + leaving interval) not
+//      two — the leaving interval is what the swimmer reads off the pool
+//      clock to know when to push off for the next rep.
+//
+// Stroke selection is intentionally NOT included in v1. ~95% of recreational
+// swimmers only do freestyle; adding a stroke selector taxes 100% of users
+// to serve maybe 5–10%. Will add when wearable integration auto-detects
+// stroke (Apple Watch / Garmin) — Phase 2.
+//
+// See CLAUDE.md "Swimming detail card — locked design spec" for the full
+// design rationale, science sources (Maglischo, Counsilman, Costill), and
+// the locked decision history.
+
+function SwimmingDetail({
+  activity, efforts, swimUnit, onDelete,
+}: {
+  activity: string
+  efforts:  Effort[]
+  swimUnit: 'm' | 'yd'
+  onDelete: (id: string) => void
+}) {
+  // CSS proxy via Riegel projection — the lowest projected per-100m pace
+  // across all efforts. Improves automatically as the user logs faster
+  // swims; never regresses on off-days. See riegelProjectCSS docstring.
+  const cssSecsPer100m = useMemo(() => riegelProjectCSS(efforts), [efforts])
+  const hasCSS         = cssSecsPer100m !== null && cssSecsPer100m > 0
+
+  // Per-100m chart series. Pace is stored in seconds-per-km (legacy unit
+  // for cardio); divide by 10 to convert to seconds-per-100m for display.
+  const chartData = useMemo(() => efforts
+    .map(e => {
+      const paceSecsPerKm = parsePaceToSecs(e.value)
+      if (paceSecsPerKm === null) return { ts: e.created_at, y: -1 }
+      return { ts: e.created_at, y: paceSecsPerKm / 10 }
+    })
+    .filter(d => d.y >= 0)
+  , [efforts])
+
+  // Plan queue — same polarized rules as running's, but pulls from
+  // SWIM_ZONE_SESSIONS and operates in per-100m pace space.
+  const planQueue: SwimPlanStep[] = useMemo(
+    () => hasCSS ? generateSwimPlanQueue(efforts, cssSecsPer100m!, swimUnit, 8) : [],
+    [hasCSS, cssSecsPer100m, efforts, swimUnit],
+  )
+
+  // UI state — tile selection drives hero card; mirrors PaceDetail's pattern.
+  const [zoneInfoOpen,    setZoneInfoOpen]    = useState(false)
+  const [selectedStepIdx, setSelectedStepIdx] = useState(0)
+  useEffect(() => {
+    setZoneInfoOpen(false)
+    setSelectedStepIdx(0)
+  }, [planQueue.length, planQueue[0]?.zone])
+
+  const selectedStep = planQueue[selectedStepIdx] ?? planQueue[0]
+  const paceUnitLabel = swimPaceUnitLabel(swimUnit)
+  const bestSubtitle = hasCSS
+    ? `${fmtPaceSecsPer100m(cssSecsPer100m!)}${paceUnitLabel}`
+    : '—'
+
+  return (
+    <View style={s.page}>
+
+      {/* Header — subtitle reads "Best — 1:38/100m" (per-100m, swim
+          convention) rather than the per-km used for running/cycling. */}
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{activity}</Text>
+        <View style={s.subRow}>
+          <Text style={s.subText}>Best — </Text>
+          <TickerNumber
+            value={bestSubtitle}
+            fontSize={14}
+            color={palette.amber[400]}
+            fontWeight="600"
+          />
+        </View>
+      </View>
+
+      {/* Progression plan card */}
+      {hasCSS && selectedStep && (
+        <AnimateRise delay={0} style={s.card}>
+          <Text style={s.h2}>Your progression plan</Text>
+          <Text style={s.helpTextSm}>
+            This is your personalized adaptation plan — follow it to see your results improve.
+          </Text>
+
+          {/* Tile row — 8 upcoming swim sessions. Each tile shows the zone
+              label, the work shape (reps × distance), and the target pace.
+              The leaving interval is on the hero card (too noisy for tiles). */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ alignItems: 'center', paddingVertical: 4, paddingHorizontal: 2 }}
+            style={{ marginHorizontal: -2 }}
+          >
+            {planQueue.map((step, idx) => {
+              const isSelected = selectedStepIdx === idx
+              const isLast     = idx === planQueue.length - 1
+              return (
+                <Fragment key={idx}>
+                  <Pressable
+                    onPress={() => setSelectedStepIdx(idx)}
+                    style={[s.queueTile, isSelected && s.queueTileSelected]}
+                  >
+                    <Text style={[s.queueTileZone, isSelected && s.queueTileZoneSelected]}>
+                      {CARDIO_ZONE_CONFIG[step.zone].shortLabel}
+                    </Text>
+                    <Text style={[s.queueTileWork, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
+                      {step.shortWork}
+                    </Text>
+                    <Text style={[s.queueTileTime, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
+                      {step.shortPace}
+                    </Text>
+                  </Pressable>
+                  {!isLast && (
+                    <View style={s.queueChevron}>
+                      <ChevronRight
+                        size={22}
+                        color={withAlpha(palette.amber[400], 0.7)}
+                        strokeWidth={2.5}
+                        style={{ transform: [{ scaleY: 1.3 }] }}
+                      />
+                    </View>
+                  )}
+                </Fragment>
+              )
+            })}
+          </ScrollView>
+
+          {/* Hero card — three stacked TickerNumber rows. Row 1 = work
+              (reps × distance), Row 2 = target pace per 100m, Row 3 =
+              leaving interval on the pool clock. Same amber chrome as
+              running's hero. */}
+          <View style={s.hero}>
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <Pressable
+                onPress={() => setZoneInfoOpen(o => !o)}
+                style={s.heroZonePillButton}
+              >
+                <Text style={s.heroZonePillText} numberOfLines={1}>
+                  {CARDIO_ZONE_CONFIG[selectedStep.zone].label}
+                </Text>
+                <Info size={11} color={palette.amber[400]} />
+              </Pressable>
+            </View>
+
+            {zoneInfoOpen && (
+              <Animated.View
+                entering={FadeInUp.duration(200)}
+                exiting={FadeOutUp.duration(180)}
+                style={s.heroInfoPanel}
+              >
+                <Text style={s.heroInfoPanelTitle}>
+                  {CARDIO_ZONE_CONFIG[selectedStep.zone].label} · {CARDIO_ZONE_CONFIG[selectedStep.zone].hrPctRange}
+                </Text>
+                <Text style={s.heroInfoPanelBody}>
+                  {CARDIO_ZONE_CONFIG[selectedStep.zone].whyText}
+                </Text>
+              </Animated.View>
+            )}
+
+            <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+              {/* Row 1 — Work (reps × distance, e.g. "8 × 100m") */}
+              <View style={s.heroValueRow}>
+                <TickerNumber
+                  value={selectedStep.shortWork}
+                  fontSize={30}
+                  color={palette.amber[400]}
+                  fontWeight="700"
+                />
+                <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                  the work
+                </Text>
+              </View>
+
+              {/* Row 2 — Target pace per 100m */}
+              <View style={s.heroValueRow}>
+                <TickerNumber
+                  value={selectedStep.shortPace}
+                  fontSize={30}
+                  color={palette.amber[400]}
+                  fontWeight="700"
+                />
+                <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                  target pace
+                </Text>
+              </View>
+
+              {/* Row 3 — Leaving interval (pool-clock time per rep) */}
+              <View style={s.heroValueRow}>
+                <TickerNumber
+                  value={selectedStep.shortLeaving}
+                  fontSize={30}
+                  color={palette.amber[400]}
+                  fontWeight="700"
+                />
+                <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                  leave every
+                </Text>
+              </View>
+            </Animated.View>
+
+            {/* Full coaching cue */}
+            <Animated.View
+              layout={LinearTransition.duration(200)}
+              style={s.heroSep}
+            >
+              <Text style={s.heroCue}>{selectedStep.cue}</Text>
+            </Animated.View>
+          </View>
+
+          {/* Science attribution — Maglischo + Counsilman + Costill are the
+              foundational swimming-science names. Riegel handles the CSS
+              projection math. */}
+          <Text style={s.tinyText}>Riegel · Maglischo · Counsilman · Costill — CSS-anchored zones</Text>
+        </AnimateRise>
+      )}
+
+      {/* Empty-state hint when no efforts logged yet. */}
+      {!hasCSS && (
+        <AnimateRise delay={0} style={s.card}>
+          <Text style={s.h2}>Progression plan</Text>
+          <Text style={s.helpTextSm}>
+            Log your first {activity} effort and your personalized plan will appear here.
+            Every step adapts to your latest pace.
+          </Text>
+        </AnimateRise>
+      )}
+
+      {/* Per-100m pace chart. Y-axis reversed (lower pace = faster swim =
+          line trends DOWN as the user improves). */}
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
+          <Text style={s.h2}>Pace per 100{swimUnit === 'yd' ? 'yd' : 'm'} over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={cssSecsPer100m}
+            reversed
+            yWidth={52}
+            yTickFormatter={(v) => fmtPaceSecsPer100m(v)}
+            tooltipValueFormatter={(v) => `${fmtPaceSecsPer100m(v)}${paceUnitLabel}`}
+            tooltipLabel="Pace"
+            lineColor={palette.amber[400]}
+            yDomain={{
+              min: (mn) => Math.max(0, Math.round(mn * 0.95)),
+              max: (mx) => Math.round(mx * 1.05),
+            }}
+            caption={<Text style={s.tinyText}>Dashed = personal best</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      {/* History — each row shows per-100m pace on the right (swim
+          convention, not per-km). */}
+      <AnimateRise delay={500} style={s.cardNoPad}>
+        <View style={s.listHeader}>
+          <Text style={s.listHeaderText}>All entries</Text>
+        </View>
+        <View>
+          {[...efforts].reverse().map((e, i, arr) => {
+            const paceSecsPerKm = parsePaceToSecs(e.value)
+            const rightVal = paceSecsPerKm !== null
+              ? `${fmtPaceSecsPer100m(paceSecsPerKm / 10)}${paceUnitLabel}`
+              : '—'
             return (
               <DeleteAction
                 key={e.id}

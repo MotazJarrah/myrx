@@ -890,6 +890,102 @@ The mirror update lives in: the Supabase `movements` table (single source of tru
 
 ---
 
+### Swimming detail card — locked design spec
+
+This is the spec for the swim-native coaching surface on `[activity].tsx` (mobile) — fired when `activity === 'Swimming'`. Routes to its own `SwimmingDetail` component rather than the generic `PaceDetail`, because swim mechanics differ from running/cycling in five fundamental ways:
+
+1. **Workouts are interval SETS on a clock.** Not "swim X km at Y pace." Real swim sessions look like "8 × 100m, leave every 1:50" — every rep ends at a wall, the user touches, gets whatever rest is left from the leaving interval, then pushes off for the next rep. The "leaving interval" is the canonical swim concept; running has no equivalent.
+2. **Distances come in pool lengths, not arbitrary km.** Pool lengths are 25m, 50m (Olympic), or 25 yards. Rep distances are always multiples of pool length: 50m, 100m, 200m, etc. The current SWIM_ZONE_SESSIONS data uses 50m and 100m chunks that fit any pool layout.
+3. **Pace is per 100m, not per km.** Universal swim convention. Storage stays in seconds-per-km for cross-activity uniformity, but the detail page divides by 10 at display time.
+4. **CSS anchors all zones.** CSS = Critical Swim Speed = swimming's threshold pace (analogous to a runner's lactate threshold). Canonical formula is `(400m_TT_time - 200m_TT_time) ÷ 200`, but v1 uses a Riegel-projected proxy instead (see "CSS proxy" below) to skip the calibration session.
+5. **Hero card stacks THREE values, not two.** Running's hero shows work + pace. Swimming's shows work + pace + leaving interval — the leaving interval is what the swimmer actually reads off the pool clock to know when to push off, so it's a first-class number.
+
+**Stroke selection is intentionally NOT in v1.** ~95% of recreational swimmers only do freestyle; a stroke selector would tax 100% of users to serve 5–10%. The minority training multiple strokes likely uses dedicated swim apps (MySwimPro, TrainingPeaks). When Apple Watch / Garmin integration auto-detects stroke (Phase 2), the stroke split can layer in without user input.
+
+**CSS proxy via Riegel projection (LOCKED):**
+
+For each logged effort, the system projects the user's time to a 1000m-equivalent time using Riegel's law `T2 = T1 × (D2/D1)^1.06`, then divides by 10 for per-100m pace. The CSS proxy = MIN of those projected per-100m paces across all efforts.
+
+- **Why MIN?** An off-day at easy pace shouldn't downgrade CSS — that would make next session's prescription artificially easy. CSS only improves when the user swims faster than current fitness. If they genuinely detrain, the prescription will be too aggressive until they log a fresh harder effort; accepted divergence for v1.
+- **Distance-aware:** a 50m sprint projects to a SLOWER 1000m pace than a 1500m steady swim does (Riegel exponent 1.06 means longer distances scale better than naive linear projection). So cross-distance comparisons work without per-distance weighting.
+- **Convergence:** the proxy is initially slightly aggressive vs true CSS (because the user's "best ever" is closer to a peak than a sustainable threshold), but the gap narrows as the user accumulates efforts at varied distances. If users complain prescriptions are too hard, optional escalations: (a) add a canonical 400m+200m calibration onboarding flow, or (b) auto-shave 3–5 sec off the proxy to bias toward sustainability.
+
+**Per-zone session prescriptions (`SWIM_ZONE_SESSIONS`, LOCKED):**
+
+Drawn from Maglischo *Swimming Even Faster* (1993), Counsilman *Science of Swimming* (1968), and Costill's lactate-threshold research at Indiana University. The 10×100m T-pace set is THE canonical swimming threshold-test set used at every level from age-group to Olympic prep.
+
+| Zone | Primary session | Variant |
+|------|-----------------|---------|
+| **Endurance** | 8 × 100m at endurance pace, leave on (pace + 10s rest) | 10 × 100m — more volume |
+| **Threshold** | 10 × 100m at threshold pace, leave on (pace + 10s rest) — Costill's canonical T-pace test set | 5 × 200m |
+| **VO2 Max** | 10 × 50m at VO2 pace, leave on (pace + 20s rest) | 6 × 100m at race pace |
+
+The plan queue cycles through both variants per zone so consecutive same-zone steps look different (no five identical Endurance tiles in a row).
+
+**Per-zone pace offsets from CSS (per 100m, LOCKED):**
+
+| Zone | Offset | Effect |
+|------|--------|--------|
+| Endurance | +12 sec/100m | Conversational aerobic pace — 12 sec slower per 100m than CSS |
+| Threshold | 0 | CSS itself — sustained moderate-hard |
+| VO2 Max | −7 sec/100m | Race-pace work — 7 sec faster per 100m than CSS |
+
+Offsets from Maglischo's training-zone tables. Same shape as Daniels' running offsets but tuned to swimming's narrower physiological window (water resistance means small pace changes are big effort changes).
+
+**Leaving interval computation (LOCKED):**
+
+`leaving_interval_secs = round_to_nearest_5(target_pace_per_100m × rep_distance_m / 100 + rest_secs_for_zone)` where `rest_secs` is 10s for Endurance/Threshold, 20s for VO2. Rounded to nearest 5s because pool clocks tick at 5-second granularity (5/10 second-hand intervals), and swimmers think in those units ("leave on the :30").
+
+**Layout — single page, top to bottom (LOCKED):**
+
+1. **Header** — back chevron + "Swimming" title + subtitle `Best — m:ss/100m` (or `/100yd` in yards mode). `TickerNumber` on the pace value.
+2. **Progression plan card** (`<AnimateRise delay={0}>`):
+   - Title `Your progression plan` + helper text
+   - Tile row: 8 upcoming swim sessions, each tile shows zone label + work shape (reps × distance) + target pace. Tappable to drive the hero card. Leaving interval is on the hero only — too noisy for tiles.
+   - **Hero card** (amber chrome, `min-h-220`): top-right info pill (zone label + Info icon, tappable for "why this zone"), then THREE stacked TickerNumber rows: Row 1 = work (`8 × 100m`), Row 2 = target pace (`1:38/100m`), Row 3 = leaving interval (`1:50`). Thin separator + full coaching cue sentence.
+   - Attribution: `Riegel · Maglischo · Counsilman · Costill — CSS-anchored zones`
+3. **Chart** (`<AnimateRise delay={250}>`) — pace per 100m over time, Y-axis reversed (lower = faster = trend down). Reference line at CSS.
+4. **Log list** (`<AnimateRise delay={500}>`) — each row shows per-100m pace on the right (swim convention, not per-km).
+
+**Log form (`cardio.tsx`) — swim-mode form variant (LOCKED):**
+
+When `activity === 'Swimming'`:
+- **Distance wheel**: INTEGER mode (step 25, min 0, max 5000) — not the decimal-km wheel. Pool distances always come in whole numbers.
+- **Unit column**: locked chip showing `m` or `yd` (pulled from `profile.swim_unit`) — not the km/mi toggle. User sets the unit once in Settings; toggling per-log would be friction.
+- **Time wheel**: stays `mm:ss` (max 99:00).
+- **Save label format**: `Swimming · 1500 m in 25:00` (or `· 1640 yd in 25:00`). Old `· 1.5 km in 25:00` labels still parse via `parseEffortLabel` for back-compat.
+- **Storage**: `value` column stores pace in seconds-per-km regardless of input unit (uniform storage across all pace-mode activities). Detail page divides by 10 for per-100m display.
+
+**`profiles.swim_unit` column (LOCKED, migration `add_swim_unit_to_profiles`):**
+
+- Type: `text NOT NULL DEFAULT 'm'`
+- CHECK constraint: `swim_unit IN ('m', 'yd')`
+- Settings UI: Profile page > Settings tab > "Swim distance" unit card row (separate from "Distance" — a user can run miles outdoors and swim meters indoors).
+
+**Swimming-specific helpers in `[activity].tsx`:**
+
+| Function | Purpose |
+|----------|---------|
+| `riegelProjectCSS(efforts)` | Compute the user's CSS proxy via Riegel projection; returns secs per 100m or null |
+| `getSwimZonePaceSecsPer100m(zone, css)` | Apply zone offset to CSS; floor at 40 s/100m (faster than world record) |
+| `buildSwimPlanStep(zone, css, swimUnit, session)` | Build one queue entry (work + pace + leaving interval + cue) |
+| `generateSwimPlanQueue(efforts, css, swimUnit, count)` | Polarized-rule queue generator (same shape as running's, but per-100m and pulling from `SWIM_ZONE_SESSIONS`) |
+| `classifySwimEffortZone(value, css)` | Classify a logged effort as endurance/threshold/vo2 in per-100m space |
+| `fmtPaceSecsPer100m(secs)` | Format secs as `m:ss` |
+| `fmtSwimDist(distM, swimUnit)` | Convert + format meters to m or yd display string |
+
+**`parseEffortLabel` (`[activity].tsx`) — extended for swim formats:**
+
+The regex chain in `parseEffortLabel` now handles `m` and `yd` units after the existing `km` and `mi` cases. Critical: the `m` regex requires `\s+in\s+` after the unit so it doesn't accidentally match the `m` in `mi`. Old km-format swim labels still parse correctly for back-compat.
+
+**Out of v1 scope (deferred):**
+- **Stroke selection** — wait for wearable integration to auto-detect.
+- **Pool length input** — currently inferred (all prescriptions use 50m and 100m sets which fit any pool). Could become a profile preference later if needed.
+- **Drill / pull / kick set prescription** — swim coaches differentiate full-stroke vs drill (technique) vs pull (no kick) vs kick (no arms). v1 just prescribes total work; the user picks the technique mix.
+- **Canonical CSS calibration flow** — currently uses Riegel proxy. Add 400m+200m TT onboarding if proxy proves inaccurate in practice.
+
+---
+
 ## Mission, vision, and revenue model
 
 ### Mission

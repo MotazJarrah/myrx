@@ -152,9 +152,22 @@ export default function Cardio() {
   }, [unitLock])
 
   // Speed-mode detection. Derived from activity name — when the selected
-  // activity is one of the 6 SPEED_INPUT_ACTIVITIES, the form swaps the
+  // activity is one of the 5 SPEED_INPUT_ACTIVITIES, the form swaps the
   // Time wheel for a Speed wheel and computes Time from distance ÷ speed.
   const isSpeedMode = SPEED_INPUT_ACTIVITIES.has(activity)
+
+  // Swim-mode detection. Swimming has its own form layout:
+  //   • Distance wheel runs in INTEGER mode (step 25) in meters or yards,
+  //     not the decimal-km wheel used for running/cycling. Pool distances
+  //     come in whole numbers — 1500m, 800m, 50m — never "1.5 km."
+  //   • Unit column shows "m" or "yd" as a locked chip (pulled from the
+  //     user's swim_unit profile preference), not the km/mi toggle.
+  //   • Time stays mm:ss as usual.
+  //   • Save label format becomes "Swimming · 1500 m in 25:00" instead
+  //     of "Swimming · 1.5 km in 25:00" — parseEffortLabel on the read
+  //     path handles both formats for back-compat with old efforts.
+  const isSwimMode = activity === 'Swimming'
+  const swimUnit: 'm' | 'yd' = ((profile as any)?.swim_unit as 'm' | 'yd' | undefined) || 'm'
 
   // ── Reset fields when switching modes — every dial starts at ZERO
   // (May 2026 lock — previously they sat at "min savable", e.g. 0.1 km
@@ -171,12 +184,16 @@ export default function Cardio() {
       setDistValue('0')
       setSpeedValue('0')
       setTimeStr('')           // derived from speed × distance, not user-entered
+    } else if (isSwimMode) {
+      setDistValue('0')        // integer meters/yards
+      setTimeStr('00:00')
+      setSpeedValue('')
     } else {
       setDistValue('0')
       setTimeStr('00:00')
       setSpeedValue('')
     }
-  }, [mode, isSpeedMode])
+  }, [mode, isSpeedMode, isSwimMode])
 
   // ── Clear saved/error on any input change ──────────────────────────────────
   useEffect(() => { setSaved(false); setSaveError('') },
@@ -247,10 +264,15 @@ export default function Cardio() {
   // distKm + effectiveTimeSecs describe the whole session.
   //   - Pace mode:  user enters distance + time directly.
   //   - Speed mode: user enters distance + speed; time = distance ÷ speed.
+  //   - Swim mode:  user enters distance in m/yd + time directly.
   //   - Duration mode (StairMill): no distance, just time.
-  const distKm = distUnit === 'mi'
-    ? (Number(distValue) || 0) * 1.60934
-    : (Number(distValue) || 0)
+  const distKm = isSwimMode
+    ? (swimUnit === 'yd'
+        ? (Number(distValue) || 0) * 0.0009144   // yd → km
+        : (Number(distValue) || 0) / 1000)        // m  → km
+    : (distUnit === 'mi'
+        ? (Number(distValue) || 0) * 1.60934
+        : (Number(distValue) || 0))
 
   // Speed mode: user-entered speed → km/h (convert from mph if needed).
   const speedKmh = isSpeedMode
@@ -282,6 +304,9 @@ export default function Cardio() {
     : timeStr
 
   // Pace is computed the same way regardless of input mode — distance ÷ time.
+  // Storage always normalizes to seconds-per-km for the `value` column so the
+  // detail page math works uniformly across activities. Swimming displays
+  // per-100m via divide-by-10 at display time, but stores per-km here.
   const livePaceKm: string | null = (() => {
     if (mode !== 'pace' || distKm <= 0 || !effectiveTimeSecs) return null
     const paceSecPerKm = effectiveTimeSecs / distKm
@@ -290,8 +315,19 @@ export default function Cardio() {
     return `${m}:${String(sc).padStart(2, '0')}/km`
   })()
 
+  // Display pace — adapts to mode:
+  //   • Swim mode: per-100m (per-100yd in yards mode). The user thinks
+  //     in per-100m, never per-km.
+  //   • Mile-unit non-swim: per-mile.
+  //   • Everything else: per-km (matches livePaceKm).
   const livePaceDisplay: string | null = (() => {
     if (!livePaceKm) return null
+    if (isSwimMode) {
+      const paceSecPer100 = (effectiveTimeSecs / distKm) / 10  // pace per 100m derived from /km
+      const m = Math.floor(paceSecPer100 / 60)
+      const sc = Math.round(paceSecPer100 % 60)
+      return `${m}:${String(sc).padStart(2, '0')}/100${swimUnit}`
+    }
     if (distUnit !== 'mi') return livePaceKm
     const paceSecPerMi = (effectiveTimeSecs / distKm) * 1.60934
     const m = Math.floor(paceSecPerMi / 60)
@@ -319,11 +355,23 @@ export default function Cardio() {
     if (!user || saved || !canSave) return
     setSaveError('')
 
-    // Speed mode: use the derived effectiveTimeStr — the user entered speed
-    // but storage is uniform across all pace-mode activities ("dist in time").
-    const label = mode === 'pace'
-      ? `${activity} · ${parseFloat(Number(distValue).toFixed(3))} ${distUnit} in ${effectiveTimeStr}`
-      : `${activity} · ${effectiveTimeStr}`
+    // Label format depends on mode:
+    //   • Swim mode:     "Swimming · 1500 m in 25:00" (integer m/yd)
+    //   • Pace mode:     "Running · 5 km in 37:55"
+    //   • Speed mode:    same as pace mode (storage is uniform)
+    //   • Duration mode: "StairMill · 15:00"
+    // The value column is always seconds-per-km pace for pace/swim/speed
+    // activities, or the bare time for duration — uniform on the read side.
+    let label: string
+    if (mode === 'pace') {
+      if (isSwimMode) {
+        label = `${activity} · ${Math.round(Number(distValue))} ${swimUnit} in ${effectiveTimeStr}`
+      } else {
+        label = `${activity} · ${parseFloat(Number(distValue).toFixed(3))} ${distUnit} in ${effectiveTimeStr}`
+      }
+    } else {
+      label = `${activity} · ${effectiveTimeStr}`
+    }
     const value = mode === 'pace' ? livePaceKm! : effectiveTimeStr
 
     const { error } = await supabase.from('efforts').insert({
@@ -406,19 +454,21 @@ export default function Cardio() {
               an interval workout. The plan reads the resulting PACE to
               classify zone, so the data captured is what matters most.
 
-              Speed mode (5 machines in SPEED_INPUT_ACTIVITIES — running
-              treadmill, stationary bike, bike erg, air bike, elliptical)
-              swaps the Time wheel for a Speed wheel; the user reads SPEED
-              off the machine console rather than computing time mentally
-              before logging. Time auto-computes from distance ÷ speed. */
+              Three sub-modes:
+              • Default pace (outdoor / generic): Distance | Unit toggle | Time
+              • Speed mode (5 machines): Distance | Speed | Unit toggle
+              • Swim mode (Swimming only):       Distance | Unit (locked m/yd) | Time
+            */
           <>
             <Text style={s.helpText}>
-              {isSpeedMode
-                ? "Log your distance and the speed you set on the machine. We'll compute the time for you."
-                : 'Log your best distance and time from this session — even a single rep of an interval workout counts.'}
+              {isSwimMode
+                ? "Log your best distance and time from this session — a single rep or a continuous swim, your choice."
+                : isSpeedMode
+                  ? "Log your distance and the speed you set on the machine. We'll compute the time for you."
+                  : 'Log your best distance and time from this session — even a single rep of an interval workout counts.'}
             </Text>
 
-            {/* Triple grid — two layouts share the same chrome (75 px field
+            {/* Triple grid — three layouts share the same chrome (75 px field
                 height, 8 px gap, 48 px Unit column — all GLOBAL spec from
                 CLAUDE.md). Big-column flex differs by mode:
 
@@ -436,9 +486,56 @@ export default function Cardio() {
                     2.55, symmetric) since their content widths are similar
                     ("5.0" / "10.5") without the unit suffix dragging.
                   - gridUnit width 48 at the END.
+
+                Swim mode (Swimming): Distance | Unit (locked) | Time
+                  - Distance wheel is INTEGER (step 25, min 0, max 5000) in
+                    m or yd. Pool distances always come in whole numbers
+                    of pool lengths.
+                  - Unit column is a LOCKED chip showing "m" or "yd" pulled
+                    from profile.swim_unit — not a toggle (the user sets
+                    this once in Settings; toggling per-log would be friction).
+                  - Time stays mm:ss.
             */}
             <View style={s.tripleGrid}>
-              {isSpeedMode ? (
+              {isSwimMode ? (
+                <>
+                  {/* Distance — integer wheel, no inline unit suffix (locked
+                      chip in the middle column declares m or yd). */}
+                  <View style={[s.field, s.gridPaceDistance]}>
+                    <Text style={s.label}>Distance</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={Number(distValue) || 0}
+                        onChange={(v) => setDistValue(String(v))}
+                        step={25}
+                        min={0}
+                        max={5000}
+                        unit={swimUnit}
+                      />
+                    </WheelInput>
+                  </View>
+                  {/* Locked unit — m or yd from profile. Tappable hint:
+                      change it in Settings. Same chrome as Rucking's
+                      unit-locked chip. */}
+                  <View style={[s.field, s.gridUnit]}>
+                    <Text style={s.label}>Unit</Text>
+                    <View style={s.unitLockedBox}>
+                      <Text style={s.unitLockedText} numberOfLines={1}>{swimUnit}</Text>
+                    </View>
+                  </View>
+                  <View style={[s.field, s.gridPaceTime]}>
+                    <Text style={s.label}>Time</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={parseTimeStr(timeStr) || 0}
+                        onChange={(secs) => setTimeStr(formatMmSs(secs))}
+                        time="mm:ss"
+                        maxMinutes={99}
+                      />
+                    </WheelInput>
+                  </View>
+                </>
+              ) : isSpeedMode ? (
                 <>
                   {/* Distance — no unit suffix (toggle at end declares it) */}
                   <View style={[s.field, s.gridLarge]}>
@@ -625,6 +722,20 @@ export default function Cardio() {
                     <>
                       <Text style={s.listRowSub}>Best time</Text>
                       <Text style={s.listRowVal}>{fmtSecs(act.secs)}</Text>
+                    </>
+                  ) : act.name === 'Swimming' ? (
+                    /* Swimming — show best pace per 100m (or 100yd). Stored
+                       value is seconds per km regardless of input unit, so
+                       divide by 10 for per-100 display. */
+                    <>
+                      <Text style={s.listRowSub}>Best pace</Text>
+                      <Text style={s.listRowVal}>{(() => {
+                        if (!act.secs || act.secs <= 0) return '—'
+                        const secsPer100 = act.secs / 10
+                        const mm = Math.floor(secsPer100 / 60)
+                        const ss = Math.round(secsPer100 % 60)
+                        return `${mm}:${String(ss).padStart(2, '0')}/100${swimUnit}`
+                      })()}</Text>
                     </>
                   ) : SPEED_INPUT_ACTIVITIES.has(act.name) ? (
                     /* Speed machines — show best speed (km/h or mph) instead
