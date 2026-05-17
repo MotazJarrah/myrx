@@ -16,10 +16,23 @@
  * (read via `useMovements`). `getCardioDistances` ported inline below.
  */
 
-import { useEffect, useState } from 'react'
-import { View, Text, Pressable, StyleSheet } from 'react-native'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native'
+import Animated, {
+  FadeInUp,
+  FadeOutUp,
+  LinearTransition,
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  withDelay,
+  runOnJS,
+} from 'react-native-reanimated'
+import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { useLocalSearchParams, router } from 'expo-router'
-import { ChevronLeft, Target } from 'lucide-react-native'
+import { ChevronLeft, ChevronRight, Info } from 'lucide-react-native'
 import Skeleton from '../../../../src/components/Skeleton'
 import DeleteAction from '../../../../src/components/DeleteAction'
 import TickerNumber from '../../../../src/components/TickerNumber'
@@ -27,8 +40,12 @@ import AnimateRise from '../../../../src/components/AnimateRise'
 import LineChart from '../../../../src/components/LineChart'
 import { useAuth } from '../../../../src/contexts/AuthContext'
 import { supabase } from '../../../../src/lib/supabase'
-import { projectPaces } from '../../../../src/lib/formulas'
 import { useMovements } from '../../../../src/hooks/useMovements'
+import {
+  isSpeedMachine,
+  formatSpeed,
+  paceSecsPerKmToSpeedDisplay,
+} from '../../../../src/lib/movements'
 import { colors, palette, alpha, withAlpha, fonts } from '../../../../src/theme'
 
 // ── Effort row ───────────────────────────────────────────────────────────────
@@ -97,11 +114,18 @@ function parsePaceToSecs(value: string | null | undefined): number | null {
 }
 
 // Render a distance in the user's preferred unit with sensible precision.
+// Sub-1km values display in meters (e.g. 0.6 km → "600 m", 0.25 km → "250 m")
+// because that's how runners / coaches actually talk about short intervals —
+// "5 × 600 m" reads cleanly, "5 × 0.6 km" reads as decimal noise. Same for
+// imperial: sub-1mi values fall back to meters since track-and-field uses
+// metric for short distances universally.
 function fmtDist(distKm: number, distUnit: 'km' | 'mi' = 'km'): string {
   if (distUnit === 'mi') {
     const mi = distKm / KM_PER_MI
+    if (mi < 1) return `${Math.round(distKm * 1000)} m`
     return `${mi.toFixed(mi < 5 ? 2 : 1).replace(/\.?0+$/, '')} mi`
   }
+  if (distKm < 1) return `${Math.round(distKm * 1000)} m`
   return `${distKm < 5 ? distKm.toFixed(2).replace(/\.?0+$/, '') : distKm.toFixed(1).replace(/\.0$/, '')} km`
 }
 
@@ -116,112 +140,765 @@ function parseEffortLabel(label: string | null | undefined): { distKm: number; t
   return null
 }
 
-// ── getCardioDistances — port of MyRX/src/lib/movements.js ───────────────────
-// Inlined here because CardioDetail is the only consumer.
-function getCardioDistances(activityName: string, distUnit: 'km' | 'mi' = 'km'): Array<{ name: string; km: number }> {
+// ── Cardio adaptation zones — locked design spec (see CLAUDE.md) ─────────────
+// THREE zones (May 2026 update): the app's job is to push you to get BETTER,
+// not to babysit recovery or program "no-man's-land" tempo work. The 5-zone
+// HR model is still the underlying science, but we expose only the three
+// zones that actually drive progression for the average trainee:
+//
+//   • ENDURANCE (Z2)  — aerobic base. Most of your training. Builds the engine.
+//   • THRESHOLD (Z4)  — lactate clearance. Race-time improvement.
+//   • VO2 MAX  (Z5)   — top-end speed. Mile / 5K race-pace adaptation.
+//
+// Recovery (Z1) is not training — it's the absence of training. Tempo (Z3) is
+// what polarized-training research calls "no man's land": too hard to be the
+// efficient aerobic stimulus of Z2, too easy to drive the specific adaptations
+// of Z4/Z5. Both dropped from the UI; the user can still log easy days, the
+// system just won't prescribe them as workouts.
+//
+// This also gives us 1:1 parity with strength's 3-zone adp model:
+//   Strength: STRENGTH    / HYPERTROPHY / ENDURANCE
+//   Cardio:   ENDURANCE   / THRESHOLD   / VO2 MAX
+
+type CardioZone = 'endurance' | 'threshold' | 'vo2'
+
+const CARDIO_ZONE_ORDER: CardioZone[] = ['endurance', 'threshold', 'vo2']
+
+interface CardioZoneCfg {
+  label:        string
+  shortLabel:   string
+  hrPctRange:   string
+  paceOffset:   number   // s/km offset from user's best pace (negative = faster)
+  whyText:      string
+}
+
+const CARDIO_ZONE_CONFIG: Record<CardioZone, CardioZoneCfg> = Object.freeze({
+  endurance: {
+    label:      'ENDURANCE',
+    shortLabel: 'ENDURANCE',
+    hrPctRange: '60–70% HRmax',
+    paceOffset: 60,
+    whyText:    'Most of your training lives here. Z2 builds the mitochondrial density and capillary networks that determine everything above — your aerobic engine. Stay disciplined and conversational; resist the urge to push.',
+  },
+  threshold: {
+    label:      'THRESHOLD',
+    shortLabel: 'THRESHOLD',
+    hrPctRange: '80–90% HRmax',
+    paceOffset: 10,
+    whyText:    'The single most productive zone for race times from 5K to half marathon. Cruise intervals teach your body to clear lactate faster, raising the speed you can sustain. 1–2 sessions per week max.',
+  },
+  vo2: {
+    label:      'VO2 MAX',
+    shortLabel: 'VO2 MAX',
+    hrPctRange: '90–100% HRmax',
+    paceOffset: -15,
+    whyText:    'Top-end stress. Short intervals at max sustainable effort build VO2 max — your engine ceiling — and pull every zone below up with them. The most direct stimulus for mile and 5K race-pace adaptation. 1 session per week with full recovery between.',
+  },
+})
+
+// Target pace at this zone in s/km, anchored on the user's fastest logged pace.
+// VO2 zone is floored at 60 s/km to prevent absurd projections for slow users.
+function getZonePaceSecPerKm(zone: CardioZone, bestPaceSecPerKm: number): number {
+  const offset = CARDIO_ZONE_CONFIG[zone].paceOffset
+  return Math.max(60, bestPaceSecPerKm + offset)
+}
+
+// ── Activity categorization ──────────────────────────────────────────────────
+// Each cardio movement name maps to a coarse category. The category drives the
+// per-zone session prescription (distance for pace mode, duration for duration
+// mode). Order matters in the regex chain — more specific patterns (e.g.
+// "Air Bike" matches "bike") must come BEFORE generic ones (e.g. "cycling").
+
+type ActivityCategory =
+  | 'running' | 'rucking'
+  | 'cycling' | 'stationary_bike' | 'air_bike'
+  | 'rowing' | 'ski_erg' | 'swimming' | 'elliptical'
+  // Duration-mode categories below (May 2026 cleanup removed battle_ropes,
+  // shadow_boxing, speed_bag, vertical_climber — those activities no longer
+  // exist; Group C is just StairMill + Arc Trainer now).
+  | 'stair_climber' | 'arc_trainer'
+
+function categorizeActivity(activityName: string): ActivityCategory {
   const lower = activityName.toLowerCase()
-  const mi = distUnit === 'mi'
 
-  if (/swim|aqua/.test(lower)) {
-    return [
-      { name: '100 m',  km: 0.1 },
-      { name: '400 m',  km: 0.4 },
-      { name: '800 m',  km: 0.8 },
-      { name: '1500 m', km: 1.5 },
-      { name: '1 mile', km: KM_PER_MI },
-    ]
-  }
-  if (/row erg|rowing|canoe|kayak|paddleboard|sup/.test(lower)) {
-    return [
-      { name: '500 m',   km: 0.5 },
-      { name: '1000 m',  km: 1 },
-      { name: '2000 m',  km: 2 },
-      { name: '5000 m',  km: 5 },
-      { name: '10000 m', km: 10 },
-    ]
-  }
-  if (/ski erg/.test(lower)) {
-    return [
-      { name: '500 m',   km: 0.5 },
-      { name: '1000 m',  km: 1 },
-      { name: '2000 m',  km: 2 },
-      { name: '5000 m',  km: 5 },
-      { name: '10000 m', km: 10 },
-    ]
-  }
-  if (/cycl|bike|spin|stationary/.test(lower)) {
-    if (mi) return [
-      { name: '5 mi',  km: 8.047 },
-      { name: '10 mi', km: 16.093 },
-      { name: '25 mi', km: 40.234 },
-      { name: '40 mi', km: 64.374 },
-      { name: '62 mi', km: 99.779 },
-    ]
-    return [
-      { name: '5 km',   km: 5 },
-      { name: '10 km',  km: 10 },
-      { name: '20 km',  km: 20 },
-      { name: '40 km',  km: 40 },
-      { name: '100 km', km: 100 },
-    ]
-  }
-  // Running, walking, hiking, rucking, skating, default
-  if (mi) return [
-    { name: '1 mi',          km: KM_PER_MI },
-    { name: '5K',            km: 5 },
-    { name: '10K',           km: 10 },
-    { name: 'Half Marathon', km: 21.0975 },
-    { name: 'Marathon',      km: 42.195 },
-  ]
-  return [
-    { name: '1 km',          km: 1 },
-    { name: '5K',            km: 5 },
-    { name: '10K',           km: 10 },
-    { name: 'Half Marathon', km: 21.0975 },
-    { name: 'Marathon',      km: 42.195 },
-  ]
+  // Pace-mode categories (order: most-specific first)
+  if (/swim|aqua/.test(lower))                                  return 'swimming'
+  // "Ski Erg" must match BEFORE "skiing" / "rowing" — the bare-word checks
+  // below would otherwise swallow it.
+  if (/ski erg/.test(lower))                                    return 'ski_erg'
+  // Outdoor skiing (Skiing, Roller Skiing) shares the ski-erg motion and
+  // gets the same zone prescriptions.
+  if (/skiing/.test(lower))                                     return 'ski_erg'
+  if (/row erg/.test(lower))                                    return 'rowing'
+  if (/air bike|assault bike|airdyne/.test(lower))              return 'air_bike'
+  if (/spin|stationary|recumbent|bike erg/.test(lower))         return 'stationary_bike'
+  if (/ellipt/.test(lower))                                     return 'elliptical'
+  if (/cycl|bike/.test(lower))                                  return 'cycling'
+  if (/ruck/.test(lower))                                       return 'rucking'
+
+  // Duration-mode categories (StairMill only — Stair Climb outdoor was
+  // removed in the May 2026 lifestyle-activity cleanup).
+  if (/stair/.test(lower))                                      return 'stair_climber'
+  if (/arc trainer/.test(lower))                                return 'arc_trainer'
+
+  // Default for run / treadmill / hill running / trail running / anything
+  // unmatched. Hill / Trail Running route here even though terrain confounds
+  // pace zones — accepted divergence until HR-zone integration lands.
+  return 'running'
 }
 
-// ── Next-milestone logic for pace projections (1:1 with web) ─────────────────
+// Group A — Endurance Athletes. Only this group gets the full E/T/V
+// progression plan. Rucking is also in the cardio list but uses a
+// load + distance progression model rather than pace zones (deferred —
+// see CLAUDE.md). Stair-based machines (StairMill, Arc Trainer) keep
+// their simple duration-tracking page until a round-based progression
+// model is designed for them. Tier-3 lifestyle/recreational activities
+// (Walking, Hiking, Canoeing, etc.) were removed from cardio entirely
+// during the May 2026 cleanup — they weren't training surfaces.
+const ENDURANCE_ATHLETE_CATEGORIES: ActivityCategory[] = [
+  'running', 'cycling', 'stationary_bike', 'air_bike',
+  'rowing', 'ski_erg', 'swimming', 'elliptical',
+]
 
-const RUNNING_MILESTONES: Record<string, number[]> = {
-  '1':       [7*60, 6*60, 5*60+30, 5*60, 4*60+30, 4*60, 3*60+30],
-  '5':       [40*60, 35*60, 30*60, 27*60+30, 25*60, 22*60+30, 20*60],
-  '10':      [80*60, 70*60, 60*60, 55*60, 50*60, 45*60, 40*60],
-  '21.0975': [3*3600, 2*3600+30*60, 2*3600+15*60, 2*3600, 1*3600+45*60, 1*3600+30*60],
-  '42.195':  [6*3600, 5*3600, 4*3600+30*60, 4*3600, 3*3600+30*60, 3*3600],
+function isEnduranceAthleteActivity(activityName: string): boolean {
+  return ENDURANCE_ATHLETE_CATEGORIES.includes(categorizeActivity(activityName))
 }
 
-const MILESTONE_LABELS: Record<string, string[]> = {
-  '1':       ['7:00', '6:00', '5:30', '5:00', '4:30', '4:00', '3:30'],
-  '5':       ['40:00', '35:00', '30:00', '27:30', '25:00', '22:30', '20:00'],
-  '10':      ['1:20:00', '1:10:00', '1:00:00', '55:00', '50:00', '45:00', '40:00'],
-  '21.0975': ['3:00:00', '2:30:00', '2:15:00', '2:00:00', '1:45:00', '1:30:00'],
-  '42.195':  ['6:00:00', '5:00:00', '4:30:00', '4:00:00', '3:30:00', '3:00:00'],
+// Classify a logged effort into one of the three zones based on its pace
+// relative to the user's current best. Used by the plan-queue generator to
+// detect what zone the user just trained, and to decide what zone is next.
+//   • paceSecs ≤ bestPace + 5 s/km   → vo2 (faster than 5K race pace)
+//   • paceSecs ≤ bestPace + 25 s/km  → threshold (between 10K and 5K pace)
+//   • otherwise                       → endurance (conversational pace)
+function classifyEffortZone(effortValue: string | null | undefined, bestPaceSecPerKm: number): CardioZone {
+  const paceSecs = parsePaceToSecs(effortValue)
+  if (paceSecs === null || bestPaceSecPerKm <= 0) return 'endurance'
+  if (paceSecs <= bestPaceSecPerKm + 5)  return 'vo2'
+  if (paceSecs <= bestPaceSecPerKm + 25) return 'threshold'
+  return 'endurance'
 }
 
-function getNextMilestone(distanceKm: number, projectedSecs: number):
-  | { type: 'named'; targetSecs: number; label: string }
-  | { type: 'generic'; targetSecs: number } {
-  const key = Object.keys(RUNNING_MILESTONES).find(
-    k => Math.abs(parseFloat(k) - distanceKm) / distanceKm < 0.01
-  )
-  if (key) {
-    const milestones = RUNNING_MILESTONES[key]
-    const labels     = MILESTONE_LABELS[key]
-    const idx = milestones.findIndex(ms => ms < projectedSecs)
-    if (idx !== -1) {
-      return { type: 'named', targetSecs: milestones[idx], label: labels[idx] }
+// Days since the user's most recent effort in a given zone. Returns 999 if
+// they've never logged anything in that zone. Drives the plan's "don't let
+// any zone go stale" rule.
+function daysSinceLastEffortInZone(efforts: Effort[], zone: CardioZone, bestPaceSecPerKm: number): number {
+  for (let i = efforts.length - 1; i >= 0; i--) {
+    if (classifyEffortZone(efforts[i].value, bestPaceSecPerKm) === zone) {
+      return (Date.now() - new Date(efforts[i].created_at).getTime()) / 86_400_000
     }
   }
-  const targetSecs = Math.round(projectedSecs * 0.95 / 5) * 5
-  return { type: 'generic', targetSecs }
+  return 999
 }
 
-// ── Duration milestones (1:1 with web) ───────────────────────────────────────
+// ── Per-zone session prescriptions (locked design spec — see CLAUDE.md) ──────
+// Each (activity, zone) maps to a FIXED distance (pace mode) or duration
+// (duration mode). Pace adapts to the user's level via the zone offset; the
+// computed time = distance × pace varies per user, but the prescribed distance
+// stays the same. This is how coaches actually prescribe — the work is fixed,
+// the speed is what scales with fitness.
+//
+// Distances chosen for "what a normal trainee would do in a session" — NOT for
+// race-event distances. No 100 km bike, no marathon run, etc.
 
-const DURATION_MILESTONES = [60, 2*60, 3*60, 5*60, 7*60, 10*60, 15*60, 20*60, 30*60]
-const DURATION_LABELS     = ['1 min', '2 min', '3 min', '5 min', '7 min', '10 min', '15 min', '20 min', '30 min']
+interface PaceZoneSession {
+  /** Fixed total distance in km for this (activity, zone) combo. */
+  distanceKm: number
+  /** For interval zones (threshold, vo2): break total work into N reps. */
+  intervalReps?: number
+}
+
+// PACE_ZONE_SESSIONS — each zone holds an ARRAY of variants. The queue
+// generator cycles through them so consecutive same-zone steps look
+// different (no more 5 Endurance tiles all showing "6 km / 45:30"). For
+// slow users the 45-min cap may collapse some variants to the same display;
+// variety opens up as the user gets faster.
+const PACE_ZONE_SESSIONS: Record<string, Partial<Record<CardioZone, PaceZoneSession[]>>> = {
+  running: {
+    endurance: [
+      { distanceKm: 5 },   // easy
+      { distanceKm: 6 },   // steady
+      { distanceKm: 8 },   // long (caps for slower runners)
+    ],
+    threshold: [
+      { distanceKm: 3, intervalReps: 3 },  // short cruise
+      { distanceKm: 4, intervalReps: 4 },  // standard cruise
+    ],
+    vo2: [
+      { distanceKm: 2, intervalReps: 5 },  // 5 × 400 m short
+      { distanceKm: 3, intervalReps: 5 },  // 5 × 600 m standard
+    ],
+  },
+  rucking: {
+    endurance: [{ distanceKm: 4 }, { distanceKm: 5 }, { distanceKm: 6 }],
+    threshold: [{ distanceKm: 2, intervalReps: 3 }, { distanceKm: 3, intervalReps: 4 }],
+    vo2:       [{ distanceKm: 1.5, intervalReps: 4 }, { distanceKm: 2, intervalReps: 5 }],
+  },
+  cycling: {
+    endurance: [{ distanceKm: 15 }, { distanceKm: 25 }, { distanceKm: 30 }],
+    threshold: [{ distanceKm: 9, intervalReps: 3 }, { distanceKm: 12, intervalReps: 4 }],
+    vo2:       [{ distanceKm: 6, intervalReps: 5 }, { distanceKm: 8, intervalReps: 5 }],
+  },
+  stationary_bike: {
+    endurance: [{ distanceKm: 10 }, { distanceKm: 15 }, { distanceKm: 20 }],
+    threshold: [{ distanceKm: 6, intervalReps: 3 }, { distanceKm: 8, intervalReps: 4 }],
+    vo2:       [{ distanceKm: 4, intervalReps: 5 }, { distanceKm: 5, intervalReps: 5 }],
+  },
+  air_bike: {
+    endurance: [{ distanceKm: 1.5 }, { distanceKm: 2.5 }, { distanceKm: 3.5 }],
+    threshold: [{ distanceKm: 1.2, intervalReps: 3 }, { distanceKm: 1.5, intervalReps: 3 }],
+    vo2:       [{ distanceKm: 0.75, intervalReps: 5 }, { distanceKm: 1, intervalReps: 5 }],
+  },
+  rowing: {
+    endurance: [{ distanceKm: 3 }, { distanceKm: 4 }, { distanceKm: 5 }],
+    threshold: [{ distanceKm: 2, intervalReps: 2 }, { distanceKm: 3, intervalReps: 3 }],
+    vo2:       [{ distanceKm: 1.5, intervalReps: 3 }, { distanceKm: 2, intervalReps: 4 }],
+  },
+  ski_erg: {
+    endurance: [{ distanceKm: 3 }, { distanceKm: 4 }, { distanceKm: 5 }],
+    threshold: [{ distanceKm: 2, intervalReps: 2 }, { distanceKm: 3, intervalReps: 3 }],
+    vo2:       [{ distanceKm: 1.5, intervalReps: 3 }, { distanceKm: 2, intervalReps: 4 }],
+  },
+  swimming: {
+    endurance: [{ distanceKm: 1 }, { distanceKm: 1.5 }, { distanceKm: 2 }],
+    threshold: [{ distanceKm: 0.6, intervalReps: 3 }, { distanceKm: 0.8, intervalReps: 4 }],
+    vo2:       [{ distanceKm: 0.3, intervalReps: 3 }, { distanceKm: 0.4, intervalReps: 4 }],
+  },
+  elliptical: {
+    endurance: [{ distanceKm: 3 }, { distanceKm: 5 }, { distanceKm: 7 }],
+    threshold: [{ distanceKm: 2, intervalReps: 3 }, { distanceKm: 3, intervalReps: 4 }],
+    vo2:       [{ distanceKm: 1.5, intervalReps: 4 }, { distanceKm: 2, intervalReps: 5 }],
+  },
+}
+
+interface DurationZoneSession {
+  /** Fixed total duration in seconds for this (activity, zone) combo. */
+  durationSecs: number
+  /** For interval zones: break total work into N reps. */
+  intervalReps?: number
+}
+
+const DURATION_ZONE_SESSIONS: Record<string, Partial<Record<CardioZone, DurationZoneSession>>> = {
+  stair_climber: {
+    endurance: { durationSecs: 25 * 60 },
+    threshold: { durationSecs: 12 * 60, intervalReps: 4 },
+    vo2:       { durationSecs: 8 * 60,  intervalReps: 5 },
+  },
+  arc_trainer: {
+    endurance: { durationSecs: 30 * 60 },
+    threshold: { durationSecs: 15 * 60, intervalReps: 4 },
+    vo2:       { durationSecs: 10 * 60, intervalReps: 5 },
+  },
+}
+
+// Lookup helpers — fall back to running / stair_climber if category is missing.
+// Returns the FULL array of variants for the (activity, zone). The queue
+// generator decides which variant to use based on its cycle counter.
+function getPaceZoneSessionVariants(activity: string, zone: CardioZone): PaceZoneSession[] {
+  const cat = categorizeActivity(activity)
+  return PACE_ZONE_SESSIONS[cat]?.[zone]
+      ?? PACE_ZONE_SESSIONS.running[zone]!
+}
+
+// ── Plan queue (the dynamic progression — locked, see CLAUDE.md) ─────────────
+// A queue of 8 upcoming steps is generated live whenever a Group A movement's
+// detail page renders. The queue is NOT stored — it's a pure function of
+// (activity, efforts history, current best pace). Every effort the user logs
+// regenerates the queue on next render, so it never goes stale.
+//
+// Rules (polarized model, in priority order):
+//   1. After a hard session (Threshold or VO2), next step is Endurance.
+//   2. If VO2 hasn't been done in 10+ days, next non-recovery step is VO2.
+//   3. If Threshold hasn't been done in 7+ days, next non-recovery step is
+//      Threshold.
+//   4. After 3 Endurance steps in a row, insert a hard step (alternates
+//      Threshold/VO2 so neither dominates).
+//   5. Default: Endurance.
+//
+// This produces an ~80% Endurance / 20% T+V split — the polarized training
+// model used by elite endurance athletes (Stephen Seiler's research).
+
+interface PlanStep {
+  zone:             CardioZone
+  rx:               AdjustedPaceRx
+  cue:              string   // work + pace/speed coaching sentence (no rest — rest lives on restLine)
+  restLine:         string   // dedicated rest descriptor for its own line (empty for endurance)
+  shortWork:        string   // tile row 1 + hero row 1 (e.g. "5 × 600 m" or "8 km")
+  shortTime:        string   // hero row 2 (non-speed) or row 3 (speed). Format "3:00" or "37:30".
+  /** Speed display for speed machines only — e.g. "12.0 km/h" / "7.5 mph".
+   *  null for non-speed activities. Used in: tile row line 2 + hero row 2. */
+  shortSpeed:       string | null
+  restDays:         number   // 0 = next session whenever ready, 1 = next day, 2 = day after next
+  restLabel:        string   // human-readable rest descriptor for the tile
+  /** Pacing checkpoint for hero row 3 (NON-speed activities only). Speed
+   *  machines don't need this row because the machine holds speed constant —
+   *  there's no mid-interval drift to verify against a sub-distance split. */
+  pacingCheckpoint: { value: string; descriptor: string } | null
+}
+
+function generatePlanQueue(
+  activity:         string,
+  efforts:          Effort[],
+  bestPaceSecPerKm: number,
+  distUnit:         'km' | 'mi',
+  count:            number = 8,
+): PlanStep[] {
+  if (bestPaceSecPerKm <= 0) return []
+
+  // Snapshot recent history.
+  const lastEffort   = efforts[efforts.length - 1]
+  const lastZone     = lastEffort ? classifyEffortZone(lastEffort.value, bestPaceSecPerKm) : null
+  const daysSinceT0  = daysSinceLastEffortInZone(efforts, 'threshold', bestPaceSecPerKm)
+  const daysSinceV0  = daysSinceLastEffortInZone(efforts, 'vo2',       bestPaceSecPerKm)
+
+  // Walk the polarized rules to build a sequence of zones.
+  const zoneQueue: CardioZone[] = []
+  let virtualLast    = lastZone
+  let virtualDaysT   = daysSinceT0
+  let virtualDaysV   = daysSinceV0
+  let endurStreak    = 0   // how many Endurance steps in a row
+  let lastHard: CardioZone | null = null   // which hard zone we did last (for alternating)
+
+  for (let i = 0; i < count; i++) {
+    let next: CardioZone
+
+    if (virtualLast === 'threshold' || virtualLast === 'vo2') {
+      // Rule 1: no hard back-to-back
+      next = 'endurance'
+    } else if (virtualDaysV >= 10) {
+      // Rule 2: VO2 stale
+      next = 'vo2'
+    } else if (virtualDaysT >= 7) {
+      // Rule 3: Threshold stale
+      next = 'threshold'
+    } else if (endurStreak >= 3) {
+      // Rule 4: too much easy — interleave a hard. Alternate so neither dominates.
+      next = lastHard === 'threshold' ? 'vo2' : 'threshold'
+    } else {
+      // Rule 5: default to Endurance (most volume)
+      next = 'endurance'
+    }
+
+    zoneQueue.push(next)
+
+    // Update virtual state for the next iteration.
+    virtualLast = next
+    if (next === 'endurance') {
+      endurStreak++
+    } else {
+      endurStreak = 0
+      lastHard = next
+    }
+    // Each step ~1-2 days apart depending on intensity.
+    const gapDays = next === 'endurance' ? 1 : 2
+    virtualDaysT = next === 'threshold' ? 0 : virtualDaysT + gapDays
+    virtualDaysV = next === 'vo2'       ? 0 : virtualDaysV + gapDays
+  }
+
+  // Convert zones to full PlanStep objects with prescriptions + cues. Each
+  // zone cycles through its variants independently — so 5 Endurance steps in
+  // a row produce 3 visually distinct variants (cycling) rather than 5
+  // identical "6 km / 45:30" tiles. Faster users see more variant variety;
+  // slower users see partial variety (some variants collapse to the same
+  // display under the 45-min cap).
+  const variantIdxByZone: Record<CardioZone, number> = { endurance: 0, threshold: 0, vo2: 0 }
+
+  return zoneQueue.map(zone => {
+    const variants    = getPaceZoneSessionVariants(activity, zone)
+    const variantIdx  = variantIdxByZone[zone] % variants.length
+    variantIdxByZone[zone]++
+    return buildPlanStep(zone, activity, bestPaceSecPerKm, distUnit, variants[variantIdx])
+  })
+}
+
+// Pacing checkpoint — answers "how long should each split take me?". The
+// checkpoint distance scales with the interval size so the user always gets
+// a non-redundant target they can verify mid-interval on their watch:
+//   • continuous (≥1 km)         → per km (or per mile in imperial)
+//   • intervals exactly 1 km     → per 500 m (mid-interval split)
+//   • intervals 600–800 m        → per 200 m (third / quarter split)
+//   • intervals 400–500 m        → per 100 m (track-standard split)
+//   • intervals < 400 m          → no checkpoint (interval is short enough)
+// Lives in buildPlanStep so the value flows through the PlanStep object
+// (used by the hero pacing-checkpoint row AND the cue sentence).
+function computePacingCheckpoint(
+  rx:       AdjustedPaceRx,
+  distUnit: 'km' | 'mi',
+  zonePace: number,
+): { value: string; descriptor: string } | null {
+  const isInterval = rx.numReps > 1
+  const repKm      = rx.repKm
+
+  let checkpointKm: number
+  let descriptor:   string
+
+  if (!isInterval) {
+    if (distUnit === 'mi') {
+      checkpointKm = KM_PER_MI
+      descriptor   = 'per mile'
+    } else {
+      checkpointKm = 1
+      descriptor   = 'per km'
+    }
+  } else {
+    const repMeters = repKm * 1000
+    if (repMeters < 400) {
+      return null
+    } else if (repMeters >= 400 && repMeters < 600) {
+      checkpointKm = 0.1
+      descriptor   = 'per 100 m'
+    } else if (repMeters >= 600 && repMeters <= 800) {
+      checkpointKm = 0.2
+      descriptor   = 'per 200 m'
+    } else if (repMeters > 800 && repMeters <= 1000) {
+      checkpointKm = 0.5
+      descriptor   = 'per 500 m'
+    } else {
+      if (distUnit === 'mi') {
+        checkpointKm = KM_PER_MI
+        descriptor   = 'per mile'
+      } else {
+        checkpointKm = 1
+        descriptor   = 'per km'
+      }
+    }
+  }
+
+  const secs = checkpointKm * zonePace
+  return { value: fmtSecs(Math.round(secs)), descriptor }
+}
+
+// Build a single PlanStep from a zone — wraps prescription + cue + rest in one
+// object so the UI doesn't have to know any of the zone math.
+function buildPlanStep(
+  zone:             CardioZone,
+  activity:         string,
+  bestPaceSecPerKm: number,
+  distUnit:         'km' | 'mi',
+  session:          PaceZoneSession,
+): PlanStep {
+  const zonePace   = getZonePaceSecPerKm(zone, bestPaceSecPerKm)
+  const rx         = adjustPaceForTimeCap(zone, session, zonePace)
+  const verb       = getActivityVerb(activity)
+  const isInterval = zone === 'threshold' || zone === 'vo2'
+
+  // Speed-mode machines: display "Speed (km/h)" as the prescription anchor
+  // instead of "Pace (per km)". The user reads/sets speed directly on the
+  // machine console. shortSpeed feeds the tile row line 2 AND hero row 2.
+  const speedMachine = isSpeedMachine(activity)
+  const shortSpeed   = speedMachine ? formatSpeed(zonePace, distUnit) : null
+
+  // Pacing checkpoint feeds the hero's third row AND the cue sentence — but
+  // ONLY for non-speed activities. Speed machines drop the checkpoint row
+  // (constant speed → no mid-interval drift to verify against).
+  const pacingCheckpoint = speedMachine ? null : computePacingCheckpoint(rx, distUnit, zonePace)
+  const pacingSentence   = pacingCheckpoint
+    ? ` — aim for ${pacingCheckpoint.value} ${pacingCheckpoint.descriptor}`
+    : ''
+
+  // Rest between this step and the next. Endurance steps have no rest
+  // descriptor at all (the user does easy days as often as they want);
+  // Threshold and VO2 explicitly call out a rest window because they're
+  // hard sessions the body needs to recover from.
+  const restDays   = zone === 'endurance' ? 0 : (zone === 'threshold' ? 1 : 2)
+  const restLabel  = restDays === 0 ? '' : restDays === 1 ? '1 day rest' : '2 days rest'
+  const restTail   = restDays === 1
+    ? 'then take 1 day easy before your next step'
+    : restDays === 2
+      ? 'then take 2 days easy before your next step'
+      : ''
+
+  if (!isInterval) {
+    const totalDist = fmtDist(rx.totalKm, distUnit)
+    const totalTime = fmtSecs(rx.totalSecs)
+    // Speed-machine cue reads "set speed, run distance, time falls out"
+    // (matching how the user actually operates the machine).
+    const cue = speedMachine
+      ? `${verb.imperative} ${totalDist} at ${shortSpeed} — should take ${totalTime}.`
+      : `${verb.imperative} ${totalDist} in ${totalTime} at steady conversation pace${pacingSentence}.`
+    return {
+      zone, rx, restDays, restLabel, pacingCheckpoint, shortSpeed,
+      shortWork: totalDist,
+      shortTime: totalTime,
+      cue,
+      restLine: '',
+    }
+  }
+
+  const repDist  = fmtDist(rx.repKm, distUnit)
+  const repTime  = fmtSecs(Math.round(rx.repKm * zonePace))
+  // For speed machines, the between-interval recovery isn't "jog" (you can't
+  // jog on a stationary machine) — it's an easy-pace continuation of the
+  // same machine motion. Re-word accordingly.
+  const restNote = speedMachine
+    ? (zone === 'threshold'
+        ? `Easy ${verb.lower} 60 sec between cruise intervals`
+        : `Equal-time easy ${verb.lower} recovery between intervals`)
+    : (zone === 'threshold'
+        ? 'Jog 60 sec between cruise intervals'
+        : 'Equal-time jog recovery between intervals')
+  const cue = speedMachine
+    ? `${verb.imperative} ${rx.numReps} × ${repDist} at ${shortSpeed} — should take ${repTime} each.`
+    : `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each${pacingSentence}.`
+  return {
+    zone, rx, restDays, restLabel, pacingCheckpoint, shortSpeed,
+    shortWork: `${rx.numReps} × ${repDist}`,
+    shortTime: repTime,
+    cue,
+    restLine: `${restNote} · ${restTail}`,
+  }
+}
+
+function getDurationZoneSession(activity: string, zone: CardioZone): DurationZoneSession {
+  const cat = categorizeActivity(activity)
+  return DURATION_ZONE_SESSIONS[cat]?.[zone]
+      ?? DURATION_ZONE_SESSIONS.stair_climber[zone]!
+}
+
+// ── 45-min total-session cap (locked — see CLAUDE.md) ────────────────────────
+// No prescribed session may exceed 45 minutes of total time (work + rest for
+// intervals). Two adjustment strategies:
+//   • Continuous zones: shrink the prescribed distance so distance × pace ≤ 45 min.
+//   • Interval zones: reduce the rep count until total time ≤ 45 min.
+const TIME_CAP_SECS = 45 * 60
+
+// Round a "would-be" distance to a presentation-friendly value (0.1 km / 0.5 km /
+// 1 km buckets depending on magnitude). Avoids "6.43 km" weirdness in the hero.
+function niceCapKm(rawKm: number): number {
+  if (rawKm < 1) return Math.max(0.1, Math.round(rawKm * 10) / 10)
+  if (rawKm < 5) return Math.round(rawKm * 2) / 2
+  return Math.max(1, Math.round(rawKm))
+}
+
+interface AdjustedPaceRx {
+  numReps:    number   // 1 for continuous
+  repKm:      number   // distance per rep (= full distance for continuous)
+  totalKm:    number   // total distance covered (= repKm × numReps)
+  workSecs:   number   // total work time (all reps)
+  restSecs:   number   // total rest time (intervals only)
+  totalSecs:  number   // workSecs + restSecs (≤ TIME_CAP_SECS)
+  wasCapped:  boolean
+}
+
+function adjustPaceForTimeCap(
+  zone: CardioZone,
+  rawSession: PaceZoneSession,
+  paceSecPerKm: number,
+): AdjustedPaceRx {
+  const isInterval = zone === 'threshold' || zone === 'vo2'
+
+  if (!isInterval) {
+    const rawWorkSecs = rawSession.distanceKm * paceSecPerKm
+    if (rawWorkSecs <= TIME_CAP_SECS) {
+      return {
+        numReps:   1,
+        repKm:     rawSession.distanceKm,
+        totalKm:   rawSession.distanceKm,
+        workSecs:  rawWorkSecs,
+        restSecs:  0,
+        totalSecs: rawWorkSecs,
+        wasCapped: false,
+      }
+    }
+    // Cap distance to fit 45 min
+    const cappedRawKm = TIME_CAP_SECS / paceSecPerKm
+    const cappedKm    = niceCapKm(cappedRawKm)
+    const newWorkSecs = Math.round(cappedKm * paceSecPerKm)
+    return {
+      numReps:   1,
+      repKm:     cappedKm,
+      totalKm:   cappedKm,
+      workSecs:  newWorkSecs,
+      restSecs:  0,
+      totalSecs: newWorkSecs,
+      wasCapped: true,
+    }
+  }
+
+  // Intervals — reduce rep count until total time ≤ 45 min.
+  //
+  // Rest values come from Jack Daniels' Running Formula (3rd ed.):
+  //   • Threshold (T-pace) "Cruise Intervals" → 60 sec jog recovery between reps
+  //   • VO2 (I-pace) "Intervals"               → equal-time jog recovery (1:1 work:rest)
+  const rawReps    = rawSession.intervalReps ?? 4
+  const repKm      = rawSession.distanceKm / rawReps
+  const repSecs    = repKm * paceSecPerKm
+  const restPerGap = zone === 'threshold' ? 60 : repSecs
+
+  let reps = rawReps
+  while (reps > 1) {
+    const candidateSecs = reps * repSecs + (reps - 1) * restPerGap
+    if (candidateSecs <= TIME_CAP_SECS) break
+    reps--
+  }
+
+  const workSecs  = Math.round(reps * repSecs)
+  const restSecs  = Math.round((reps - 1) * restPerGap)
+  const totalSecs = workSecs + restSecs
+  return {
+    numReps:   reps,
+    repKm:     repKm,
+    totalKm:   repKm * reps,
+    workSecs,
+    restSecs,
+    totalSecs,
+    wasCapped: reps !== rawReps,
+  }
+}
+
+interface AdjustedDurationRx {
+  numReps:   number     // 1 for continuous
+  repSecs:   number     // duration per rep (= full duration for continuous)
+  workSecs:  number     // total work time
+  restSecs:  number     // total rest (intervals only)
+  totalSecs: number     // ≤ TIME_CAP_SECS
+  wasCapped: boolean
+}
+
+function adjustDurationForTimeCap(
+  zone: CardioZone,
+  rawSession: DurationZoneSession,
+): AdjustedDurationRx {
+  const isInterval = zone === 'threshold' || zone === 'vo2'
+
+  if (!isInterval) {
+    const totalSecs = Math.min(rawSession.durationSecs, TIME_CAP_SECS)
+    return {
+      numReps:   1,
+      repSecs:   totalSecs,
+      workSecs:  totalSecs,
+      restSecs:  0,
+      totalSecs,
+      wasCapped: totalSecs < rawSession.durationSecs,
+    }
+  }
+
+  const rawReps    = rawSession.intervalReps ?? 4
+  const repSecs    = Math.max(30, Math.round(rawSession.durationSecs / rawReps))
+  const restPerGap = repSecs // equal recovery for duration intervals
+
+  let reps = rawReps
+  while (reps > 1) {
+    const candidateSecs = reps * repSecs + (reps - 1) * restPerGap
+    if (candidateSecs <= TIME_CAP_SECS) break
+    reps--
+  }
+
+  const workSecs  = reps * repSecs
+  const restSecs  = (reps - 1) * restPerGap
+  return {
+    numReps:   reps,
+    repSecs,
+    workSecs,
+    restSecs,
+    totalSecs: workSecs + restSecs,
+    wasCapped: reps !== rawReps,
+  }
+}
+
+// Activity-aware action verb for the hero card cue line. "Run easy at..."
+// makes sense for running but is wrong for Air Bike, Rowing, Swimming, etc.
+// Returns the imperative form ("Run", "Pedal", "Row") + a lowercase form for
+// mid-sentence use ("tempo run", "tempo pedal", ...).
+function getActivityVerb(activity: string): { imperative: string; lower: string } {
+  const lower = activity.toLowerCase()
+  if (/swim|aqua/.test(lower))                                    return { imperative: 'Swim',  lower: 'swim'  }
+  if (/row erg/.test(lower))                                      return { imperative: 'Row',   lower: 'row'   }
+  if (/ski erg|skiing/.test(lower))                               return { imperative: 'Ski',   lower: 'ski'   }
+  if (/cycl|bike|spin|stationary/.test(lower))                    return { imperative: 'Pedal', lower: 'pedal' }
+  if (/ruck/.test(lower))                                         return { imperative: 'Ruck',  lower: 'ruck'  }
+  if (/ellipt/.test(lower))                                       return { imperative: 'Glide', lower: 'glide' }
+  // Default: running (includes Hill Running, Trail Running, Running, Running (Treadmill))
+  return { imperative: 'Run', lower: 'run' }
+}
+
+// Hero-card cue line per zone — the FULL workout descriptor as a single
+// coaching sentence. Includes activity verb, distance, time target, rest
+// pattern, and intensity feel. The user reads this and knows the entire
+// session in one line. The dual rows above this line are a quick visual
+// reference; this is the prescription in words.
+function getZonePaceCue(
+  zone:        CardioZone,
+  activity:    string,
+  rx:          AdjustedPaceRx,
+  paceSecPerKm: number,
+  distUnit:    'km' | 'mi',
+): string {
+  const verb = getActivityVerb(activity)
+
+  if (zone === 'endurance') {
+    const totalDist = fmtDist(rx.totalKm, distUnit)
+    const totalTime = fmtSecs(rx.totalSecs)
+    return `${verb.imperative} ${totalDist} in ${totalTime} — steady conversation pace, resist pushing`
+  }
+
+  // Intervals (threshold + vo2)
+  const repDist = fmtDist(rx.repKm, distUnit)
+  const repTime = fmtSecs(Math.round(rx.repKm * paceSecPerKm))
+
+  if (zone === 'threshold') {
+    // Daniels' Cruise Intervals: 60 sec jog recovery between reps at T-pace.
+    return `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each — jog 60 sec between cruise intervals. After your session, log your best ${repDist}.`
+  }
+  // VO2: equal-time jog recovery between reps at I-pace.
+  return `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each — equal-time jog recovery, max sustainable effort. After your session, log your best ${repDist}.`
+}
+
+// Hero-card cue line per zone for DURATION-MODE movements. Same idea —
+// the full workout descriptor as one sentence.
+function getZoneDurationCue(zone: CardioZone, rx: AdjustedDurationRx): string {
+  if (zone === 'endurance') {
+    const totalTime = fmtSecs(rx.totalSecs)
+    return `${totalTime} — conversational intensity, steady rhythm throughout`
+  }
+
+  const repTime = fmtSecs(rx.repSecs)
+  if (zone === 'threshold') {
+    return `${rx.numReps} × ${repTime} hard — 60 sec rest between cruise intervals`
+  }
+  return `${rx.numReps} × ${repTime} max effort — equal-time rest between intervals`
+}
+
+// Pulsing chevron used to flank the zone pill — amber-toned version of the
+// BwAnimatedChevron in strength's [exercise].tsx. Same 1.5s cycle:
+//   • 0.00s – 0.25s: fade in
+//   • 0.25s – 1.00s: visible
+//   • 1.00s – 1.25s: fade out
+//   • 1.25s – 1.50s: invisible gap, loop
+function AmberAnimatedChevron({
+  direction,
+  delay,
+  size = 16,
+  color,
+}: {
+  direction: 'left' | 'right'
+  delay:     number
+  size?:     number
+  color:     string
+}) {
+  const opacity = useSharedValue(0)
+  useEffect(() => {
+    opacity.value = withDelay(
+      delay,
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration: 250 }),
+          withTiming(1, { duration: 750 }),
+          withTiming(0, { duration: 250 }),
+          withTiming(0, { duration: 250 }),
+        ),
+        -1,
+      ),
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const animStyle = useAnimatedStyle(() => ({ opacity: opacity.value }))
+  const Icon = direction === 'left' ? ChevronLeft : ChevronRight
+  return (
+    <Animated.View style={animStyle}>
+      <Icon size={size} color={color} />
+    </Animated.View>
+  )
+}
 
 // ── Common navigation ───────────────────────────────────────────────────────
 
@@ -248,10 +925,19 @@ export default function CardioDetailRoute() {
   const { activity: rawActivity } = useLocalSearchParams<{ activity: string }>()
   const activity = typeof rawActivity === 'string' ? decodeURIComponent(rawActivity) : ''
   const { user, profile } = useAuth()
-  const distUnit = ((profile as any)?.distance_unit as 'km' | 'mi' | undefined) || 'km'
+  const profileDistUnit = ((profile as any)?.distance_unit as 'km' | 'mi' | undefined) || 'km'
 
   const dbMovements = useMovements()
   const movementRecord = dbMovements.find(m => m.name === activity) ?? null
+
+  // Movement-level unit lock overrides profile preference. Rucking is locked
+  // to 'mi' (community-dominated unit — GoRuck and US tactical fitness use
+  // miles universally; the 12-mile ruck is the canonical benchmark). Same
+  // mechanism as the log form's unit-lock chip on `cardio.tsx`.
+  const distUnitLock = (movementRecord?.unit_lock === 'km' || movementRecord?.unit_lock === 'mi')
+    ? movementRecord.unit_lock as 'km' | 'mi'
+    : null
+  const distUnit: 'km' | 'mi' = distUnitLock ?? profileDistUnit
   const mode: 'pace' | 'duration' =
     movementRecord?.cardio_mode === 'duration' ? 'duration' : 'pace'
 
@@ -261,6 +947,21 @@ export default function CardioDetailRoute() {
   async function handleDeleteEffort(id: string) {
     setEfforts(prev => prev.filter(e => e.id !== id))
     if (user) await supabase.from('efforts').delete().eq('id', id).eq('user_id', user.id)
+  }
+
+  // Add a new effort to local state + persist to Supabase. Used by the
+  // "✓ Log this session" button on the NEXT STEP card — one-tap commit of
+  // the prescribed step. The local-state update triggers an immediate
+  // re-render, the queue regenerates, the new step appears.
+  async function handleAddEffort(label: string, value: string) {
+    if (!user) return
+    const { data, error } = await supabase
+      .from('efforts')
+      .insert({ user_id: user.id, type: 'cardio', label, value })
+      .select()
+      .single()
+    if (error || !data) return
+    setEfforts(prev => [...prev, data as Effort])
   }
 
   useEffect(() => {
@@ -313,7 +1014,7 @@ export default function CardioDetailRoute() {
   if (mode === 'duration') {
     return <DurationDetail activity={activity} efforts={efforts} onDelete={handleDeleteEffort} />
   }
-  return <PaceDetail activity={activity} efforts={efforts} distUnit={distUnit} onDelete={handleDeleteEffort} />
+  return <PaceDetail activity={activity} efforts={efforts} distUnit={distUnit} onDelete={handleDeleteEffort} onAddEffort={handleAddEffort} />
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -321,15 +1022,19 @@ export default function CardioDetailRoute() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function PaceDetail({
-  activity, efforts, distUnit, onDelete,
+  activity, efforts, distUnit, onDelete, onAddEffort,
 }: {
-  activity: string
-  efforts:  Effort[]
-  distUnit: 'km' | 'mi'
-  onDelete: (id: string) => void
+  activity:    string
+  efforts:     Effort[]
+  distUnit:    'km' | 'mi'
+  onDelete:    (id: string) => void
+  onAddEffort: (label: string, value: string) => Promise<void>
 }) {
-  const distances = getCardioDistances(activity, distUnit)
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(0)
+  // Only Group A (endurance athletes) gets the progression plan. Rucking
+  // is in cardio but progresses on load + distance rather than pace zones —
+  // it falls through to the simple tracking page (header + chart + history)
+  // until its own progression model is designed. See CLAUDE.md.
+  const isGroupA = isEnduranceAthleteActivity(activity)
 
   // Best = fastest (lowest pace seconds-per-km)
   let bestEffort:  Effort | null = null
@@ -338,181 +1043,357 @@ function PaceDetail({
     const secs = parsePaceToSecs(e.value)
     if (secs !== null && secs < bestPaceSecs) { bestPaceSecs = secs; bestEffort = e }
   })
+  const hasBestPace = bestPaceSecs > 0 && bestPaceSecs !== Infinity
 
-  const bestData    = bestEffort ? parseEffortLabel((bestEffort as Effort).label) : null
-  const projections = bestData?.distKm && bestData?.timeSecs
-    ? projectPaces(bestData.distKm, bestData.timeSecs, distances)
-    : []
-
+  // Chart data — for speed machines, plot SPEED over time (higher = better,
+  // line trends UP as user improves); for everyone else plot pace (lower =
+  // better, line trends DOWN, axis reversed). y in the (ts,y) tuple holds
+  // whatever metric the chart's Y-axis is currently showing.
+  const chartIsSpeed = isSpeedMachine(activity)
   const chartData = efforts
-    .map(e => ({ ts: e.created_at, y: parsePaceToSecs(e.value) ?? -1 }))
+    .map(e => {
+      const paceSecs = parsePaceToSecs(e.value)
+      if (paceSecs === null) return { ts: e.created_at, y: -1 }
+      const y = chartIsSpeed ? paceSecsPerKmToSpeedDisplay(paceSecs, distUnit) : paceSecs
+      return { ts: e.created_at, y }
+    })
     .filter(d => d.y >= 0)
 
-  const selectedProj = selectedIdx !== null ? projections[selectedIdx] : null
+  // ── Progression plan (Group A only) ──────────────────────────────────────
+  // The queue is regenerated live from (activity, efforts, bestPace) every
+  // time the component renders. Logging a new effort updates bestPace and
+  // recent-zone history, which automatically reshapes the queue. The plan
+  // never staleness-rots — it's a pure function of training data.
+  const planQueue: PlanStep[] = useMemo(
+    () => isGroupA && hasBestPace
+      ? generatePlanQueue(activity, efforts, bestPaceSecs, distUnit, 8)
+      : [],
+    [isGroupA, hasBestPace, activity, efforts, bestPaceSecs, distUnit],
+  )
 
-  // ── Smart next-target (mirror of web) ────────────────────────────────────
-  const hasBest = !!(bestData?.distKm && bestData?.timeSecs)
-  const nextTarget = (() => {
-    if (!hasBest) return null
-    const aMs = getNextMilestone(bestData!.distKm, bestData!.timeSecs!)
-    const pathA = {
-      distKm:   bestData!.distKm,
-      timeSecs: aMs.targetSecs,
-      label:    aMs.type === 'named' ? aMs.label : fmtSecs(aMs.targetSecs),
-    }
-    let pathB: { distKm: number; timeSecs: number; label: string } | null = null
-    if (selectedProj) {
-      const distMatchesBest = Math.abs(selectedProj.km - bestData!.distKm) / bestData!.distKm < 0.01
-      if (!distMatchesBest) {
-        const bMs = getNextMilestone(selectedProj.km, selectedProj.timeSecs)
-        pathB = {
-          distKm:   selectedProj.km,
-          timeSecs: bMs.targetSecs,
-          label:    bMs.type === 'named' ? bMs.label : fmtSecs(bMs.targetSecs),
-        }
-      }
-    }
-    const big = pathB ?? pathA
-    const bigPaceSecPerKm = big.timeSecs / big.distKm
-    const paceDelta = Math.round(bestPaceSecs - bigPaceSecPerKm)
-    return { pathA, pathB, big, bigPaceSecPerKm, paceDelta }
-  })()
+  // UI state for the progression card. Default selection = step 0 (the
+  // actual NEXT step). The tile row drives what the details card shows —
+  // tap any tile to preview that step's prescription. Selection is never
+  // null (always one tile is highlighted), mirroring strength's rep-max
+  // tile pattern.
+  const [zoneInfoOpen,    setZoneInfoOpen]    = useState(false)
+  const [selectedStepIdx, setSelectedStepIdx] = useState(0)
+
+  // When the queue regenerates (after a new effort logs), reset to step 0.
+  useEffect(() => {
+    setZoneInfoOpen(false)
+    setSelectedStepIdx(0)
+  }, [planQueue.length, planQueue[0]?.zone])
+
+  const selectedStep = planQueue[selectedStepIdx] ?? planQueue[0]
+  const selectedIsInterval = selectedStep
+    ? (selectedStep.zone === 'threshold' || selectedStep.zone === 'vo2')
+    : false
+
+  // Pacing checkpoint flows through PlanStep now — computed at buildPlanStep
+  // time so the value can also live inside the cue sentence. The hero just
+  // reads selectedStep.pacingCheckpoint directly.
+  const pacingCheckpoint = selectedStep?.pacingCheckpoint ?? null
 
   return (
     <View style={s.page}>
 
-      {/* Header */}
+      {/* Header — for speed machines, show "Best speed — N km/h" (matches
+          what the user enters on the log form and reads off the console);
+          for everyone else, show "Best pace — m:ss/km" as before. */}
       <View>
         <BackButton />
         <Text style={s.h1}>{activity}</Text>
         <View style={s.subRow}>
-          <Text style={s.subText}>Best pace — </Text>
-          <TickerNumber
-            value={convertStoredPace((bestEffort as Effort | null)?.value, distUnit)}
-            fontSize={14}
-            color={palette.amber[400]}
-            fontWeight="600"
-          />
+          {isSpeedMachine(activity) ? (
+            <>
+              <Text style={s.subText}>Best speed — </Text>
+              <TickerNumber
+                value={
+                  bestPaceSecs > 0 && bestPaceSecs !== Infinity
+                    ? formatSpeed(bestPaceSecs, distUnit)
+                    : '—'
+                }
+                fontSize={14}
+                color={palette.amber[400]}
+                fontWeight="600"
+              />
+            </>
+          ) : (
+            <>
+              <Text style={s.subText}>Best pace — </Text>
+              <TickerNumber
+                value={convertStoredPace((bestEffort as Effort | null)?.value, distUnit)}
+                fontSize={14}
+                color={palette.amber[400]}
+                fontWeight="600"
+              />
+            </>
+          )}
         </View>
       </View>
 
-      {/* Projections — clickable rows */}
-      {projections.length > 0 && (
-        <AnimateRise style={s.card}>
-          <Text style={s.h2}>Pace projections</Text>
+      {/* Progression plan card. The tile row is the navigation; the details
+          card below is driven by the SELECTED tile. Chevrons between tiles
+          signal forward progression. No log buttons (logging happens via
+          the Cardio tab). */}
+      {isGroupA && hasBestPace && selectedStep && (
+        <AnimateRise delay={0} style={s.card}>
+          <Text style={s.h2}>Your progression plan</Text>
           <Text style={s.helpTextSm}>
-            Based on best effort: {(bestEffort as Effort | null)?.label?.split(' · ')[1] ?? '—'}
+            This is your personalized adaptation plan — follow it to see your results improve.
           </Text>
 
-          <View style={{ gap: 8 }}>
-            {projections.map(({ name, time, paceSecPerKm }, idx) => {
-              const isSelected   = selectedIdx === idx
-              const displayPace  = fmtPaceStr(paceSecPerKm, distUnit)
+          {/* Tile row with chevrons between each pair, indicating forward
+              direction. Selected tile (default: step 0) is highlighted. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ alignItems: 'center', paddingVertical: 4, paddingHorizontal: 2 }}
+            style={{ marginHorizontal: -2 }}
+          >
+            {planQueue.map((step, idx) => {
+              const isSelected = selectedStepIdx === idx
+              const isLast     = idx === planQueue.length - 1
               return (
-                <Pressable
-                  key={name}
-                  onPress={() => setSelectedIdx(isSelected ? null : idx)}
-                  style={({ pressed }) => [
-                    s.projRow,
-                    isSelected ? s.projRowSelected : s.projRowDefault,
-                    pressed && !isSelected && { backgroundColor: alpha(colors.accent, 0.5) },
-                  ]}
-                >
-                  <Text style={[s.projLabel, isSelected && s.projLabelSelected]}>
-                    {name}
-                  </Text>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={s.projTime}>{time}</Text>
-                    <Text style={[s.projPace, isSelected && { fontWeight: '700' }]}>{displayPace}</Text>
-                  </View>
-                </Pressable>
+                <Fragment key={idx}>
+                  <Pressable
+                    onPress={() => setSelectedStepIdx(idx)}
+                    style={[s.queueTile, isSelected && s.queueTileSelected]}
+                  >
+                    <Text style={[s.queueTileZone, isSelected && s.queueTileZoneSelected]}>
+                      {CARDIO_ZONE_CONFIG[step.zone].shortLabel}
+                    </Text>
+                    <Text style={[s.queueTileWork, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
+                      {step.shortWork}
+                    </Text>
+                    {/* Tile row line 2: speed for speed machines, time for
+                        everyone else. Speed is the most distinguishing metric
+                        at a glance when scanning upcoming tiles on a machine
+                        (Endurance 8 km/h vs Threshold 11 km/h vs VO2 14 km/h). */}
+                    <Text style={[s.queueTileTime, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
+                      {step.shortSpeed ?? step.shortTime}
+                    </Text>
+                  </Pressable>
+                  {!isLast && (
+                    <View style={s.queueChevron}>
+                      <ChevronRight
+                        size={22}
+                        color={withAlpha(palette.amber[400], 0.7)}
+                        strokeWidth={2.5}
+                        style={{ transform: [{ scaleY: 1.3 }] }}
+                      />
+                    </View>
+                  )}
+                </Fragment>
               )
             })}
+          </ScrollView>
+
+          {/* Details card — shows the SELECTED step. Each big value sits on a
+              row with a small right-aligned descriptor (intensity feel for the
+              work row, "per interval" / "to complete", "per km"). No more
+              small-caps labels above values — the descriptors say what each
+              row is. */}
+          <View style={s.hero}>
+            {/* Zone info pill (top-right) — tappable for "why this zone". */}
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <Pressable
+                onPress={() => setZoneInfoOpen(o => !o)}
+                style={s.heroZonePillButton}
+              >
+                <Text style={s.heroZonePillText} numberOfLines={1}>
+                  {CARDIO_ZONE_CONFIG[selectedStep.zone].label}
+                </Text>
+                <Info size={11} color={palette.amber[400]} />
+              </Pressable>
+            </View>
+
+            {zoneInfoOpen && (
+              <Animated.View
+                entering={FadeInUp.duration(200)}
+                exiting={FadeOutUp.duration(180)}
+                style={s.heroInfoPanel}
+              >
+                <Text style={s.heroInfoPanelTitle}>
+                  {CARDIO_ZONE_CONFIG[selectedStep.zone].label} · {CARDIO_ZONE_CONFIG[selectedStep.zone].hrPctRange}
+                </Text>
+                <Text style={s.heroInfoPanelBody}>
+                  {CARDIO_ZONE_CONFIG[selectedStep.zone].whyText}
+                </Text>
+              </Animated.View>
+            )}
+
+            {/* Three rows — value on the left (big amber), descriptor on the
+                right (small muted). Mirrors strength's "value + descriptor"
+                pattern (where descriptors say things like "per side" or
+                "each hand"). The descriptor for the work row is the zone's
+                intensity feel ("conversation pace", "comfortably hard", "max
+                sustainable"); for the time and per-unit rows it identifies
+                the unit context. */}
+            <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+              {/* Each big-value row uses TickerNumber so digits roll
+                  slot-machine style when the selected step changes (e.g.,
+                  tapping a different tile). Non-digit characters (×, m,
+                  km/h, :, etc.) render as static Text inside the same row.
+                  Style values mirror s.heroBigValue (fontSize 30, amber 400,
+                  weight 700, JetBrainsMono Bold via TickerNumber's
+                  monoForWeight resolver). */}
+              <View style={s.heroValueRow}>
+                <TickerNumber value={selectedStep.shortWork} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                <Text style={s.heroValueDescriptor} numberOfLines={2}>
+                  {selectedStep.zone === 'endurance' ? 'conversation pace'
+                    : selectedStep.zone === 'threshold' ? 'comfortably hard'
+                    : 'max sustainable'}
+                </Text>
+              </View>
+              {/* Row 2: Speed (for speed machines) OR Time (everyone else).
+                  Speed is what the user sets on the machine console; Time
+                  is what they read off it for outdoor / generic activities. */}
+              {selectedStep.shortSpeed ? (
+                <View style={s.heroValueRow}>
+                  <TickerNumber value={selectedStep.shortSpeed} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                  <Text style={s.heroValueDescriptor} numberOfLines={2}>
+                    set on the console
+                  </Text>
+                </View>
+              ) : (
+                <View style={s.heroValueRow}>
+                  <TickerNumber value={selectedStep.shortTime} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                  <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                    {selectedIsInterval ? 'per interval' : 'to complete'}
+                  </Text>
+                </View>
+              )}
+              {/* Row 3: Time-derived display (speed machines) OR pacing
+                  checkpoint (non-speed). Speed machines always show this
+                  because the user wants to know how long their session
+                  will be; non-speed activities only show it when the
+                  computePacingCheckpoint helper produces a non-null target. */}
+              {selectedStep.shortSpeed ? (
+                <View style={s.heroValueRow}>
+                  <TickerNumber value={selectedStep.shortTime} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                  <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                    {selectedIsInterval ? 'per interval' : 'to complete'}
+                  </Text>
+                </View>
+              ) : pacingCheckpoint ? (
+                <View style={s.heroValueRow}>
+                  <TickerNumber value={pacingCheckpoint.value} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                  <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                    {pacingCheckpoint.descriptor}
+                  </Text>
+                </View>
+              ) : null}
+            </Animated.View>
+
+            {/* Cue — work + pace sentence on line 1. Rest descriptor on its
+                own line below (only for threshold / vo2 — endurance has no
+                rest line). Splitting them makes the rest cue much more
+                visible than when it was buried mid-sentence. */}
+            <Animated.View
+              layout={LinearTransition.duration(200)}
+              style={s.heroSep}
+            >
+              <Text style={s.heroCue}>{selectedStep.cue}</Text>
+              {selectedStep.restLine ? (
+                <Text style={s.heroRestLine}>{selectedStep.restLine}</Text>
+              ) : null}
+            </Animated.View>
           </View>
 
-          {/* Your next training target */}
-          {nextTarget && (
-            <View style={s.callout}>
-              <Text style={s.calloutTitleUpper}>YOUR NEXT TRAINING TARGET</Text>
-
-              {/* Big time + distance label */}
-              <View style={s.nextTargetRow}>
-                <Text style={s.nextTargetBigTime}>{fmtSecs(nextTarget.big.timeSecs)}</Text>
-                <Text style={s.nextTargetSub}>{fmtDist(nextTarget.big.distKm, distUnit)}</Text>
-              </View>
-
-              <Text style={s.tinyText}>
-                Pace: {fmtPaceStr(nextTarget.bigPaceSecPerKm, distUnit)}
-                {nextTarget.paceDelta > 0
-                  ? ` · ${Math.round(distUnit === 'mi' ? nextTarget.paceDelta * KM_PER_MI : nextTarget.paceDelta)} sec/${distUnit} faster than ${fmtPaceStr(bestPaceSecs, distUnit)} best`
-                  : ' · personal best territory'}
-              </Text>
-
-              {/* Thin separator, then the brief two-path instruction */}
-              <View style={s.nextTargetSep}>
-                <Text style={s.calloutBrief}>
-                  <Text style={s.boldFg}>{fmtDist(nextTarget.pathA.distKm, distUnit)}</Text> in <Text style={s.boldFg}>{fmtSecs(nextTarget.pathA.timeSecs)}</Text>
-                </Text>
-                {nextTarget.pathB && (
-                  <Text style={s.calloutBrief}>
-                    or <Text style={s.boldFg}>{fmtDist(nextTarget.pathB.distKm, distUnit)}</Text> in <Text style={[s.boldFg, s.amberFg]}>{fmtSecs(nextTarget.pathB.timeSecs)}</Text>
-                  </Text>
-                )}
-              </View>
-            </View>
-          )}
+          {/* Science attribution */}
+          <Text style={s.tinyText}>Riegel · Daniels' · Seiler · pace zones & polarized 80/20</Text>
         </AnimateRise>
       )}
 
-      {/* Pace over time chart — Y reversed so lower (faster) pace = top */}
-      {chartData.length > 1 && (
-        <AnimateRise style={s.card}>
-          <Text style={s.h2}>Pace over time</Text>
+      {/* Empty-state hint for Group A users with no efforts logged yet. */}
+      {isGroupA && !hasBestPace && (
+        <AnimateRise delay={0} style={s.card}>
+          <Text style={s.h2}>Progression plan</Text>
+          <Text style={s.helpTextSm}>
+            Log your first {activity} effort and your personalized plan will appear here.
+            Every step adapts to your latest pace.
+          </Text>
+        </AnimateRise>
+      )}
+
+      {/* Progress chart over time. For speed machines: Y-axis = speed,
+          non-reversed (higher = faster, line trends UP). For everyone
+          else: Y-axis = pace, reversed (lower = faster, line trends DOWN).
+          Amber line in either case (cardio's locked theme — strength's
+          equivalent chart uses palette.blue[400]).
+
+          Renders even with a single data point — LineChart centres it as a
+          dot. The user sees their first effort plotted from day one rather
+          than waiting for a second log to unlock the visual. */}
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
+          <Text style={s.h2}>{chartIsSpeed ? 'Speed over time' : 'Pace over time'}</Text>
           <LineChart
             data={chartData}
-            referenceY={bestPaceSecs !== Infinity ? bestPaceSecs : null}
-            reversed
-            yWidth={52}
-            yTickFormatter={(v) => fmtPaceTick(v)}
-            tooltipValueFormatter={(v) => fmtPaceStr(v, distUnit)}
-            tooltipLabel="Pace"
+            referenceY={
+              bestPaceSecs !== Infinity
+                ? (chartIsSpeed
+                    ? paceSecsPerKmToSpeedDisplay(bestPaceSecs, distUnit)
+                    : bestPaceSecs)
+                : null
+            }
+            reversed={!chartIsSpeed}
+            yWidth={chartIsSpeed ? 56 : 52}
+            yTickFormatter={(v) => chartIsSpeed ? v.toFixed(1) : fmtPaceTick(v)}
+            tooltipValueFormatter={(v) =>
+              chartIsSpeed
+                ? `${v.toFixed(1)} ${distUnit === 'mi' ? 'mph' : 'km/h'}`
+                : fmtPaceStr(v, distUnit)
+            }
+            tooltipLabel={chartIsSpeed ? 'Speed' : 'Pace'}
+            lineColor={palette.amber[400]}
             yDomain={{
               min: (mn) => Math.max(0, Math.round(mn * 0.95)),
               max: (mx) => Math.round(mx * 1.05),
             }}
             caption={
-              <Text style={s.tinyText}>Lower = faster · Dashed = personal best</Text>
+              <Text style={s.tinyText}>Dashed = personal best</Text>
             }
           />
         </AnimateRise>
       )}
 
-      {/* History */}
-      <AnimateRise style={s.cardNoPad}>
+      {/* History — for speed machines, each row's right-side metric shows
+          the speed equivalent of the stored pace; for everyone else, the
+          stored pace value (converted to mi if needed). */}
+      <AnimateRise delay={500} style={s.cardNoPad}>
         <View style={s.listHeader}>
           <Text style={s.listHeaderText}>All entries</Text>
         </View>
         <View>
-          {[...efforts].reverse().map((e, i, arr) => (
-            <DeleteAction
-              key={e.id}
-              onDelete={() => onDelete(e.id)}
-              style={i < arr.length - 1 ? s.listRowDivider : undefined}
-              bg={colors.card}
-            >
-              <View style={s.listRow}>
-                <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text style={s.listRowName}>
-                    {e.label.split(' · ').slice(1).join(' · ')}
-                  </Text>
-                  <Text style={s.listRowDate}>
-                    {new Date(e.created_at).toLocaleDateString()}
-                  </Text>
+          {[...efforts].reverse().map((e, i, arr) => {
+            const paceSecs = parsePaceToSecs(e.value)
+            const rightVal = isSpeedMachine(activity)
+              ? (paceSecs ? formatSpeed(paceSecs, distUnit) : '—')
+              : convertStoredPace(e.value, distUnit)
+            return (
+              <DeleteAction
+                key={e.id}
+                onDelete={() => onDelete(e.id)}
+                style={i < arr.length - 1 ? s.listRowDivider : undefined}
+                bg={colors.card}
+              >
+                <View style={s.listRow}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={s.listRowName}>
+                      {e.label.split(' · ').slice(1).join(' · ')}
+                    </Text>
+                    <Text style={s.listRowDate}>
+                      {new Date(e.created_at).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  <Text style={s.valAmber}>{rightVal}</Text>
                 </View>
-                <Text style={s.valAmber}>{convertStoredPace(e.value, distUnit)}</Text>
-              </View>
-            </DeleteAction>
-          ))}
+              </DeleteAction>
+            )
+          })}
         </View>
       </AnimateRise>
 
@@ -527,7 +1408,15 @@ function PaceDetail({
 function DurationDetail({
   activity, efforts, onDelete,
 }: { activity: string; efforts: Effort[]; onDelete: (id: string) => void }) {
-  const [selectedMs, setSelectedMs] = useState<number | null>(null)
+  // Duration mode (Group C — machines without distance display: StairMill +
+  // Arc Trainer) is a simple tracking page in v1. No zones, no progression
+  // queue — those are Endurance-Athlete concepts that don't map cleanly to
+  // step-based conditioning work. We'll design a separate progression model
+  // for this group later. The May 2026 cleanup removed Battle Ropes / Shadow
+  // Boxing / Speed Bag / VersaClimber / Jacob's Ladder entirely (the first
+  // three weren't measurable in a way the rest of the system could use; the
+  // last two were niche enough that removing them simplified the cardio list
+  // without meaningful coverage loss). See CLAUDE.md.
 
   let bestSecs = 0
   efforts.forEach(e => {
@@ -539,16 +1428,6 @@ function DurationDetail({
     .map(e => ({ ts: e.created_at, y: parseTimeStr(e.value) ?? 0 }))
     .filter(d => d.y > 0)
 
-  // Smart auto-target — next named milestone, or +5% if all cleared. Mirror
-  // of web. Tile selection is kept for celebration only (visual feedback).
-  const autoTarget = (() => {
-    if (bestSecs <= 0) return null
-    const idx = DURATION_MILESTONES.findIndex(ms => ms > bestSecs)
-    if (idx !== -1) return { secs: DURATION_MILESTONES[idx], label: DURATION_LABELS[idx], rhs: 'next milestone' }
-    const secs = Math.round(bestSecs * 1.05 / 5) * 5
-    return { secs, label: fmtSecs(secs), rhs: '+5% target' }
-  })()
-
   return (
     <View style={s.page}>
 
@@ -558,71 +1437,13 @@ function DurationDetail({
         <Text style={s.h1}>{activity}</Text>
         <View style={s.subRow}>
           <Text style={s.subText}>Best session — </Text>
-          <Text style={[s.subText, s.amberFg, s.monoNum]}>{fmtSecs(bestSecs)}</Text>
+          <TickerNumber value={fmtSecs(bestSecs)} fontSize={14} color={palette.amber[400]} fontWeight="600" />
         </View>
       </View>
 
-      {/* Milestone tiles */}
-      <AnimateRise style={s.card}>
-        <Text style={s.h2}>Milestones</Text>
-        <Text style={s.helpTextSm}>Tap a milestone to see your next target.</Text>
-
-        <View style={s.milestoneGrid}>
-          {DURATION_MILESTONES.map((ms, idx) => {
-            const achieved   = bestSecs >= ms
-            const isSelected = selectedMs === ms
-            return (
-              <Pressable
-                key={ms}
-                onPress={() => achieved && setSelectedMs(isSelected ? null : ms)}
-                disabled={!achieved}
-                style={[
-                  s.milestoneTile,
-                  isSelected ? s.milestoneTileSelected
-                  : achieved ? s.milestoneTileAchieved
-                             : s.milestoneTileLocked,
-                ]}
-              >
-                <Text
-                  style={[
-                    s.milestoneText,
-                    achieved ? { color: palette.amber[400] } : { color: colors.mutedForeground },
-                  ]}
-                >
-                  {DURATION_LABELS[idx]}
-                </Text>
-                {achieved && <Text style={s.milestoneCheck}>✓ done</Text>}
-              </Pressable>
-            )
-          })}
-        </View>
-
-        {/* Your next training target */}
-        {autoTarget && (
-          <View style={s.callout}>
-            <Text style={s.calloutTitleUpper}>YOUR NEXT TRAINING TARGET</Text>
-
-            <View style={s.nextTargetRow}>
-              <Text style={s.nextTargetBigTime}>{autoTarget.label}</Text>
-              <Text style={s.nextTargetSub}>{autoTarget.rhs}</Text>
-            </View>
-
-            <Text style={s.tinyText}>
-              {fmtSecs(autoTarget.secs - bestSecs)} longer than {fmtSecs(bestSecs)} best
-            </Text>
-
-            <View style={s.nextTargetSep}>
-              <Text style={s.calloutBrief}>
-                Hit <Text style={[s.boldFg, s.amberFg]}>{autoTarget.label}</Text>
-              </Text>
-            </View>
-          </View>
-        )}
-      </AnimateRise>
-
-      {/* Session time chart */}
-      {chartData.length > 1 && (
-        <AnimateRise style={s.card}>
+      {/* Session time chart — renders even with a single data point. */}
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
           <Text style={s.h2}>Session time over time</Text>
           <LineChart
             data={chartData}
@@ -636,14 +1457,14 @@ function DurationDetail({
               max: (mx) => Math.round(mx * 1.15),
             }}
             caption={
-              <Text style={s.tinyText}>Higher = longer session · Dashed = personal best</Text>
+              <Text style={s.tinyText}>Dashed = personal best</Text>
             }
           />
         </AnimateRise>
       )}
 
-      {/* History */}
-      <AnimateRise style={s.cardNoPad}>
+      {/* History (unchanged) */}
+      <AnimateRise delay={500} style={s.cardNoPad}>
         <View style={s.listHeader}>
           <Text style={s.listHeaderText}>All entries</Text>
         </View>
@@ -673,10 +1494,6 @@ function DurationDetail({
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────────────────
-
-const AMBER_BG_SOFT = withAlpha(palette.amber[500], 0.08)
-const AMBER_BORDER  = withAlpha(palette.amber[500], 0.25)
-const AMBER_BG_HOT  = withAlpha(palette.amber[500], 0.15)
 
 const s = StyleSheet.create({
   page: { gap: 24 },
@@ -710,111 +1527,6 @@ const s = StyleSheet.create({
     borderRadius: 12, overflow: 'hidden',
   },
 
-  // Pace projection rows
-  projRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderRadius: 9, borderWidth: 1,
-  },
-  projRowDefault:  { borderColor: alpha(colors.border, 0.6), backgroundColor: alpha(colors.card, 0.4) },
-  projRowSelected: { borderColor: withAlpha(palette.amber[500], 0.4), backgroundColor: AMBER_BG_SOFT },
-  projLabel:         { color: colors.mutedForeground, fontSize: 14 },
-  projLabelSelected: { color: colors.foreground, fontWeight: '500' },
-  projTime: {
-    fontFamily: fonts.mono[400], fontVariant: ['tabular-nums'],
-    fontSize: 14, color: colors.foreground,
-  },
-  projPace: {
-    fontFamily: fonts.mono[400], fontVariant: ['tabular-nums'],
-    fontSize: 12, color: palette.amber[400],
-  },
-
-  // Goal-panel callout (used by both detail modes)
-  callout: {
-    borderRadius: 9, paddingHorizontal: 16, paddingVertical: 14,
-    borderWidth: 1, borderColor: AMBER_BORDER, backgroundColor: AMBER_BG_SOFT,
-    gap: 10,
-  },
-  calloutHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    marginBottom: -2,
-  },
-  calloutTitle: {
-    color: palette.amber[400], fontSize: 11, fontWeight: '700',
-    textTransform: 'uppercase', letterSpacing: 0.8,
-  },
-  calloutRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
-  calloutDivider: {
-    borderTopColor: withAlpha(palette.amber[500], 0.2),
-    borderTopWidth: 1, paddingTop: 8,
-  },
-  calloutKey:      { color: colors.mutedForeground, fontSize: 12 },
-  calloutVal: {
-    fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'],
-    fontSize: 14, color: colors.foreground,
-  },
-  calloutValSmall: {
-    color: colors.foreground, fontSize: 12, fontWeight: '500',
-  },
-
-  // New next-target card layout (mirrors strength's blue card pattern)
-  calloutTitleUpper: {
-    color: palette.amber[400], fontSize: 11, fontWeight: '700',
-    textTransform: 'uppercase', letterSpacing: 0.8,
-    marginBottom: 2,
-  },
-  nextTargetRow: {
-    flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between',
-  },
-  nextTargetBigTime: {
-    fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'],
-    fontSize: 28, color: palette.amber[400], fontWeight: '700', lineHeight: 32,
-  },
-  nextTargetSub: {
-    color: colors.mutedForeground, fontSize: 13,
-  },
-  nextTargetSep: {
-    paddingTop: 10, marginTop: 4,
-    borderTopWidth: 1, borderTopColor: withAlpha(palette.amber[500], 0.15),
-    gap: 2,
-  },
-  calloutBrief: {
-    color: colors.foreground, fontSize: 14, lineHeight: 20,
-  },
-
-  // Duration milestone grid (3 cols)
-  milestoneGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
-  },
-  milestoneTile: {
-    flexBasis: '31%',
-    flexGrow: 1,
-    borderWidth: 1, borderRadius: 9,
-    paddingVertical: 10, paddingHorizontal: 12,
-    alignItems: 'center',
-    gap: 2,
-  },
-  milestoneTileAchieved: {
-    borderColor: colors.border, backgroundColor: colors.card,
-  },
-  milestoneTileSelected: {
-    borderColor: withAlpha(palette.amber[500], 0.4), backgroundColor: AMBER_BG_HOT,
-  },
-  milestoneTileLocked: {
-    borderColor: alpha(colors.border, 0.4),
-    backgroundColor: alpha(colors.card, 0.4),
-    opacity: 0.4,
-  },
-  milestoneText: {
-    fontSize: 12, fontWeight: '600',
-    fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'],
-  },
-  milestoneCheck: {
-    color: colors.mutedForeground, fontSize: 10, marginTop: 2,
-  },
-
   // History list
   listHeader: {
     paddingHorizontal: 20, paddingVertical: 14,
@@ -833,5 +1545,151 @@ const s = StyleSheet.create({
   valAmber: {
     fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'],
     fontSize: 14, color: palette.amber[400],
+  },
+
+  // ── Progression plan section heading (smaller than h2) ─────────────────
+  h3: {
+    color: colors.foreground, fontSize: 12, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 0.5,
+    marginTop: 4,
+  },
+
+  // ── Coming-up queue tile (smaller than the strength rep-max tile, more
+  // content). Tappable to preview. Selected state highlights amber. ───────
+  queueTile: {
+    minWidth: 110, paddingHorizontal: 10, paddingVertical: 10,
+    borderRadius: 9, borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: alpha(colors.card, 0.4),
+    gap: 4,
+  },
+  queueTileSelected: {
+    borderColor: palette.amber[500],
+    backgroundColor: withAlpha(palette.amber[500], 0.12),
+  },
+  queueTileZone: {
+    fontSize: 9, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.6,
+    color: colors.mutedForeground,
+  },
+  queueTileZoneSelected: {
+    color: palette.amber[400],
+  },
+  queueTileWork: {
+    fontSize: 14, fontWeight: '700',
+    fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'],
+    color: colors.foreground,
+  },
+  queueTileTime: {
+    fontSize: 12, fontWeight: '500',
+    fontFamily: fonts.mono[500], fontVariant: ['tabular-nums'],
+    color: colors.mutedForeground,
+  },
+  queueTileRest: {
+    fontSize: 10, fontWeight: '500',
+    color: alpha(colors.mutedForeground, 0.7),
+  },
+  queueTileTextSelected: {
+    color: colors.foreground,
+  },
+
+  // ── Small caps label above each big value in the hero card.
+  // Mirrors strength's "per side" / "each hand" descriptor pattern —
+  // tells the user what each number IS without cluttering the value itself.
+  // Each big value row in the hero card — value on the left, small
+  // descriptor on the right (the "info cue"). The right-side descriptor
+  // tells the user what the value represents ("conversation pace", "per
+  // rep", "per km") in context.
+  heroValueRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  heroValueDescriptor: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    textAlign: 'right',
+    flexShrink: 1,
+    maxWidth: '50%',
+    paddingBottom: 4,
+  },
+
+  // Chevron between tiles in the progression-plan tile row. Indicates
+  // forward direction of the plan (left → right flow).
+  queueChevron: {
+    paddingHorizontal: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Hero card — AMBER end-to-end (cardio's locked theme color). Strength
+  // keeps its blue, cardio keeps amber. The two domains are distinguished at
+  // a glance by their accent color. ────────────────────────────────────────
+  hero: {
+    borderRadius: 9, paddingHorizontal: 16, paddingVertical: 16,
+    backgroundColor: withAlpha(palette.amber[500], 0.08),
+    borderColor:     withAlpha(palette.amber[500], 0.30),
+    borderWidth: 1, gap: 8,
+    minHeight: 220,
+  },
+  heroTitle: {
+    color: palette.amber[400],
+    fontSize: 11, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1.2,
+  },
+  heroZonePillButton: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 8, paddingVertical: 2,
+    borderRadius: 999, borderWidth: 1,
+    borderColor:     withAlpha(palette.amber[500], 0.4),
+    backgroundColor: withAlpha(palette.amber[500], 0.10),
+  },
+  heroZonePillText: {
+    fontSize: 10, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1,
+    color: palette.amber[400],
+  },
+  heroInfoPanel: {
+    borderWidth: 1, borderColor: withAlpha(palette.amber[500], 0.15),
+    backgroundColor: alpha(colors.card, 0.6),
+    borderRadius: 6,
+    paddingHorizontal: 10, paddingVertical: 8,
+    marginTop: 4,
+  },
+  heroInfoPanelTitle: {
+    color: colors.foreground,
+    fontSize: 12, fontWeight: '700',
+    marginBottom: 4,
+  },
+  heroInfoPanelBody: {
+    color: colors.mutedForeground,
+    fontSize: 11, lineHeight: 16,
+  },
+  // ── Hero body values — clean single-column layout, one value per line.
+  // PaceDetail uses two of these stacked (WORK + TIME); DurationDetail uses
+  // just one. No right-side delta text, no descriptor text — the clutter
+  // those caused was the original UX complaint. ───────────────────────────
+  heroBigValue: {
+    color: palette.amber[400],
+    fontSize: 30,
+    fontWeight: '700',
+    fontFamily: fonts.mono[700],
+    fontVariant: ['tabular-nums'],
+    lineHeight: 34,
+    textAlign: 'left',
+  },
+  heroSep: {
+    marginTop: 10, paddingTop: 10,
+    borderTopWidth: 1, borderTopColor: withAlpha(palette.amber[500], 0.15),
+    gap: 6,
+  },
+  heroCue: {
+    color: colors.foreground, fontSize: 13, lineHeight: 18,
+  },
+  // Rest line sits below the cue on its own row. Amber-toned so it reads
+  // as "do this between sessions" rather than blending into the cue body.
+  heroRestLine: {
+    color: palette.amber[400], fontSize: 12, lineHeight: 17, fontWeight: '600',
   },
 })

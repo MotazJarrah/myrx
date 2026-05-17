@@ -478,7 +478,39 @@ The shared formula update (locked simultaneously): `estimate1RM` and `projectAll
 
 ### Carry detail card — locked design spec
 
-This is the spec for the detail page that covers **loaded carry movements** — `movements.equipment === 'carry'` — Farmer's Carry, Kettlebell Farmer's Carry, Single Arm Farmer's Carry, Suitcase Carry, Yoke Carry, Kettlebell Overhead Carry, Single Arm Overhead Carry, and the strongman-object carries (Atlas Stone Bear Hug, D-Ball Bear Hug, Husafell Stone, Keg, Sandbag, Shield). Progression is tracked along TWO axes simultaneously: **weight per hand / per implement** AND **distance traveled** (meters or feet, normalized to meters internally).
+This is the spec for the detail page that covers **loaded carry movements** — `movements.equipment === 'carry'` — Farmer's Carry, Kettlebell Farmer's Carry, Single Arm Farmer's Carry, Suitcase Carry, Yoke Carry, Kettlebell Overhead Carry, Single Arm Overhead Carry, and the strongman-object carries (Atlas Stone Bear Hug, D-Ball Bear Hug, Husafell Stone, Keg, Sandbag, Shield, Sled Drag [Push], Sled Drag [Pull]). Progression is tracked along TWO axes simultaneously: **weight per hand / per implement** AND **distance traveled** (meters or feet, normalized to meters internally).
+
+**Sled Drag variant tag (May 2026 lock):** Sled work has TWO biomechanically distinct variants on the same equipment:
+- **Sled Drag [Push]** — Prowler-style, leg-dominant (quad/glute concentric drive). Facing the sled, hands on handles, legs piston. Higher loads possible.
+- **Sled Drag [Pull]** — drag, posterior-chain dominant (hams/glutes pull). Strap or harness, sled behind. Lower loads typical.
+
+Both are stored as separate movements (`Sled Drag [Push]`, `Sled Drag [Pull]`) with their own `CARRY_BENCHMARKS` entries (`mode: 'ratio'`; Push tiers: 1.0/1.5/2.0/2.5×BW; Pull tiers: 0.75/1.25/1.75/2.25×BW; all at ≥ 15 m).
+
+**Consolidated detail page (locked May 2026):** the strength index collapses both variants into ONE row keyed by the base name `Sled Drag` with a small `PUSH` / `PULL` badge on the right showing whichever variant the user most recently logged. Tapping the row routes to `/effort/strength/Sled Drag` (the base name — not a real movement row in the DB).
+
+The detail page detects `exercise === 'Sled Drag'` (via `isSledDragConsolidated`), fetches BOTH variants in one `or()` query (`Sled Drag [Push] ·%` OR `Sled Drag [Pull] ·%`), and dispatches to `SledDragConsolidatedDetail`. That component:
+1. Maintains an `activeVariant: 'push' | 'pull'` state (defaults to whichever variant has the most recent logged effort).
+2. Renders a simple PUSH | PULL pill toggle in CarryDetail's header (via the new `extraHeaderContent` prop).
+3. Delegates the actual page render to CarryDetail, passing `exercise={`Sled Drag [${activeVariant}]`}` (so `CARRY_BENCHMARKS` lookup + label parsing still work), `displayName="Sled Drag"` (so the h1 reads as the base name), and `efforts={filteredEfforts}` (only the active variant's efforts).
+4. The CarryDetail render gets a `key={activeVariant}` prop so it remounts when the user toggles — clean reset of all internal state (selected zone, scroll position, info panel) per variant.
+
+The two new CarryDetail props (`displayName?: string` and `extraHeaderContent?: React.ReactNode`) are additive and have no effect when omitted — every other carry call site (Atlas Stone, Yoke, Farmer's, etc.) renders unchanged.
+
+The May 2026 cleanup also moved `Sandbag Carry`, `Sled Pull`, `Sled Push` from cardio to strength — they were loaded carry work miscategorized as cardio. `Sled Pull` → renamed to `Sled Drag [Pull]`; `Sled Push (Prowler)` → renamed to `Sled Drag [Push]`. `Sandbag Carry` added as a new strength entry (its `CARRY_BENCHMARKS` spec was already in code, but the movement row was missing from the DB).
+
+**`movements.unit_lock` — community-dominant-unit forcing (locked May 2026):**
+
+`unit_lock` is a `CHECK`-constrained text column on the `movements` table that forces a specific unit for that movement, overriding the user's profile preference. Allowed values: `'kg'`, `'lb'`, `'mi'`, `'km'`. NULL when the movement should follow the user's profile preference.
+
+Currently in use:
+- **Strongman strength events** (Atlas Stone family, D-Ball family, Husafell Stone, Keg, Yoke, Tire Flip, Log, Axle, etc.) — locked to **`kg`** because strongman weights are kg-universal worldwide.
+- **Rucking (cardio)** — locked to **`mi`** because the rucking community (GoRuck, US tactical fitness) uses miles exclusively. The canonical benchmark is the 12-mile ruck under 3 hours; GoRuck events are all programmed in miles. No European/Asian rucking event uses km as the primary unit despite local convention.
+
+Honored by:
+1. The log form (`strength.tsx` carry block, `cardio.tsx` pace mode): when `unit_lock` is set, the regular `UnitToggle` is replaced by a static `unitLockedBox` chip showing the locked unit; the toggle can't change it.
+2. The detail page (`[exercise].tsx` carry render, `[activity].tsx` cardio detail): a derived `distUnit` (or weight unit) prefers `movementRecord.unit_lock` over `profile.distance_unit` / `profile.weight_unit` when set. So Rucking's "Best — N mi" subtitle displays in miles even for a user whose profile says km.
+
+The CHECK constraint was widened from `{'kg','lb'}` to `{'kg','lb','mi','km'}` in migration `widen_movements_unit_lock_check` (May 2026) so distance-based locks could be added. When adding a new community-dominant-unit lock, update both the DB column AND the TS `Movement.unit_lock` union in `mobile/src/hooks/useMovements.ts`.
 
 **Visual design (locked):** Mirrors WeightedStandardDetail's outer chrome (header + adaptation-zone pill row + chevron-swipe + hero card with min-h-220 blue chrome + chart + log list). The carry-specific twist is the **dual-axis hero card** — two stacked target rows ("Go heavier" / "Go further") instead of weighted's single TickerNumber + cue line. The user's current strongman tier (BEGINNER / INTERMEDIATE / ADVANCED / STRONGMAN) is shown as a chip in the header subtitle, NOT as a dedicated ladder card. The tier criteria one-liner ("Tiers based on weight × bodyweight at ≥ 15 m walked" or "Tiers based on absolute load at ≥ 10 m walked") appears as the secondary subtitle of the Adaptation zone block, not as a separate card.
 
@@ -672,8 +704,243 @@ Worked example — **Kettlebell Farmer's Carry** in lb mode, user PB = 60 lb × 
 
 ---
 
+### Cardio coaching-surface detail card — locked design spec
+
+This is the spec for the detail page that covers **cardio movements** on `[activity].tsx` (mobile). Cardio v1 promotes from tracking surface to coaching surface, matching strength's depth.
+
+**Three movement groups (May 2026 lock, revised after non-cardio cleanup):** not every cardio movement fits the same progression model. The user explicitly rejected forcing one framework onto everything during the design lock. A subsequent cleanup (May 17 2026) removed 10 activities from cardio entirely — Walking, Walking (Treadmill), Hiking, Rowing (Open Water), Canoeing, Kayaking, Stand Up Paddleboarding, Inline Skating, Ice Skating, and Stair Climb (outdoor). Those are **recreational / lifestyle activities**, not cardio training surfaces — the user does them for transport, leisure, or outdoor enjoyment rather than to deliberately improve cardio fitness, so any coaching prescription would feel condescending. They might come back as a separate "activity log" surface later; they don't belong in the cardio coaching list.
+
+| Group | Activities | Detail page treatment |
+|-------|------------|----------------------|
+| **A — Endurance Athletes** | Running, Running (Treadmill), Cycling, Cycling (Mountain Bike), Stationary Bike, Bike Erg, Air Bike, Row Erg, Ski Erg, Skiing, Roller Skiing, Swimming, Aqua Jogging, Elliptical | Full **progression plan** with Endurance/Threshold/VO2 zones (this spec) |
+| **B — Different framework needed** | Rucking, Hill Running, Trail Running | Cardio category but pace zones don't fit. Rucking progresses on load + distance (carry-like, not pace). Hill / Trail Running are terrain-confounded — they currently route through Group A's pace-zone plan as an accepted divergence until HR-zone integration lands (Phase 2). |
+| **C — Step-Based Machines** | StairMill, Arc Trainer | **Simple tracking page** (header + chart + history). Step-based conditioning needs its own round-based progression model. Deferred. |
+
+This spec covers **Group A only.** Group B's Rucking gets the simple tracking page; Hill Running and Trail Running fall through Group A's regex default to `running` and use that prescription set (terrain-aware design deferred). Group C gets the simple page until a round-based model is designed.
+
+Determined in code by `isEnduranceAthleteActivity(activityName)` → returns true for Group A categories.
+
+**Two cardio modes still exist underneath** (`cardio_mode = 'pace'` vs `'duration'`), but Group A is all pace mode. Duration mode is Group C only, and gets the simple page.
+
+**Adaptation zones (3 zones, locked May 2026):**
+
+The 5-zone HR model is still the underlying science, but the app exposes only the three zones that actually drive progression. **Recovery (Z1) is not training — it's the absence of training, and we don't program rest days for users.** **Tempo (Z3) is what polarized-training research calls "no man's land" — too hard to be efficient aerobic base, too easy to drive lactate-clearance or VO2 max adaptations.** Both dropped from the UI. This also gives perfect 1:1 parity with strength's 3-zone adp model (Strength / Hypertrophy / Endurance → Endurance / Threshold / VO2 Max).
+
+| Zone | Label | %HRmax | Adaptation focus |
+|------|-------|--------|------------------|
+| Z2 | ENDURANCE | 60–70% | Mitochondrial density, capillary network, fat oxidation. The foundation of all endurance — 70–80% of total training volume per polarized model. |
+| Z4 | THRESHOLD | 80–90% | Lactate clearance — the body learns to process lactate faster. THE pace that improves 5K–half marathon times most directly. 1–2 sessions per week max. |
+| Z5 | VO2 MAX | 90–100% | Maximum oxygen uptake — your engine ceiling. The most direct stimulus for mile and 5K race-pace adaptation. 1 session per week with full recovery between. |
+
+**Science backing (locked):** ACSM *Guidelines for Exercise Testing and Prescription* (12th ed., 2025); Karvonen, Kentala & Mustala (1957) for HR-reserve methodology; Jack Daniels' *Running Formula* (3rd ed., 2014) for VDOT-to-zone mapping; Garmin / Polar / Suunto / Apple Watch all default to the same 5-zone model. The 50/60/70/80/90% HRmax boundaries are the global standard, not novel.
+
+Until heart-rate integration lands (Phase 2 — via Apple Health / Strava / Garmin / Polar), zones derive from **pace as the proxy** using Riegel-scaled offsets from the user's fastest logged pace. Once HR data is available, zones recalibrate from actual HR.
+
+**Per-zone pace formula (pace mode):**
+
+Anchored on the user's fastest logged pace `Pbest` for the activity:
+
+| Zone | Target pace offset (running, /km) | Notes |
+|------|-----------------------------------|-------|
+| Z2 | `Pbest + 60 s/km` | conversational, aerobic base |
+| Z4 | `Pbest + 10 s/km` | ≈ 10K race pace, "comfortably hard sustained" |
+| Z5 | `Pbest − 15 s/km` | ≈ 3K race pace, "max sustainable" |
+
+Offsets scale to the activity's pace units (km or mi). For non-running activities (rowing, swimming, cycling, ski erg) the offsets translate to the activity's typical pace scale; calibration tables per activity will land alongside the implementation. Riegel projection (`projectPaces` in `formulas.ts`) handles cross-distance pace mapping — unchanged from today.
+
+**Per-zone session prescription (the hero card cue):**
+
+| Zone | Session format | Source |
+|------|----------------|--------|
+| Z1 | Continuous easy, 20–40 min | ACSM recovery-day prescription |
+| Z2 | Continuous, 30–90 min | Phil Maffetone (MAF method) · Iñigo San Millán (polarized training) · ACSM aerobic-base recommendation |
+| Z3 | Continuous, 20–40 min at "comfortably hard" | Pete Pfitzinger marathon training · Daniels' "T pace" continuous |
+| Z4 | Cruise intervals: 4–6 × 1km at T-pace with 1 min jog recovery (or 3–4 × 1.5K, or 2 × 3K) | Daniels' Running Formula — canonical "Cruise Intervals" |
+| Z5 | Short intervals: 3–5 × 1km at I-pace with equal recovery, OR Norwegian 4×4 min at VO2 pace | Veronique Billat (time-at-VO2max research) · Daniels' "I pace" · Stephen Seiler / Marius Bakken (Norwegian model) |
+
+For non-running activities, the prescriptions translate naturally:
+- Rowing: 1km reps → 500m / 1000m intervals
+- Swimming: 1km reps → 4 × 200m / 8 × 100m
+- Cycling: time-based intervals (3–5 min reps)
+- Duration-mode movements: time-at-zone (e.g. "20 min at Z3 tempo intensity · maintain consistent rhythm")
+
+**Layout — single page, top to bottom (locked):**
+
+1. **Header** — back chevron + movement name + best-effort subtitle.
+   - Pace mode: `Best pace — 4:30 /km · 5K` (`TickerNumber` on the pace value).
+   - Duration mode: `Best — 30 min`.
+   - Activity-type chip below header (e.g. `RUNNING`, `CYCLING`, `ROWING`, `BATTLE ROPES`).
+
+2. **Progression plan card** (wrapper card, replaces the earlier "Adaptation zone" card):
+   - `<h2>Progression plan</h2>`
+   - Help text: `Your next step is below. After that, here's what's coming up.`
+   - **NO ZONE PILL ROW.** The earlier swipe-pill design let the user pick the zone, but the user explicitly rejected that approach during the May 2026 lock — *"the system should pick what's next, not me"*. The plan generator decides the zone for each step. Zone info is still discoverable via the info pill on the hero card's top-right.
+   - **NO TILE ROW for distance selection.** Distance/duration is locked per `(activity, zone)` in `PACE_ZONE_SESSIONS`. The user picks a movement and follows the plan; they don't pick distances.
+   - **NEXT STEP hero card** — same `min-h-[220px]` amber-chrome layout as before. Background `withAlpha(palette.amber[500], 0.08)`, border `withAlpha(palette.amber[500], 0.30)`, title `palette.amber[400]`. Title now reads `NEXT STEP` (was `YOUR NEXT TRAINING TARGET`):
+     - Top-right zone info pill — label + Info icon. Tappable to expand inline why-this-zone info panel. Auto-closes when the plan queue regenerates.
+     - **Two-row body, no clutter:**
+       - **Row 1 (WORK)**: `X km` (continuous) or `N × X km` (intervals). Sub-1km values render in meters: `5 × 600 m`, not `5 × 0.6 km`.
+       - **Row 2 (TIME)**: bare time. Continuous = total session time (e.g. `37:30`). Intervals = time per rep (e.g. `3:48`). NO prefix (`in`, `per rep`, etc.) — the cue below spells out what the number is.
+     - Thin separator + **full workout descriptor cue line** — one sentence containing the activity verb, work, time, rest pattern, and recovery instruction. Activity verb auto-adapts: `Run`/`Pedal`/`Row`/`Swim`/`Walk`/`Skate`/`Glide`. Rest is **informative only** — *"then take 1 day easy before your next step"*, *"next step whenever you're ready"*. No mandatory rests.
+   - **COMING UP queue (8-tile horizontal scroll)**:
+     - Shows 7 upcoming steps (after the current) generated live by `generatePlanQueue(activity, efforts, bestPaceSecs, distUnit, 8)`.
+     - Each tile shows: zone label (small caps), work spec, time spec, rest descriptor.
+     - All tiles tappable. Tapping a tile expands a preview panel below the scroll row showing the tile's full cue + an encouraging reminder: *"Finish your current step first — this one's queued up after."*
+     - The queue is **regenerated on every render** from training history. Never stored. Never stale.
+   - **Attribution under the queue:** `Riegel · Daniels' · Seiler · pace zones & polarized 80/20`. Three names credit the formulas we actually compute against: Riegel (`projectPaces` pace projection across distances), Daniels' (zone pace offsets — Endurance = best + 60s/km, Threshold = best + 10s/km, VO2 = best − 15s/km — and the cruise-interval / VO2-rep session formats), Seiler (polarized 80/20 queue rules — no hard back-to-back, ~80% Endurance distribution). Two trailing descriptors joined with `&` (NOT `·`) so they read as a single bundled description rather than two more authorities: "pace zones" describes the output type (paces by zone), "polarized 80/20" labels the queue philosophy. ACSM and Coggan/Concept2/USA-Swimming were dropped because the math doesn't actually invoke them — HR zones are Phase 2, and we apply Daniels' pace logic uniformly across all Group A activities (running, cycling, air bike, rowing, swimming, ski erg, elliptical), not sport-specific frameworks. Same string on every activity. "Daniels'" drops "Running Formula" intentionally — we credit the person/methodology, not the book title, mirroring strength's `Epley · Brzycki · Lombardi` convention.
+   - **45-min total-time ceiling** — enforced by `adjustPaceForTimeCap` per step. For continuous zones, distance shrinks via `niceCapKm`. For interval zones, rep count drops until total ≤ 45 min. The product philosophy: *the app pushes you to become better, not to chase event distances you'll never train for.*
+
+   **Per-activity prescribed sessions (locked, May 2026):** see `PACE_ZONE_SESSIONS` and `DURATION_ZONE_SESSIONS` in `mobile/app/(app)/effort/cardio/[activity].tsx`. Highlights:
+
+   | Activity | Recovery | Endurance | Tempo | Threshold | VO2 Max |
+   |----------|----------|-----------|-------|-----------|---------|
+   | Running / Treadmill | 3 km easy | 8 km steady | 5 km tempo | 4 × 1 km | 5 × 600 m |
+   | Walking | 1.5 km | 4 km | 3 km | 4 × 500 m | 5 × 300 m |
+   | Hiking | 3 km | 10 km | 6 km | 4 × 1 km | 5 × 600 m |
+   | Rucking | 2 km | 6 km | 4 km | 4 × 750 m | 5 × 400 m |
+   | Outdoor Cycling | 10 km | 25 km | 15 km | 4 × 3 km | 5 × 1.6 km |
+   | Stationary Bike | 5 km | 15 km | 10 km | 4 × 2 km | 5 × 1 km |
+   | Air Bike / Assault Bike | 1.5 km | 2.5 km | 1.5 km | 3 × 500 m | 5 × 200 m |
+   | Rowing / Canoe / Kayak | 2 km | 4 km | 3 km | 3 × 1 km | 4 × 500 m |
+   | Ski Erg | 2 km | 4 km | 3 km | 3 × 1 km | 4 × 500 m |
+   | Swimming | 400 m | 1500 m | 1000 m | 4 × 200 m | 4 × 100 m |
+   | Elliptical | 2 km | 5 km | 4 km | 4 × 750 m | 5 × 400 m |
+   | Skating | 3 km | 8 km | 5 km | 4 × 1 km | 5 × 600 m |
+   | StairMill (duration) | 10 min | 25 min | 15 min | 4 × 3 min | 5 × 90 s |
+   | Arc Trainer (duration) | 15 min | 30 min | 20 min | 4 × 3.5 min | 5 × 2 min |
+
+   **No activity prescribes anything close to event distances** — no marathon, no 100 km bike, no half-Ironman swim. The largest single-session prescription is 25 km on outdoor cycling. The product philosophy is "push you to become better at the science-backed adaptation that matters", not "chase distance records you'll never train for".
+
+3. **Why-this-zone info panel** — inline expandable, toggled by tapping the zone info pill on the current-step hero. Auto-closes when the plan queue regenerates. Same pattern as strength's adp-zone info panel (`FadeInUp` / `FadeOutUp`). Each zone has a `whyText` field in `CARDIO_ZONE_CONFIG`:
+   - **ENDURANCE**: *"Most of your training lives here. Z2 builds the mitochondrial density and capillary networks that determine everything above — your aerobic engine. Stay disciplined and conversational; resist the urge to push."*
+   - **THRESHOLD**: *"The single most productive zone for race times from 5K to half marathon. Cruise intervals teach your body to clear lactate faster, raising the speed you can sustain. 1–2 sessions per week max."*
+   - **VO2 MAX**: *"Top-end stress. Short intervals at max sustainable effort build VO2 max — your engine ceiling — and pull every zone below up with them. The most direct stimulus for mile and 5K race-pace adaptation. 1 session per week with full recovery between."*
+
+**Plan-queue generator (LOCKED):** `generatePlanQueue(activity, efforts, bestPace, distUnit, count=8)` in `[activity].tsx`. Pure function of training history. Walks polarized-training rules to build a sequence of upcoming zones:
+
+1. **No hard back-to-back** — after a Threshold or VO2 step, next is Endurance.
+2. **Don't let VO2 go stale** — if 10+ days since last Z5, next non-recovery step is VO2.
+3. **Don't let Threshold go stale** — if 7+ days since last Z4, next non-recovery step is Threshold.
+4. **Anti-stagnation interleave** — after 3 Endurance steps in a row, insert a hard step (alternates T/V).
+5. **Default: Endurance** — produces the ~80% Endurance / 20% T+V polarized split (Stephen Seiler's research).
+
+The queue is **never stored**. Logging a new effort updates `bestPaceSecs` and recency tracking, which regenerates a different queue on next render. The plan adapts continuously.
+
+**Encouraging language is LOCKED across the cardio progression UI.** No "missed pace", no "off-script", no "incomplete". Replacements:
+- `Welcome back — let's pick up where you left off.` (instead of "plan stale")
+- `Same step is still your next one — no rush.` (instead of "incomplete")
+- `Solid effort. Same step next time — your body's building toward it.` (instead of "missed pace, try again")
+- `Got a session in — adjusting your plan around it.` (instead of "off-script training")
+- `Finish your current step first — this one's queued up after.` (preview-tile note)
+
+Voice: a coach who trusts the athlete. Never punitive. Always assumes the user is doing their best.
+
+4. **Progress chart** — existing `LineChart` component. Pace mode: Y-axis reversed (lower pace = better progress). Duration mode: standard Y-axis (higher = better). Dashed line = personal best. Unchanged from today.
+
+5. **Log list** — efforts history, swipe-to-delete. Same row format as today.
+
+**Color theme (locked):**
+- **Cardio is amber end-to-end.** Zone pill / chevrons / tile highlights / hero values / hero chrome / hero title / info panel border — all `palette.amber[400]` and `palette.amber[500]`. Strength keeps its blue theme, cardio keeps amber. The two domains are distinguished at a glance by their accent color — DO NOT use blue chrome on cardio's hero card. This was an explicit user instruction during the May 2026 lock; a prior draft of this spec mistakenly proposed blue chrome for parity with strength's "next target" badge, and the user correctly rejected it.
+
+**Animation conventions (carried over from strength — no deviation):**
+- Big pace/duration number on hero card uses `TickerNumber` slot-machine animation.
+- Info panel open/close uses `FadeInUp` / `FadeOutUp` with sibling `LinearTransition` so the hero card slides smoothly when the panel opens.
+- Zone pill swipe choreography matches strength exactly (gesture-handler `Pan`, chevron opacity override, slide-off / slide-in via Reanimated `withTiming`).
+
+**Movements supported (locked, May 2026):**
+
+Pace mode: all run / cycle / row / ski erg / swim / elliptical / treadmill / skating / skiing variants with distance + time inputs.
+
+Duration mode: Arc Trainer, StairMill.
+
+**Movements REMOVED from cardio (May 2026 cleanup — locked):**
+- **Jump Rope** — covered by Single Unders / Double Unders in strength as rep-only bodyweight movements. No need for a duration-mode duplicate.
+- **Agility drills**: Agility Ladder Drills, Carioca, Lateral Shuffles, Line Drills. Skill / warm-up work — zone framework doesn't add coaching value here.
+- **Sprint-style**: Box Step Overs, Shuttle Run, Slideboard. Same rationale as agility drills; cleaner cardio list is better than mixed.
+- **Conditioning fluff**: Battle Ropes, Shadow Boxing, Speed Bag. Couldn't be tracked in a way the rest of the system could use; removed entirely rather than left as orphan duration entries.
+- **Floor-work cardio**: Bear Crawl, Crab Walk, Low Crawl. Same reasoning as conditioning fluff — not useful in the progression model.
+- **Niche vertical-climber machines**: VersaClimber, Jacob's Ladder. Removed for cardio-list simplicity — niche enough (HIIT studios, CrossFit boxes, specialty gyms) that removing them costs little coverage. StairMill + Arc Trainer (the common commercial-gym duration machines) kept.
+- **Duplicate indoor cycling variants**: `Cycling (Indoor Trainer)` + `Indoor Cycling` consolidated into `Stationary Bike`. `Bike Erg` kept as a separate entry (Concept2-specific, different machine, recognized by serious users).
+- **Duplicate treadmill variant**: `Curved Treadmill` consolidated into `Running (Treadmill)` (the user logs the same data either way).
+- **Duplicate swimming variant**: `Swimming (Open Water)` consolidated into bare `Swimming` (pool vs open-water distinction was unused).
+
+**Renamed in cardio (May 2026 cleanup — locked):**
+- `Rowing` → `Rowing (Open Water)` to disambiguate from `Row Erg` (the machine).
+- `Cross Country Skiing` → `Skiing` (in a cardio-only context, "Skiing" unambiguously means the cardio variant; downhill skiing isn't tracked here).
+
+**Final cardio movements list (19 activities — May 17 2026 lock, after non-cardio cleanup):** Air Bike, Aqua Jogging, Arc Trainer, Bike Erg, Cycling, Cycling (Mountain Bike), Elliptical, Hill Running, Roller Skiing, Row Erg, Rucking, Running, Running (Treadmill), Ski Erg, Skiing, StairMill, Stationary Bike, Swimming, Trail Running.
+
+**Removed from cardio (May 17 2026 — recreational/lifestyle, not cardio training):** Walking, Walking (Treadmill), Hiking, Stair Climb (outdoor), Rowing (Open Water), Canoeing, Kayaking, Stand Up Paddleboarding, Inline Skating, Ice Skating. Rationale: these are transport, leisure, or outdoor activities — the user doesn't pick them with intent to improve cardio fitness, intensity isn't deliberately modulated, and a coaching prescription would be condescending. They might come back as part of a separate "activity log" surface later (where lifestyle movement counts toward weekly minutes / calories / streaks without a coaching layer); they don't belong in the cardio training list.
+
+**Earlier May 2026 cleanup** also moved `Sandbag Carry`, `Sled Pull`, and `Sled Push` to strength — they're loaded carries, not endurance/lifestyle movement. See Sled Drag note in the strength Carry detail spec.
+
+The mirror update lives in: the Supabase `movements` table (single source of truth for mobile) and `mobile/app/(app)/effort/cardio/[activity].tsx` (`categorizeActivity` regex, `PACE_ZONE_SESSIONS` keys, `DURATION_ZONE_SESSIONS` keys), plus `mobile/src/lib/movements.ts` (`SPEED_INPUT_ACTIVITIES` set + `SPEED_MAX_KMH` map — Walking (Treadmill) removed from both). The `categorizeActivity` regex maps the remaining names to existing categories: `Skiing` / `Roller Skiing` → `ski_erg` (same motion); `Bike Erg` → `stationary_bike`; `Stationary Bike` → `stationary_bike`; Hill Running / Trail Running → `running` (default fallback). `web/src/lib/movements.js` may still list the removed names — web is frozen per the May 12 2026 lock, so it's allowed to lag.
+
+**Out of v1 scope (deferred, locked):**
+- **RPE rating field** on log form — adds no value to zone calculations (pace IS the zone proxy until HR lands). Revisit if coaches request it after the coaching surface is live.
+- **Notes field** on log form — pure UX, defer.
+- **Per-session calorie auto-estimation** — handled inside the upcoming Calories page overhaul (separate conversation).
+- **Heart rate via integration** (Apple Health / Strava / Garmin / Polar) — Phase 2. When it lands, zones recalibrate automatically from actual HR data.
+
+**What's removed from the previous PaceDetail / DurationDetail design:**
+- The single "Your next training target" callout that prescribed only a pace at a distance with no session structure, no rest cue, no why explanation. Replaced by the zone-aware hero card with full Daniels-style prescription.
+- The implicit "always train at race pace" model. Replaced by 5 explicit adaptation zones, each with its own pace target and session format.
+
+---
+
+## Mission, vision, and revenue model
+
+### Mission
+MyRX helps every person progress **one step at a time** across every domain that matters in their fitness — strength, cardio, mobility, body composition, nutrition, recovery, and the habits that hold it all together. Every screen, every card, every chart answers one question for the user: **"What's my next step here?"**
+
+### Vision
+One product, two audiences:
+- **Coaches** who want a complete admin platform to run their entire client roster.
+- **Self-coached individuals** who want a coach-quality next-step experience even without a human coach.
+
+Both audiences use the same client-facing app. The coach version is the admin overlay on top of it; the self-coached version is the client UI minus the coach. **There is one product, not two.**
+
+### Revenue model (two streams)
+
+**Stream A — Coach subscription (B2B2C).** Coaches pay a monthly subscription for the admin portal. Their clients get the full client app at NO cost as long as the coach's subscription is active. The coach gets every client's data, chat, suggestion threads, progress dashboards, and the ability to message and program for the whole roster. This is the differentiator vs. Strong / Hevy / Strava — none of those sell a coach overlay.
+
+**Stream B — App Store / Google Play tier (B2C direct).** Free download with a limited free tier. Full features unlocked by EITHER a recurring subscription (monthly) OR a one-time lifetime purchase. No coach involved — the app itself plays the coaching role through the "next step" framing built into every domain.
+
+### Why so many domains? (the question that nearly tripped us up)
+A coach helps clients with strength, cardio, mobility, body composition, nutrition, recovery, AND the habits that hold the whole program together — not just one of those. The B2B2C arm means the app must support what a coach actually does day-to-day, or the coach can't deliver their full service through MyRX. **Breadth is table stakes for the coach segment, not bloat.**
+
+**Backed by May 2026 market research:** every successful B2B2C coaching platform on the market is multi-domain. Trainerize (#1, tens of thousands of coaches) covers strength, cardio, nutrition, macros, meal plans, habits, sleep, water, mindfulness, body weight, and wearable sync — they identify *five pillars of healthy living* (activity, nutrition macros, nutrition portions, mindfulness, sleep). TrueCoach, MyPTHub, Virtuagym, Exercise.com sit in the same range. **Shipping without sleep / water / habits would put MyRX BEHIND the segment standard, not ahead of it.**
+
+For the B2C arm, multi-domain works at scale (MyFitnessPal, Peloton, Apple Fitness+ all dominate via breadth) but niche specialists charge more per user (Whoop $30/mo, Strava $12/mo) because they go deeper. **The depth is the lever for B2C competitiveness, not the breadth.**
+
+### Product principle (the scope decider)
+Two tiers of domain treatment, and the goal is to promote every domain from tier 2 to tier 1 over time:
+
+1. **Coaching surface** — answers "what's my next step here?" the way the Strength detail page does today. Clear target value, specific prescription (sets / reps / weight / time / distance), rest / recovery cue, and a "why this matters" explanation. Coaching surfaces are competitive moats for both arms — they justify the B2C paid tier AND they make the coach's job easier in the B2B2C arm.
+
+2. **Tracking surface** — logs data, surfaces trends, but doesn't prescribe a next step. Habit checkboxes, water intake, sleep duration, body weight trend. Still valuable for both arms — Trainerize's habit checkboxes are tracking surfaces with light coaching — but doesn't drive a B2C subscription on its own.
+
+Promote in order of decision energy: training prescription comes first (strength + cardio), recovery / habits / hydration come last.
+
+### Where each domain stands today
+- **Strength** — coaching surface. Done.
+- **Cardio** — tracking surface today; next up for promotion (in progress).
+- **Mobility** — tracking surface (ROM logs).
+- **Bodyweight** — tracking surface (weight + goal).
+- **Calories / Nutrition** — tracking surface (food log, macros, daily target).
+- **Sleep / Water / Habits** — not built. To be decided whether they ship as first-party builds or as Apple Health / Google Fit integrations (Trainerize uses the integration path for sleep — worth copying).
+
+### Roadmap order (rough, not locked)
+1. Cardio → coaching surface (NEXT)
+2. Bodyweight → coaching surface
+3. Mobility → coaching surface
+4. Calories → coaching surface
+5. Sleep / Water / Habits → tracking surfaces, likely via Apple Health / Google Fit integrations
+
+---
+
 ## What This Is
-A React + Vite SPA — a fitness coaching platform. Clients track strength, cardio, mobility, bodyweight, and calories. Admins (coaches) manage clients, review progress, and communicate via chat/suggestions.
+A React + Vite SPA (web, frozen) + React Native / Expo app (mobile, active) — a fitness coaching platform per the mission above. Clients track strength, cardio, mobility, bodyweight, and calories. Admins (coaches) manage clients, review progress, and communicate via chat/suggestions.
 
 ---
 
@@ -1097,28 +1364,93 @@ If you find yourself tweaking `FIELD_HEIGHT`, `tripleGrid.gap`, `gridUnit.width`
 - `WheelInput` defaults: `paddingHorizontal: 0`, `paddingVertical: 6`. `WheelInput` accepts an optional `style` prop for per-field overrides (currently unused after the Active-Hang +3 experiment was rolled into the global `FIELD_HEIGHT` bump).
 - `PhantomWheel.container` defaults: `alignSelf: 'stretch'`, `paddingHorizontal: 0`. Stretching is critical — without it the container sized to the centre text's width, which made every HaloRow's `left:0/right:0` wrapper inherit that narrow width and truncate longer halo values (the classic "wider value coming up from below → text wraps and `lb` clips" bug).
 
-**Default values: min savable — LOCKED across strength + cardio:**
+**Default values: min scrollable value — LOCKED across strength + cardio (May 2026 lock):**
 
-Every value/time wheel on strength and cardio sits at its MIN SAVABLE value on page-load (and on exercise-switch / mode-switch). NOT min scrollable. The wheels CAN scroll down to 0 / 0.0 — but Save is disabled at that boundary, so defaults sit one notch above zero where Save would actually enable.
+Every value/time/distance/speed wheel on strength and cardio sits at its **minimum scrollable value** on page-load (and on exercise-switch / mode-switch). For most wheels that minimum is 0 (cardio distance, cardio time, cardio speed, isometric time). For wheels where 0 isn't physically meaningful, the minimum is whatever the wheel hard-stops at:
+
+- **Strength reps**: min = 1 (you can't perform 0 reps).
+- **Strength weight** (non-bodyweight, non-assisted): min = `ladder[0]` for ladder movements (Atlas Stone 60 kg, D-Ball 30 kg, etc.) or `wheelMin` for non-ladder (barbell 45 lb / 20 kg, dumbbell 5 lb / 2 kg, generic carry 5 kg / 10 lb).
+- **Strength carry distance**: min = 5 m (carrying 0 m isn't a meaningful effort; wheel hard-stops at 5).
+- **Strength weight on bodyweight / assisted**: min = 0 (no added load is a valid starting point).
+
+Earlier in May 2026 this rule was briefly relaxed to "blank slate at literal zero" — which broke wheels whose physical minimum was non-zero (carry distance showed 0 m while the wheel itself could only scroll down to 5 m, and the wheel-and-state contract silently disagreed). The corrected rule is "min scrollable": the wheel's `min` prop defines what zero means for that field; the state defaults to exactly that.
 
 Concrete defaults (verified against current code, NOT to be drifted from without updating this doc and the matching effect in code):
 
-| Wheel | Default | Min scrollable | Why |
+| Wheel | Default | Save guard | Notes |
 |---|---|---|---|
-| Strength reps | `1` | 1 | `setReps('1')` in the exercise-change effect. Min savable is 1 (1+ reps). |
-| Strength weight (non-bodyweight) | `ladder[0]` if ladder, else `wheelMin` (e.g. barbell 45 lb / 20 kg, dumbbell 5 lb / 2 kg, atlas-stone first rung) | same | `setWeight(String(wheelMin))` in the effect. Min savable is the smallest valid lift. |
-| Strength weight (bodyweight added) | `0` | 0 | Added load is 0 by default; bodyweight itself comes from the profile. |
-| Strength carry distance | `5` (metres) | 5 | `setDistance(isCarry ? '5' : '')`. Min savable distance for carries. |
-| Strength isometric duration | `00:01` (1 second) | 0 | `setTimeStr(isIsometric ? '00:01' : '')`. 00:00 is scrollable; Save disables there. |
-| Cardio pace distance | `0.1` (km / mi) | 0.0 | `setDistValue('0.1')` in mode effect. 0.0 scrollable; Save disables. |
-| Cardio pace time | `00:01` | 0 | `setTimeStr('00:01')`. 00:00 scrollable; Save disables. |
-| Cardio duration time | `00:01` | 0 | `setTimeStr('00:01')` in duration mode. 00:00 scrollable; Save disables. |
+| Strength reps | `1` | reps ≥ 1 (always met) | Wheel min = 1; 0 reps isn't meaningful. |
+| Strength weight (non-bodyweight) | `ladder[0]` if ladder, else `wheelMin` | weight > 0 | Wheel min varies by equipment — see formula in `weightWheelProps()`. |
+| Strength weight (bodyweight added) | `0` | n/a | Added load is 0 by default; bodyweight itself comes from the profile. |
+| Strength carry distance | `5` (metres) | distance > 0 (always met) | Wheel min = 5 m; carrying 0 m isn't meaningful. |
+| Strength isometric duration | `00:00` | timeSecs > 0 | Wheel min = 00:00 (a "just started" hold). |
+| Cardio pace distance | `0` (km / mi) | distKm > 0 | Wheel min = 0; scrollable down to 0.0. |
+| Cardio pace time | `00:00` | timeSecs > 0 | Wheel min = 00:00. |
+| Cardio pace speed (5 machines) | `0` (km/h or mph) | speed > 0 | Wheel min = 0. Drives `effectiveTimeSecs = distance ÷ speed`. |
+| Cardio duration time | `00:00` | timeSecs > 0 | Wheel min = 00:00. |
 
 The matching state-driving code lives in:
 - Strength: `useEffect` keyed off `exercise` / `unit` / `isIsometric` / `isCarry` / `movementRecord` (mobile/app/(app)/strength.tsx).
-- Cardio: `useEffect` keyed off `mode` (mobile/app/(app)/cardio.tsx).
+- Cardio: `useEffect` keyed off `mode` / `isSpeedMode` (mobile/app/(app)/cardio.tsx).
 
-When adding a new value/time wheel anywhere, the same rule applies: initialise to the lowest value that would still let the user save, NOT to a "sensible mid-range default" and NOT to absolute zero.
+When adding a new value/time wheel anywhere, the same rule applies: initialise state to the wheel's `min` prop value (whatever the wheel can scroll down to). The wheel and the state must agree from frame 0 — never set state to a value the wheel can't reach, and never let the wheel render a fallback that disagrees with state (the original carry-distance bug: state was `0`, wheel min was `5`, wheel rendered `50` via a `|| 50` fallback — Save was gated on the state, so it stayed disabled while the user looked at a wheel that read `50 m`).
+
+**Staggered page-load animation — LOCKED across strength + cardio detail pages (May 2026 lock):**
+
+Every detail page (strength weighted-standard / assisted / carry / iso / repsonly / bodyweight, cardio pace / duration) follows the same entrance choreography:
+
+1. **Skeleton** rendered while `loading === true` (Supabase fetch in progress).
+2. **Main content card** — the tile-grid + hero-card combo (or empty-state card) — slides in via `<AnimateRise delay={0}>`. Cubic-bezier(0.16, 1, 0.3, 1), 500 ms, opacity 0 → 1 + translateY 8 → 0.
+3. **Chart card** — slides in 250 ms later: `<AnimateRise delay={250}>`.
+4. **Log list (Efforts history)** — slides in 500 ms after mount: `<AnimateRise delay={500}>`, applied via `EffortsHistorySection`'s `delay` prop on strength, and inline on cardio's history block.
+
+Total entrance: ~1000 ms from skeleton-clear to log fully visible. Delays were bumped from 120/240 → 250/500 in May 2026 because 120 ms felt too tight to perceive as a real cascade.
+
+**Critical: every new detail-page card must follow this pattern.** Always pass `delay={0}` / `{250}` / `{500}` explicitly — relying on the default for the "main" case (`<AnimateRise style={s.card}>` without `delay`) is technically equivalent (the AnimateRise component defaults `delay = 0`), but explicit values make the cascade intent unambiguous in code. If a page renders the main content via a custom component (like `BodyweightConsolidatedBlock` for the BW tier pager), wrap the call site in `<AnimateRise delay={0}>` so the cascade still works.
+
+**Common gotcha:** when adding a log section that uses `EffortsHistorySection`, remember to pass `delay={500}` — the prop forwards to the inner `AnimateRise`. Without it the log defaults to 0 and appears alongside the main card. (This was the bug on the weighted-standard detail in the May 2026 audit — the call site used `onDelete={handleDeleteEffort}` instead of the common `onDelete={onDelete}` pattern, so a `replace_all` missed adding the delay.)
+
+**Second gotcha — `bwLoaded`-gated detail pages (Assisted Machine + Carry ratio mode):** these pages run a separate Supabase fetch for the user's recent bodyweight inside the detail component (not at the parent level). The main projections / hero card is gated on `bwLoaded && bwForMath != null` — i.e. it doesn't mount until the BW fetch completes (~200 ms after the page-level effort fetch resolves).
+
+If you let the chart and log render unconditionally on these pages, they mount on frame 0 (only need `efforts`, already loaded) and animate in via their `delay={250}` / `delay={500}` schedules. Meanwhile the main card waits ~200 ms for BW, then mounts and starts its own `delay={0}` animation — but by then the chart has already started. **The user sees chart BEFORE main, breaking the cascade.**
+
+The fix: gate the chart + log on `bwLoaded` (Assisted Machine) or `isRatio ? bwLoaded : true` (Carry, since abs-mode movements like Atlas Stone don't need BW) so they wait for the same fetch as the main card. All three then mount on the same frame and the `delay={0}` / `{250}` / `{500}` cascade fires in order.
+
+When adding new detail-page types or surfaces that depend on async data inside the component (not just `efforts`), always gate ALL cascade-eligible content on the SAME async-ready flag — never let some cards render eagerly and others wait.
+
+**TickerNumber slot-machine animation — LOCKED across strength + cardio (May 2026 lock):**
+
+The `TickerNumber` component (`src/components/TickerNumber.tsx`) animates each digit slot-machine style when the value changes (digits roll past on a vertical reel). Non-digit characters (×, m, km/h, :, %, etc.) render as static `Text` inside the same row, so mixed strings like `"5 × 600 m"` animate the `5`, `6`, `0`, `0` digits and keep the `× ` and ` m` static.
+
+**First-mount animation guarantee:** the component forces `from = 9` (when `targetIdx === 0`) or `from = 0` (otherwise) on the very first mount of each digit reel — so EVERY digit always animates on page open, regardless of its value. Without this guard, a digit whose `targetIdx` happened to be 0 (forward column → digit `0`; reverse column → digit `9`) hit the `from === targetIdx` shortcut and skipped the animation, manifesting as e.g. the tenth digit of a `"7.9 km/h"` speed display not rolling on first paint.
+
+Where it lives (USE TickerNumber here):
+
+1. **"Best — X" subtitle** in the page header — EVERY detail page must use it. Exhaustive list:
+   - Strength weighted standard: `Best Est. 1RM — N unit` (`[exercise].tsx` ~line 3655)
+   - Strength assisted: `Best Est. 1RM — N unit assist` (`[exercise].tsx` ~line 1875)
+   - Strength carry: `Best — N wUnit · M dUnit` (`[exercise].tsx` ~line 2598) — both numbers ticker
+   - Strength isometric: `Personal best — N min N sec` (`[exercise].tsx` ~line 1469) — fmtDurationLong string tickers the numbers
+   - Strength bodyweight: `Best — N max attempts on TIER` (`[exercise].tsx` ~line 3641) — the `N` tickers; tier label stays plain
+   - Strength rep-only (band/knee/etc.): `assistLabel · Best — N reps` (`[exercise].tsx` ~line 2927)
+   - Cardio pace mode: `Best pace — m:ss/km` (`[activity].tsx` ~line 1126)
+   - Cardio speed mode: `Best speed — N km/h` (`[activity].tsx` ~line 1112)
+   - Cardio duration mode: `Best session — N:NN` (`[activity].tsx` ~line 1441)
+2. **Hero card big numbers (the main target value)** on every detail page. Strength's weighted-standard target weight, assisted target assistance, carry weight/distance targets, BW max-attempts (all 6 Full RX modes: achieved / push / locked / not-yet-achievable / push-at-bodyweight / weighted), BW assist-tier `displayBest`, isometric duration segments, rep-only "Personal best" callout (`bestReps`). Cardio's Work / Speed / Time / pacing-checkpoint rows.
+3. **Hero card cue-line embedded numbers (14 px)** — the small numbers INSIDE the cue sentence (e.g., strength's `"Push 6 reps at 135 lb"` tickers both the `6` and the `135`). ✅ on strength; cardio's cue is a plain sentence today and stays plain.
+
+Where it is NOT used (and must not be added):
+
+1. **Tiles** (rep-max grid, BW max-attempt grid, iso milestone grid, cardio upcoming-step tiles). Tiles are status indicators that change wholesale when the user taps; rolling digits inside them adds noise. Plain `Text` only.
+2. **Plate chips** (the per-side plate breakdown like `25 / 10 / 2.5` on barbell). Plates are categorical labels, not progressive numeric values. Plain `Text` only.
+3. **Chart axis labels and tooltip values.** The chart's own dot animations carry the visual progression; tickering the axis labels would compete.
+4. **Log-list rows** (recent efforts on the detail page, "Your activities" list on the index page). These are read-only history; tickering would be over-decoration.
+5. **Cue lines, descriptors, helper text, captions.** Plain `Text`.
+6. **The "—" placeholder** shown when a metric has no data yet (e.g., `Best Est. 1RM — — lb assist` when `best1RMAssistance` is null). Plain `Text` — there's no number to ticker.
+
+**Sub-text + value layout pattern for Best subtitles:** wrap in `<View style={s.subRow}>` and place the label `Text`, the `TickerNumber`, and any trailing unit `Text` as siblings. Do NOT nest `<Text>` inside `<Text>` for these (the inner Text can't be replaced by a TickerNumber View since View can't be a child of Text in React Native).
+
+When adding a new numeric display anywhere: default to plain `Text`. Add `TickerNumber` ONLY if the value represents a progressive achievement that updates as the user logs new efforts (best subtitle, hero card target) — never for static labels, categorical chips, or read-only history.
 
 **Live-chip label convention (`strength.tsx`):**
 - The "Estimated 1RM" chip below the form drops the "Est." / "Estimated" prefix when reps is exactly `1`: a 1-rep lift IS the 1RM, no `estimate1RM` projection runs in that case, and the prefix would be misleading. For 2+ reps the chip reads "Estimated 1RM" / "Est. 1RM per hand" (dumbbell variant) as before. The stored effort `value` in the DB still uses the `"Est. 1RM N unit"` shape regardless — the `parseOneRM` regex on the read path is just looking for the number; the visible label divergence is UI-only.

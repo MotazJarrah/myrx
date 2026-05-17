@@ -23,6 +23,7 @@ import { Activity, Timer, ChevronRight, Check } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import { useMovements } from '../../src/hooks/useMovements'
+import { SPEED_INPUT_ACTIVITIES, speedMaxTenths } from '../../src/lib/movements'
 import MovementSearch from '../../src/components/MovementSearch'
 import PhantomWheel from '../../src/components/PhantomWheel'
 import AnimateRise from '../../src/components/AnimateRise'
@@ -62,6 +63,13 @@ function formatMmSs(secs: number): string {
 // (`unitLockedBox`, future-proof; cardio doesn't currently have any
 // unit-locked activities but the styling exists for parity).
 const FIELD_HEIGHT = 75
+
+// SPEED_INPUT_ACTIVITIES — the set of 5 machine cardio activities where the
+// user reads speed off the console (Running Treadmill, Stationary Bike,
+// Bike Erg, Air Bike, Elliptical). Imported from movements.ts so the detail
+// page reads from the same authoritative source. See that file for the full
+// rationale (form swaps Time wheel for Speed wheel; detail page swaps pace
+// display for speed display across header / hero / tiles / chart / log list).
 
 function WheelInput({ children }: { children: React.ReactNode }) {
   return (
@@ -109,6 +117,10 @@ export default function Cardio() {
     if (u) setDistUnit(u as 'km' | 'mi')
   }, [profile])
   const [timeStr, setTimeStr] = useState('')
+  // Speed-mode third column (machines in SPEED_INPUT_ACTIVITIES). Same string
+  // shape as distValue (e.g. "10.5" means 10.5 km/h or 10.5 mph). Time is
+  // derived at render-time from speedKmh × distKm — never stored separately.
+  const [speedValue, setSpeedValue] = useState('')
 
   // ── UI state ───────────────────────────────────────────────────────────────
   const [saved,        setSaved]        = useState(false)
@@ -139,23 +151,36 @@ export default function Cardio() {
     if (unitLock === 'km' || unitLock === 'mi') setDistUnit(unitLock)
   }, [unitLock])
 
-  // ── Reset fields when switching modes — every value/time field starts at
-  // its MIN SAVABLE value (NOT min scrollable). The wheels can be scrolled
-  // down to 0 / 0.0, but Save is disabled there (`canSave` requires
-  // distKm > 0 and timeSecs > 0). So defaults sit one notch above zero:
-  //   • Distance → 0.1 (km / mi, the smallest > 0)
-  //   • Time     → 00:01 (one second, the smallest > 0)
-  // Mirrors strength's exercise-load effect (reps 1, weight wheel min,
-  // carry 5 m, isometric 00:01). See CLAUDE.md "Default values: min
-  // savable" for the rule.
+  // Speed-mode detection. Derived from activity name — when the selected
+  // activity is one of the 6 SPEED_INPUT_ACTIVITIES, the form swaps the
+  // Time wheel for a Speed wheel and computes Time from distance ÷ speed.
+  const isSpeedMode = SPEED_INPUT_ACTIVITIES.has(activity)
+
+  // ── Reset fields when switching modes — every dial starts at ZERO
+  // (May 2026 lock — previously they sat at "min savable", e.g. 0.1 km
+  // and 00:01, but that read as pre-filled clutter). With a blank-slate
+  // 0 default the Save button starts disabled (canSave requires
+  // distKm > 0 and timeSecs > 0) and enables as soon as the user dials
+  // anything in.
   useEffect(() => {
-    if (mode === 'duration') { setDistValue('');    setTimeStr('00:01') }
-    else                     { setDistValue('0.1'); setTimeStr('00:01') }
-  }, [mode])
+    if (mode === 'duration') {
+      setDistValue('')
+      setTimeStr('00:00')
+      setSpeedValue('')
+    } else if (isSpeedMode) {
+      setDistValue('0')
+      setSpeedValue('0')
+      setTimeStr('')           // derived from speed × distance, not user-entered
+    } else {
+      setDistValue('0')
+      setTimeStr('00:00')
+      setSpeedValue('')
+    }
+  }, [mode, isSpeedMode])
 
   // ── Clear saved/error on any input change ──────────────────────────────────
   useEffect(() => { setSaved(false); setSaveError('') },
-    [activity, distValue, distUnit, timeStr])
+    [activity, distValue, distUnit, timeStr, speedValue])
 
   // ── Suggestion mode ────────────────────────────────────────────────────────
   const suggestionMode = !isAdmin && !activity && pendingQuery.trim() !== '' &&
@@ -219,14 +244,47 @@ export default function Cardio() {
   }, [user, saved, dbMovements])
 
   // ── Derived state ─────────────────────────────────────────────────────────
+  // distKm + effectiveTimeSecs describe the whole session.
+  //   - Pace mode:  user enters distance + time directly.
+  //   - Speed mode: user enters distance + speed; time = distance ÷ speed.
+  //   - Duration mode (StairMill / Arc Trainer): no distance, just time.
   const distKm = distUnit === 'mi'
     ? (Number(distValue) || 0) * 1.60934
     : (Number(distValue) || 0)
-  const timeSecs = parseTimeStr(timeStr) ?? 0
 
+  // Speed mode: user-entered speed → km/h (convert from mph if needed).
+  const speedKmh = isSpeedMode
+    ? (distUnit === 'mi'
+        ? (Number(speedValue) || 0) * 1.60934
+        : (Number(speedValue) || 0))
+    : 0
+
+  // Derived time in speed mode (seconds) — exact, not rounded yet.
+  const speedModeTimeSecs = (isSpeedMode && distKm > 0 && speedKmh > 0)
+    ? (distKm / speedKmh) * 3600
+    : 0
+
+  // Effective time used everywhere downstream (chip, label, canSave).
+  // In speed mode this is the derived value; otherwise it's parsed from
+  // the user-entered timeStr.
+  const effectiveTimeSecs = isSpeedMode
+    ? Math.round(speedModeTimeSecs)
+    : (parseTimeStr(timeStr) ?? 0)
+
+  // Backwards-compat alias — most existing code reads `timeSecs`.
+  const timeSecs = effectiveTimeSecs
+
+  // The string form of the effective time, used as-is in the saved label.
+  // formatMmSs allows >99 minutes (renders as "120:00"), same as duration
+  // mode does for >1h sessions — parseTimeStr handles both shapes on read.
+  const effectiveTimeStr = isSpeedMode
+    ? formatMmSs(effectiveTimeSecs)
+    : timeStr
+
+  // Pace is computed the same way regardless of input mode — distance ÷ time.
   const livePaceKm: string | null = (() => {
-    if (mode !== 'pace' || distKm <= 0 || !timeSecs) return null
-    const paceSecPerKm = timeSecs / distKm
+    if (mode !== 'pace' || distKm <= 0 || !effectiveTimeSecs) return null
+    const paceSecPerKm = effectiveTimeSecs / distKm
     const m = Math.floor(paceSecPerKm / 60)
     const sc = Math.round(paceSecPerKm % 60)
     return `${m}:${String(sc).padStart(2, '0')}/km`
@@ -235,27 +293,38 @@ export default function Cardio() {
   const livePaceDisplay: string | null = (() => {
     if (!livePaceKm) return null
     if (distUnit !== 'mi') return livePaceKm
-    const paceSecPerMi = (timeSecs / distKm) * 1.60934
+    const paceSecPerMi = (effectiveTimeSecs / distKm) * 1.60934
     const m = Math.floor(paceSecPerMi / 60)
     const sc = Math.round(paceSecPerMi % 60)
     return `${m}:${String(sc).padStart(2, '0')}/mi`
   })()
 
-  const canSave = !!activity?.trim() && (mode === 'pace' ? (distKm > 0 && timeSecs > 0) : timeSecs > 0)
+  const canSave = !!activity?.trim() && (
+    mode === 'pace' ? (distKm > 0 && effectiveTimeSecs > 0) : effectiveTimeSecs > 0
+  )
 
   const saveDisabled = suggestionMode
     ? (suggesting || suggestSent)
     : (saved || !canSave)
 
   // ── Save ───────────────────────────────────────────────────────────────────
+  // Single-format labels only (locked May 2026 — no interval entry mode):
+  //   • Pace:     "Running · 5 km in 37:55"
+  //   • Duration: "StairMill · 15:00"
+  // The user logs their BEST distance × time from any session — could be
+  // a continuous run, or one rep from an interval workout. The plan/queue
+  // logic only reads pace via `value`, so it doesn't care about rep count.
+  // Volume tracking deferred to a future iteration.
   async function saveEffort() {
     if (!user || saved || !canSave) return
     setSaveError('')
 
+    // Speed mode: use the derived effectiveTimeStr — the user entered speed
+    // but storage is uniform across all pace-mode activities ("dist in time").
     const label = mode === 'pace'
-      ? `${activity} · ${parseFloat(Number(distValue).toFixed(3))} ${distUnit} in ${timeStr}`
-      : `${activity} · ${timeStr}`
-    const value = mode === 'pace' ? livePaceKm! : timeStr
+      ? `${activity} · ${parseFloat(Number(distValue).toFixed(3))} ${distUnit} in ${effectiveTimeStr}`
+      : `${activity} · ${effectiveTimeStr}`
+    const value = mode === 'pace' ? livePaceKm! : effectiveTimeStr
 
     const { error } = await supabase.from('efforts').insert({
       user_id: user.id, type: 'cardio', label, value,
@@ -263,7 +332,7 @@ export default function Cardio() {
     if (error) { setSaveError('Failed to save. Try again.'); return }
     setSaved(true)
     setTimeout(() => {
-      setActivity(''); setDistValue(''); setTimeStr('')
+      setActivity(''); setDistValue(''); setTimeStr(''); setSpeedValue('')
       setPendingQuery(''); setMovementKey(k => k + 1)
     }, 1500)
   }
@@ -332,70 +401,160 @@ export default function Cardio() {
           </>
 
         ) : (
-          /* Pace mode */
+          /* Pace mode — single distance + time entry. Log your best effort
+              from any session — could be a continuous run, or one rep from
+              an interval workout. The plan reads the resulting PACE to
+              classify zone, so the data captured is what matters most.
+
+              Speed mode (5 machines in SPEED_INPUT_ACTIVITIES — running
+              treadmill, stationary bike, bike erg, air bike, elliptical)
+              swaps the Time wheel for a Speed wheel; the user reads SPEED
+              off the machine console rather than computing time mentally
+              before logging. Time auto-computes from distance ÷ speed. */
           <>
+            <Text style={s.helpText}>
+              {isSpeedMode
+                ? "Log your distance and the speed you set on the machine. We'll compute the time for you."
+                : 'Log your best distance and time from this session — even a single rep of an interval workout counts.'}
+            </Text>
+
+            {/* Triple grid — two layouts share the same chrome (75 px field
+                height, 8 px gap, 48 px Unit column — all GLOBAL spec from
+                CLAUDE.md). Big-column flex differs by mode:
+
+                Pace mode (outdoor): Distance | Unit | Time
+                  - gridPaceDistance flex 3.0 (Distance carries unit suffix
+                    "26.2 km" — needs extra room)
+                  - gridUnit width 48 (Unit toggle between distance + time)
+                  - gridPaceTime flex 2.1 (Time "25:00" is narrower)
+
+                Speed mode (5 machines): Distance | Speed | Unit
+                  - Both Distance and Speed are decimal wheels with NO unit
+                    suffix (Unit toggle at the end declares the km/mi basis
+                    for both fields — column headers "Distance" and "Speed"
+                    disambiguate the dimension). Both use gridLarge (flex
+                    2.55, symmetric) since their content widths are similar
+                    ("5.0" / "10.5") without the unit suffix dragging.
+                  - gridUnit width 48 at the END.
+            */}
             <View style={s.tripleGrid}>
-              <View style={[s.field, s.gridPaceDistance]}>
-                <Text style={s.label}>Distance</Text>
-                <WheelInput>
-                  {/* Split-reel decimal picker (whole . tenth + static
-                      unit). Same logic + design as the time wheel but
-                      with a `.` static between the reels instead of a
-                      `:`, and a static km/mi suffix after the right
-                      reel. `value` is in TENTHS — 50 → 5.0 km, 262 →
-                      26.2 km. min/max are also in tenths. */}
-                  <PhantomWheel
-                    // Compute the wheel's tenths value from distValue. CAREFUL:
-                    // can't use `Number(distValue) || 0.1` here — JS treats 0 as
-                    // falsy, so the moment the user scrolls all the way down and
-                    // distValue becomes '0', the `||` would short-circuit to 0.1
-                    // and the wheel would snap back from 0.0 → 0.1. The ternary
-                    // distinguishes "empty string" (default to 0.1 km savable
-                    // min) from "literal zero" (let the wheel sit at 0.0). Save
-                    // stays disabled at 0.0 via the canSave check below.
-                    value={distValue === '' ? 1 : Math.max(0, Math.round(Number(distValue) * 10))}
-                    onChange={(tenths) => setDistValue(String(tenths / 10))}
-                    decimal="XX.X"
-                    min={0} max={500}
-                    unit={distUnit}
-                  />
-                </WheelInput>
-              </View>
-              <View style={[s.field, s.gridUnit]}>
-                <Text style={s.label}>Unit</Text>
-                {unitLock ? (
-                  <View style={s.unitLockedBox}><Text style={s.unitLockedText} numberOfLines={1}>{unitLock}</Text></View>
-                ) : (
-                  <UnitToggle value={distUnit} options={['km', 'mi'] as const} onChange={setDistUnit} vertical />
-                )}
-              </View>
-              <View style={[s.field, s.gridPaceTime]}>
-                <Text style={s.label}>Time</Text>
-                <WheelInput>
-                  {/* Pace-mode Time uses split-reel mm:ss. Cap at 99:59 —
-                      two-digit-minutes ceiling (matches what a user
-                      could plausibly log for a pace-tracked activity;
-                      anything beyond is duration-mode territory).
-                      Seconds reel keeps the standard 0-59 range. */}
-                  <PhantomWheel
-                    value={parseTimeStr(timeStr) || 0}
-                    onChange={(secs) => setTimeStr(formatMmSs(secs))}
-                    time="mm:ss"
-                    maxMinutes={99}
-                  />
-                </WheelInput>
-              </View>
+              {isSpeedMode ? (
+                <>
+                  {/* Distance — no unit suffix (toggle at end declares it) */}
+                  <View style={[s.field, s.gridLarge]}>
+                    <Text style={s.label}>Distance</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={distValue === '' ? 1 : Math.max(0, Math.round(Number(distValue) * 10))}
+                        onChange={(tenths) => setDistValue(String(tenths / 10))}
+                        decimal="XX.X"
+                        min={0} max={500}
+                      />
+                    </WheelInput>
+                  </View>
+                  {/* Speed — no unit suffix; column header tells the user
+                      what dimension this is (km/h or mph implied by toggle).
+                      Max scrollable range is per-machine (see
+                      `speedMaxTenths` in `movements.ts`) — caps slightly
+                      above each machine's realistic top speed so users
+                      can't dial in physically impossible numbers but
+                      genuine sprint bursts still fit. */}
+                  <View style={[s.field, s.gridLarge]}>
+                    <Text style={s.label}>Speed</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={speedValue === '' ? 1 : Math.max(0, Math.round(Number(speedValue) * 10))}
+                        onChange={(tenths) => setSpeedValue(String(tenths / 10))}
+                        decimal="XX.X"
+                        min={0} max={speedMaxTenths(activity, distUnit)}
+                      />
+                    </WheelInput>
+                  </View>
+                  {/* Unit toggle at the END — same chrome as pace mode but
+                      moved here so the two related decimal fields sit
+                      side-by-side without the toggle splitting them. */}
+                  <View style={[s.field, s.gridUnit]}>
+                    <Text style={s.label}>Unit</Text>
+                    {unitLock ? (
+                      <View style={s.unitLockedBox}><Text style={s.unitLockedText} numberOfLines={1}>{unitLock}</Text></View>
+                    ) : (
+                      <UnitToggle value={distUnit} options={['km', 'mi'] as const} onChange={setDistUnit} vertical />
+                    )}
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={[s.field, s.gridPaceDistance]}>
+                    <Text style={s.label}>Distance</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={distValue === '' ? 1 : Math.max(0, Math.round(Number(distValue) * 10))}
+                        onChange={(tenths) => setDistValue(String(tenths / 10))}
+                        decimal="XX.X"
+                        min={0} max={500}
+                        unit={distUnit}
+                      />
+                    </WheelInput>
+                  </View>
+                  <View style={[s.field, s.gridUnit]}>
+                    <Text style={s.label}>Unit</Text>
+                    {unitLock ? (
+                      <View style={s.unitLockedBox}><Text style={s.unitLockedText} numberOfLines={1}>{unitLock}</Text></View>
+                    ) : (
+                      <UnitToggle value={distUnit} options={['km', 'mi'] as const} onChange={setDistUnit} vertical />
+                    )}
+                  </View>
+                  <View style={[s.field, s.gridPaceTime]}>
+                    <Text style={s.label}>Time</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={parseTimeStr(timeStr) || 0}
+                        onChange={(secs) => setTimeStr(formatMmSs(secs))}
+                        time="mm:ss"
+                        maxMinutes={99}
+                      />
+                    </WheelInput>
+                  </View>
+                </>
+              )}
             </View>
 
-            {livePaceDisplay ? (
-              <ChipAmber>
-                <Activity size={14} color={palette.amber[400]} />
-                <Text style={s.chipLabel}>Pace</Text>
-                <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
-                  {livePaceDisplay}
-                </Text>
-              </ChipAmber>
-            ) : null}
+            {/* Live chip(s) below the grid.
+                  - Pace mode (user entered time):    one chip showing Pace.
+                  - Speed mode (user entered speed):  TWO chips — Time
+                    (primary, what the user usually wants to see fall out)
+                    and Pace (secondary, what the system stores + classifies
+                    zone with). Both render once distance + speed are > 0. */}
+            {isSpeedMode ? (
+              effectiveTimeSecs > 0 && livePaceDisplay ? (
+                <>
+                  <ChipAmber>
+                    <Timer size={14} color={palette.amber[400]} />
+                    <Text style={s.chipLabel}>Session time</Text>
+                    <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
+                      {fmtSecs(effectiveTimeSecs)}
+                    </Text>
+                  </ChipAmber>
+                  <ChipAmber>
+                    <Activity size={14} color={palette.amber[400]} />
+                    <Text style={s.chipLabel}>Pace</Text>
+                    <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
+                      {livePaceDisplay}
+                    </Text>
+                  </ChipAmber>
+                </>
+              ) : null
+            ) : (
+              livePaceDisplay ? (
+                <ChipAmber>
+                  <Activity size={14} color={palette.amber[400]} />
+                  <Text style={s.chipLabel}>Pace</Text>
+                  <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
+                    {livePaceDisplay}
+                  </Text>
+                </ChipAmber>
+              ) : null
+            )}
           </>
         )}
 
@@ -466,6 +625,20 @@ export default function Cardio() {
                     <>
                       <Text style={s.listRowSub}>Best time</Text>
                       <Text style={s.listRowVal}>{fmtSecs(act.secs)}</Text>
+                    </>
+                  ) : SPEED_INPUT_ACTIVITIES.has(act.name) ? (
+                    /* Speed machines — show best speed (km/h or mph) instead
+                       of best pace. act.secs is pace seconds per km regardless
+                       of how it was entered (storage is uniform). Convert to
+                       speed_kmh = 3600 / secs, then to mph if needed. */
+                    <>
+                      <Text style={s.listRowSub}>Best speed</Text>
+                      <Text style={s.listRowVal}>{(() => {
+                        if (!act.secs || act.secs <= 0) return '—'
+                        const kmh = 3600 / act.secs
+                        const v   = distUnit === 'mi' ? kmh / 1.60934 : kmh
+                        return `${v.toFixed(1)} ${distUnit === 'mi' ? 'mph' : 'km/h'}`
+                      })()}</Text>
                     </>
                   ) : (
                     <>
