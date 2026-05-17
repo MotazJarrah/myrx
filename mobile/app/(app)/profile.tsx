@@ -1729,10 +1729,13 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
   return (
     <View style={s.formGap}>
 
-      {/* Coach privacy — only for end-users (admins ARE the coach). */}
+      {/* Chat privacy — only for end-users (admins ARE the coach). The
+          two toggles below control what the coach sees in the chat panel
+          — online status (live activity dot) and last-seen timestamp.
+          Both default to ON. */}
       {!isAdmin && (
         <AnimateRise delay={0} style={s.chatCard}>
-          <Text style={[s.cardLabel, s.chatCardLabel]}>Coach privacy</Text>
+          <Text style={[s.cardLabel, s.chatCardLabel]}>Chat privacy</Text>
           <Pressable onPress={toggleShareOnline} style={s.chatRowBtn}>
             <View style={s.chatRowText}>
               <Text style={s.chatRowTitle}>Share online status</Text>
@@ -1836,37 +1839,42 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
             <Text style={[s.errorText, { color: colors.primary }]}>Password updated</Text>
           </View>
         ) : null}
-        <Pressable
-          onPress={handlePasswordChange}
-          disabled={pwdBusy}
-          style={[s.saveBtn, pwdBusy ? s.saveBtnDisabled : null]}
-        >
-          {pwdBusy ? (
-            <View style={s.saveBtnInner}>
-              <ActivityIndicator size="small" color={colors.primaryForeground} />
-              <Text style={s.saveBtnText}>Updating…</Text>
-            </View>
-          ) : (
-            <Text style={s.saveBtnText}>Update password</Text>
-          )}
-        </Pressable>
+        {/* Button only fires when all three fields have content AND we
+            aren't mid-submit. The disabled state styles still apply so
+            the user sees a muted button until they've filled in the
+            form — clear visual feedback that the action isn't available
+            yet. The actual VALIDATION (length / match / current correct)
+            still happens inside handlePasswordChange so we can show
+            inline error banners; this gate just prevents premature
+            submits with empty fields. */}
+        {(() => {
+          const allFilled = pwdCurrent.length > 0 && pwdNext.length > 0 && pwdConfirm.length > 0
+          const canSubmit = allFilled && !pwdBusy
+          return (
+            <Pressable
+              onPress={handlePasswordChange}
+              disabled={!canSubmit}
+              style={[s.saveBtn, !canSubmit ? s.saveBtnDisabled : null]}
+            >
+              {pwdBusy ? (
+                <View style={s.saveBtnInner}>
+                  <ActivityIndicator size="small" color={colors.primaryForeground} />
+                  <Text style={s.saveBtnText}>Updating…</Text>
+                </View>
+              ) : (
+                <Text style={s.saveBtnText}>Update password</Text>
+              )}
+            </Pressable>
+          )
+        })()}
       </AnimateRise>
 
-      {/* About row — version, legal docs. Moved here from the old SettingsTab
-          since "Security" is the natural home for app-metadata / legal-info
-          links (low-frequency, advanced). */}
-      <AnimateRise delay={60} style={s.chatCard}>
-        <Pressable
-          onPress={() => router.push('/(app)/about' as any)}
-          style={s.chatRowBtn}
-        >
-          <View style={s.chatRowText}>
-            <Text style={s.chatRowTitle}>About MyRX</Text>
-            <Text style={s.chatRowSub}>Version, legal documents, and licenses</Text>
-          </View>
-          <ChevronRight size={16} color={colors.mutedForeground} />
-        </Pressable>
-      </AnimateRise>
+      {/* About moved out — it's its own destination page (/(app)/about)
+          accessed via a standalone row below the tab carousel rather
+          than nested inside Security. Keeps the Security tab focused
+          on what it actually IS (auth / privacy) instead of mixing in
+          metadata links. See the EditProfile render below for where
+          the standalone About row now lives. */}
 
       {/* Biometric password modal — only shown while enabling biometric */}
       <Modal
@@ -2238,6 +2246,22 @@ export default function EditProfile() {
             ))}
           </ScrollView>
         </View>
+
+        {/* About — standalone row below the tab carousel. NOT nested
+            inside any tab because About is genuinely its own destination
+            (route /(app)/about) — version, legal documents, licenses —
+            not a setting the user toggles. Always visible regardless of
+            which tab is active. */}
+        <Pressable
+          onPress={() => router.push('/(app)/about' as any)}
+          style={s.aboutRow}
+        >
+          <View style={s.chatRowText}>
+            <Text style={s.chatRowTitle}>About MyRX</Text>
+            <Text style={s.chatRowSub}>Version, legal documents, and licenses</Text>
+          </View>
+          <ChevronRight size={16} color={colors.mutedForeground} />
+        </Pressable>
 
       </View>
     </ScrollView>
@@ -2667,6 +2691,20 @@ const s = StyleSheet.create({
     borderRadius: 16,
     padding: 24,
     gap: 12,
+  },
+
+  // Standalone About row — sits below the tab carousel, always visible
+  // regardless of which tab is active. Same chrome as a chatRowBtn but
+  // with extra top margin so it's visually separated from the tab
+  // content (signals "this is page-level, not part of a tab").
+  aboutRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: 12,
+    borderColor: colors.border, borderWidth: 1,
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    paddingHorizontal: 16, paddingVertical: 14,
+    marginTop: 12,
   },
   // `labelCls + ' mb-1'` on web — 4px extra below the "Chat" label
   chatCardLabel: { marginBottom: 4 },
