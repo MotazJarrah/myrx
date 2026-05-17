@@ -1752,15 +1752,16 @@ function SwimmingConsolidatedDetail({
   swimUnit: 'm' | 'yd'
   onDelete: (id: string) => void
 }) {
-  // Determine the most-recent stroke from the combined efforts list.
-  // Falls back to freestyle if nothing's logged yet.
+  // Determine the HARDEST stroke the user has actually logged. Mirrors
+  // BW's "default landing = highest logged tier" rule. SWIM_STROKE_ORDER
+  // is hardest → easiest (butterfly first), so iterate forward and pick
+  // the first stroke with at least one logged effort. If nothing's
+  // logged, fall back to freestyle (most users start there and the
+  // empty-state card on FREE reads as the most natural "log your first
+  // swim" prompt).
   const defaultStroke: SwimStroke = useMemo(() => {
-    const sorted = [...efforts].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    )
-    for (const e of sorted) {
-      const stroke = parseSwimStroke(e.label)
-      if (stroke) return stroke
+    for (const stroke of SWIM_STROKE_ORDER) {
+      if (efforts.some(e => parseSwimStroke(e.label) === stroke)) return stroke
     }
     return 'freestyle'
   }, [efforts])
@@ -1797,12 +1798,19 @@ function SwimmingConsolidatedDetail({
   // (smooth slide), and direct body swipes scroll natively then sync state
   // via onMomentumScrollEnd. Both gestures converge through navigateStroke.
   //
-  // slotWidth is pre-seeded to (windowWidth − page padding) so the slots
-  // render at near-final width on first paint — eliminates the 0 → N pop
-  // that would otherwise cause LinearTransition jank inside SwimmingDetail.
+  // slotWidth pre-seed: the ScrollView wrapper below uses
+  // `marginHorizontal: -PAGE_PADDING_HORIZONTAL` to bleed the slots edge-
+  // to-edge, so its measured width is `windowWidth` (the full screen),
+  // NOT `windowWidth − page padding`. Pre-seeding with the wrong value
+  // (winWidth − 32) caused a ~32 px misalignment on first paint: the
+  // slots rendered too narrow, scrollTo landed on a fractional position,
+  // and the user saw a sliver of the previous slot on the left edge.
+  // Pre-seeding with the FULL window width matches what onLayout will
+  // eventually measure, so the initial scrollTo lands exactly on the
+  // active slot's boundary.
   const PAGE_PADDING_HORIZONTAL = 16
   const winWidth = useWindowDimensions().width
-  const [slotWidth, setSlotWidth] = useState(Math.max(0, winWidth - PAGE_PADDING_HORIZONTAL * 2))
+  const [slotWidth, setSlotWidth] = useState(winWidth)
 
   const scrollRef = useRef<ScrollView>(null)
 

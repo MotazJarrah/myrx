@@ -158,6 +158,16 @@ This is the BIG one — the canonical pattern for switching between variants of 
 2. **Pill row** — single pill in the center showing the active variant's short label (e.g., `PUSH`, `FREE`, `STRENGTH`, `BAND`). Flanked by pulsing chevrons (Pattern 3) on both sides. Wrapped in `<GestureDetector gesture={pillSwipeGesture}>`. Chevrons only render on the side where a navigation target exists (no wrap at the carousel ends).
 3. **Paged ScrollView** — `horizontal pagingEnabled` with `showsHorizontalScrollIndicator={false}` and `decelerationRate="fast"`. One slot per variant. Each slot is a fixed `width: slotWidth` and contains the body content for that variant (rep-max projections + hero + chart + log list, or whatever the page renders).
 
+**Variant order in the carousel (LOCKED):**
+
+- When variants have a clear HARDNESS / INTENSITY / PROGRESSION ranking, the **hardest variant goes LEFTMOST** (slot 0). Easier variants follow to the right. Examples currently in the app:
+  - BW assist tiers: `FULL RX → BAND → KNEE → BAND+KNEE` (no-assist hardest, most-assist easiest)
+  - Weighted-standard adp zones: `STRENGTH → HYPERTROPHY → ENDURANCE` (heaviest load hardest, lightest easiest)
+  - Swim strokes: `FLY → BREAST → BACK → FREE` (butterfly technically + physiologically hardest; freestyle easiest)
+- When variants are PARALLEL (different muscle groups, equipment configs, or stylistic choices with no clean hardness ordering), the order is arbitrary — pick what's intuitive. Example: Sled Drag `PUSH | PULL` (push is leg-dominant, pull is posterior-chain dominant — different stimuli, neither "harder").
+- **Default landing slot on first mount**: the LEFTMOST variant the user has actually logged. For BW that's the highest LOGGED tier (Full RX if reached, else next-down). For Swimming, the hardest stroke the user has logged (FLY if logged, else BREAST, else BACK, else FREE; fallback to FREE if nothing logged). For Sled Drag, whichever variant has the most-recent effort (since there's no hardness ranking to default to). This is implemented as a forward iteration over `VARIANT_ORDER` returning the first variant with a logged effort.
+- Why "hardest logged" not "always hardest": landing on a variant the user has never trained means they open the page to an empty-state card, which is poor UX. "Hardest logged" surfaces the user's frontier achievement — the most-impressive result they have.
+
 **Constants (LOCKED — copy verbatim, do not retune):**
 
 ```
@@ -189,8 +199,12 @@ PAGE_PADDING_HORIZONTAL = 16        // outer padding of page; used in slotWidth
 
 **slotWidth handling (CRITICAL — first-paint smoothness):**
 
-- **Pre-seed** the initial `slotWidth` state with `Math.max(0, windowWidth - PAGE_PADDING_HORIZONTAL * 2)`. If you let it start at 0, the slots render as 0-px-wide on first paint and pop to full width when `onLayout` fires, which causes the inner detail content to lag behind the header by one frame.
-- `onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}` on the ScrollView's wrapper View — still wire this up, because the pre-seed isn't perfect (split view, orientation, dynamic-island insets can differ slightly). The measurement refinement happens silently because the pre-seed is sub-pixel accurate.
+- **Pre-seed** the initial `slotWidth` state. The pre-seeded value MUST match what `onLayout` will eventually measure for the ScrollView wrapper. The right formula depends on whether the wrapper uses the negative-margin "edge-to-edge" trick:
+  - **No negative-margin** (wrapper sits inside the normal page padding) → pre-seed `windowWidth − PAGE_PADDING_HORIZONTAL * 2` (= `windowWidth − 32`). Example: `BodyweightConsolidatedBlock`.
+  - **With negative-margin** (wrapper bleeds edge-to-edge via `marginHorizontal: -PAGE_PADDING_HORIZONTAL`) → pre-seed `windowWidth`. Example: `SwimmingConsolidatedDetail`, `SledDragConsolidatedDetail`. The wrapper's measured width is the full screen because the negative margin cancels the page padding.
+- Mismatched pre-seed causes a ~32 px alignment bug on first paint: the slots render at the wrong width, the initial `scrollTo(idx * slotWidth)` lands on a fractional pixel boundary, and the user sees a sliver of the adjacent slot at the screen edge. Pattern was originally introduced for BW and copy-pasted into the negative-margin wrappers without adjusting — leading to a real bug surfaced in May 2026. Always pick the formula based on the wrapper's actual width.
+- If you let it start at 0, the slots render as 0-px-wide on first paint and pop to full width when `onLayout` fires, which causes the inner detail content to lag behind the header by one frame. NEVER ship with `useState(0)`.
+- `onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}` on the ScrollView's wrapper View — still wire this up, because the pre-seed isn't perfect (split view, orientation, dynamic-island insets can differ slightly). The measurement refinement happens silently because the pre-seed is sub-pixel accurate when the formula is right.
 - For BW specifically, also gate `LinearTransition` off for the first 2 RAFs after mount so any sub-pixel refinement doesn't animate as a layout change.
 
 **Initial scrollTo (CRITICAL — landing on the right slot):**

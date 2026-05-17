@@ -118,8 +118,15 @@ export function speedMaxTenths(activity: string, distUnit: 'km' | 'mi'): number 
 
 export type SwimStroke = 'freestyle' | 'backstroke' | 'breaststroke' | 'butterfly'
 
+// Slot order — HARDEST first (left → right) per the universal carousel
+// pattern (matches BW assist tiers: FULL RX → BAND → KNEE → BAND+KNEE,
+// and adp zones: STRENGTH → HYPERTROPHY → ENDURANCE). Butterfly is the
+// most technically demanding stroke (dolphin kick + simultaneous over-
+// head arms) and physiologically the costliest per length; freestyle
+// is the easiest / most common. The order also drives default landing
+// in the consolidated detail page (lands on the hardest LOGGED stroke).
 export const SWIM_STROKE_ORDER: readonly SwimStroke[] =
-  ['freestyle', 'backstroke', 'breaststroke', 'butterfly'] as const
+  ['butterfly', 'breaststroke', 'backstroke', 'freestyle'] as const
 
 export const SWIM_STROKE_LABELS: Record<SwimStroke, { full: string; short: string }> = Object.freeze({
   freestyle:    { full: 'Freestyle',    short: 'FREE'   },

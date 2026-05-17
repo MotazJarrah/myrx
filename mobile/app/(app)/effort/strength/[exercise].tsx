@@ -3101,11 +3101,18 @@ function SledDragConsolidatedDetail({
   // projections, hero, chart, log) lives inside each slot; the wrapper
   // renders the static page-level header (h1 + pill row) above.
   //
-  // slotWidth is pre-seeded to (windowWidth − page padding) so the slots
-  // render at near-final width on first paint. Matches the BW pattern.
+  // slotWidth pre-seed: the ScrollView wrapper below uses
+  // `marginHorizontal: -PAGE_PADDING_HORIZONTAL` to bleed the slots edge-
+  // to-edge, so its measured width is `windowWidth` (the full screen),
+  // NOT `windowWidth − page padding`. Pre-seeding with `winWidth` matches
+  // what onLayout eventually measures, so the initial scrollTo lands
+  // exactly on the active slot's boundary. The BW consolidated block uses
+  // `winWidth - 32` instead because it doesn't bleed edge-to-edge — its
+  // wrapper sits inside the normal page padding. See CLAUDE.md Pattern 4
+  // "slotWidth handling" for the rule.
   const PAGE_PADDING_HORIZONTAL = 16
   const winWidth = useWindowDimensions().width
-  const [slotWidth, setSlotWidth] = useState(Math.max(0, winWidth - PAGE_PADDING_HORIZONTAL * 2))
+  const [slotWidth, setSlotWidth] = useState(winWidth)
 
   const scrollRef = useRef<ScrollView>(null)
 
