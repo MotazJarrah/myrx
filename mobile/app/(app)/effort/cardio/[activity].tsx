@@ -213,21 +213,21 @@ type ActivityCategory =
   | 'running' | 'rucking'
   | 'cycling' | 'stationary_bike' | 'air_bike'
   | 'rowing' | 'ski_erg' | 'swimming' | 'elliptical'
-  // Duration-mode categories below (May 2026 cleanup removed battle_ropes,
-  // shadow_boxing, speed_bag, vertical_climber — those activities no longer
-  // exist; Group C is just StairMill + Arc Trainer now).
-  | 'stair_climber' | 'arc_trainer'
+  // Duration-mode category. Group C is just StairMill now — Arc Trainer
+  // was removed in the May 17 2026 cleanup as a niche gym machine.
+  | 'stair_climber'
 
 function categorizeActivity(activityName: string): ActivityCategory {
   const lower = activityName.toLowerCase()
 
   // Pace-mode categories (order: most-specific first)
-  if (/swim|aqua/.test(lower))                                  return 'swimming'
+  if (/swim/.test(lower))                                       return 'swimming'
   // "Ski Erg" must match BEFORE "skiing" / "rowing" — the bare-word checks
   // below would otherwise swallow it.
   if (/ski erg/.test(lower))                                    return 'ski_erg'
-  // Outdoor skiing (Skiing, Roller Skiing) shares the ski-erg motion and
-  // gets the same zone prescriptions.
+  // Outdoor skiing shares the ski-erg motion and gets the same zone
+  // prescriptions (Roller Skiing was removed May 17 2026 — niche to
+  // competitive Nordic skiers off-season training only).
   if (/skiing/.test(lower))                                     return 'ski_erg'
   if (/row erg/.test(lower))                                    return 'rowing'
   if (/air bike|assault bike|airdyne/.test(lower))              return 'air_bike'
@@ -237,9 +237,9 @@ function categorizeActivity(activityName: string): ActivityCategory {
   if (/ruck/.test(lower))                                       return 'rucking'
 
   // Duration-mode categories (StairMill only — Stair Climb outdoor was
-  // removed in the May 2026 lifestyle-activity cleanup).
+  // removed in the May 2026 lifestyle-activity cleanup; Arc Trainer
+  // was removed May 17 2026 as a niche gym machine).
   if (/stair/.test(lower))                                      return 'stair_climber'
-  if (/arc trainer/.test(lower))                                return 'arc_trainer'
 
   // Default for run / treadmill / hill running / trail running / anything
   // unmatched. Hill / Trail Running route here even though terrain confounds
@@ -250,11 +250,13 @@ function categorizeActivity(activityName: string): ActivityCategory {
 // Group A — Endurance Athletes. Only this group gets the full E/T/V
 // progression plan. Rucking is also in the cardio list but uses a
 // load + distance progression model rather than pace zones (deferred —
-// see CLAUDE.md). Stair-based machines (StairMill, Arc Trainer) keep
-// their simple duration-tracking page until a round-based progression
-// model is designed for them. Tier-3 lifestyle/recreational activities
-// (Walking, Hiking, Canoeing, etc.) were removed from cardio entirely
-// during the May 2026 cleanup — they weren't training surfaces.
+// see CLAUDE.md). StairMill keeps its simple duration-tracking page
+// until a round-based progression model is designed for it. Tier-3
+// lifestyle/recreational activities (Walking, Hiking, Canoeing, etc.)
+// were removed from cardio entirely during the May 2026 cleanup — they
+// weren't training surfaces. May 17 2026 also removed Aqua Jogging
+// (rehab niche), Roller Skiing (Nordic-skier niche), and Arc Trainer
+// (gym-equipment niche) for similar low-coverage / niche-only reasons.
 const ENDURANCE_ATHLETE_CATEGORIES: ActivityCategory[] = [
   'running', 'cycling', 'stationary_bike', 'air_bike',
   'rowing', 'ski_erg', 'swimming', 'elliptical',
@@ -382,11 +384,6 @@ const DURATION_ZONE_SESSIONS: Record<string, Partial<Record<CardioZone, Duration
     endurance: { durationSecs: 25 * 60 },
     threshold: { durationSecs: 12 * 60, intervalReps: 4 },
     vo2:       { durationSecs: 8 * 60,  intervalReps: 5 },
-  },
-  arc_trainer: {
-    endurance: { durationSecs: 30 * 60 },
-    threshold: { durationSecs: 15 * 60, intervalReps: 4 },
-    vo2:       { durationSecs: 10 * 60, intervalReps: 5 },
   },
 }
 
@@ -801,7 +798,7 @@ function adjustDurationForTimeCap(
 // mid-sentence use ("tempo run", "tempo pedal", ...).
 function getActivityVerb(activity: string): { imperative: string; lower: string } {
   const lower = activity.toLowerCase()
-  if (/swim|aqua/.test(lower))                                    return { imperative: 'Swim',  lower: 'swim'  }
+  if (/swim/.test(lower))                                         return { imperative: 'Swim',  lower: 'swim'  }
   if (/row erg/.test(lower))                                      return { imperative: 'Row',   lower: 'row'   }
   if (/ski erg|skiing/.test(lower))                               return { imperative: 'Ski',   lower: 'ski'   }
   if (/cycl|bike|spin|stationary/.test(lower))                    return { imperative: 'Pedal', lower: 'pedal' }
@@ -1408,15 +1405,15 @@ function PaceDetail({
 function DurationDetail({
   activity, efforts, onDelete,
 }: { activity: string; efforts: Effort[]; onDelete: (id: string) => void }) {
-  // Duration mode (Group C — machines without distance display: StairMill +
-  // Arc Trainer) is a simple tracking page in v1. No zones, no progression
-  // queue — those are Endurance-Athlete concepts that don't map cleanly to
-  // step-based conditioning work. We'll design a separate progression model
-  // for this group later. The May 2026 cleanup removed Battle Ropes / Shadow
-  // Boxing / Speed Bag / VersaClimber / Jacob's Ladder entirely (the first
-  // three weren't measurable in a way the rest of the system could use; the
-  // last two were niche enough that removing them simplified the cardio list
-  // without meaningful coverage loss). See CLAUDE.md.
+  // Duration mode (Group C — StairMill, the only remaining machine without
+  // a distance display) is a simple tracking page in v1. No zones, no
+  // progression queue — those are Endurance-Athlete concepts that don't map
+  // cleanly to step-based conditioning work. We'll design a separate
+  // progression model for this group later. May 2026 cleanup removed Battle
+  // Ropes / Shadow Boxing / Speed Bag / VersaClimber / Jacob's Ladder
+  // entirely (not measurable in a useful way / too niche); May 17 2026
+  // cleanup removed Arc Trainer for the same niche-equipment reason. See
+  // CLAUDE.md.
 
   let bestSecs = 0
   efforts.forEach(e => {

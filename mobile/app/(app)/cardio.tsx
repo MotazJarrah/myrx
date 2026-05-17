@@ -247,7 +247,7 @@ export default function Cardio() {
   // distKm + effectiveTimeSecs describe the whole session.
   //   - Pace mode:  user enters distance + time directly.
   //   - Speed mode: user enters distance + speed; time = distance ÷ speed.
-  //   - Duration mode (StairMill / Arc Trainer): no distance, just time.
+  //   - Duration mode (StairMill): no distance, just time.
   const distKm = distUnit === 'mi'
     ? (Number(distValue) || 0) * 1.60934
     : (Number(distValue) || 0)

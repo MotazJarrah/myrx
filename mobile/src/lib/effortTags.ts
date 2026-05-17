@@ -109,10 +109,14 @@ function getStrengthSubtype(exerciseName: string): string {
 function getCardioSubtype(activityName: string): string {
   const lower = activityName.toLowerCase()
 
-  if (/crab walk|bear crawl|low crawl/.test(lower)) return 'Mobility'
-  if (/agility|carioca|lateral shuffle|line drill|shuttle|box step over|slideboard/.test(lower)) return 'Agility'
-  if (/battle rope|jump rope|speed bag|shadow box/.test(lower)) return 'Metcon'
-  if (/run|sprint|jog|trail|walk|hik|ruck|ice skat|inline skat|stair climb|cross country|roller ski/.test(lower)) return 'Endurance'
+  // May 2026 cleanup: Mobility/Agility/Metcon regexes removed — the matching
+  // movements (crab walk, bear crawl, low crawl, agility drills, battle ropes,
+  // jump rope, speed bag, shadow boxing) are gone from the cardio list.
+  // May 17 2026 cleanup: walk/hik/ice-skat/inline-skat/stair-climb/aqua/
+  // canoe/kayak/paddle/sup/roller-ski regexes left in place for back-compat
+  // with any orphan historical effort labels — the movements themselves are
+  // removed from the cardio list but old logs may still carry these names.
+  if (/run|sprint|jog|trail|walk|hik|ruck|ice skat|inline skat|stair climb|roller ski/.test(lower)) return 'Endurance'
   if (/cycl|bike|spin/.test(lower)) return 'Cycling'
   if (/row|canoe|kayak|paddle|sup|paddleboard|ski erg/.test(lower)) return 'Rowing'
   if (/swim|aqua/.test(lower)) return 'Swimming'
