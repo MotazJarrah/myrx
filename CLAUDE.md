@@ -71,6 +71,7 @@ MyRX/
 - **PLAIN-ENGLISH PLANS (MANDATORY).** When the user asks for a plan or a breakdown, write it in plain language they can read without being a coder. No code snippets, no file paths in the middle of sentences, no formulas, no library names dropped without explanation, no acronyms without a parenthetical. Describe the visible behaviour or end-user outcome, then explain the change in product-manager terms. Save the code/formula/file-path talk for the actual implementation turn. This is a separate rule from the numbered-plan rule — both apply at once.
 - **ONE QUESTION AT A TIME ON COMPLEX REBUILDS (MANDATORY).** For larger design rebuilds where many elements need discussion (multiple visual tweaks, multiple behavioural changes, multiple copy edits, etc.) — when the user says "break it down" / "walk me through it" / asks for the breakdown of a complex change — present ONE numbered question at a time, not the whole list. For each question include: (a) the issue or decision point in plain language, (b) one or two proposals, (c) the assistant's recommendation and why. WAIT for the user's answer before moving to the next question. Do not batch four questions at once and expect the user to answer all of them in one message. The whole-plan-up-front presentation is fine when the user explicitly asks for "the plan" or "all of it"; the one-at-a-time mode is for the explicit break-it-down requests. **The trigger phrase "break it down" ALWAYS refers to the active plan / proposal on the table, even if the same message mentions reading or doing something else first (e.g. "read X, break it down" still means "after reading X, break down the active plan one item at a time" — NOT "summarise the contents of X"). When in doubt about what "it" refers to, default to the active plan; if there's no active plan, ask the user "break down what specifically?" rather than guessing.**
 - **CLAUDE.md MISMATCH AUTO-SYNC (MANDATORY).** This file goes stale fast — the user has been burned by the assistant operating on outdated information about what's in the codebase. Whenever the assistant scans a file, runs a check, or reads a value in the system AND finds that the actual state disagrees with what CLAUDE.md currently states (a value's wrong, a default's changed, a path moved, a behaviour's been edited since the doc was written, etc.) — the assistant MUST update CLAUDE.md immediately to reflect the actual state. Timing: BEFORE making any further change if the assistant is about to act on the mismatched info, or AFTER landing the change if the scan was triggered by the change itself. Never leave CLAUDE.md describing a state that doesn't match the codebase. If multiple mismatches are found in one turn, surface them all in the same edit. The doc is the contract between assistant turns — it has to stay accurate or the next turn starts wrong.
+- **WEB-SEARCH-FIRST WHEN STUCK ON A PLATFORM BUG (MANDATORY, locked May 18 2026).** When debugging an Android / iOS / native-platform bug whose symptom is STABLE and REPRODUCIBLE (e.g. "permission Activity launches and auto-dismisses within 20 ms", "build fails at xyz Gradle task", "Kotlin compile errors on a stable RN library"), and the codebase-only diagnostic time exceeds **15 minutes** with no convincing root-cause hypothesis — STOP local diagnostics and run a WebSearch first. Stable platform symptoms are almost always documented somewhere on developer.android.com, developer.apple.com, GitHub issue trackers, or Stack Overflow. The May 18 2026 Health Connect debugging session burned ~30 minutes on local-only diagnostics (checking permission state, querying HC's data store, inspecting MainActivity) before finally web-searching and finding the missing `<activity-alias>` requirement in 2 minutes via the official Android docs. Codebase-only diagnostics ARE useful for asymmetric bugs that depend on YOUR specific app state, but stable platform-API symptoms aren't that — they're the same on every app that hits them, so the answer is already on the public internet. Heuristic: if the symptom would reproduce identically on a brand-new throwaway app, web-search it.
 
 ### Training vocabulary (locked terms — use these names in all UI copy and discussion)
 
@@ -1179,6 +1180,79 @@ Android-only wearable / health-platform funnel. Google Health Connect is the uni
 
 Adding `react-native-health-connect` is a native-module change, so the dev-client APK must be rebuilt via `npx expo run:android` before the integration works on the user's phone. JS Fast Refresh continues to work for everything else, but the Health Connect surface in `ConnectTab` will show as "unavailable" until the user installs the rebuilt APK.
 
+**`MainActivity.onCreate` MUST register the permission delegate (LOCKED, May 18 2026):**
+
+`react-native-health-connect` uses a singleton `HealthConnectPermissionDelegate` with a `lateinit var requestPermission: ActivityResultLauncher<...>` that has to be bound to a real `ComponentActivity` via `registerForActivityResult` BEFORE any JS code can tap the "Connect" button. The library does NOT do this binding via its config plugin (the plugin only adds the rationale intent filter). The host app's `MainActivity.onCreate` has to call it explicitly:
+
+```kotlin
+// mobile/android/app/src/main/java/com/myrx/app/MainActivity.kt
+import dev.matinzd.healthconnect.permissions.HealthConnectPermissionDelegate
+
+class MainActivity : ReactActivity() {
+  override fun onCreate(savedInstanceState: Bundle?) {
+    SplashScreenManager.registerOnActivity(this)
+    super.onCreate(null)
+
+    // Must register AFTER super.onCreate() but BEFORE the activity reaches
+    // STARTED state (registerForActivityResult validates lifecycle).
+    HealthConnectPermissionDelegate.setPermissionDelegate(this)
+  }
+}
+```
+
+Without this call, the FIRST permission request crashes with `UninitializedPropertyAccessException: lateinit property requestPermission has not been initialized`. The dev launcher catches that crash and PERSISTS it into `shared_prefs/expo.modules.devlauncher.errorregistry.xml`, which then makes EVERY subsequent cold launch land directly on `DevLauncherErrorActivity` — Metro never gets a bundle fetch, the JS bundle never executes, and the app appears bricked. Recovering requires deleting the prefs file via `adb shell run-as com.myrx.app rm shared_prefs/expo.modules.devlauncher.errorregistry.xml` AND fixing the underlying registration, because otherwise the next "Connect" tap re-triggers the same crash.
+
+The MainActivity edit is preserved across `npx expo prebuild --clean` ONLY if it's done BEFORE the prebuild (clean prebuild wipes `android/`). When you have to do a clean prebuild for an unrelated reason, re-apply this patch immediately after.
+
+**If the dev launcher ever lands on the red error screen with the bundle never loading, ALWAYS check `errorregistry.xml` first** — `adb shell run-as com.myrx.app cat shared_prefs/expo.modules.devlauncher.errorregistry.xml` shows you the persisted exception. That's the actual root cause; the visible "error" is just a symptom of the launcher refusing to retry.
+
+**`<activity-alias ViewPermissionUsageActivity>` is REQUIRED for Android 14+ (LOCKED, May 18 2026):**
+
+On Android 14+ devices, Health Connect refuses to show its permission dialog unless the app declares an `<activity-alias>` named `ViewPermissionUsageActivity` with:
+1. An intent filter for `android.intent.action.VIEW_PERMISSION_USAGE` + `android.intent.category.HEALTH_PERMISSIONS`
+2. The `android:permission="android.permission.START_VIEW_PERMISSION_USAGE"` gate
+3. An `android:targetActivity` pointing at a real Activity in the app
+
+Without this alias, `com.android.healthconnect.controller.permissions.request.PermissionsActivity` launches and **auto-dismisses within milliseconds** without ever becoming user-visible. Our wrapper sees an empty permission grant set and reports "No data types granted." The alias is HC's privacy-policy-rationale handshake — it verifies the app can render an explanation of why it needs the data. The target activity doesn't need to actually render a privacy policy for the alias to satisfy HC (MainActivity is fine as a target for v1).
+
+Our `mobile/plugins/withHealthConnectPermissions.js` config plugin adds the alias automatically on every prebuild:
+
+```xml
+<activity-alias
+    android:name="ViewPermissionUsageActivity"
+    android:exported="true"
+    android:targetActivity=".MainActivity"
+    android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+  <intent-filter>
+    <action android:name="android.intent.action.VIEW_PERMISSION_USAGE"/>
+    <category android:name="android.intent.category.HEALTH_PERMISSIONS"/>
+  </intent-filter>
+</activity-alias>
+```
+
+**Diagnosing this specific failure mode:** if Connect taps produce "No data types granted" every time AND the app is NOT in HC's "Your health apps" list at all (apps only get registered there AFTER a successful permission grant), the alias is missing. Confirm with `adb shell cmd package query-activities -a android.intent.action.VIEW_PERMISSION_USAGE -p com.myrx.app` — output must include `com.myrx.app.ViewPermissionUsageActivity`. If empty, the alias didn't make it into the manifest.
+
+**AndroidManifest MUST declare `<queries>` visibility for the Android 14+ HC system module (LOCKED, May 18 2026):**
+
+On Android 14+ devices (Galaxy S25, Pixel 8+, etc.), Health Connect ships as a system module under package `com.google.android.healthconnect.controller` — NOT the legacy `com.google.android.apps.healthdata` that older docs reference. `react-native-health-connect`'s own AndroidManifest declares a `<queries><package>` for ONLY the legacy package, which means on Android 11+ (where package visibility is strict), the HC SDK literally cannot see the system provider on a modern device. The symptom: when the user taps Connect, the HC `PermissionsActivity` AND Android's `GrantPermissionsActivity` both launch and auto-dismiss within ~20 ms with no UI shown, our wrapper returns an empty grant set, and the UI shows "No data types granted — tap Connect again to retry." Tapping again does the same thing every time.
+
+The fix is one extra `<package>` entry inside the existing `<queries>` block. Our `mobile/plugins/withHealthConnectPermissions.js` config plugin (invoked from `app.json` plugins array) now adds this automatically — every prebuild produces a manifest containing:
+
+```xml
+<queries>
+  <intent>
+    <action android:name="android.intent.action.VIEW"/>
+    <category android:name="android.intent.category.BROWSABLE"/>
+    <data android:scheme="https"/>
+  </intent>
+  <package android:name="com.google.android.healthconnect.controller"/>
+</queries>
+```
+
+The legacy `com.google.android.apps.healthdata` query already comes in via the library's own manifest, so we don't need to add it; the new system-module query is what closes the gap.
+
+**Diagnosing this specific failure mode:** if Connect taps produce "No data types granted" every time AND `adb logcat` shows `com.android.healthconnect.controller.permissions.request.PermissionsActivity` + `com.google.android.permissioncontroller.../GrantPermissionsActivity` both being created and destroyed within milliseconds without ever becoming user-visible — the package-visibility query is missing. Confirm with `adb shell dumpsys package com.myrx.app | grep queriesPackages` — if the output doesn't include `com.google.android.healthconnect.controller`, the manifest hasn't been regenerated with the plugin fix.
+
 **User-side prerequisites for Samsung-watch testing:**
 
 1. Samsung Health app installed on the phone, paired with the user's Galaxy Watch.
@@ -1186,14 +1260,42 @@ Adding `react-native-health-connect` is a native-module change, so the dev-clien
 3. Open MyRX → Settings → Connect → tap **Connect** on the Google Health Connect row → grant the 6 data types in HC's system UI.
 4. Tap **Sync now**. Recent workouts + HR samples are logged to console (`console.log('[Health Connect] workouts:', ...)`) and the last-sync stamp updates in the row's sub-text.
 
-**Phase 1.5 / Phase 2 deferrals:**
+**Integration strategy update — direct OAuth/SDK per platform (LOCKED, May 18 2026):**
 
-- **HC → MyRX effort mapping**: convert ExerciseSession records into strength / cardio effort rows. Sport-type enum mapping (ExerciseType=33 → Running, ExerciseType=11 → Cycling, etc.) lives behind this work.
-- **HR series storage**: figure out where HR samples land in MyRX's schema. Likely a new `hr_samples` table or extended `efforts.hr_avg` column on the effort row. Open question, deferred.
-- **Bidirectional sync**: write MyRX effort logs back to HC so the user's primary health app (Samsung Health / Fitbit) sees them too. Requires permission upgrades to `WRITE_EXERCISE` etc.
-- **Background sync**: native background task (WorkManager on Android) that polls HC every N hours without the user opening the app. Significant native scope.
-- **Apple HealthKit**: separate module, separate config plugin, separate UI affordance. Symmetric to Health Connect on the API surface — when it ships, the `ConnectTab` "Apple Health" row becomes functional.
-- **Per-platform OAuth integrations**: Strava / Garmin / Whoop / Polar all expose their own APIs. For Android users, HC covers them automatically (Strava is in HC, Garmin can be pulled via Garmin Connect Mobile, etc.). Dedicated integrations only add value for iOS users until iOS HK ships.
+After the Galaxy S25 HC test surfaced that Samsung Health doesn't share HR or workouts with Health Connect by default (only steps / weight / body fat make it through the bridge — confirmed via the user's Health Connect → Data and access screen on May 18), the product direction is **dedicated direct integrations per platform**, NOT relying on HC as the universal aggregator. The user's call: *"i want everything connected, every platform connected individually"* — coverage matters more than implementation cost.
+
+HC stays in the app as a FALLBACK for users on non-Samsung Android devices whose source apps DO bridge to HC. It's no longer the primary path for Galaxy/Garmin/Whoop/Polar/Fitbit/Strava users.
+
+**The seven integrations on the roadmap:**
+
+1. **Apple HealthKit** — iOS only, native module. No external approval, just App Store review covers HealthKit entitlements.
+2. **Samsung Health SDK** — Android only, native module. Samsung Developer Program approval required (~1-2 weeks).
+3. **Strava** — OAuth2 + REST. No approval delay; just register an API app at https://www.strava.com/settings/api.
+4. **Garmin Health API** — OAuth1.0a + webhooks. Garmin Developer Program approval required (~2-4 weeks).
+5. **Whoop API v1** — OAuth2 + webhooks. Whoop Developer Program approval (~1-2 weeks).
+6. **Polar AccessLink** — OAuth2. Polar Business team approval (~1-2 weeks).
+7. **Fitbit Web API** — OAuth2. Personal-tier app registration is instant; production-tier rate limits need approval.
+
+**Build order (locked May 18 2026):** Strava → Fitbit → Apple HealthKit → Samsung SDK → Garmin → Whoop → Polar. The first three have no external approval delay and can ship sequentially. The last four are gated on developer-program approvals — applications get submitted in parallel with the first-three build work.
+
+**Cross-cutting infrastructure (build once, reuse across all integrations):**
+
+- **OAuth callback worker** at `workers/oauth/` (new Cloudflare Worker) — handles `/oauth/callback/{platform}` endpoints, exchanges authorization codes for refresh tokens, stores tokens encrypted to a per-user `user_integrations` Supabase table.
+- **Webhook receiver worker** at `workers/webhooks/` (new) — accepts POSTs from Garmin and Whoop when new data lands. Maps webhook payload → MyRX effort rows.
+- **`user_integrations` Supabase table** — columns: `user_id`, `platform`, `access_token` (encrypted), `refresh_token` (encrypted), `expires_at`, `scopes`, `connected_at`, `last_synced_at`, `status` ('active'/'disconnected'/'expired'). RLS: users own their rows.
+- **Token-refresh background job** — Cloudflare Worker cron that re-issues access tokens before they expire (Strava: 6hr, Whoop: 1hr, Garmin: 90d, Polar: long-lived, Fitbit: 8hr).
+- **Data normalization layer** in `mobile/src/lib/integrations/` — each platform gets its own `<platform>Mapper.ts` that converts platform-native workouts → MyRX effort schema. Sport-type enum mapping lives there.
+
+**Application content for every developer-program signup** lives in `docs/integrations/developer-program-applications.md` — that's the canonical place. Update that file as each application moves through pending → approved → live.
+
+**Secrets** for OAuth client_secrets and webhook signing keys live in **Cloudflare Worker secrets** (`wrangler secret put`) and **Supabase Edge Function secrets** (Dashboard → Edge Functions → Secrets). Never in tracked files; see "Secrets hygiene (MANDATORY)" further down for the full rules.
+
+**Health Connect bullets that survive this strategy change:**
+
+- HC → MyRX effort mapping: still needed for the HC-as-fallback path. Sport-type enum mapping (ExerciseType=33 → Running, ExerciseType=11 → Cycling) lives behind this work.
+- HR series storage: still an open schema question — likely a new `hr_samples` table or extended `efforts.hr_avg` column. Resolved once we pick a representative integration and see what shape its HR-stream payload arrives in.
+- Bidirectional sync: deferred — write-back to HC is not on the roadmap. Each direct integration is read-only for v1 too; we'll consider write-back per platform as users ask for it.
+- Background sync: deferred until at least one direct integration is live. WorkManager (Android) and BackgroundTasks (iOS) are the right primitives.
 
 ---
 
@@ -1640,6 +1742,45 @@ If the phone can't reach Metro after a network change:
   These rules persist across reboots; you only need to add them once. Both use `profile=private,public` so they apply whether the WiFi network is classified as Private (home) or Public (cafe / hotspot).
 - Worst case, plug in USB and `adb reverse tcp:8081 tcp:8081` again as the fallback.
 
+#### adb-over-WiFi (LOCKED, May 18 2026 — preferred over USB except for the initial setup)
+
+The user explicitly told us not to ask for the USB cable again once wireless adb is established. The cable is needed exactly ONCE to flip the switch; everything afterward — `adb logcat`, `adb shell`, `dumpsys`, `pm list`, etc. — works over WiFi until the phone reboots.
+
+**One-time setup with the cable plugged in:**
+```powershell
+& "$env:ANDROID_HOME\platform-tools\adb.exe" tcpip 5555
+Start-Sleep -Seconds 2
+& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.226:5555
+& "$env:ANDROID_HOME\platform-tools\adb.exe" devices    # should show both endpoints
+```
+
+**Important effects of `adb tcpip 5555`:**
+- The adbd daemon on the phone restarts in TCP mode. Any previous USB endpoint (`R5GYC0VWG4A` style serial) becomes unreachable for a few seconds while the daemon re-binds.
+- **`adb reverse tcp:8081 tcp:8081` is destroyed** by the tcpip flip and CANNOT be re-armed over WiFi (`adb reverse` is a USB-only feature). After `tcpip`, the dev client MUST use the laptop's LAN IP (`http://<laptop-IP>:8081`), not `localhost`. If the LAN bundle stream is flaky, your only USB-tunnel option requires re-plugging AND running `tcpip 5555` again (the USB-mode bit is sticky until reboot or `adb usb`).
+- The WiFi endpoint persists until the phone reboots OR you run `adb usb` to revert. After a reboot, the user has to replug the cable and re-run `adb tcpip 5555` exactly once.
+
+**Discovering the phone's IP without USB:** `adb shell ip route` (over WiFi) returns `10.0.0.0/24 dev wlan0 ... src <IP>`. If even the WiFi adb is dead, ask the user to read it from **Settings → About phone → Status info → IP address** on the device.
+
+**Wireless adb does NOT enable Metro tunneling.** The `adb reverse` trick that lets the phone hit `http://localhost:8081` over USB has no WiFi equivalent. Once you're wireless, the dev client URL MUST be the laptop's LAN IP. If the LAN bundle stream stalls (the `Software caused connection abort` mid-multipart symptom we've hit), the fallback is to physically replug the cable, run `adb tcpip 5555` if you want to stay wireless after, then deep-link the dev client to localhost; OR fix the underlying WiFi flakiness (Windows TCP keepalive / firewall / power-save on the phone's wlan0 chip).
+
+**Do not ask the user to re-plug for diagnostics.** If `adb devices` shows the WiFi endpoint as `10.0.0.226:5555 device`, everything else works the same — `logcat`, `pidof`, `dumpsys`, `pm list packages`, `run-as <pkg>`, `cat shared_prefs/...` all run unchanged over WiFi. The only commands that fail are `adb reverse` and `adb push` to large files (slower but functional).
+
+#### Background-process output buffering (PowerShell pipelines)
+
+A common time-waster: when launching a long-running build via `run_in_background`, **never** end the command with `| Select-Object -Last N` or any other aggregator-style filter. `Select-Object`, `Sort-Object`, `Group-Object`, etc. are all "wait for the entire stream" cmdlets in PowerShell — they buffer until EOF, which means the output file stays empty until the process exits. If you need to keep memory usage low, redirect the full stream and tail later:
+
+```powershell
+# WRONG — output file empty until the build finishes:
+& .\gradlew.bat installDebug 2>&1 | Select-Object -Last 50
+# (Select-Object only emits at EOF)
+
+# RIGHT — output streams live, tail with Bash / Read tool later:
+& .\gradlew.bat installDebug 2>&1
+# (raw stdout/stderr stream straight into the captured background log)
+```
+
+To filter LIVE for specific lines (e.g. `BUILD SUCCESSFUL` / `error:`), use the Monitor tool with `tail -f <output-file> | grep --line-buffered ...` instead of trying to filter inside the PowerShell pipeline.
+
 #### When the dev client APK needs rebuilding (`npx expo run:android`)
 Only when one of these changes:
 - A new native module is added (`npx expo install <pkg>` for anything that has Android/iOS code)
@@ -1648,6 +1789,20 @@ Only when one of these changes:
 - Expo SDK version is bumped
 
 Plain JS / TS / TSX edits (95% of work) hot-reload through Metro — never trigger a rebuild for those.
+
+**Use `npx expo run:android`, NOT raw `gradlew installDebug` (LOCKED, May 18 2026):**
+
+`npx expo run:android` automatically passes an ABI filter that restricts native-lib compilation to ONLY the connected device's architecture — Galaxy S25 is arm64-v8a, so only arm64 native libs get built. Total time on incremental Kotlin-only changes: ~2 min.
+
+Calling `gradlew installDebug` directly does NOT inherit that filter. Gradle then compiles native libs for ALL FOUR ABIs (arm64-v8a, armeabi-v7a, x86, x86_64) which is 4× the CMake work for zero benefit on a physical device. Empirical: same change goes from 2 min → 10+ min that way. Worse: there's no obvious progress signal because clang invocations don't print to stdout, so it looks hung even when it's actively working with 10+ parallel `clang++` processes.
+
+If you MUST call `gradlew` directly (e.g. to bypass an `expo prebuild` step that would clobber a manual file edit), add this to `mobile/android/gradle.properties` first:
+
+```properties
+reactNativeArchitectures=arm64-v8a
+```
+
+That restricts native builds to the one ABI the dev phone needs. Don't commit it though — CI builds the full set for store releases.
 
 #### Daily dev workflow — emulator (fallback only)
 Used when no phone is plugged in. Emulator reaches the host PC at `10.0.2.2:8081`, NOT `localhost` (from inside Android, `localhost` is the emulator itself).
