@@ -795,24 +795,8 @@ function StepLog({ runId, active }) {
 
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground/70 font-medium">
-          Sync progress log
-        </div>
-        {/* Copy button — appears only when there's something to copy.
-            Click → copies HH:MM:SS-prefixed log lines to clipboard,
-            shows a 1.5s "Copied" check-mark confirmation. */}
-        {entries.length > 0 && (
-          <button
-            onClick={copyLog}
-            className="flex items-center gap-1 rounded-md border border-border/40 bg-muted/20 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-            title="Copy log to clipboard"
-          >
-            {copied
-              ? <><Check className="h-3 w-3 text-emerald-400" /> Copied</>
-              : <><Copy className="h-3 w-3" /> Copy</>}
-          </button>
-        )}
+      <div className="text-xs uppercase tracking-wider text-muted-foreground/70 font-medium">
+        Sync progress log
       </div>
       {/* Box is FIXED height (h-48 = 12rem = 192 px). Always exactly
           that tall regardless of entry count, so the panel layout
@@ -854,14 +838,32 @@ function StepLog({ runId, active }) {
           })
         )}
       </div>
-      {!autoScroll && active && (
-        <button
-          onClick={() => { setAuto(true) }}
-          className="text-xs text-amber-400 hover:underline"
-        >
-          ↓ Resume auto-scroll
-        </button>
-      )}
+      {/* Footer row: resume-auto-scroll affordance on the left (only
+          surfaces when the user has scrolled away from the bottom),
+          Copy-to-clipboard button on the right (only when there's
+          content to copy). Both kept low-key so they don't compete
+          with the log content itself. */}
+      <div className="flex items-center justify-between">
+        {!autoScroll && active ? (
+          <button
+            onClick={() => { setAuto(true) }}
+            className="text-xs text-amber-400 hover:underline"
+          >
+            ↓ Resume auto-scroll
+          </button>
+        ) : <span />}
+        {entries.length > 0 && (
+          <button
+            onClick={copyLog}
+            className="flex items-center gap-1 rounded-md border border-border/40 bg-muted/20 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+            title="Copy log to clipboard"
+          >
+            {copied
+              ? <><Check className="h-3 w-3 text-emerald-400" /> Copied</>
+              : <><Copy className="h-3 w-3" /> Copy</>}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
