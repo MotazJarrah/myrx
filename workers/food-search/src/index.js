@@ -877,6 +877,225 @@ export default {
       return json({ ok: true })
     }
 
+    // ── Source-file mirror endpoints (R2 bucket: MIRROR_BUCKET) ───────────────
+    //
+    // Powers the food-library admin UI's drag-and-drop uploader. The two
+    // source ZIPs (USDA FoodData Central + OpenNutrition dataset) live in
+    // R2 under predictable keys:
+    //   usda/current.zip
+    //   on/current.zip
+    // Plus their metadata at:
+    //   usda/meta.json
+    //   on/meta.json   ({ filename, size, uploaded_at, sha256 })
+    //
+    // Uploads use R2 multipart so the admin can push 460 MB files without
+    // hitting the Worker's 100 MB request-body limit. The frontend chunks
+    // the file into ~50 MB parts and POSTs each part separately.
+    //
+    // Endpoints:
+    //   GET    /admin/food-files/status                    list both files + metadata
+    //   POST   /admin/food-files/upload/start              create multipart upload
+    //   PUT    /admin/food-files/upload/part               upload one chunk
+    //   POST   /admin/food-files/upload/complete           finalize multipart
+    //   POST   /admin/food-files/upload/abort              cancel multipart
+    //   DELETE /admin/food-files/:type                     remove uploaded file
+    //   GET    /admin/food-files/:type/download            stream the file (for the
+    //                                                       sync orchestrator)
+    //
+    // `type` must be 'usda' or 'on'. Bearer auth required for all routes
+    // except /download (which uses a separate FOOD_ADMIN_KEY header
+    // identical to the rest of the admin tree).
+    if (pathname === '/admin/food-files/status' && method === 'GET') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      async function readMeta(type) {
+        const obj = await env.MIRROR_BUCKET.get(`${type}/meta.json`)
+        if (!obj) return null
+        try { return JSON.parse(await obj.text()) } catch { return null }
+      }
+      return json({
+        usda: await readMeta('usda'),
+        on:   await readMeta('on'),
+      })
+    }
+
+    if (pathname === '/admin/food-files/upload/start' && method === 'POST') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const body = await request.json().catch(() => ({}))
+      const { type, filename, size } = body
+      if (type !== 'usda' && type !== 'on') return json({ error: 'type must be usda|on' }, 400)
+      if (!filename || typeof size !== 'number') return json({ error: 'filename + size required' }, 400)
+      // Stash temporary metadata so we know which key the multipart
+      // upload is for when the client comes back with parts.
+      const key = `${type}/current.zip`
+      const upload = await env.MIRROR_BUCKET.createMultipartUpload(key)
+      // Track the pending upload so we can clean it up if abandoned.
+      await env.MIRROR_BUCKET.put(`${type}/pending.json`, JSON.stringify({
+        upload_id: upload.uploadId,
+        key,
+        filename,
+        size,
+        started_at: new Date().toISOString(),
+      }))
+      return json({ upload_id: upload.uploadId, key })
+    }
+
+    if (pathname === '/admin/food-files/upload/part' && method === 'PUT') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const uploadId   = url.searchParams.get('upload_id')
+      const partNumber = parseInt(url.searchParams.get('part_number') ?? '0', 10)
+      const type       = url.searchParams.get('type')
+      if (!uploadId || !partNumber || (type !== 'usda' && type !== 'on')) {
+        return json({ error: 'upload_id + part_number + type required' }, 400)
+      }
+      const key = `${type}/current.zip`
+      const upload = env.MIRROR_BUCKET.resumeMultipartUpload(key, uploadId)
+      // Stream the raw request body straight into R2 — no buffering.
+      const part = await upload.uploadPart(partNumber, request.body)
+      return json({ part_number: part.partNumber, etag: part.etag })
+    }
+
+    if (pathname === '/admin/food-files/upload/complete' && method === 'POST') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const body = await request.json().catch(() => ({}))
+      const { upload_id, type, parts, filename, size } = body
+      if (type !== 'usda' && type !== 'on') return json({ error: 'type must be usda|on' }, 400)
+      if (!upload_id || !Array.isArray(parts) || !parts.length) {
+        return json({ error: 'upload_id + parts[] required' }, 400)
+      }
+      const key = `${type}/current.zip`
+      const upload = env.MIRROR_BUCKET.resumeMultipartUpload(key, upload_id)
+      // R2 expects { partNumber, etag } shape — convert from snake_case.
+      const r2Parts = parts.map(p => ({
+        partNumber: p.part_number ?? p.partNumber,
+        etag:       p.etag,
+      }))
+      await upload.complete(r2Parts)
+      const meta = {
+        filename:    filename ?? 'unknown.zip',
+        size:        size ?? 0,
+        uploaded_at: new Date().toISOString(),
+      }
+      await env.MIRROR_BUCKET.put(`${type}/meta.json`, JSON.stringify(meta))
+      // Clear the pending marker.
+      try { await env.MIRROR_BUCKET.delete(`${type}/pending.json`) } catch {}
+      return json({ ok: true, type, ...meta })
+    }
+
+    if (pathname === '/admin/food-files/upload/abort' && method === 'POST') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const body = await request.json().catch(() => ({}))
+      const { upload_id, type } = body
+      if (type !== 'usda' && type !== 'on') return json({ error: 'type must be usda|on' }, 400)
+      if (!upload_id) return json({ error: 'upload_id required' }, 400)
+      const key = `${type}/current.zip`
+      try {
+        const upload = env.MIRROR_BUCKET.resumeMultipartUpload(key, upload_id)
+        await upload.abort()
+      } catch { /* already aborted / non-existent */ }
+      try { await env.MIRROR_BUCKET.delete(`${type}/pending.json`) } catch {}
+      return json({ ok: true })
+    }
+
+    const fileTypeMatch = pathname.match(/^\/admin\/food-files\/(usda|on)$/)
+    if (fileTypeMatch && method === 'DELETE') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const type = fileTypeMatch[1]
+      await Promise.all([
+        env.MIRROR_BUCKET.delete(`${type}/current.zip`).catch(() => {}),
+        env.MIRROR_BUCKET.delete(`${type}/meta.json`).catch(() => {}),
+        env.MIRROR_BUCKET.delete(`${type}/pending.json`).catch(() => {}),
+      ])
+      return json({ ok: true })
+    }
+
+    const fileDownloadMatch = pathname.match(/^\/admin\/food-files\/(usda|on)\/download$/)
+    if (fileDownloadMatch && method === 'GET') {
+      // The sync orchestrator (GHA) calls this to fetch the mirrored
+      // file. Bearer auth required so the URL isn't public.
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const type = fileDownloadMatch[1]
+      const obj = await env.MIRROR_BUCKET.get(`${type}/current.zip`)
+      if (!obj) return json({ error: 'File not uploaded' }, 404)
+      return new Response(obj.body, {
+        status: 200,
+        headers: {
+          ...CORS,
+          'Content-Type':   'application/zip',
+          'Content-Length': String(obj.size),
+        },
+      })
+    }
+
+    // ── GET /admin/sync/diagnose ──────────────────────────────────────────────
+    // One-shot connectivity test: try to reach USDA's CDN from this Worker.
+    // GHA runners can't resolve fdc-datasets.ars.usda.gov, but Cloudflare
+    // Workers run on Cloudflare's global network — completely different
+    // egress IPs and DNS. If the Worker can reach USDA, we have a proxy
+    // path forward (Worker fetches → streams to GHA). If it can't, we
+    // need to find another solution.
+    //
+    // Returns: { worker_reachable: bool, status: number, head_bytes: number, error?: string }
+    if (pathname === '/admin/sync/diagnose' && method === 'GET') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const testUrl = 'https://fdc-datasets.ars.usda.gov/FoodData_Central_csv_2026-04-30.zip'
+
+      // Run multiple test variations to triangulate what USDA is rejecting:
+      //   1. Plain GET, no headers
+      //   2. GET with browser-like User-Agent
+      //   3. Try the parent domain root (catches host-level issues vs path-level)
+      //   4. Try the directory page on fdc.nal.usda.gov (the SPA host)
+      const tests = []
+
+      async function runTest(name, url, init = {}) {
+        try {
+          const res = await fetch(url, init)
+          let bodySnippet = ''
+          try {
+            const buf = await res.arrayBuffer()
+            bodySnippet = new TextDecoder().decode(buf.slice(0, 200))
+          } catch {}
+          tests.push({
+            name,
+            url,
+            status: res.status,
+            cf_ray: res.headers.get('cf-ray'),
+            server: res.headers.get('server'),
+            cf_cache_status: res.headers.get('cf-cache-status'),
+            content_type: res.headers.get('content-type'),
+            content_length: res.headers.get('content-length'),
+            body_snippet: bodySnippet,
+          })
+        } catch (err) {
+          tests.push({
+            name, url,
+            error: err.message,
+            cause: err.cause?.code || null,
+          })
+        }
+      }
+
+      await runTest('plain-get',  testUrl)
+      await runTest('browser-ua', testUrl, {
+        headers: {
+          'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept':          '*/*',
+          'Accept-Encoding': 'gzip',
+        },
+      })
+      await runTest('root',       'https://fdc-datasets.ars.usda.gov/')
+      await runTest('directory',  'https://fdc.nal.usda.gov/')
+
+      return json({ tests })
+    }
+
     // ── GET /admin/sync/eta ───────────────────────────────────────────────────
     // Compute an ETA estimate from sync_history. Returns the median total_ms
     // of the most-recent 5 successful runs (so a single slow outlier doesn't

@@ -28,7 +28,7 @@ import {
   RefreshCw, Play, Pause, Loader2, X, CheckCircle2, AlertCircle,
   Clock, Calendar, Database, FileText, Download, RotateCcw,
   ChevronDown, ChevronUp, AlertTriangle, ShieldCheck, FlaskConical,
-  Copy, Check,
+  Copy, Check, Upload, ExternalLink, FileArchive, Trash2,
 } from 'lucide-react'
 
 const WORKER_URL = 'https://myrx-food-search.motaz-jarrah.workers.dev'
@@ -265,6 +265,380 @@ function ProgressBar({ status, progress, startedAt, etaBaselineMs }) {
           <span className="text-rose-400 font-medium">
             −{(progress.removed ?? 0).toLocaleString()} <span className="text-muted-foreground/60 font-normal">deletes</span>
           </span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Source files (drag-drop uploader for USDA + ON ZIPs) ──────────────────
+
+/**
+ * SourceFiles — admin uploader for the two source ZIPs.
+ *
+ * USDA's CDN keeps breaking (Cloudflare 1016 origin-DNS errors), so we
+ * mirror both source files to R2 instead of trying to scrape USDA at
+ * sync time. This component:
+ *   - Shows what's currently uploaded (filename + size + when)
+ *   - Offers a single button to open both source download pages
+ *   - Provides a drag-drop / click-to-browse staging area
+ *   - Uploads files via R2 multipart (50 MB chunks) so the Worker's
+ *     100 MB request-body limit doesn't matter
+ *
+ * The morphing-button logic lives in the parent OperationsPanel so it
+ * can coordinate with the existing sync controls. This component only
+ * handles upload itself; it calls `onUploadStateChange` to bubble
+ * state up.
+ *
+ * File type detection is filename-based:
+ *   FoodData_Central_csv_*.zip       → USDA
+ *   opennutrition-dataset-*.zip      → OpenNutrition
+ *
+ * Uploads progress per-file; both files can stage and upload
+ * independently. Sync becomes available once BOTH show as uploaded
+ * (status comes from the worker, not this component).
+ */
+function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning }) {
+  // staged: { usda: File|null, on: File|null } — picked but not yet uploaded
+  const [staged, setStaged] = useState({ usda: null, on: null })
+  // progress: { usda: { pct, sent, total } | null, on: ... }
+  const [progress, setProgress] = useState({ usda: null, on: null })
+  // uploading: bool — true while one or both uploads are in flight
+  const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [error, setError] = useState('')
+  const fileInputRef = useRef(null)
+
+  // Detect file type from filename. Returns 'usda' | 'on' | null.
+  function detectType(file) {
+    const name = file.name || ''
+    if (/FoodData_Central_csv.*\.zip$/i.test(name)) return 'usda'
+    if (/opennutrition-dataset.*\.zip$/i.test(name)) return 'on'
+    return null
+  }
+
+  // Stage a list of dropped/selected files. Classify each into usda/on
+  // slots; reject unrecognised files with a brief error.
+  function stageFiles(fileList) {
+    setError('')
+    const next = { ...staged }
+    const unknown = []
+    for (const f of fileList) {
+      const type = detectType(f)
+      if (!type) { unknown.push(f.name); continue }
+      next[type] = f
+    }
+    setStaged(next)
+    if (unknown.length) {
+      setError(`Unrecognised filename(s): ${unknown.join(', ')}. Expected FoodData_Central_csv_*.zip or opennutrition-dataset-*.zip.`)
+    }
+  }
+
+  function clearStaged(type) {
+    setStaged(s => ({ ...s, [type]: null }))
+  }
+
+  // Drag handlers
+  function onDrop(e) {
+    e.preventDefault()
+    setDragOver(false)
+    if (uploading) return
+    stageFiles(Array.from(e.dataTransfer.files || []))
+  }
+  function onDragOver(e) {
+    e.preventDefault()
+    if (!uploading) setDragOver(true)
+  }
+  function onDragLeave(e) {
+    e.preventDefault()
+    setDragOver(false)
+  }
+  function onBrowse() {
+    if (uploading) return
+    fileInputRef.current?.click()
+  }
+  function onFileInputChange(e) {
+    stageFiles(Array.from(e.target.files || []))
+    // Reset so re-picking the same file fires onChange again.
+    e.target.value = ''
+  }
+
+  // Open both source-download pages in new tabs with one click.
+  function openDownloadPages() {
+    window.open('https://fdc.nal.usda.gov/download-datasets', '_blank', 'noopener,noreferrer')
+    window.open('https://www.opennutrition.app/download',    '_blank', 'noopener,noreferrer')
+  }
+
+  // ── Upload pipeline ─────────────────────────────────────────────────
+  // Multipart chunks: 50 MB each. R2 requires part size >= 5 MB (except
+  // the last part) and supports up to 10,000 parts. 50 MB gives a
+  // good balance for 460 MB files (10 parts) vs upload concurrency.
+  const CHUNK_SIZE = 50 * 1024 * 1024
+
+  async function uploadOne(type, file) {
+    setProgress(p => ({ ...p, [type]: { pct: 0, sent: 0, total: file.size } }))
+
+    // 1. Start multipart upload
+    const startRes = await workerFetch('/admin/food-files/upload/start', {
+      method: 'POST',
+      body: JSON.stringify({ type, filename: file.name, size: file.size }),
+    })
+    if (!startRes.ok) throw new Error(`${type} start failed: ${startRes.status}`)
+    const { upload_id } = await startRes.json()
+
+    // 2. Upload each chunk sequentially. We could parallelise but
+    // residential upload bandwidth is usually the bottleneck —
+    // sending one chunk at a time saturates it without overwhelming
+    // the worker.
+    const parts = []
+    const totalParts = Math.ceil(file.size / CHUNK_SIZE)
+    let sent = 0
+    for (let i = 0; i < totalParts; i++) {
+      const start = i * CHUNK_SIZE
+      const end   = Math.min(start + CHUNK_SIZE, file.size)
+      const chunk = file.slice(start, end)
+      const partNumber = i + 1
+
+      const partRes = await fetch(
+        `${WORKER_URL}/admin/food-files/upload/part?upload_id=${encodeURIComponent(upload_id)}&part_number=${partNumber}&type=${type}`,
+        {
+          method:  'PUT',
+          headers: { 'Authorization': `Bearer ${ADMIN_KEY}` },
+          body:    chunk,
+        }
+      )
+      if (!partRes.ok) {
+        throw new Error(`${type} part ${partNumber} failed: HTTP ${partRes.status}`)
+      }
+      const partData = await partRes.json()
+      parts.push({ part_number: partNumber, etag: partData.etag })
+      sent += (end - start)
+      setProgress(p => ({
+        ...p,
+        [type]: { pct: Math.round((sent / file.size) * 100), sent, total: file.size },
+      }))
+    }
+
+    // 3. Complete multipart upload
+    const completeRes = await workerFetch('/admin/food-files/upload/complete', {
+      method: 'POST',
+      body: JSON.stringify({
+        upload_id, type, parts,
+        filename: file.name, size: file.size,
+      }),
+    })
+    if (!completeRes.ok) throw new Error(`${type} complete failed: ${completeRes.status}`)
+
+    setProgress(p => ({ ...p, [type]: { pct: 100, sent: file.size, total: file.size } }))
+  }
+
+  async function startUpload() {
+    setError('')
+    setUploading(true)
+    onUploadStateChange?.('uploading')
+    try {
+      // Upload both staged files in parallel.
+      const tasks = []
+      if (staged.usda) tasks.push(uploadOne('usda', staged.usda))
+      if (staged.on)   tasks.push(uploadOne('on',   staged.on))
+      await Promise.all(tasks)
+      setStaged({ usda: null, on: null })
+      await onRefreshStatus?.()
+    } catch (e) {
+      setError(`Upload failed: ${e.message}`)
+    } finally {
+      setUploading(false)
+      onUploadStateChange?.('idle')
+      // Clear per-file progress after a beat so the user sees 100%.
+      setTimeout(() => setProgress({ usda: null, on: null }), 1500)
+    }
+  }
+
+  async function deleteFile(type) {
+    if (!confirm(`Remove the uploaded ${type === 'usda' ? 'USDA' : 'OpenNutrition'} file from the mirror?`)) return
+    try {
+      await workerFetch(`/admin/food-files/${type}`, { method: 'DELETE' })
+      await onRefreshStatus?.()
+    } catch (e) {
+      setError(`Delete failed: ${e.message}`)
+    }
+  }
+
+  // ── Derived state ──────────────────────────────────────────────────
+  const hasStaged   = !!(staged.usda || staged.on)
+  const bothUploaded = !!(status?.usda && status?.on)
+  // Expose computed state to parent so it can drive the morphing
+  // bottom button (Upload → Uploading → Sync now).
+  useEffect(() => {
+    onUploadStateChange?.({
+      hasStaged,
+      bothUploaded,
+      uploading,
+      staged,
+      startUpload,
+    })
+  }, [hasStaged, bothUploaded, uploading, staged.usda, staged.on])
+
+  function fmtFileSize(bytes) {
+    if (!bytes) return '0 B'
+    if (bytes < 1024)            return `${bytes} B`
+    if (bytes < 1024 * 1024)     return `${(bytes / 1024).toFixed(1)} KB`
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  }
+
+  function fmtUploadedAt(iso) {
+    if (!iso) return ''
+    try {
+      const d = new Date(iso)
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    } catch { return '' }
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground/70 font-medium">
+          Source files
+        </div>
+        <button
+          onClick={openDownloadPages}
+          className="flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/20 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+        >
+          <ExternalLink className="h-3 w-3" /> Open download pages
+        </button>
+      </div>
+
+      {/* Currently-uploaded cards — one per source. Cards collapse to
+          a single line if no file is uploaded yet. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {(['usda', 'on']).map(type => {
+          const meta = status?.[type]
+          const stagedFile = staged[type]
+          const prog = progress[type]
+          const label = type === 'usda' ? 'USDA FoodData Central' : 'OpenNutrition'
+
+          // Three display states:
+          // 1. Uploading right now → show progress bar
+          // 2. File staged but not uploaded → show staged file info
+          // 3. File already in mirror → show meta + delete button
+          // 4. Nothing → show empty placeholder
+          if (prog) {
+            return (
+              <div key={type} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+                <div className="flex items-center gap-2 text-xs font-medium text-amber-300">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {label}
+                </div>
+                <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+                  {fmtFileSize(prog.sent)} / {fmtFileSize(prog.total)} — {prog.pct}%
+                </div>
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted/40">
+                  <div
+                    className="h-full bg-amber-500 transition-[width] duration-200"
+                    style={{ width: `${prog.pct}%` }}
+                  />
+                </div>
+              </div>
+            )
+          }
+
+          if (stagedFile) {
+            return (
+              <div key={type} className="rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-medium text-violet-300 min-w-0">
+                    <FileArchive className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{stagedFile.name}</span>
+                  </div>
+                  <button
+                    onClick={() => clearStaged(type)}
+                    className="text-muted-foreground/60 hover:text-foreground"
+                    title="Remove from upload queue"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground/70 tabular-nums">
+                  {fmtFileSize(stagedFile.size)} · staged for upload
+                </div>
+              </div>
+            )
+          }
+
+          if (meta) {
+            return (
+              <div key={type} className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-medium text-emerald-400/90 min-w-0">
+                    <CheckCircle2 className="h-3 w-3 shrink-0" />
+                    <span className="truncate" title={meta.filename}>{meta.filename}</span>
+                  </div>
+                  <button
+                    onClick={() => deleteFile(type)}
+                    disabled={syncRunning || uploading}
+                    className="text-muted-foreground/60 hover:text-destructive disabled:opacity-30 disabled:cursor-default"
+                    title="Remove from mirror"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground/70 tabular-nums">
+                  {fmtFileSize(meta.size)} · uploaded {fmtUploadedAt(meta.uploaded_at)}
+                </div>
+              </div>
+            )
+          }
+
+          return (
+            <div key={type} className="rounded-lg border border-dashed border-border/50 bg-muted/10 px-3 py-2.5">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
+                <FileArchive className="h-3 w-3" />
+                {label}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground/50 italic">Not uploaded yet</div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Drag-drop / click-to-browse zone */}
+      <div
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onClick={onBrowse}
+        className={[
+          'flex flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors',
+          'cursor-pointer select-none px-4 py-6',
+          dragOver
+            ? 'border-violet-400 bg-violet-500/10'
+            : 'border-border/50 bg-muted/10 hover:bg-muted/20 hover:border-border/70',
+          uploading && 'opacity-50 cursor-default pointer-events-none',
+        ].filter(Boolean).join(' ')}
+      >
+        <Upload className="h-5 w-5 text-muted-foreground/60 mb-1.5" />
+        <div className="text-xs font-medium text-muted-foreground">
+          Drop ZIPs here, or click to browse
+        </div>
+        <div className="text-xs text-muted-foreground/50 mt-0.5">
+          USDA FoodData_Central_csv_*.zip + OpenNutrition opennutrition-dataset-*.zip
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".zip"
+          multiple
+          onChange={onFileInputChange}
+          className="hidden"
+        />
+      </div>
+
+      {error && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>{error}</span>
         </div>
       )}
     </div>
@@ -644,6 +1018,10 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   // last 5 successful sync durations. Lets the progress bar show a
   // sensible ETA from t=0 instead of "Calculating…".
   const [etaBaseline, setEtaBaseline] = useState(null)
+  // R2 mirror metadata — { usda: {filename, size, uploaded_at}|null, on: ... }
+  const [filesStatus, setFilesStatus] = useState({ usda: null, on: null })
+  // Upload state surfaced by SourceFiles for the morphing bottom button.
+  const [uploadState, setUploadState] = useState({ hasStaged: false, bothUploaded: false, uploading: false, staged: { usda: null, on: null }, startUpload: null })
   // displayError is the ephemeral copy of sync_error we show in the banner.
   // The server-side sync_error is cleared the first time we observe it in a
   // non-running state, so subsequent mounts won't re-display it. This
@@ -681,6 +1059,13 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
     } catch { /* silent */ }
   }, [])
 
+  const fetchFilesStatus = useCallback(async () => {
+    try {
+      const res = await workerFetch('/admin/food-files/status')
+      if (res.ok) setFilesStatus(await res.json())
+    } catch { /* silent */ }
+  }, [])
+
   // Fetch the ETA baseline once on mount AND whenever a fresh run starts.
   // The endpoint returns the median of the most-recent 5 successful runs,
   // so it stays accurate across syncs without per-render recomputation.
@@ -698,6 +1083,7 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
     fetchStatus()
     fetchHistory()
     fetchEta()
+    fetchFilesStatus()
     function schedule() {
       const interval = (sync?.status === 'running' || sync?.status === 'pending') ? 3000 : 30000
       pollRef.current = setTimeout(async () => {
@@ -971,6 +1357,21 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
             />
           </div>
 
+          {/* Source-file uploader — sits between the stat tiles and
+              the sync progress bar so admins see it before the sync
+              controls. Hidden during an active sync (so it doesn't
+              distract from progress feedback). */}
+          {!isRunning && !reviewPending && (
+            <SourceFiles
+              status={filesStatus}
+              onUploadStateChange={(s) => {
+                if (typeof s === 'object' && s !== null) setUploadState(s)
+              }}
+              onRefreshStatus={fetchFilesStatus}
+              syncRunning={isRunning}
+            />
+          )}
+
           {/* Progress bar (when running) */}
           {isRunning && (
             <ProgressBar
@@ -1044,6 +1445,16 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
               })()}
 
               <div className="flex items-center gap-2">
+                {/*
+                  Morphing bottom button. Five states:
+                    1. Sync running        → 'Cancel sync' (destructive red)
+                    2. Uploading           → 'Uploading…' disabled (with spinner)
+                    3. Files staged        → 'Upload' enabled (primary)
+                    4. No files in mirror  → 'Upload' disabled (gray; user must
+                                              drop files before sync is possible)
+                    5. Both files in mirror → 'Sync now' enabled (primary)
+                  Order matters: uploading > staged > sync-ready > pre-upload.
+                */}
                 {isRunning ? (
                   <button
                     onClick={cancelSync}
@@ -1055,7 +1466,23 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
                       : <Pause className="h-3 w-3" />}
                     {isCancelling ? 'Cancelling…' : 'Cancel sync'}
                   </button>
-                ) : (
+                ) : uploadState.uploading ? (
+                  <button
+                    disabled
+                    className="flex items-center gap-1.5 rounded-lg bg-primary/40 px-3 py-1.5 text-xs font-semibold text-primary-foreground cursor-default"
+                  >
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Uploading…
+                  </button>
+                ) : uploadState.hasStaged ? (
+                  <button
+                    onClick={() => uploadState.startUpload?.()}
+                    className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+                  >
+                    <Upload className="h-3 w-3" />
+                    Upload
+                  </button>
+                ) : uploadState.bothUploaded ? (
                   <button
                     onClick={triggerSync}
                     disabled={triggering}
@@ -1063,6 +1490,15 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
                   >
                     {triggering ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
                     {triggering ? 'Starting…' : 'Sync now'}
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    title="Upload USDA + OpenNutrition ZIPs before syncing"
+                    className="flex items-center gap-1.5 rounded-lg bg-muted/40 px-3 py-1.5 text-xs font-semibold text-muted-foreground cursor-default"
+                  >
+                    <Upload className="h-3 w-3" />
+                    Upload
                   </button>
                 )}
               </div>

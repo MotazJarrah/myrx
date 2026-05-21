@@ -298,31 +298,52 @@ async function bailIfCancelled() {
 // ── Phase 1: Download (parallel) ─────────────────────────────────────────────
 
 /**
- * Discover the latest USDA FoodData Central CSV snapshot.
+ * Look up the staged USDA + ON files in the R2 mirror via the Worker.
  *
- * USDA's download-datasets page is a JavaScript-rendered SPA — the
- * `<a href>` links don't exist in the raw HTML. Static scraping is
- * impossible without a headless browser.
+ * The admin uploads both source ZIPs through the food-library UI's
+ * drag-and-drop. This function reads the mirror status to confirm
+ * both files are present and returns the metadata.
  *
- * Strategy: probe a curated set of candidate URLs on the CDN
- * (fdc-datasets.ars.usda.gov) and pick the most recent one that
- * returns a successful response. USDA publishes ~2x/year with
- * predictable release-day patterns, so the candidate space is small.
+ * Why mirror at all: USDA's CDN (fdc-datasets.ars.usda.gov) has been
+ * returning Cloudflare error 1016 ("origin DNS error") — it's broken
+ * at the source. Even if it weren't broken, depending on USDA's
+ * uptime for an automated sync is fragile. The mirror puts both
+ * source ZIPs under our control in R2.
  *
- * Probe method: tiny ranged GET (Range: bytes=0-0). HEAD requests
- * fail against this CDN — it rejects HEAD with no body, returning
- * status codes that don't include 200. Ranged GET works on every
- * conforming CDN: 206 Partial Content if the URL is valid (and we
- * only read 1 byte, so it's effectively free), 200 OK if the server
- * ignores Range, 4xx/5xx if the file doesn't exist.
- *
- * Guaranteed fallback: KNOWN_GOOD ('2026-04-30') is always probed
- * AND falls through as the last-resort answer if every newer
- * candidate fails. That way the first sync after the orchestrator
- * deploys always succeeds even before we've calibrated the probe
- * list against USDA's current publication.
- *
- * Returns { url, date } for the latest reachable snapshot.
+ * The data only updates twice a year (April + October/November), so
+ * the admin only needs to refresh the mirror twice a year via the
+ * upload UI. The sync itself runs entirely against R2.
+ */
+async function lookupMirrorFiles() {
+  logStep('mirror', 'Checking R2 mirror for staged source files…')
+  const res = await fetch(`${WORKER_URL}/admin/food-files/status`, {
+    headers: { 'Authorization': `Bearer ${FOOD_ADMIN_KEY}` },
+  })
+  if (!res.ok) {
+    throw new Error(`Mirror status fetch failed: HTTP ${res.status}`)
+  }
+  const meta = await res.json()
+  if (!meta.usda) {
+    throw Object.assign(
+      new Error('USDA file not uploaded — go to the Food Library admin panel and upload the USDA ZIP first'),
+      { code: 'E_001' }
+    )
+  }
+  if (!meta.on) {
+    throw Object.assign(
+      new Error('OpenNutrition file not uploaded — go to the Food Library admin panel and upload the ON ZIP first'),
+      { code: 'E_010' }
+    )
+  }
+  logStep('mirror', `USDA: ${meta.usda.filename} (uploaded ${meta.usda.uploaded_at})`)
+  logStep('mirror', `ON:   ${meta.on.filename} (uploaded ${meta.on.uploaded_at})`)
+  return meta
+}
+
+/**
+ * @deprecated Kept temporarily for reference. USDA's CDN is broken
+ * (Cloudflare 1016 errors) so probing is pointless. The mirror flow
+ * supersedes this — see lookupMirrorFiles() above.
  */
 async function findUsdaSnapshot() {
   logStep('scrape_usda', 'Probing USDA CDN for latest snapshot…')
@@ -464,11 +485,13 @@ async function findOnSnapshot() {
  * the function throws — main()'s top-level catch will handle the clean
  * cancel exit.
  */
-async function downloadFile(url, destPath, label, progressKey) {
+async function downloadFile(url, destPath, label, progressKey, extraHeaders = {}) {
   fs.mkdirSync(path.dirname(destPath), { recursive: true })
   let res
   try {
-    res = await fetch(url, { headers: { 'User-Agent': 'myrx-sync/1.0' } })
+    res = await fetch(url, {
+      headers: { 'User-Agent': 'myrx-sync/1.0', ...extraHeaders },
+    })
   } catch (err) {
     // Surface the underlying network-level error code (ENOTFOUND, etc.)
     // instead of Node's opaque "fetch failed" wrapper.
@@ -529,19 +552,20 @@ async function extractUsdaZip(zipPath, extractRoot) {
 
 async function downloadPhase() {
   startPhase('download')
-  logStep('phase', '── Phase 1/6 — Download (parallel USDA + ON) ──')
+  logStep('phase', '── Phase 1/6 — Pull staged files from R2 mirror ──')
 
-  // Scrape both URLs in parallel.
-  const [usda, on] = await Promise.all([
-    findUsdaSnapshot().catch(err => {
-      logStep('scrape_usda', `USDA scrape error: ${err.message}`, { level: 'error', errorCode: 'E_001' })
-      throw err
-    }),
-    findOnSnapshot().catch(err => {
-      logStep('scrape_on', `ON scrape error: ${err.message}`, { level: 'error', errorCode: 'E_010' })
-      throw err
-    }),
-  ])
+  // Confirm both files are present in the mirror BEFORE wiping our
+  // local working directories. If the admin hasn't uploaded yet,
+  // we want to fail fast with a clear "go upload" message, not
+  // leave the orchestrator in a weird half-state.
+  const meta = await lookupMirrorFiles()
+  const usdaFilename = meta.usda.filename
+  const onFilename   = meta.on.filename
+  // Derive USDA snapshot date + ON version from the filenames the
+  // user uploaded. The bulk_import loaders use these as the
+  // `source_version` field on every imported row.
+  const usdaDate = /(\d{4}-\d{2}-\d{2})/.exec(usdaFilename)?.[1] || new Date().toISOString().slice(0, 10)
+  const onVersion = /opennutrition-dataset-(\d{4}\.\d+)/.exec(onFilename)?.[1] || 'unknown'
 
   await bailIfCancelled()
 
@@ -549,20 +573,21 @@ async function downloadPhase() {
   if (fs.existsSync(USDA_ROOT)) fs.rmSync(USDA_ROOT, { recursive: true, force: true })
   if (fs.existsSync(ON_ROOT))   fs.rmSync(ON_ROOT,   { recursive: true, force: true })
 
-  const usdaZip = path.join(USDA_ROOT, `FoodData_Central_csv_${usda.date}.zip`)
-  const onZip   = path.join(ON_ROOT,   `opennutrition-dataset-${on.version}.zip`)
+  const usdaZip = path.join(USDA_ROOT, `FoodData_Central_csv_${usdaDate}.zip`)
+  const onZip   = path.join(ON_ROOT,   `opennutrition-dataset-${onVersion}.zip`)
 
-  logStep('download', `Starting parallel downloads — USDA ${usda.date} + ON ${on.version}`)
-
-  // Download in parallel. The two endpoints are independent so we max out
-  // available bandwidth this way.
+  // Streaming download from the Worker's R2-backed endpoint. Both
+  // streams run in parallel — the Worker reads directly from R2 so
+  // bandwidth is whatever GHA's runner can accept.
+  const mirrorBase = `${WORKER_URL}/admin/food-files`
+  logStep('download', `Pulling USDA + ON from mirror in parallel…`)
   const [usdaRes, onRes] = await Promise.all([
-    downloadFile(usda.url, usdaZip, 'USDA', 'usda').catch(err => {
-      logStep('download_usda', `USDA download failed: ${err.message}`, { level: 'error', errorCode: 'E_002' })
+    downloadFile(`${mirrorBase}/usda/download`, usdaZip, 'USDA', 'usda', { 'Authorization': `Bearer ${FOOD_ADMIN_KEY}` }).catch(err => {
+      logStep('download_usda', `USDA mirror download failed: ${err.message}`, { level: 'error', errorCode: 'E_002' })
       throw err
     }),
-    downloadFile(on.url, onZip, 'OpenNutrition', 'on').catch(err => {
-      logStep('download_on', `ON download failed: ${err.message}`, { level: 'error', errorCode: 'E_011' })
+    downloadFile(`${mirrorBase}/on/download`, onZip, 'OpenNutrition', 'on', { 'Authorization': `Bearer ${FOOD_ADMIN_KEY}` }).catch(err => {
+      logStep('download_on', `ON mirror download failed: ${err.message}`, { level: 'error', errorCode: 'E_011' })
       throw err
     }),
   ])
@@ -580,7 +605,7 @@ async function downloadPhase() {
   endPhase('download')
   logStep('phase', `Phase 1 complete in ${fmtMs(phaseTimers.download.ms)} — USDA ${fmtBytes(usdaRes.bytes)} + ON ${fmtBytes(onRes.bytes)}`)
 
-  return { usdaDate: usda.date, onVersion: on.version }
+  return { usdaDate, onVersion }
 }
 
 // ── Phase 2: Parse + filter ──────────────────────────────────────────────────

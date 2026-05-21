@@ -8,6 +8,14 @@ binding = "DB"
 database_name = "myrx-food-library"
 database_id = "52b5d0d1-d9b5-4d76-89c8-34362fdc0fb6"
 
+# Source-file mirror. The admin uploads USDA + OpenNutrition ZIPs here
+# via the food-library admin UI; the sync orchestrator reads from here
+# instead of fetching directly from USDA's CDN (which is unreliable —
+# it's been returning Cloudflare 1016 origin-DNS errors).
+[[r2_buckets]]
+binding = "MIRROR_BUCKET"
+bucket_name = "myrx-food-mirror"
+
 [vars]
 GITHUB_OWNER        = "MotazJarrah"
 GITHUB_REPO         = "myrx"
