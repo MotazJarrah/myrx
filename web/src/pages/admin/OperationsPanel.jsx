@@ -397,6 +397,13 @@ function HistoryList({ history, lastCommittedRunId, onUndo, undoing }) {
 export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   const [sync,        setSync]        = useState(null)
   const [history,     setHistory]     = useState([])
+  // displayError is the ephemeral copy of sync_error we show in the banner.
+  // The server-side sync_error is cleared the first time we observe it in a
+  // non-running state, so subsequent mounts won't re-display it. This
+  // matches user expectation: "show only until the page refreshes or I
+  // navigate away and come back."
+  const [displayError, setDisplayError] = useState('')
+  const errorClearedRef = useRef(false)
   const [collapsed,   setCollapsed]   = useState(false)
   const [stagedToggle,setStagedToggle]= useState(false)
   const [triggering,  setTriggering]  = useState(false)
@@ -436,6 +443,37 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
     schedule()
     return () => clearTimeout(pollRef.current)
   }, [fetchStatus, fetchHistory, sync?.status])
+
+  // ── Ephemeral error display ────────────────────────────────────────────
+  // First time we observe sync.error in a non-running state (i.e. after
+  // a cancel/fail/completion), capture it for the banner AND clear it on
+  // the server. The banner stays visible (via displayError) until the
+  // component unmounts; the server-side clear means a fresh mount won't
+  // re-display the same error.
+  //
+  // Reset when a new sync starts (status becomes running/pending), so
+  // any error that surfaces from THAT run gets shown too.
+  useEffect(() => {
+    if (!sync) return
+    const isActive = sync.status === 'running' || sync.status === 'pending'
+    if (isActive) {
+      // A new run started — drop any stale banner and re-arm.
+      if (displayError) setDisplayError('')
+      errorClearedRef.current = false
+      return
+    }
+    // Non-running state with an error → capture + clear server-side once.
+    if (sync.error && !displayError) {
+      setDisplayError(sync.error)
+      if (!errorClearedRef.current) {
+        errorClearedRef.current = true
+        workerFetch('/admin/sync/state', {
+          method: 'POST',
+          body: JSON.stringify({ error: '' }),
+        }).catch(() => {})
+      }
+    }
+  }, [sync, displayError])
 
   // ── Derived state ───────────────────────────────────────────────────────
   // Cancel flow:
@@ -702,11 +740,18 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
             </div>
           )}
 
-          {/* Error display */}
-          {(error || sync?.error) && (
+          {/* Error display. Two sources:
+              - `error`: transient errors from the local trigger / commit /
+                discard / undo handlers. Lives in local state until the
+                next action overwrites it.
+              - `displayError`: the ephemeral copy of the server-side
+                sync_error captured on first non-running observation.
+                The server-side value is cleared immediately when captured,
+                so refreshing the page drops the banner. */}
+          {(error || displayError) && (
             <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-              <span>{error || sync.error}</span>
+              <span>{error || displayError}</span>
             </div>
           )}
 
