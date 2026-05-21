@@ -902,14 +902,16 @@ function StepLog({ entries, active }) {
       <div className="text-xs uppercase tracking-wider text-muted-foreground/70 font-medium">
         Sync progress log
       </div>
-      {/* Box is FIXED height (h-48 = 12rem = 192 px). Always exactly
-          that tall regardless of entry count, so the panel layout
-          doesn't shift around as the feed grows. Older entries scroll
-          out of view (with auto-scroll to bottom on new entries). */}
+      {/* Box is FIXED height (h-32 = 8rem = 128 px ≈ 7 log lines).
+          Always exactly that tall regardless of entry count, so the
+          panel layout doesn't shift around as the feed grows. Older
+          entries scroll out of view (with auto-scroll to bottom on
+          new entries). Copy button below lets the admin grab the
+          full history regardless of what's visible. */}
       <div
         ref={containerRef}
         onScroll={onScroll}
-        className="h-48 overflow-y-auto rounded-lg border border-border/40 bg-muted/10 px-3 py-2 font-mono"
+        className="h-32 overflow-y-auto rounded-lg border border-border/40 bg-muted/10 px-3 py-2 font-mono"
         style={{ fontSize: '12px', lineHeight: '1.5' }}
       >
         {entries.length === 0 ? null : (
