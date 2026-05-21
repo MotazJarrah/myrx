@@ -141,48 +141,62 @@ function Stat({ label, value, hint }) {
 
 // ─── Progress bar + ETA ─────────────────────────────────────────────────────
 
-function ProgressBar({ status, progress, startedAt }) {
-  // Use whatever progress signal the sync scripts have written.
-  // Branded pass: progress.page / progress.total_pages
-  // Foundation/SR Legacy: similar shape
-  // Fallback: indeterminate
-  const page  = progress?.page  ?? 0
-  const pages = progress?.total_pages ?? progress?.usda_total ?? null
+function ProgressBar({ status, progress, startedAt, etaBaselineMs }) {
+  // Progress shape from the new sync orchestrator:
+  //   progress.phase   — string identifier ('download_usda', 'parse_usda', ...)
+  //   progress.pushed  — running write count (commit + staged modes)
+  //   progress.total   — expected total for the active phase
+  //   progress.inserted, .updated, .removed — final counters once known
+  // Fallback signals retained for back-compat with older sync runs.
+  const page  = progress?.pushed ?? progress?.page ?? 0
+  const pages = progress?.total  ?? progress?.total_pages ?? progress?.usda_total ?? null
   const phase = progress?.phase || '—'
 
   let pct = null
   if (pages && page) pct = Math.min(100, Math.max(0, (page / pages) * 100))
 
-  // ETA computation. Linear extrapolation from `elapsed / pct` is wildly
-  // unstable in the first 1-2 minutes of a sync because the elapsed
-  // clock starts at workflow dispatch (which includes GHA runner boot,
-  // npm install, USDA cold-start, etc.) but real work doesn't begin
-  // until the first page is processed. From 0.4% complete the ratio
-  // produces ~28h estimates that are pure noise.
+  // ETA — two-tier strategy:
   //
-  // Suppress ETA until we have enough data points to be meaningful:
-  //   - elapsed > 60s (past the startup spike)
-  //   - pct >= 3%  (past the warm-up phase)
-  // Past those thresholds the rate stabilises and ETA reads sensibly.
+  // 1. Baseline estimate from sync_history (median of last 5 successful runs).
+  //    Available from the moment the sync starts → no "Calculating…" gap.
+  //    Computed server-side via GET /admin/sync/eta and passed in as
+  //    `etaBaselineMs`. Fallback: 15 min if history is empty.
+  //
+  // 2. Adaptive refinement once pct >= 3% AND elapsed > 60s — blend
+  //    the linear extrapolation with the baseline using a 50/50 weight
+  //    so the displayed ETA shifts smoothly toward reality without
+  //    jumping if one is dramatically off.
+  //
+  // Result: ETA is shown from t=0, gracefully approaches truth, and
+  // never produces "28h remaining" garbage from a 0.4% data point.
   const eta = useMemo(() => {
-    if (!startedAt || pct == null || pct < 3) return null
+    if (!startedAt) return etaBaselineMs ? fmtDuration(etaBaselineMs) : null
     const elapsed = Date.now() - new Date(startedAt).getTime()
-    if (elapsed < 60_000) return null
-    const totalEstimated = elapsed / (pct / 100)
-    const remaining = totalEstimated - elapsed
-    if (remaining < 0) return null
-    return fmtDuration(remaining)
-  }, [pct, startedAt])
+    const baselineRemaining = etaBaselineMs != null
+      ? Math.max(0, etaBaselineMs - elapsed)
+      : null
+
+    // Until pct is meaningful, use the baseline straight.
+    if (pct == null || pct < 3 || elapsed < 60_000) {
+      return baselineRemaining != null ? fmtDuration(baselineRemaining) : null
+    }
+
+    // Linear extrapolation: elapsed/pct -> total -> remaining.
+    const linearTotal     = elapsed / (pct / 100)
+    const linearRemaining = Math.max(0, linearTotal - elapsed)
+
+    // Blend.
+    const blended = baselineRemaining != null
+      ? (linearRemaining * 0.5 + baselineRemaining * 0.5)
+      : linearRemaining
+    return fmtDuration(blended)
+  }, [pct, startedAt, etaBaselineMs])
 
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>Phase: <span className="text-foreground/80 font-medium">{phase}</span></span>
-        {/* ETA: show the actual remaining estimate once it's stable
-            (pct >= 3% AND elapsed > 60s). Before that, show a
-            "Calculating…" placeholder so the user knows the estimator
-            is alive and waiting for enough data, instead of showing
-            nothing or showing a wildly inflated early extrapolation. */}
+        {/* ETA — present from t=0 thanks to the sync_history baseline. */}
         {eta
           ? <span>~{eta} remaining</span>
           : <span className="opacity-60 italic">Calculating estimated time…</span>}
@@ -227,8 +241,8 @@ function ProgressBar({ status, progress, startedAt }) {
         )}
       </div>
       {pct != null && (
-        <div className="text-[10px] text-muted-foreground/60 tabular-nums">
-          {page.toLocaleString()} / {pages.toLocaleString()} pages — {pct.toFixed(1)}%
+        <div className="text-xs text-muted-foreground/60 tabular-nums">
+          {page.toLocaleString()} / {pages.toLocaleString()} — {pct.toFixed(1)}%
         </div>
       )}
 
@@ -248,6 +262,132 @@ function ProgressBar({ status, progress, startedAt }) {
             −{(progress.removed ?? 0).toLocaleString()} <span className="text-muted-foreground/60 font-normal">deletes</span>
           </span>
         </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Step log (verbose progress feed) ───────────────────────────────────────
+
+/**
+ * StepLog — live verbose feed shown while a sync is running, and the
+ * full transcript for the most recent runs after they finish.
+ *
+ * Architecture:
+ *   - Polls /admin/sync/step-log?run_id=X&after_id=N every 2 seconds.
+ *   - Maintains a local `entries` array, appended monotonically.
+ *   - Auto-scrolls to the bottom on new entries UNLESS the user has
+ *     scrolled up manually (preserves their reading position).
+ *   - Entries past the most-recent 3 runs are purged server-side, so
+ *     the polling cursor naturally resets when the run rotates.
+ *
+ * Levels are colour-tinted: info = neutral, warn = amber, error = rose.
+ * Timestamps are rendered in HH:MM:SS local time (parsed from the UTC
+ * `ts` field).
+ */
+function StepLog({ runId, active }) {
+  const [entries, setEntries]   = useState([])
+  const [autoScroll, setAuto]   = useState(true)
+  const cursorRef               = useRef(0)
+  const containerRef            = useRef(null)
+  const lastRunIdRef            = useRef(runId)
+
+  // Reset cursor on run change.
+  useEffect(() => {
+    if (runId !== lastRunIdRef.current) {
+      cursorRef.current = 0
+      setEntries([])
+      lastRunIdRef.current = runId
+    }
+  }, [runId])
+
+  useEffect(() => {
+    if (!runId) return
+    let cancelled = false
+    const interval = active ? 2000 : 10000
+
+    async function tick() {
+      try {
+        const res = await workerFetch(`/admin/sync/step-log?run_id=${runId}&after_id=${cursorRef.current}&limit=500`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        if (data.rows?.length) {
+          cursorRef.current = data.next_id
+          setEntries(prev => prev.concat(data.rows))
+        }
+      } catch { /* silent */ }
+    }
+    tick()
+    const id = setInterval(tick, interval)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [runId, active])
+
+  // Auto-scroll on new entries.
+  useEffect(() => {
+    if (!autoScroll || !containerRef.current) return
+    const el = containerRef.current
+    el.scrollTop = el.scrollHeight
+  }, [entries, autoScroll])
+
+  function onScroll(e) {
+    const el = e.currentTarget
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20
+    setAuto(atBottom)
+  }
+
+  if (!runId || (!active && entries.length === 0)) return null
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <div className="text-xs uppercase tracking-wider text-muted-foreground/70 font-medium">
+          Sync progress log
+        </div>
+        <div className="text-xs text-muted-foreground/60">
+          {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+        </div>
+      </div>
+      <div
+        ref={containerRef}
+        onScroll={onScroll}
+        className="max-h-64 overflow-y-auto rounded-lg border border-border/40 bg-muted/10 px-3 py-2 font-mono"
+        style={{ fontSize: '12px', lineHeight: '1.5' }}
+      >
+        {entries.length === 0 ? (
+          <div className="text-muted-foreground/50 italic">Waiting for first step…</div>
+        ) : (
+          entries.map(e => {
+            const ts = (() => {
+              try {
+                const d = new Date(e.ts)
+                const pad = n => String(n).padStart(2, '0')
+                return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+              } catch { return '' }
+            })()
+            const tint =
+              e.level === 'error' ? 'text-rose-400'
+              : e.level === 'warn' ? 'text-amber-400'
+              : 'text-foreground/80'
+            return (
+              <div key={e.id} className="flex items-start gap-2 py-0.5">
+                <span className="text-muted-foreground/50 tabular-nums shrink-0">{ts}</span>
+                {e.error_code && (
+                  <span className="text-rose-400/80 font-medium shrink-0">[{e.error_code}]</span>
+                )}
+                <span className={`${tint} break-words flex-1`}>{e.message}</span>
+              </div>
+            )
+          })
+        )}
+      </div>
+      {!autoScroll && active && (
+        <button
+          onClick={() => { setAuto(true) }}
+          className="text-xs text-amber-400 hover:underline"
+        >
+          ↓ Resume auto-scroll
+        </button>
       )}
     </div>
   )
@@ -454,6 +594,10 @@ function HistoryList({ history, lastCommittedRunId, onUndo, undoing }) {
 export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   const [sync,        setSync]        = useState(null)
   const [history,     setHistory]     = useState([])
+  // ETA baseline (ms) pulled from /admin/sync/eta — the median of the
+  // last 5 successful sync durations. Lets the progress bar show a
+  // sensible ETA from t=0 instead of "Calculating…".
+  const [etaBaseline, setEtaBaseline] = useState(null)
   // displayError is the ephemeral copy of sync_error we show in the banner.
   // The server-side sync_error is cleared the first time we observe it in a
   // non-running state, so subsequent mounts won't re-display it. This
@@ -485,9 +629,23 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
     } catch { /* silent */ }
   }, [])
 
+  // Fetch the ETA baseline once on mount AND whenever a fresh run starts.
+  // The endpoint returns the median of the most-recent 5 successful runs,
+  // so it stays accurate across syncs without per-render recomputation.
+  const fetchEta = useCallback(async () => {
+    try {
+      const res = await workerFetch('/admin/sync/eta')
+      if (res.ok) {
+        const data = await res.json()
+        if (typeof data.estimate_ms === 'number') setEtaBaseline(data.estimate_ms)
+      }
+    } catch { /* silent */ }
+  }, [])
+
   useEffect(() => {
     fetchStatus()
     fetchHistory()
+    fetchEta()
     function schedule() {
       const interval = (sync?.status === 'running' || sync?.status === 'pending') ? 3000 : 30000
       pollRef.current = setTimeout(async () => {
@@ -499,7 +657,16 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
     }
     schedule()
     return () => clearTimeout(pollRef.current)
-  }, [fetchStatus, fetchHistory, sync?.status])
+  }, [fetchStatus, fetchHistory, fetchEta, sync?.status])
+
+  // Re-fetch the baseline when a sync starts so the bar reflects the
+  // most recent run history (especially useful right after the first
+  // successful run lands in history).
+  useEffect(() => {
+    if (sync?.status === 'running' || sync?.status === 'pending') {
+      fetchEta()
+    }
+  }, [sync?.status, fetchEta])
 
   // ── Ephemeral error display ────────────────────────────────────────────
   // First time we observe sync.error in a non-running state (i.e. after
@@ -684,7 +851,7 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
           {collapsed ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />}
           <Database className="h-3.5 w-3.5 text-muted-foreground/50" />
           <span className="text-sm font-medium">Library Operations</span>
-          <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${chip.bg}`}>{chip.label}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${chip.bg}`}>{chip.label}</span>
         </button>
       </div>
 
@@ -725,7 +892,19 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
 
           {/* Progress bar (when running) */}
           {isRunning && (
-            <ProgressBar status={status} progress={sync?.progress} startedAt={sync?.started_at} />
+            <ProgressBar
+              status={status}
+              progress={sync?.progress}
+              startedAt={sync?.started_at}
+              etaBaselineMs={etaBaseline}
+            />
+          )}
+
+          {/* Verbose step log — shown while running, and after a sync
+              completes (until the user navigates away or another run
+              rotates the retention window). */}
+          {sync?.run_id && (
+            <StepLog runId={sync.run_id} active={isRunning} />
           )}
 
           {/* Review dialog (when staged) */}

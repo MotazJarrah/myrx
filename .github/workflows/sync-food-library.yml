@@ -7,10 +7,15 @@ name: Sync Food Library
 #                           run_id + staged + force inputs.
 #   schedule (monthly cron) runs on the 1st of every month at 03:00 UTC.
 #                           USDA's monthly publication cadence is the upper
-#                           bound on useful sync frequency; ON updates every
-#                           ~3 months but a monthly cron catches it without
-#                           lag. Pre-stamps a generated run_id so the worker
-#                           sees the same identifier in /admin/sync/state.
+#                           bound on useful sync frequency. Cron auto-
+#                           generates a run_id so the UI can track it.
+#
+# This workflow runs ONE step: the unified orchestrator at scripts/sync/run.mjs.
+# It replaces the older two-script flow (sync_usda.mjs + sync_on.mjs) with
+# the bulk_import path (CSV download → parse → filter rules 1-14 → in-memory
+# dedup rules 15-19 → diff → write). End-to-end identical to a fresh
+# bulk_import, but with diff-based change detection so we don't wipe and
+# rebuild every time.
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -42,13 +47,8 @@ jobs:
       CLOUDFLARE_API_TOKEN:   ${{ secrets.CF_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID:  ${{ secrets.CF_ACCOUNT_ID }}
       D1_DATABASE_ID:         ${{ secrets.D1_DATABASE_ID }}
-      USDA_API_KEY:           ${{ secrets.USDA_API_KEY }}
       FOOD_ADMIN_KEY:         ${{ secrets.FOOD_ADMIN_KEY }}
       WORKER_URL:             https://myrx-food-search.motaz-jarrah.workers.dev
-      # Pass run_id + mode through to the sync scripts. The
-      # changelog-recorder lib reads these. Cron-triggered runs have
-      # no input; we generate a run_id below in the "Resolve run_id"
-      # step before the sync scripts execute.
       SYNC_MODE:              ${{ github.event.inputs.staged == 'true' && 'staged' || 'commit' }}
 
     steps:
@@ -60,14 +60,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install script dependencies
-        working-directory: scripts/d1_migrate
-        run: npm ci
+      # Install dependencies for both bulk_import and d1_migrate (shared lib code).
+      - name: Install bulk_import dependencies
+        working-directory: scripts/bulk_import
+        run: npm ci || npm install
 
-      # ── Resolve run_id ──────────────────────────────────────────────────────
-      # Worker-dispatched runs already have run_id in inputs. Cron-triggered
-      # runs don't, so we generate one and stamp it back into the worker
-      # via /admin/sync/state so the admin UI can track the run.
+      - name: Install d1_migrate dependencies
+        working-directory: scripts/d1_migrate
+        run: npm ci || npm install
+
+      # Resolve run_id. Worker-dispatched runs already have it via inputs;
+      # cron-triggered runs generate one and stamp it back into the worker.
       - name: Resolve run_id
         id: runid
         run: |
@@ -88,7 +91,7 @@ jobs:
           echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
           echo "SYNC_RUN_ID=$RUN_ID" >> $GITHUB_ENV
 
-      # ── Mark sync as started ────────────────────────────────────────────────
+      # Mark running in the worker (also resets any prior cancel flag).
       - name: Mark sync started in D1
         run: |
           curl -fsS -X POST "$WORKER_URL/admin/sync/state" \
@@ -96,43 +99,14 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"status\":\"running\",\"run_id\":\"${{ steps.runid.outputs.RUN_ID }}\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":\"\",\"progress\":{}}" || true
 
-      # ── USDA incremental sync ───────────────────────────────────────────────
-      - name: Sync USDA (attempt 1)
-        id: usda_1
-        continue-on-error: true
-        run: node scripts/d1_migrate/sync_usda.mjs
+      # ── Run the unified orchestrator ────────────────────────────────────────
+      # The script handles: download (parallel) → parse → filter rules 1-14
+      # → dedup rules 15-19 → diff → write (staged or commit) → finalise.
+      # 8 GB heap is needed for the 2M+ row arrays during dedup.
+      - name: Run sync orchestrator
+        run: node --max-old-space-size=8192 scripts/sync/run.mjs
 
-      - name: Sync USDA (attempt 2 — retry)
-        id: usda_2
-        if: steps.usda_1.outcome == 'failure'
-        continue-on-error: true
-        run: node scripts/d1_migrate/sync_usda.mjs
-
-      - name: Sync USDA (attempt 3 — final retry)
-        id: usda_3
-        if: steps.usda_2.outcome == 'failure'
-        continue-on-error: true
-        run: node scripts/d1_migrate/sync_usda.mjs
-
-      # ── ON diff sync ────────────────────────────────────────────────────────
-      - name: Sync OpenNutrition (attempt 1)
-        id: on_1
-        continue-on-error: true
-        run: node scripts/d1_migrate/sync_on.mjs
-
-      - name: Sync OpenNutrition (attempt 2 — retry)
-        id: on_2
-        if: steps.on_1.outcome == 'failure'
-        continue-on-error: true
-        run: node scripts/d1_migrate/sync_on.mjs
-
-      - name: Sync OpenNutrition (attempt 3 — final retry)
-        id: on_3
-        if: steps.on_2.outcome == 'failure'
-        run: node scripts/d1_migrate/sync_on.mjs
-
-      # ── Mark completed ──────────────────────────────────────────────────────
-      # Worker's /admin/sync/state endpoint handles the staged-vs-commit
+      # Worker's /admin/sync/state endpoint handles staged-vs-commit
       # bookkeeping: if mode='staged', it sets sync_staged_review=1 so the
       # UI shows the review dialog. If mode='commit', it records the run
       # as last_committed_run_id for undo support.
@@ -144,11 +118,10 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{\"status\":\"completed\",\"run_id\":\"${{ steps.runid.outputs.RUN_ID }}\",\"mode\":\"$SYNC_MODE\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" || true
 
-      # ── Mark failed (always runs on failure) ────────────────────────────────
       - name: Mark sync failed in worker
         if: failure()
         run: |
           curl -fsS -X POST "$WORKER_URL/admin/sync/state" \
             -H "Authorization: Bearer $FOOD_ADMIN_KEY" \
             -H "Content-Type: application/json" \
-            -d "{\"status\":\"failed\",\"run_id\":\"${{ steps.runid.outputs.RUN_ID }}\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":\"One or more sync steps failed after 3 attempts. Check GitHub Actions logs.\"}" || true
+            -d "{\"status\":\"failed\",\"run_id\":\"${{ steps.runid.outputs.RUN_ID }}\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":\"Sync orchestrator exited non-zero — check GitHub Actions logs.\"}" || true

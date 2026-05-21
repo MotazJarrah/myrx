@@ -685,8 +685,47 @@ export default {
     // ── POST /admin/sync/changelog/append ─────────────────────────────────────
     // Internal: called by sync scripts during a run. Bulk-inserts a batch
     // of changelog rows. Body: { run_id, entries: [{operation, food_source,
-    // food_source_id, before_data, after_data}, ...] }
+    // food_source_id, before_data, after_data}, ...], committed?: 0|1 }
+    //
+    // committed defaults to 0 (staged-mode behaviour). Commit-mode sync
+    // passes committed=1 so the changelog rows record the operation as
+    // already applied to food_library — used for undo support.
     if (pathname === '/admin/sync/changelog/append' && method === 'POST') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const body = await request.json().catch(() => ({}))
+      const { run_id, entries } = body
+      const committed = body.committed === 1 || body.committed === '1' ? 1 : 0
+      if (!run_id || !Array.isArray(entries) || !entries.length) {
+        return json({ error: 'run_id + entries[] required' }, 400)
+      }
+
+      const stmts = entries.map(e => env.DB.prepare(
+        `INSERT INTO sync_changelog
+         (run_id, operation, food_source, food_source_id, before_data, after_data, committed)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        run_id, e.operation, e.food_source, e.food_source_id,
+        e.before_data ?? null, e.after_data ?? null,
+        committed,
+      ))
+
+      await env.DB.batch(stmts)
+      return json({ appended: entries.length })
+    }
+
+    // ── POST /admin/sync/step-log/append ──────────────────────────────────────
+    // Internal: sync scripts emit a verbose step-by-step progress feed via
+    // this endpoint. Bulk-inserts entries — typically 1–20 per call,
+    // flushed every ~500 ms by the orchestrator.
+    //
+    // Retention: on each call, we ALSO purge step-log rows for any run
+    // beyond the most-recent 3 (this one + 2 previous). Three runs gives
+    // the admin enough context to compare this sync to the last one
+    // without unbounded growth.
+    //
+    // Body: { run_id, entries: [{ts, step_code, message, level?, error_code?, detail?}] }
+    if (pathname === '/admin/sync/step-log/append' && method === 'POST') {
       const authErr = requireAuth(request, env)
       if (authErr) return authErr
       const body = await request.json().catch(() => ({}))
@@ -696,16 +735,160 @@ export default {
       }
 
       const stmts = entries.map(e => env.DB.prepare(
-        `INSERT INTO sync_changelog
-         (run_id, operation, food_source, food_source_id, before_data, after_data, committed)
-         VALUES (?, ?, ?, ?, ?, ?, 0)`
+        `INSERT INTO sync_step_log
+         (run_id, ts, step_code, message, level, error_code, detail)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       ).bind(
-        run_id, e.operation, e.food_source, e.food_source_id,
-        e.before_data ?? null, e.after_data ?? null,
+        run_id,
+        e.ts          ?? new Date().toISOString(),
+        e.step_code   ?? 'unknown',
+        e.message     ?? '',
+        e.level       ?? 'info',
+        e.error_code  ?? null,
+        e.detail      ?? null,
       ))
 
       await env.DB.batch(stmts)
+
+      // Retention sweep — keep the 3 most-recent run_ids only. Use the
+      // step_log table itself as the source of truth (every run that
+      // logged has at least one entry).
+      try {
+        const { results: keepRuns } = await env.DB.prepare(
+          `SELECT run_id FROM sync_step_log
+           GROUP BY run_id
+           ORDER BY MAX(id) DESC
+           LIMIT 3`
+        ).all()
+        const keepIds = (keepRuns ?? []).map(r => r.run_id)
+        if (keepIds.length === 3) {
+          const placeholders = keepIds.map(() => '?').join(',')
+          await env.DB.prepare(
+            `DELETE FROM sync_step_log WHERE run_id NOT IN (${placeholders})`
+          ).bind(...keepIds).run()
+        }
+      } catch { /* non-fatal */ }
+
       return json({ appended: entries.length })
+    }
+
+    // ── GET /admin/sync/step-log ──────────────────────────────────────────────
+    // OperationsPanel polls this every ~2 seconds during a sync to render the
+    // live progress feed. Returns entries chronologically.
+    //
+    // Query params:
+    //   run_id   required
+    //   after_id optional — return only entries with id > after_id (cursor-style)
+    //   limit    optional, default 500, max 2000
+    if (pathname === '/admin/sync/step-log' && method === 'GET') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const runId   = url.searchParams.get('run_id')
+      const afterId = Number(url.searchParams.get('after_id') ?? 0) || 0
+      const limit   = Math.min(2000, Math.max(1, Number(url.searchParams.get('limit') ?? 500) || 500))
+      if (!runId) return json({ error: 'run_id required' }, 400)
+
+      const { results } = await env.DB.prepare(
+        `SELECT id, REPLACE(ts, ' ', 'T') || 'Z' AS ts,
+                step_code, message, level, error_code, detail
+         FROM sync_step_log
+         WHERE run_id = ? AND id > ?
+         ORDER BY id ASC
+         LIMIT ?`
+      ).bind(runId, afterId, limit).all()
+
+      const rows = results ?? []
+      const nextId = rows.length ? rows[rows.length - 1].id : afterId
+      return json({ run_id: runId, rows, next_id: nextId, done: rows.length < limit })
+    }
+
+    // ── POST /admin/sync/history/upsert ───────────────────────────────────────
+    // Internal: sync script reports lifecycle events to sync_history.
+    //
+    // Body fields:
+    //   run_id           required
+    //   mode             'staged' | 'commit'
+    //   status           'running' | 'completed' | 'failed' | 'cancelled'
+    //   started_at       ISO (only used on initial insert; ignored on updates)
+    //   ended_at         ISO (null while running)
+    //   total_ms         number
+    //   phase_durations  object → JSON stringified server-side
+    //   inserts          number
+    //   updates          number
+    //   deletes          number
+    //   error_code       string | null
+    //   error_message    string | null
+    if (pathname === '/admin/sync/history/upsert' && method === 'POST') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const body = await request.json().catch(() => ({}))
+      const { run_id } = body
+      if (!run_id) return json({ error: 'run_id required' }, 400)
+
+      const phaseDurations =
+        body.phase_durations && typeof body.phase_durations === 'object'
+          ? JSON.stringify(body.phase_durations)
+          : (body.phase_durations ?? null)
+
+      await env.DB.prepare(
+        `INSERT INTO sync_history
+           (run_id, mode, status, started_at, ended_at, total_ms,
+            phase_durations, inserts, updates, deletes,
+            error_code, error_message)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id) DO UPDATE SET
+           mode            = COALESCE(excluded.mode,            sync_history.mode),
+           status          = COALESCE(excluded.status,          sync_history.status),
+           ended_at        = COALESCE(excluded.ended_at,        sync_history.ended_at),
+           total_ms        = COALESCE(excluded.total_ms,        sync_history.total_ms),
+           phase_durations = COALESCE(excluded.phase_durations, sync_history.phase_durations),
+           inserts         = COALESCE(excluded.inserts,         sync_history.inserts),
+           updates         = COALESCE(excluded.updates,         sync_history.updates),
+           deletes         = COALESCE(excluded.deletes,         sync_history.deletes),
+           error_code      = COALESCE(excluded.error_code,      sync_history.error_code),
+           error_message   = COALESCE(excluded.error_message,   sync_history.error_message)`
+      ).bind(
+        run_id,
+        body.mode          ?? null,
+        body.status        ?? null,
+        body.started_at    ?? new Date().toISOString(),
+        body.ended_at      ?? null,
+        body.total_ms      ?? null,
+        phaseDurations,
+        body.inserts       ?? null,
+        body.updates       ?? null,
+        body.deletes       ?? null,
+        body.error_code    ?? null,
+        body.error_message ?? null,
+      ).run()
+
+      return json({ ok: true })
+    }
+
+    // ── GET /admin/sync/eta ───────────────────────────────────────────────────
+    // Compute an ETA estimate from sync_history. Returns the median total_ms
+    // of the most-recent 5 successful runs (so a single slow outlier doesn't
+    // skew the projection). If history is too sparse, falls back to a
+    // baseline of 900_000 ms (15 minutes).
+    //
+    // OperationsPanel reads this once at sync start, then computes
+    // "time remaining" client-side from elapsed.
+    if (pathname === '/admin/sync/eta' && method === 'GET') {
+      const authErr = requireAuth(request, env)
+      if (authErr) return authErr
+      const { results } = await env.DB.prepare(
+        `SELECT total_ms FROM sync_history
+         WHERE status = 'completed' AND total_ms IS NOT NULL
+         ORDER BY started_at DESC
+         LIMIT 5`
+      ).all()
+      const samples = (results ?? []).map(r => r.total_ms).filter(n => n > 0)
+      let estimateMs = 900_000  // 15 min baseline
+      if (samples.length) {
+        const sorted = [...samples].sort((a, b) => a - b)
+        estimateMs = sorted[Math.floor(sorted.length / 2)]
+      }
+      return json({ estimate_ms: estimateMs, sample_count: samples.length, samples })
     }
 
     // ── POST /admin/sync/state ────────────────────────────────────────────────
@@ -739,6 +922,11 @@ export default {
         if (runId) {
           cleanup.push(env.DB.prepare(
             `DELETE FROM sync_changelog WHERE run_id = ?`
+          ).bind(runId))
+          // Mark the history row as cancelled rather than deleting it —
+          // keeps the "Recent syncs" feed honest about what happened.
+          cleanup.push(env.DB.prepare(
+            `UPDATE sync_history SET status = 'cancelled', ended_at = datetime('now') WHERE run_id = ?`
           ).bind(runId))
         }
         cleanup.push(
