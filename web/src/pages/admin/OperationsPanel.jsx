@@ -634,22 +634,47 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
           {/* Trigger controls */}
           {!reviewPending && (
             <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-border/40">
-              <label className="flex items-center gap-2 text-[12px] cursor-pointer select-none">
-                <span className="relative inline-flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={stagedToggle}
-                    onChange={e => setStagedToggle(e.target.checked)}
-                    disabled={isRunning}
-                    className="sr-only peer"
-                  />
-                  <span className="h-4 w-7 rounded-full bg-muted border border-border peer-checked:bg-violet-500/40 peer-checked:border-violet-400 transition-colors" />
-                  <span className="absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-foreground transition-transform peer-checked:translate-x-3" />
-                </span>
-                <span className={stagedToggle ? 'text-violet-300' : 'text-muted-foreground'}>
-                  Dry-run (review before commit)
-                </span>
-              </label>
+              {/*
+                Dry-run toggle.
+
+                While a sync is running, the toggle is BOTH locked
+                (disabled prop on the input prevents state change) AND
+                visually frozen — opacity lowers, cursor changes to
+                not-allowed, and the displayed value is derived from the
+                CURRENT RUN's mode (sync.mode === 'staged') rather than
+                local state. That way the toggle always reflects what's
+                actually happening on the server, even if the user opens
+                the page mid-sync from a different browser.
+
+                When idle (or status === 'cancelled' / 'completed'), the
+                toggle returns to its normal interactive state and the
+                local `stagedToggle` value governs the next sync.
+              */}
+              {(() => {
+                const liveStaged = isRunning ? sync?.mode === 'staged' : stagedToggle
+                return (
+                  <label
+                    className={`flex items-center gap-2 text-[12px] select-none ${isRunning ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                    title={isRunning ? 'Mode is locked while a sync is running' : ''}
+                  >
+                    <span className={`relative inline-flex items-center ${isRunning ? 'opacity-60' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={liveStaged}
+                        onChange={e => setStagedToggle(e.target.checked)}
+                        disabled={isRunning}
+                        className="sr-only peer"
+                      />
+                      <span className="h-4 w-7 rounded-full bg-muted border border-border peer-checked:bg-violet-500/40 peer-checked:border-violet-400 transition-colors" />
+                      <span className="absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-foreground transition-transform peer-checked:translate-x-3" />
+                    </span>
+                    <span className={liveStaged ? 'text-violet-300' : 'text-muted-foreground'}>
+                      Dry-run (review before commit)
+                      {isRunning && <span className="ml-1 text-muted-foreground/60">— locked</span>}
+                    </span>
+                  </label>
+                )
+              })()}
 
               <div className="flex items-center gap-2">
                 {isRunning ? (
