@@ -1016,13 +1016,20 @@ export default {
           ).bind(commitTs),
         )
       }
-      // If status transitioned to 'running', clear the cancel flag
-      // from any prior cancellation.
-      if (body.status === 'running') {
-        updates.push(env.DB.prepare(
-          `UPDATE sync_state SET value = '0', updated_at = datetime('now') WHERE key = 'sync_cancel_requested'`
-        ))
-      }
+      // DO NOT clear cancel_requested on running transitions.
+      //
+      // Earlier this branch auto-cleared cancel_requested whenever a
+      // sync transitioned to 'running' (as a "fresh run" safety net).
+      // That silently swallowed user cancels in the common pending →
+      // running gap: user clicks Sync now → status=pending → user
+      // clicks Cancel → cancel_requested=1 → GHA workflow boots and
+      // posts status='running' → this branch wiped the cancel.
+      //
+      // The cancel flag is now ONLY cleared in two places:
+      //   1. /admin/sync (trigger endpoint) at click time
+      //   2. /admin/sync/state with status='cancelled' (cancel cleanup)
+      // Both represent intentional resets; the running transition is
+      // not such a reset.
 
       if (updates.length) await env.DB.batch(updates)
       return json({ ok: true })

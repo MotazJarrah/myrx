@@ -408,7 +408,13 @@ async function findOnSnapshot() {
 }
 
 /**
- * Stream a URL to disk, emitting progress updates every ~500 KB.
+ * Stream a URL to disk, emitting progress updates every ~10%.
+ *
+ * Polls the cancel flag every 5 seconds during the download so the user
+ * doesn't have to wait through a 3 GB transfer if they hit Cancel. If
+ * cancel is detected mid-download, the partial file is discarded and
+ * the function throws — main()'s top-level catch will handle the clean
+ * cancel exit.
  */
 async function downloadFile(url, destPath, label, progressKey) {
   fs.mkdirSync(path.dirname(destPath), { recursive: true })
@@ -418,6 +424,7 @@ async function downloadFile(url, destPath, label, progressKey) {
   const out   = fs.createWriteStream(destPath)
   let received = 0
   let lastLogPct = 0
+  let lastCancelCheck = Date.now()
 
   const reader = res.body.getReader()
   while (true) {
@@ -430,6 +437,15 @@ async function downloadFile(url, destPath, label, progressKey) {
       if (pct >= lastLogPct + 10) {
         lastLogPct = pct
         logStep(`download_${progressKey}`, `${label} download: ${pct}% (${fmtBytes(received)} / ${fmtBytes(total)})`)
+      }
+    }
+    // Cancel-check every 5 s during the transfer.
+    if (Date.now() - lastCancelCheck > 5000) {
+      lastCancelCheck = Date.now()
+      if (await checkCancel()) {
+        out.destroy()
+        try { fs.unlinkSync(destPath) } catch {}
+        throw Object.assign(new Error('Download aborted by cancel'), { _isCancel: true })
       }
     }
   }
@@ -1028,6 +1044,19 @@ async function main() {
   const totalStart = Date.now()
   logStep('start', `MyRX Food Library Sync — run_id ${RUN_ID}, mode ${MODE}`)
 
+  // EARLY cancel check — if the admin clicked Cancel during the pending
+  // phase (between trigger dispatch and GHA boot), honour it before
+  // doing any heavy work. The trigger endpoint doesn't clear the cancel
+  // flag, and the worker no longer clears it on running transitions
+  // (was a bug — silently swallowed user cancels in the pending→running
+  // gap), so a pre-set cancel propagates correctly to here.
+  if (await checkCancel()) {
+    logStep('cancel', 'Cancel was requested before the sync could start — exiting cleanly', { level: 'warn' })
+    await pushState({ status: 'cancelled', completed_at: nowIso() })
+    await drainSteps()
+    process.exit(0)
+  }
+
   // Mark running + record initial history row so ETA can use the started_at.
   await pushState({ status: 'running', started_at: nowIso(), error: '' })
   await pushHistoryRow({ status: 'running' })
@@ -1074,6 +1103,15 @@ async function main() {
     await drainSteps()
     process.exit(0)
   } catch (err) {
+    // Mid-download cancel-throws land here. Route them to the cancel
+    // exit path so the worker cleans up the changelog instead of
+    // reporting a generic failure.
+    if (err._isCancel) {
+      logStep('cancel', 'Cancel requested mid-sync — aborting cleanly', { level: 'warn' })
+      await pushState({ status: 'cancelled', completed_at: nowIso() })
+      await drainSteps()
+      process.exit(0)
+    }
     const code = err.code || 'E_099'
     logStep('error', `Sync failed: ${err.message}`, {
       level: 'error',
