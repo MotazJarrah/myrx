@@ -547,13 +547,13 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
         </button>
       </div>
 
-      {/* Helper line — explains the upload rule. Different copy
-          depending on whether the mirror has any files yet. */}
-      <div className="text-xs text-muted-foreground/70 leading-snug">
-        {hasAnyMirror
-          ? <>Upload only the file(s) with a newer version on the source page. The other one stays put — both versions in the mirror are used for every sync.</>
-          : <>Upload both ZIPs to populate the mirror. After that, only re-upload the file that has a new version.</>}
-      </div>
+      {/* Helper line — only when the mirror has at least one file.
+          Explains the partial-upload rule (re-upload only what's new). */}
+      {hasAnyMirror && (
+        <div className="text-xs text-muted-foreground/70 leading-snug">
+          Upload only the file(s) with a newer version on the source page. The other one stays put — both versions in the mirror are used for every sync.
+        </div>
+      )}
 
       {/* Currently-uploaded cards — one per source. Cards collapse to
           a single line if no file is uploaded yet. */}
@@ -1425,52 +1425,13 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
             />
           )}
 
-          {/* Progress bar (when running) */}
-          {isRunning && (
-            <ProgressBar
-              status={status}
-              progress={sync?.progress}
-              startedAt={sync?.started_at}
-              etaBaselineMs={etaBaseline}
-            />
-          )}
-
-          {/* Verbose step log — shown only when something actionable is
-              happening (sync running OR sync failed). Successful and
-              cancelled runs hide the log so the panel doesn't carry
-              stale noise; the result lives in the history list. */}
-          {sync?.run_id && showStepLog && (
-            <StepLog runId={sync.run_id} active={isRunning} />
-          )}
-
-          {/* Review dialog (when staged) */}
-          {reviewPending && (
-            <ReviewDialog
-              runId={sync.run_id}
-              working={reviewing}
-              error={reviewError}
-              onCommit={commitStaged}
-              onDiscard={discardStaged}
-              onDownload={downloadChangelog}
-            />
-          )}
-
-          {/* Trigger controls */}
+          {/* Trigger controls — dry-run toggle + morphing action button.
+              Lives directly below the upload zone so the admin's eye
+              flows top-to-bottom: see what's uploaded → choose dry-run →
+              hit the button. Border-top intentionally omitted so the
+              controls visually attach to the upload zone above. */}
           {!reviewPending && (
-            <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-border/40">
-              {/*
-                Dry-run toggle.
-
-                While a sync is running, the toggle is locked at the
-                state level (disabled prop on the input prevents change)
-                AND the displayed value is derived from the CURRENT RUN's
-                mode so the UI always reflects what's actually happening.
-                Visual treatment: just dim the toggle + label to gray —
-                no cursor change, no "locked" text. Simple disabled-look.
-
-                When idle, the toggle returns to normal interactive state
-                and the local `stagedToggle` governs the next sync's mode.
-              */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
               {(() => {
                 const liveStaged = isRunning ? sync?.mode === 'staged' : stagedToggle
                 return (
@@ -1556,6 +1517,36 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
                 )}
               </div>
             </div>
+          )}
+
+          {/* Progress bar (when running) */}
+          {isRunning && (
+            <ProgressBar
+              status={status}
+              progress={sync?.progress}
+              startedAt={sync?.started_at}
+              etaBaselineMs={etaBaseline}
+            />
+          )}
+
+          {/* Verbose step log — shown only when something actionable is
+              happening (sync running OR sync failed). Successful and
+              cancelled runs hide the log so the panel doesn't carry
+              stale noise; the result lives in the history list. */}
+          {sync?.run_id && showStepLog && (
+            <StepLog runId={sync.run_id} active={isRunning} />
+          )}
+
+          {/* Review dialog (when staged) */}
+          {reviewPending && (
+            <ReviewDialog
+              runId={sync.run_id}
+              working={reviewing}
+              error={reviewError}
+              onCommit={commitStaged}
+              onDiscard={discardStaged}
+              onDownload={downloadChangelog}
+            />
           )}
 
           {/* Error display. Two sources:
