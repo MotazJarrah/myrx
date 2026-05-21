@@ -702,10 +702,31 @@ export default {
     // ── POST /admin/sync/state ────────────────────────────────────────────────
     // Internal: sync scripts call this to update status + progress + run_id.
     // Body: { status?, run_id?, mode?, progress?, error?, started_at?, completed_at? }
+    //
+    // Status precedence: once a run reaches a "final" state ('cancelled' or
+    // 'failed'), subsequent 'completed' writes are dropped — the GHA
+    // workflow's "Mark completed" step fires unconditionally on script
+    // success, but a clean cancel exits 0 which GHA counts as success.
+    // Without this guard, a cancelled run would silently flip to
+    // 'completed' a few seconds after the script pushed 'cancelled'.
     if (pathname === '/admin/sync/state' && method === 'POST') {
       const authErr = requireAuth(request, env)
       if (authErr) return authErr
       const body = await request.json().catch(() => ({}))
+
+      // If the caller is trying to write status='completed', check the
+      // current state first — if it's already cancelled or failed, keep
+      // the final state but allow other fields (timestamps, error msg) to
+      // update.
+      if (body.status === 'completed') {
+        const { results } = await env.DB.prepare(
+          `SELECT value FROM sync_state WHERE key = 'sync_status'`
+        ).all()
+        const current = results?.[0]?.value
+        if (current === 'cancelled' || current === 'failed') {
+          delete body.status  // preserve final state
+        }
+      }
 
       const updates = []
       const stateMap = {
@@ -727,6 +748,14 @@ export default {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
           ).bind(dbKey, value))
         }
+      }
+
+      // When status flips to 'cancelled', clear the cancel_requested flag
+      // so the next sync isn't pre-cancelled.
+      if (body.status === 'cancelled') {
+        updates.push(env.DB.prepare(
+          `UPDATE sync_state SET value = '0', updated_at = datetime('now') WHERE key = 'sync_cancel_requested'`
+        ))
       }
 
       // If status transitioned to 'completed' AND mode === 'staged',
@@ -758,24 +787,62 @@ export default {
     // ── GET /admin/sync/history ───────────────────────────────────────────────
     // Last N sync runs grouped from the changelog. Lightweight — uses
     // GROUP BY run_id without storing a separate history table.
+    //
+    // Excludes the currently-running run (if status is running/pending and
+    // we have an active sync_run_id) so the user only sees completed
+    // syncs, not the one they just kicked off that's still in progress.
+    //
+    // Timestamps are returned in proper ISO format with the `Z` suffix.
+    // SQLite's `datetime('now')` produces "YYYY-MM-DD HH:MM:SS" with no
+    // timezone marker — JavaScript misinterprets that as local time, so
+    // a sync that ran at 03:00 UTC would display as 03:00 local (off by
+    // the user's UTC offset). The `||'Z'` concat tells JS the value is
+    // already UTC, so toLocaleString converts it correctly.
     if (pathname === '/admin/sync/history' && method === 'GET') {
       const authErr = requireAuth(request, env)
       if (authErr) return authErr
       const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit') ?? 10) || 10))
-      const { results } = await env.DB.prepare(
-        `SELECT run_id,
-                MIN(created_at) AS started_at,
-                MAX(created_at) AS ended_at,
-                SUM(CASE WHEN operation = 'insert' THEN 1 ELSE 0 END) AS inserts,
-                SUM(CASE WHEN operation = 'update' THEN 1 ELSE 0 END) AS updates,
-                SUM(CASE WHEN operation = 'delete' THEN 1 ELSE 0 END) AS deletes,
-                SUM(CASE WHEN committed = 1 THEN 1 ELSE 0 END) AS committed,
-                SUM(CASE WHEN reverted  = 1 THEN 1 ELSE 0 END) AS reverted
-         FROM sync_changelog
-         GROUP BY run_id
-         ORDER BY MAX(id) DESC
-         LIMIT ?`
-      ).bind(limit).all()
+
+      // Find the in-progress run (if any) so we can exclude it.
+      const { results: stateRows } = await env.DB.prepare(
+        `SELECT key, value FROM sync_state WHERE key IN ('sync_status', 'sync_run_id')`
+      ).all()
+      const state = {}
+      for (const r of stateRows ?? []) state[r.key] = r.value
+      const activeRunId =
+        (state.sync_status === 'running' || state.sync_status === 'pending')
+          ? (state.sync_run_id || '')
+          : ''
+
+      const sql = activeRunId
+        ? `SELECT run_id,
+                  REPLACE(MIN(created_at), ' ', 'T') || 'Z' AS started_at,
+                  REPLACE(MAX(created_at), ' ', 'T') || 'Z' AS ended_at,
+                  SUM(CASE WHEN operation = 'insert' THEN 1 ELSE 0 END) AS inserts,
+                  SUM(CASE WHEN operation = 'update' THEN 1 ELSE 0 END) AS updates,
+                  SUM(CASE WHEN operation = 'delete' THEN 1 ELSE 0 END) AS deletes,
+                  SUM(CASE WHEN committed = 1 THEN 1 ELSE 0 END) AS committed,
+                  SUM(CASE WHEN reverted  = 1 THEN 1 ELSE 0 END) AS reverted
+           FROM sync_changelog
+           WHERE run_id != ?
+           GROUP BY run_id
+           ORDER BY MAX(id) DESC
+           LIMIT ?`
+        : `SELECT run_id,
+                  REPLACE(MIN(created_at), ' ', 'T') || 'Z' AS started_at,
+                  REPLACE(MAX(created_at), ' ', 'T') || 'Z' AS ended_at,
+                  SUM(CASE WHEN operation = 'insert' THEN 1 ELSE 0 END) AS inserts,
+                  SUM(CASE WHEN operation = 'update' THEN 1 ELSE 0 END) AS updates,
+                  SUM(CASE WHEN operation = 'delete' THEN 1 ELSE 0 END) AS deletes,
+                  SUM(CASE WHEN committed = 1 THEN 1 ELSE 0 END) AS committed,
+                  SUM(CASE WHEN reverted  = 1 THEN 1 ELSE 0 END) AS reverted
+           FROM sync_changelog
+           GROUP BY run_id
+           ORDER BY MAX(id) DESC
+           LIMIT ?`
+
+      const binds = activeRunId ? [activeRunId, limit] : [limit]
+      const { results } = await env.DB.prepare(sql).bind(...binds).all()
       return json(results ?? [])
     }
 

@@ -284,7 +284,7 @@ async function syncBranded(db, dateBegin, dateEnd) {
     }
 
     processed += foods.length
-    await updateProgress(db, { phase: 'usda_branded', page, processed, inserted, updated, removed, filterStats })
+    await updateProgress(db, { phase: 'usda_branded', page, total_pages: totalPages, processed, inserted, updated, removed, filterStats })
     page++
   }
 
@@ -382,7 +382,7 @@ async function syncGeneric(db, apiLabel, shortName, dateBegin, dateEnd) {
     if (shouldApplyToLiveDb() && upsertStmts.length) await db.batch(upsertStmts)
 
     processed += foods.length
-    await updateProgress(db, { phase: `usda_${shortName}`, page, processed, inserted, updated, filterStats })
+    await updateProgress(db, { phase: `usda_${shortName}`, page, total_pages: totalPages, processed, inserted, updated, filterStats })
 
     if (await isCancelRequested()) {
       console.log(`\n  ⚠ Cancel requested — aborting ${apiLabel} pass`)
@@ -432,9 +432,32 @@ async function run() {
 
   // Run each pass sequentially. Branded is by far the heaviest (~420K rows);
   // Foundation + SR Legacy are quick (~8K rows combined).
-  const branded    = await syncBranded(db,             dateBegin, dateEnd)
+  //
+  // Cancellation: each pass returns `cancelled: true` if it noticed the
+  // cancel flag mid-stream. Once we see that, skip remaining passes,
+  // push a 'cancelled' state to the worker so the UI reflects it, and
+  // exit early (process.exit(0) — cleanly cancelled, not failed).
+  const branded = await syncBranded(db, dateBegin, dateEnd)
+  if (branded.cancelled) {
+    console.log('\n⚠ Sync cancelled — skipping remaining passes')
+    await flushAll()
+    await pushSyncState({ status: 'cancelled', error: 'Cancelled by admin' })
+    process.exit(0)
+  }
   const foundation = await syncGeneric(db, 'Foundation', 'foundation', dateBegin, dateEnd)
-  const srLegacy   = await syncGeneric(db, 'SR Legacy',  'sr_legacy',  dateBegin, dateEnd)
+  if (foundation.cancelled) {
+    console.log('\n⚠ Sync cancelled — skipping remaining passes')
+    await flushAll()
+    await pushSyncState({ status: 'cancelled', error: 'Cancelled by admin' })
+    process.exit(0)
+  }
+  const srLegacy = await syncGeneric(db, 'SR Legacy',  'sr_legacy',  dateBegin, dateEnd)
+  if (srLegacy.cancelled) {
+    console.log('\n⚠ Sync cancelled — skipping remaining passes')
+    await flushAll()
+    await pushSyncState({ status: 'cancelled', error: 'Cancelled by admin' })
+    process.exit(0)
+  }
 
   const totals = {
     processed: branded.processed + foundation.processed + srLegacy.processed,

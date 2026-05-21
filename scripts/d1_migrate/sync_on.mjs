@@ -280,6 +280,17 @@ async function run() {
   const myrxSupersededUniq = [...new Map(myrxSuperseded.map(r => [r.source_id, r])).values()]
   console.log(`\n  → ${toInsert.length.toLocaleString()} to insert, ${toUpdate.length.toLocaleString()} to update, ${toDelete.length.toLocaleString()} to delete, ${myrxSupersededUniq.length} MYRX superseded`)
 
+  // Honor cancel requests before the heavy write phase. ON sync builds
+  // up its diff in memory then applies it in one block — if the user
+  // cancelled while we were parsing the TSV, abort here before any
+  // writes happen.
+  if (await isCancelRequested()) {
+    console.log('\n  ⚠ Cancel requested — aborting ON sync before write')
+    await flushAll()
+    await pushSyncState({ status: 'cancelled', error: 'Cancelled by admin' })
+    process.exit(0)
+  }
+
   // ── Apply changes ───────────────────────────────────────────────────────────
   console.log('\nStep 5/5  Applying changes to D1…')
 

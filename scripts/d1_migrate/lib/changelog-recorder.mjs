@@ -153,14 +153,22 @@ async function flush() {
 }
 
 // ── Cancel polling ────────────────────────────────────────────────────────────
-// Sync scripts can call this between batches to abort cleanly if the
-// admin clicked "Cancel mid-sync" in the UI.
+// Sync scripts call this between batches to abort cleanly if the admin
+// clicked "Cancel mid-sync" in the UI.
+//
+// Throttling: at most one HTTP check per 2 seconds. The previous 5s
+// throttle made cancel feel sluggish — a USDA branded page round-trip
+// takes ~1.5–3s, so cancel could miss the next page check entirely
+// and not stop until the page after that, putting total cancel latency
+// at 8–10s. 2s throttle catches the next page boundary almost always
+// while still keeping worker traffic minimal (~30 checks/min worst case).
 let lastCancelCheck = 0
+let cachedCancel = false  // sticky — once true, always returns true
 export async function isCancelRequested() {
   if (!ENABLED) return false
-  // Poll at most once per 5 seconds to avoid worker spam.
+  if (cachedCancel) return true
   const now = Date.now()
-  if (now - lastCancelCheck < 5_000) return false
+  if (now - lastCancelCheck < 2_000) return false
   lastCancelCheck = now
   try {
     const res = await fetch(`${WORKER}/admin/sync/cancel/check`, {
@@ -168,6 +176,7 @@ export async function isCancelRequested() {
     })
     if (!res.ok) return false
     const { cancel } = await res.json()
+    if (cancel) cachedCancel = true  // remember; no need to re-check
     return !!cancel
   } catch {
     return false

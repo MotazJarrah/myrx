@@ -126,6 +126,26 @@
   .hover-elevate:hover::after {
     background-color: var(--elevate-1);
   }
+
+  /* Library Operations progress bar animations (OperationsPanel.jsx).
+     Pure-CSS keyframes so the animation runs on the compositor at
+     native 60fps and is unaffected by React re-renders from polling. */
+  @keyframes op-bar-sweep {
+    /* Indeterminate state: a translucent stripe sweeps L→R across the
+       track. The track width is 100% and the stripe is 25% wide, so we
+       move it from -25% to 100% so it fully exits the right edge before
+       re-entering on the left. */
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+  }
+  @keyframes op-bar-shimmer {
+    /* Determinate state shimmer: a faint highlight sweep INSIDE the
+       filled portion. Moves L→R then resets. The filled portion is
+       100% of its own width; the shimmer is 33% of THAT width, so we
+       translate from -33% to 100% to span the visible portion. */
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(300%); }
+  }
 }
 
 /* react-phone-number-input — adapts to dark/light via CSS vars */
