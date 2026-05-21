@@ -301,21 +301,28 @@ async function bailIfCancelled() {
  * Discover the latest USDA FoodData Central CSV snapshot.
  *
  * USDA's download-datasets page is a JavaScript-rendered SPA — the
- * `<a href>` links don't exist in the raw HTML, they're added at
- * runtime by Angular. Static scraping is impossible without spinning
- * up a headless browser.
+ * `<a href>` links don't exist in the raw HTML. Static scraping is
+ * impossible without a headless browser.
  *
- * Strategy: HEAD-probe a curated set of candidate URLs on the CDN
+ * Strategy: probe a curated set of candidate URLs on the CDN
  * (fdc-datasets.ars.usda.gov) and pick the most recent one that
- * returns 200. USDA publishes ~2x/year with predictable release-day
- * patterns (mid-to-late month) so the candidate space is small.
+ * returns a successful response. USDA publishes ~2x/year with
+ * predictable release-day patterns, so the candidate space is small.
  *
- * Candidate window: last 8 months, on these days-of-month:
- *   17, 18, 20, 24, 26, 28, 29, 30, 31
- * Plus the known-good 2026-04-30 as a guaranteed fallback so first-run
- * always succeeds even if probing rate-limits.
+ * Probe method: tiny ranged GET (Range: bytes=0-0). HEAD requests
+ * fail against this CDN — it rejects HEAD with no body, returning
+ * status codes that don't include 200. Ranged GET works on every
+ * conforming CDN: 206 Partial Content if the URL is valid (and we
+ * only read 1 byte, so it's effectively free), 200 OK if the server
+ * ignores Range, 4xx/5xx if the file doesn't exist.
  *
- * Returns the latest reachable URL + date string ("YYYY-MM-DD" format).
+ * Guaranteed fallback: KNOWN_GOOD ('2026-04-30') is always probed
+ * AND falls through as the last-resort answer if every newer
+ * candidate fails. That way the first sync after the orchestrator
+ * deploys always succeeds even before we've calibrated the probe
+ * list against USDA's current publication.
+ *
+ * Returns { url, date } for the latest reachable snapshot.
  */
 async function findUsdaSnapshot() {
   logStep('scrape_usda', 'Probing USDA CDN for latest snapshot…')
@@ -340,29 +347,52 @@ async function findUsdaSnapshot() {
 
   logStep('scrape_usda', `Probing ${dateList.length} candidate dates in parallel…`)
 
-  // HEAD-probe all in parallel. Each probe is a few hundred ms, total
-  // wall-clock ~1-2s for the whole batch.
-  const probes = await Promise.allSettled(
+  // Ranged GET probe — read 1 byte, immediately cancel the body.
+  // Status 200/206/304 = URL exists. 4xx/5xx = not found.
+  async function probe(url) {
+    try {
+      const res = await fetch(url, {
+        method:  'GET',
+        headers: {
+          'User-Agent': 'myrx-sync/1.0',
+          'Range':      'bytes=0-0',
+        },
+        redirect: 'follow',
+      })
+      // Cancel the body stream — we already have the status code.
+      try { await res.body?.cancel() } catch {}
+      const ok = res.status >= 200 && res.status < 400
+      return { ok, status: res.status }
+    } catch (err) {
+      return { ok: false, status: 0, error: err.message }
+    }
+  }
+
+  const probeResults = await Promise.all(
     dateList.map(async date => {
       const url = `${base}${date}.zip`
-      try {
-        const res = await fetch(url, {
-          method:  'HEAD',
-          headers: { 'User-Agent': 'myrx-sync/1.0' },
-          redirect: 'follow',
-        })
-        return res.ok ? { date, url } : null
-      } catch { return null }
+      const result = await probe(url)
+      return { date, url, ...result }
     })
   )
 
-  const found = probes
-    .filter(r => r.status === 'fulfilled' && r.value)
-    .map(r => r.value)
+  const found = probeResults
+    .filter(r => r.ok)
     .sort((a, b) => b.date.localeCompare(a.date))
 
+  // Diagnostic: log a few sample status codes from failed probes so
+  // future debugging is easier. Limit to first 3 to keep the log
+  // tidy.
   if (!found.length) {
-    throw new Error('No reachable USDA snapshot URL — HEAD probe found nothing')
+    const samples = probeResults.slice(0, 3).map(r =>
+      `${r.date}=${r.status || r.error || 'no-response'}`
+    ).join(', ')
+    logStep('scrape_usda', `All probes failed. Sample responses: ${samples}`, { level: 'warn' })
+    // Last-resort fallback: assume the known-good URL is still valid
+    // (CDN might be having a temporary issue with probes but
+    // downloads can still succeed). Surface it as a warning.
+    logStep('scrape_usda', `Falling back to known-good snapshot: ${KNOWN_GOOD}`, { level: 'warn' })
+    return { url: `${base}${KNOWN_GOOD}.zip`, date: KNOWN_GOOD }
   }
 
   const latest = found[0]
