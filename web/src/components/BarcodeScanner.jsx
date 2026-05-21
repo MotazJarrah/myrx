@@ -42,6 +42,42 @@ export function BarcodeScanner({ onScan, onClose }) {
     const reader = new BrowserMultiFormatReader(SCAN_HINTS)
     let stopped  = false
 
+    // ── Lock screen orientation to portrait while scanning ───────────
+    // The aim frame is rectangular (wider than tall) and assumes the
+    // page is in portrait. If the user rotates the phone — say to get
+    // a better angle on an open can they can't tilt — the screen
+    // flips to landscape and the aim frame moves with it. Locking
+    // orientation pins the overlay so the user can physically rotate
+    // the device freely without the UI rotating underneath them.
+    //
+    // Browser support is uneven:
+    //   - Android Chrome: works, but only inside fullscreen mode
+    //   - iOS Safari    : doesn't support screen.orientation.lock at all,
+    //                     even in fullscreen. Best we can do is the
+    //                     visible hint and hope for the best.
+    //   - Desktop       : no-op, since rotation isn't a concern there.
+    //
+    // We try fullscreen + lock; if either step fails (no user gesture,
+    // unsupported, etc.) we silently fall through to "scanner works
+    // but doesn't lock orientation."
+    let didEnterFullscreen = false
+    let didLockOrientation = false
+    async function lockOrientation() {
+      try {
+        // requestFullscreen needs a user gesture; the click that opened
+        // the scanner counts on most browsers.
+        if (document.documentElement?.requestFullscreen && !document.fullscreenElement) {
+          await document.documentElement.requestFullscreen()
+          didEnterFullscreen = true
+        }
+        if (screen.orientation?.lock) {
+          await screen.orientation.lock('portrait')
+          didLockOrientation = true
+        }
+      } catch { /* graceful no-op — iOS Safari, denied gestures, etc. */ }
+    }
+    lockOrientation()
+
     // Request the rear-facing camera explicitly. On phones this is what
     // the user actually wants — they hold the device with the screen
     // facing them and aim the back at the barcode. `ideal` instead of
@@ -80,6 +116,12 @@ export function BarcodeScanner({ onScan, onClose }) {
     return () => {
       stopped = true
       try { controlsRef.current?.stop() } catch { /* already stopped */ }
+      // Tear down orientation lock + fullscreen in reverse order so
+      // the page returns to whatever rotation policy it had before.
+      if (didLockOrientation) { try { screen.orientation.unlock?.() } catch {} }
+      if (didEnterFullscreen && document.exitFullscreen && document.fullscreenElement) {
+        try { document.exitFullscreen() } catch {}
+      }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -131,7 +173,11 @@ export function BarcodeScanner({ onScan, onClose }) {
               </div>
             )}
           </div>
-          <p className="text-center text-white/50 text-xs">Align the barcode inside the frame</p>
+          <p className="text-center text-white/50 text-xs leading-relaxed">
+            Align the barcode horizontally inside the frame.
+            <br />
+            Rotate your phone or the product so the barcode runs left-to-right.
+          </p>
         </div>
       )}
     </div>
