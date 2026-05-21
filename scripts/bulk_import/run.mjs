@@ -28,6 +28,7 @@ import { fileURLToPath } from 'url'
 
 import { loadUsda } from './lib/usda_loader.mjs'
 import { loadOn   } from './lib/on_loader.mjs'
+import { applyDedup } from './lib/dedup_in_memory.mjs'
 import {
   executeSql,
   bulkInsertRows,
@@ -120,7 +121,7 @@ async function main() {
   console.log('  ✓ done')
 
   banner('USDA')
-  console.log('Step 5/10 — Load USDA CSVs into memory')
+  console.log('Step 5/11 — Load USDA CSVs into memory (Rules 1-14 applied)')
   const tUsdaStart = Date.now()
   const { rows: usdaRows, version: usdaVersion, stats: usdaStats } = await loadUsda(USDA_ROOT)
   console.log(`\n  Built ${fmt(usdaRows.length)} USDA rows in ${fmtMs(Date.now() - tUsdaStart)}`)
@@ -129,13 +130,8 @@ async function main() {
     console.log(`    ${k}: ${fmt(v)}`)
   }
 
-  console.log('\nStep 6/10 — Push USDA rows to D1')
-  const tUsdaPushStart = Date.now()
-  await bulkInsertRows(usdaRows, 'usda')
-  console.log(`  ✓ USDA pushed in ${fmtMs(Date.now() - tUsdaPushStart)}`)
-
   banner('OpenNutrition')
-  console.log('Step 7/10 — Load ON dataset into memory')
+  console.log('Step 6/11 — Load ON dataset into memory (Rules 1-14 applied)')
   const tOnStart = Date.now()
   const { rows: onRows, version: onVersion, stats: onStats } = await loadOn(ON_ROOT)
   console.log(`  Built ${fmt(onRows.length)} ON rows in ${fmtMs(Date.now() - tOnStart)}`)
@@ -144,13 +140,43 @@ async function main() {
     console.log(`    ${k}: ${fmt(v)}`)
   }
 
-  console.log('\nStep 8/10 — Push ON rows to D1')
-  const tOnPushStart = Date.now()
-  await bulkInsertRows(onRows, 'on')
-  console.log(`  ✓ ON pushed in ${fmtMs(Date.now() - tOnPushStart)}`)
+  // ── Step 7 — apply dedup IN MEMORY before D1 writes ─────────────────────
+  // Rules 15-19 require cross-row comparison and were previously run as
+  // a post-import SQL pass. At 2M+ rows that hit D1's 30-second per-query
+  // budget on every monolithic DELETE. The right place to do dedup is
+  // here — in Node, where we hold the combined array and can do it as
+  // O(n) Map operations instead of D1's O(n²-ish) self-joins.
+  banner('Dedup (in-memory)')
+  console.log('Step 7/11 — Apply Rules 15-19 to combined USDA+ON in memory')
+  const tDedupStart = Date.now()
+  const combined = [...usdaRows, ...onRows]
+  const { rows: dedupedRows, stats: dedupStats } = applyDedup(combined)
+  console.log(`  ✓ Dedup finished in ${fmtMs(Date.now() - tDedupStart)}`)
+
+  // Free the source arrays — combined holds all references we need now.
+  usdaRows.length = 0
+  onRows.length = 0
+
+  // Split deduped rows back by source for clearer push logging.
+  const finalUsda = dedupedRows.filter(r => r.source === 'usda')
+  const finalOn   = dedupedRows.filter(r => r.source === 'on')
+
+  banner('Push to D1')
+  console.log(`Step 8/11 — Push ${fmt(dedupedRows.length)} deduped rows to D1`)
+  console.log(`  USDA: ${fmt(finalUsda.length)} · ON: ${fmt(finalOn.length)}`)
+  const tPushStart = Date.now()
+  if (finalUsda.length) {
+    console.log('\n  USDA push…')
+    await bulkInsertRows(finalUsda, 'usda')
+  }
+  if (finalOn.length) {
+    console.log('\n  ON push…')
+    await bulkInsertRows(finalOn, 'on')
+  }
+  console.log(`  ✓ Push complete in ${fmtMs(Date.now() - tPushStart)}`)
 
   banner('Finalisation')
-  console.log('Step 9/10 — Rebuild FTS5 search index')
+  console.log('Step 9/11 — Rebuild FTS5 search index')
   await rebuildFts()
   console.log('  ✓ done')
 
@@ -187,9 +213,15 @@ async function main() {
   console.log(`  ✓ on_last_version    = ${onVersion}`)
   console.log('  Future syncs will fetch only deltas since this snapshot.')
 
-  console.log('\nStep 10/10 — Final verification')
+  console.log('\nStep 10/11 — Final row count verification')
   const finalStats = await statsBySourceSubtype()
   printStats(finalStats, 'Final row counts (source / source_subtype)')
+
+  console.log('\nStep 11/11 — Dedup summary')
+  console.log('  Rows removed per rule (in-memory pass):')
+  for (const [rule, removed] of Object.entries(dedupStats)) {
+    console.log(`    ${rule.padEnd(30)} ${fmt(removed).padStart(10)}`)
+  }
 
   banner('Complete')
   console.log(`Total runtime: ${fmtMs(Date.now() - t0)}`)
