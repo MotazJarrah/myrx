@@ -58,7 +58,10 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Wrangler 4.x requires Node 22+. Bumped from 20 after a sync
+          # run died in Phase 4 with "Wrangler requires at least Node.js
+          # v22.0.0. You are using v20.20.2."
+          node-version: '22'
 
       # Install dependencies for all three script folders.
       # - scripts/sync (orchestrator)
