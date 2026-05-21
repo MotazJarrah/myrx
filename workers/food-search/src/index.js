@@ -703,28 +703,59 @@ export default {
     // Internal: sync scripts call this to update status + progress + run_id.
     // Body: { status?, run_id?, mode?, progress?, error?, started_at?, completed_at? }
     //
-    // Status precedence: once a run reaches a "final" state ('cancelled' or
-    // 'failed'), subsequent 'completed' writes are dropped — the GHA
-    // workflow's "Mark completed" step fires unconditionally on script
-    // success, but a clean cancel exits 0 which GHA counts as success.
-    // Without this guard, a cancelled run would silently flip to
-    // 'completed' a few seconds after the script pushed 'cancelled'.
+    // CANCEL CLEANUP: when the script pushes status='cancelled', the worker
+    // FULLY RESETS the run — deletes every changelog entry the cancelled
+    // run produced (staged or committed) and flips state back to 'idle'.
+    // The user's mental model for Cancel is "stop and revert as if I never
+    // clicked", so we don't leave the partial work sitting around as a
+    // review dialog or history row.
+    //
+    // STATUS PRECEDENCE: 'completed' writes from GHA are only honored when
+    // the current state is still 'running' or 'pending'. Once we've
+    // finalized to 'idle' (after cancel), 'cancelled', or 'failed', the
+    // workflow's "Mark completed" step (which fires on any clean exit
+    // including a successful cancel exit) can't overwrite the final state.
     if (pathname === '/admin/sync/state' && method === 'POST') {
       const authErr = requireAuth(request, env)
       if (authErr) return authErr
       const body = await request.json().catch(() => ({}))
 
+      // Cancel cleanup — wipe the run completely.
+      if (body.status === 'cancelled') {
+        const { results: runRes } = await env.DB.prepare(
+          `SELECT value FROM sync_state WHERE key = 'sync_run_id'`
+        ).all()
+        const runId = runRes?.[0]?.value || body.run_id || ''
+        const cleanup = []
+        if (runId) {
+          cleanup.push(env.DB.prepare(
+            `DELETE FROM sync_changelog WHERE run_id = ?`
+          ).bind(runId))
+        }
+        cleanup.push(
+          env.DB.prepare(`UPDATE sync_state SET value = 'idle',  updated_at = datetime('now') WHERE key = 'sync_status'`),
+          env.DB.prepare(`UPDATE sync_state SET value = '',      updated_at = datetime('now') WHERE key = 'sync_run_id'`),
+          env.DB.prepare(`UPDATE sync_state SET value = '',      updated_at = datetime('now') WHERE key = 'sync_mode'`),
+          env.DB.prepare(`UPDATE sync_state SET value = '{}',    updated_at = datetime('now') WHERE key = 'sync_progress'`),
+          env.DB.prepare(`UPDATE sync_state SET value = '0',     updated_at = datetime('now') WHERE key = 'sync_staged_review'`),
+          env.DB.prepare(`UPDATE sync_state SET value = '0',     updated_at = datetime('now') WHERE key = 'sync_cancel_requested'`),
+          env.DB.prepare(`UPDATE sync_state SET value = ?,       updated_at = datetime('now') WHERE key = 'sync_completed_at'`)
+            .bind(body.completed_at || new Date().toISOString()),
+          env.DB.prepare(`UPDATE sync_state SET value = 'Cancelled by admin', updated_at = datetime('now') WHERE key = 'sync_error'`),
+        )
+        await env.DB.batch(cleanup)
+        return json({ ok: true, cancelled: true, run_id: runId, changelog_deleted: !!runId })
+      }
+
       // If the caller is trying to write status='completed', check the
-      // current state first — if it's already cancelled or failed, keep
-      // the final state but allow other fields (timestamps, error msg) to
-      // update.
+      // current state first — preserve any finalized state.
       if (body.status === 'completed') {
         const { results } = await env.DB.prepare(
           `SELECT value FROM sync_state WHERE key = 'sync_status'`
         ).all()
         const current = results?.[0]?.value
-        if (current === 'cancelled' || current === 'failed') {
-          delete body.status  // preserve final state
+        if (current && current !== 'running' && current !== 'pending') {
+          delete body.status  // preserve final state — drop only the status field
         }
       }
 
@@ -748,14 +779,6 @@ export default {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
           ).bind(dbKey, value))
         }
-      }
-
-      // When status flips to 'cancelled', clear the cancel_requested flag
-      // so the next sync isn't pre-cancelled.
-      if (body.status === 'cancelled') {
-        updates.push(env.DB.prepare(
-          `UPDATE sync_state SET value = '0', updated_at = datetime('now') WHERE key = 'sync_cancel_requested'`
-        ))
       }
 
       // If status transitioned to 'completed' AND mode === 'staged',
