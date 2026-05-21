@@ -234,34 +234,56 @@ async function syncBranded(db, dateBegin, dateEnd) {
         })
         inserted++
       } else if (row.source === 'usda' && parseInt(food.source_id) > parseInt(row.source_id)) {
+        // USDA re-published the same UPC under a NEW fdcId. Replace
+        // the old row entirely:
+        //   1. DELETE the existing row at the OLD source_id
+        //   2. INSERT OR REPLACE the new row at the NEW source_id
+        //
+        // Why not UPDATE source_id directly? Because the new
+        // (usda, source_id) tuple may ALREADY exist as a separate row
+        // — e.g. your bulk import included that fdcId via a different
+        // path, or a previous partial sync inserted it. UPDATE would
+        // then violate UNIQUE(source, source_id). INSERT OR REPLACE
+        // is idempotent on that constraint.
         if (isChangelogEnabled()) recordUpdate(row, food)
+        deleteStmts.push({
+          sql:    `DELETE FROM food_library WHERE source='usda' AND source_id=?`,
+          params: [row.source_id],
+        })
         upsertStmts.push({
-          sql: `UPDATE food_library SET
-                  source_id=?, name=?, brand=?, kcal=?, protein_g=?, fat_g=?,
-                  carbs_g=?, fiber_g=?, sodium_mg=?, serving_g=?, serving_label=?,
-                  data_type=?, source_subtype=?
-                WHERE upc=? AND source='usda'`,
+          sql: `INSERT OR REPLACE INTO food_library
+                  (source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
+                   fiber_g, sodium_mg, serving_g, serving_label, upc, data_type, source_subtype)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           params: [
-            food.source_id, food.name, food.brand, food.kcal,
-            food.protein_g, food.fat_g, food.carbs_g, food.fiber_g,
-            food.sodium_mg, food.serving_g, food.serving_label, food.data_type,
-            food.source_subtype, food.upc,
+            food.source, food.source_id, food.name, food.brand,
+            food.kcal, food.protein_g, food.fat_g, food.carbs_g,
+            food.fiber_g, food.sodium_mg, food.serving_g, food.serving_label,
+            food.upc, food.data_type, food.source_subtype,
           ],
         })
         updated++
       } else if (row.source === 'on') {
+        // Source-switch: ON had this UPC, now USDA owns it. Same shape
+        // as above — DELETE the ON row, INSERT OR REPLACE at the new
+        // (usda, source_id). Direct UPDATE of source + source_id can
+        // hit UNIQUE(source, source_id) when the target tuple already
+        // exists elsewhere.
         if (isChangelogEnabled()) recordUpdate(row, food)
+        deleteStmts.push({
+          sql:    `DELETE FROM food_library WHERE source='on' AND source_id=?`,
+          params: [row.source_id],
+        })
         upsertStmts.push({
-          sql: `UPDATE food_library SET
-                  source='usda', source_id=?, name=?, brand=?, kcal=?, protein_g=?,
-                  fat_g=?, carbs_g=?, fiber_g=?, sodium_mg=?, serving_g=?,
-                  serving_label=?, data_type=?, source_subtype=?
-                WHERE upc=? AND source='on'`,
+          sql: `INSERT OR REPLACE INTO food_library
+                  (source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
+                   fiber_g, sodium_mg, serving_g, serving_label, upc, data_type, source_subtype)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
           params: [
-            food.source_id, food.name, food.brand, food.kcal,
-            food.protein_g, food.fat_g, food.carbs_g, food.fiber_g,
-            food.sodium_mg, food.serving_g, food.serving_label, food.data_type,
-            food.source_subtype, food.upc,
+            food.source, food.source_id, food.name, food.brand,
+            food.kcal, food.protein_g, food.fat_g, food.carbs_g,
+            food.fiber_g, food.sodium_mg, food.serving_g, food.serving_label,
+            food.upc, food.data_type, food.source_subtype,
           ],
         })
         updated++
