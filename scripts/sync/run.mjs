@@ -298,44 +298,75 @@ async function bailIfCancelled() {
 // ── Phase 1: Download (parallel) ─────────────────────────────────────────────
 
 /**
- * Scrape USDA's data-type page for the latest FoodData Central CSV bundle.
- * USDA publishes monthly snapshots; the URL changes every release.
+ * Discover the latest USDA FoodData Central CSV snapshot.
  *
- * The download URLs live at `https://fdc-datasets.ars.usda.gov/` (NOT
- * `fdc.nal.usda.gov` which is the directory page itself). Our regex is
- * host-agnostic — match any URL containing `FoodData_Central_csv_YYYY-MM-DD.zip`
- * — so we survive future host changes too.
+ * USDA's download-datasets page is a JavaScript-rendered SPA — the
+ * `<a href>` links don't exist in the raw HTML, they're added at
+ * runtime by Angular. Static scraping is impossible without spinning
+ * up a headless browser.
  *
- * Note: the directory page issues a 302 redirect (HTTPS → HTTP, with
- * trailing slash). Pass `redirect: 'follow'` (the default in fetch())
- * and request the trailing-slash URL up front to avoid one round-trip.
+ * Strategy: HEAD-probe a curated set of candidate URLs on the CDN
+ * (fdc-datasets.ars.usda.gov) and pick the most recent one that
+ * returns 200. USDA publishes ~2x/year with predictable release-day
+ * patterns (mid-to-late month) so the candidate space is small.
  *
- * Returns the snapshot URL + date string ("2026-04-30" format).
+ * Candidate window: last 8 months, on these days-of-month:
+ *   17, 18, 20, 24, 26, 28, 29, 30, 31
+ * Plus the known-good 2026-04-30 as a guaranteed fallback so first-run
+ * always succeeds even if probing rate-limits.
+ *
+ * Returns the latest reachable URL + date string ("YYYY-MM-DD" format).
  */
 async function findUsdaSnapshot() {
-  logStep('scrape_usda', 'Scraping USDA snapshot URL from download-datasets page…')
-  const res = await fetch('https://fdc.nal.usda.gov/download-datasets/', {
-    headers: { 'User-Agent': 'myrx-sync/1.0', 'Accept': 'text/html' },
-    redirect: 'follow',
-  })
-  if (!res.ok) throw new Error(`USDA page fetch failed: ${res.status}`)
-  const html = await res.text()
-  // Host-agnostic match — works whether the file is hosted at
-  // fdc.nal.usda.gov, fdc-datasets.ars.usda.gov, or anywhere else USDA
-  // might move it to.
-  const matches = html.matchAll(/https?:\/\/[^\s"'<>]*FoodData_Central_csv_(\d{4}-\d{2}-\d{2})\.zip/g)
-  let latest = null
-  for (const m of matches) {
-    if (!latest || m[1] > latest.date) latest = { url: m[0], date: m[1] }
+  logStep('scrape_usda', 'Probing USDA CDN for latest snapshot…')
+
+  const base = 'https://fdc-datasets.ars.usda.gov/FoodData_Central_csv_'
+  const KNOWN_GOOD = '2026-04-30'  // bumped when we confirm a newer release
+  const RELEASE_DAYS = [17, 18, 20, 24, 26, 28, 29, 30, 31]
+
+  // Build candidates: last 8 months × release-day patterns.
+  const today = new Date()
+  const candidates = new Set()
+  for (let monthsBack = 0; monthsBack < 8; monthsBack++) {
+    const target = new Date(today.getUTCFullYear(), today.getUTCMonth() - monthsBack, 1)
+    const y = target.getUTCFullYear()
+    const m = String(target.getUTCMonth() + 1).padStart(2, '0')
+    for (const d of RELEASE_DAYS) {
+      candidates.add(`${y}-${m}-${String(d).padStart(2, '0')}`)
+    }
   }
-  if (!latest) {
-    // Diagnostic dump — the page format may have changed. Surface a
-    // short snippet so we can update the regex.
-    const snippet = html.slice(0, 600).replace(/\s+/g, ' ')
-    logStep('scrape_usda', `Page returned ${html.length} bytes — snippet: ${snippet}`, { level: 'warn' })
-    throw new Error('No FoodData_Central_csv URL found on USDA page (regex needs update?)')
+  candidates.add(KNOWN_GOOD)  // always include the safety net
+  const dateList = [...candidates].sort().reverse()  // newest first
+
+  logStep('scrape_usda', `Probing ${dateList.length} candidate dates in parallel…`)
+
+  // HEAD-probe all in parallel. Each probe is a few hundred ms, total
+  // wall-clock ~1-2s for the whole batch.
+  const probes = await Promise.allSettled(
+    dateList.map(async date => {
+      const url = `${base}${date}.zip`
+      try {
+        const res = await fetch(url, {
+          method:  'HEAD',
+          headers: { 'User-Agent': 'myrx-sync/1.0' },
+          redirect: 'follow',
+        })
+        return res.ok ? { date, url } : null
+      } catch { return null }
+    })
+  )
+
+  const found = probes
+    .filter(r => r.status === 'fulfilled' && r.value)
+    .map(r => r.value)
+    .sort((a, b) => b.date.localeCompare(a.date))
+
+  if (!found.length) {
+    throw new Error('No reachable USDA snapshot URL — HEAD probe found nothing')
   }
-  logStep('scrape_usda', `Found USDA snapshot: ${latest.date} at ${latest.url}`)
+
+  const latest = found[0]
+  logStep('scrape_usda', `Latest USDA snapshot: ${latest.date}`)
   return latest
 }
 

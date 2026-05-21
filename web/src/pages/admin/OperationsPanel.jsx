@@ -28,6 +28,7 @@ import {
   RefreshCw, Play, Pause, Loader2, X, CheckCircle2, AlertCircle,
   Clock, Calendar, Database, FileText, Download, RotateCcw,
   ChevronDown, ChevronUp, AlertTriangle, ShieldCheck, FlaskConical,
+  Copy, Check,
 } from 'lucide-react'
 
 const WORKER_URL = 'https://myrx-food-search.motaz-jarrah.workers.dev'
@@ -195,11 +196,14 @@ function ProgressBar({ status, progress, startedAt, etaBaselineMs }) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>Phase: <span className="text-foreground/80 font-medium">{phase}</span></span>
-        {/* ETA — present from t=0 thanks to the sync_history baseline. */}
-        {eta
-          ? <span>~{eta} remaining</span>
-          : <span className="opacity-60 italic">Calculating estimated time…</span>}
+        {/* Phase chip — only shown when there's a real phase string.
+            Empty/unknown phase renders nothing rather than 'Phase: —'. */}
+        {phase && phase !== '—' ? (
+          <span>Phase: <span className="text-foreground/80 font-medium">{phase}</span></span>
+        ) : <span />}
+        {/* ETA — only shown when we have a real number. No
+            "Calculating…" placeholder. */}
+        {eta && <span>~{eta} remaining</span>}
       </div>
       {/*
         Progress bar — two visual modes:
@@ -288,6 +292,7 @@ function ProgressBar({ status, progress, startedAt, etaBaselineMs }) {
 function StepLog({ runId, active }) {
   const [entries, setEntries]   = useState([])
   const [autoScroll, setAuto]   = useState(true)
+  const [copied, setCopied]     = useState(false)
   const cursorRef               = useRef(0)
   const containerRef            = useRef(null)
   const lastRunIdRef            = useRef(runId)
@@ -336,6 +341,29 @@ function StepLog({ runId, active }) {
     setAuto(atBottom)
   }
 
+  // Copy the full log to the clipboard. Format: `HH:MM:SS message`,
+  // one entry per line — matches what the user sees on screen so they
+  // can paste it directly into chat/email without reformatting.
+  async function copyLog() {
+    const text = entries.map(e => {
+      let ts = ''
+      try {
+        const d = new Date(e.ts)
+        if (!isNaN(d.getTime())) {
+          const pad = n => String(n).padStart(2, '0')
+          ts = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} `
+        }
+      } catch {}
+      const code = e.error_code ? `[${e.error_code}] ` : ''
+      return `${ts}${code}${e.message}`
+    }).join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* clipboard write blocked — silent */ }
+  }
+
   if (!runId || (!active && entries.length === 0)) return null
 
   return (
@@ -344,9 +372,20 @@ function StepLog({ runId, active }) {
         <div className="text-xs uppercase tracking-wider text-muted-foreground/70 font-medium">
           Sync progress log
         </div>
-        <div className="text-xs text-muted-foreground/60">
-          {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
-        </div>
+        {/* Copy button — appears only when there's something to copy.
+            Click → copies HH:MM:SS-prefixed log lines to clipboard,
+            shows a 1.5s "Copied" check-mark confirmation. */}
+        {entries.length > 0 && (
+          <button
+            onClick={copyLog}
+            className="flex items-center gap-1 rounded-md border border-border/40 bg-muted/20 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+            title="Copy log to clipboard"
+          >
+            {copied
+              ? <><Check className="h-3 w-3 text-emerald-400" /> Copied</>
+              : <><Copy className="h-3 w-3" /> Copy</>}
+          </button>
+        )}
       </div>
       {/* Box is FIXED height (h-48 = 12rem = 192 px). Always exactly
           that tall regardless of entry count, so the panel layout
@@ -358,9 +397,7 @@ function StepLog({ runId, active }) {
         className="h-48 overflow-y-auto rounded-lg border border-border/40 bg-muted/10 px-3 py-2 font-mono"
         style={{ fontSize: '12px', lineHeight: '1.5' }}
       >
-        {entries.length === 0 ? (
-          <div className="text-muted-foreground/50 italic">Waiting for first step…</div>
-        ) : (
+        {entries.length === 0 ? null : (
           entries.map(e => {
             const ts = (() => {
               try {
@@ -919,20 +956,12 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
               If no sync has been committed yet, shows '—' / 'Never'. */}
           <div className="grid grid-cols-2 gap-2">
             <Stat
-              label={isRunning ? 'Last committed sync' : 'Last sync'}
+              label="Last sync"
               value={sync?.last_committed_sync_at ? fmtShort(sync.last_committed_sync_at) : '—'}
-              hint={
-                isRunning
-                  ? 'a new sync is in progress — this date is the last commit'
-                  : (sync?.last_committed_sync_at
-                       ? relTime(sync.last_committed_sync_at)
-                       : 'no sync committed yet')
-              }
             />
             <Stat
               label="Next scheduled"
               value={fmtShort(nextMonthlyCron())}
-              hint={cronTimeLabel(nextMonthlyCron())}
             />
           </div>
 
