@@ -305,9 +305,17 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
   const [progress, setProgress] = useState({ usda: null, on: null })
   // uploading: bool — true while one or both uploads are in flight
   const [uploading, setUploading] = useState(false)
+  // cancelling: bool — flips to true between the user clicking Cancel
+  // and the upload actually winding down (so the button can disable +
+  // show 'Cancelling…')
+  const [cancelling, setCancelling] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState('')
   const fileInputRef = useRef(null)
+  // Active upload metadata so cancelUpload() can abort fetches AND
+  // call the R2 multipart-abort endpoint to clean up partial state.
+  const activeUploadsRef = useRef({ usda: null, on: null })  // { controller, upload_id }
+  const cancelledRef = useRef(false)
 
   // Detect file type from filename. Returns 'usda' | 'on' | null.
   function detectType(file) {
@@ -376,13 +384,21 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
   async function uploadOne(type, file) {
     setProgress(p => ({ ...p, [type]: { pct: 0, sent: 0, total: file.size } }))
 
+    // AbortController so cancelUpload() can interrupt any in-flight
+    // fetch (start, each part, or complete).
+    const controller = new AbortController()
+    activeUploadsRef.current[type] = { controller, upload_id: null }
+
     // 1. Start multipart upload
     const startRes = await workerFetch('/admin/food-files/upload/start', {
       method: 'POST',
       body: JSON.stringify({ type, filename: file.name, size: file.size }),
+      signal: controller.signal,
     })
     if (!startRes.ok) throw new Error(`${type} start failed: ${startRes.status}`)
     const { upload_id } = await startRes.json()
+    // Cache the upload_id so cancel can abort the R2 multipart cleanly.
+    activeUploadsRef.current[type] = { controller, upload_id }
 
     // 2. Upload each chunk sequentially. We could parallelise but
     // residential upload bandwidth is usually the bottleneck —
@@ -392,6 +408,9 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
     const totalParts = Math.ceil(file.size / CHUNK_SIZE)
     let sent = 0
     for (let i = 0; i < totalParts; i++) {
+      if (cancelledRef.current) {
+        throw Object.assign(new Error('cancelled'), { _cancelled: true })
+      }
       const start = i * CHUNK_SIZE
       const end   = Math.min(start + CHUNK_SIZE, file.size)
       const chunk = file.slice(start, end)
@@ -403,6 +422,7 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
           method:  'PUT',
           headers: { 'Authorization': `Bearer ${ADMIN_KEY}` },
           body:    chunk,
+          signal:  controller.signal,
         }
       )
       if (!partRes.ok) {
@@ -424,15 +444,49 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
         upload_id, type, parts,
         filename: file.name, size: file.size,
       }),
+      signal: controller.signal,
     })
     if (!completeRes.ok) throw new Error(`${type} complete failed: ${completeRes.status}`)
 
     setProgress(p => ({ ...p, [type]: { pct: 100, sent: file.size, total: file.size } }))
+    activeUploadsRef.current[type] = null
+  }
+
+  // Cancel any in-flight uploads. Three steps:
+  //   1. Flip cancelledRef so the chunk loop bails on next iteration
+  //   2. Abort the active AbortController so the current fetch errors
+  //   3. Tell R2 to clean up the multipart upload (releases storage
+  //      for the partial parts that were uploaded)
+  async function cancelUpload() {
+    if (cancelling) return
+    setCancelling(true)
+    cancelledRef.current = true
+    const cleanupTasks = []
+    for (const type of ['usda', 'on']) {
+      const active = activeUploadsRef.current[type]
+      if (!active) continue
+      try { active.controller.abort() } catch {}
+      if (active.upload_id) {
+        cleanupTasks.push(
+          workerFetch('/admin/food-files/upload/abort', {
+            method: 'POST',
+            body: JSON.stringify({ upload_id: active.upload_id, type }),
+          }).catch(() => {})
+        )
+      }
+      activeUploadsRef.current[type] = null
+    }
+    await Promise.all(cleanupTasks)
+    // Note: the rest of the cleanup (clearing progress, resetting
+    // uploading flag) happens in startUpload()'s finally block when
+    // it observes the cancelled error.
   }
 
   async function startUpload() {
     setError('')
     setUploading(true)
+    setCancelling(false)
+    cancelledRef.current = false
     onUploadStateChange?.('uploading')
     try {
       // Upload both staged files in parallel.
@@ -443,12 +497,24 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
       setStaged({ usda: null, on: null })
       await onRefreshStatus?.()
     } catch (e) {
-      setError(`Upload failed: ${e.message}`)
+      // Cancellation is a clean exit, not an error — distinguish by
+      // the _cancelled marker we set in uploadOne() OR the AbortError
+      // that fetch() throws on signal.abort().
+      const wasCancelled = e._cancelled || e.name === 'AbortError' || cancelledRef.current
+      if (!wasCancelled) {
+        setError(`Upload failed: ${e.message}`)
+      }
     } finally {
       setUploading(false)
+      setCancelling(false)
+      cancelledRef.current = false
+      activeUploadsRef.current = { usda: null, on: null }
       onUploadStateChange?.('idle')
-      // Clear per-file progress after a beat so the user sees 100%.
-      setTimeout(() => setProgress({ usda: null, on: null }), 1500)
+      // Clear per-file progress immediately on cancel (no need to
+      // linger on a half-filled bar); after a beat on success so
+      // the user sees the 100% state.
+      const delay = cancelledRef.current ? 0 : 1500
+      setTimeout(() => setProgress({ usda: null, on: null }), delay)
     }
   }
 
@@ -472,10 +538,12 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
       hasStaged,
       bothUploaded,
       uploading,
+      cancelling,
       staged,
       startUpload,
+      cancelUpload,
     })
-  }, [hasStaged, bothUploaded, uploading, staged.usda, staged.on])
+  }, [hasStaged, bothUploaded, uploading, cancelling, staged.usda, staged.on])
 
   function fmtFileSize(bytes) {
     if (!bytes) return '0 B'
@@ -1126,7 +1194,7 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   // R2 mirror metadata — { usda: {filename, size, uploaded_at}|null, on: ... }
   const [filesStatus, setFilesStatus] = useState({ usda: null, on: null })
   // Upload state surfaced by SourceFiles for the morphing bottom button.
-  const [uploadState, setUploadState] = useState({ hasStaged: false, bothUploaded: false, uploading: false, staged: { usda: null, on: null }, startUpload: null })
+  const [uploadState, setUploadState] = useState({ hasStaged: false, bothUploaded: false, uploading: false, cancelling: false, staged: { usda: null, on: null }, startUpload: null, cancelUpload: null })
   // displayError is the ephemeral copy of sync_error we show in the banner.
   // The server-side sync_error is cleared the first time we observe it in a
   // non-running state, so subsequent mounts won't re-display it. This
@@ -1310,10 +1378,13 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   //   - HIDE after successful completion (the result is in history)
   //   - HIDE after cancellation (the sync was abandoned; log is noise)
   //   - HIDE on staged review (the review dialog has its own summary)
+  //   - HIDE while uploading (the previous run's log shouldn't bleed
+  //     into a fresh operation; upload itself has its own in-box
+  //     progress bars so the user has feedback already)
   // Same logic as a terminal: log streams while the command runs, the
-  // output stays put if it errored, but `make clean` doesn't keep
-  // showing the last build's stdout forever.
-  const showStepLog = isRunning || status === 'failed'
+  // output stays put if it errored, but starting a new command clears
+  // the previous output.
+  const showStepLog = (isRunning || status === 'failed') && !uploadState.uploading
 
   // ── Actions ─────────────────────────────────────────────────────────────
   async function triggerSync() {
@@ -1553,12 +1624,20 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
                     {isCancelling ? 'Cancelling…' : 'Cancel sync'}
                   </button>
                 ) : uploadState.uploading ? (
+                  // While uploading, the bottom button becomes a
+                  // 'Cancel upload' action so the admin can stop a
+                  // long-running transfer without waiting for it.
+                  // Mirrors the 'Cancel sync' button's destructive
+                  // red treatment for symmetric mental model.
                   <button
-                    disabled
-                    className="flex items-center gap-1.5 rounded-lg bg-primary/40 px-3 py-1.5 text-xs font-semibold text-primary-foreground cursor-default"
+                    onClick={() => uploadState.cancelUpload?.()}
+                    disabled={uploadState.cancelling}
+                    className="flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-60 disabled:cursor-default transition-colors"
                   >
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Uploading…
+                    {uploadState.cancelling
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <Pause className="h-3 w-3" />}
+                    {uploadState.cancelling ? 'Cancelling…' : 'Cancel upload'}
                   </button>
                 ) : uploadState.hasStaged ? (
                   <button
