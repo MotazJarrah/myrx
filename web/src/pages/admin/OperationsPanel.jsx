@@ -298,7 +298,7 @@ function ProgressBar({ status, progress, startedAt, etaBaselineMs }) {
  * independently. Sync becomes available once BOTH show as uploaded
  * (status comes from the worker, not this component).
  */
-function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning }) {
+function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning, onLogEvent, onLogClear }) {
   // staged: { usda: File|null, on: File|null } — picked but not yet uploaded
   const [staged, setStaged] = useState({ usda: null, on: null })
   // progress: { usda: { pct, sent, total } | null, on: ... }
@@ -382,7 +382,9 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
   const CHUNK_SIZE = 50 * 1024 * 1024
 
   async function uploadOne(type, file) {
+    const label = type === 'usda' ? 'USDA FoodData Central' : 'OpenNutrition'
     setProgress(p => ({ ...p, [type]: { pct: 0, sent: 0, total: file.size } }))
+    onLogEvent?.({ message: `Starting upload — ${label}: ${file.name} (${fmtFileSize(file.size)})`, step_code: `upload_${type}_start` })
 
     // AbortController so cancelUpload() can interrupt any in-flight
     // fetch (start, each part, or complete).
@@ -399,6 +401,7 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
     const { upload_id } = await startRes.json()
     // Cache the upload_id so cancel can abort the R2 multipart cleanly.
     activeUploadsRef.current[type] = { controller, upload_id }
+    onLogEvent?.({ message: `${label} — R2 multipart session opened`, step_code: `upload_${type}_session` })
 
     // 2. Upload each chunk sequentially. We could parallelise but
     // residential upload bandwidth is usually the bottleneck —
@@ -435,9 +438,14 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
         ...p,
         [type]: { pct: Math.round((sent / file.size) * 100), sent, total: file.size },
       }))
+      onLogEvent?.({
+        message: `${label} — chunk ${partNumber}/${totalParts} uploaded (${fmtFileSize(sent)} / ${fmtFileSize(file.size)} · ${Math.round((sent / file.size) * 100)}%)`,
+        step_code: `upload_${type}_chunk`,
+      })
     }
 
     // 3. Complete multipart upload
+    onLogEvent?.({ message: `${label} — finalising multipart…`, step_code: `upload_${type}_finalise` })
     const completeRes = await workerFetch('/admin/food-files/upload/complete', {
       method: 'POST',
       body: JSON.stringify({
@@ -450,6 +458,7 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
 
     setProgress(p => ({ ...p, [type]: { pct: 100, sent: file.size, total: file.size } }))
     activeUploadsRef.current[type] = null
+    onLogEvent?.({ message: `${label} — upload complete (${fmtFileSize(file.size)})`, step_code: `upload_${type}_done` })
   }
 
   // Cancel any in-flight uploads. Three steps:
@@ -488,6 +497,13 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
     setCancelling(false)
     cancelledRef.current = false
     onUploadStateChange?.('uploading')
+    // Fresh log from this moment — clears any stale sync output.
+    onLogClear?.()
+    const stagedFiles = [staged.usda, staged.on].filter(Boolean)
+    onLogEvent?.({
+      message: `Upload initiated — ${stagedFiles.length} file${stagedFiles.length === 1 ? '' : 's'} (${stagedFiles.map(f => fmtFileSize(f.size)).join(' + ')})`,
+      step_code: 'upload_init',
+    })
     try {
       // Upload both staged files in parallel.
       const tasks = []
@@ -496,13 +512,17 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
       await Promise.all(tasks)
       setStaged({ usda: null, on: null })
       await onRefreshStatus?.()
+      onLogEvent?.({ message: `All uploads complete — ready to sync`, step_code: 'upload_all_done', level: 'info' })
     } catch (e) {
       // Cancellation is a clean exit, not an error — distinguish by
       // the _cancelled marker we set in uploadOne() OR the AbortError
       // that fetch() throws on signal.abort().
       const wasCancelled = e._cancelled || e.name === 'AbortError' || cancelledRef.current
-      if (!wasCancelled) {
+      if (wasCancelled) {
+        onLogEvent?.({ message: 'Upload cancelled by admin', level: 'warn', step_code: 'upload_cancelled' })
+      } else {
         setError(`Upload failed: ${e.message}`)
+        onLogEvent?.({ message: `Upload failed: ${e.message}`, level: 'error', step_code: 'upload_failed' })
       }
     } finally {
       setUploading(false)
@@ -834,44 +854,10 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
  * Timestamps are rendered in HH:MM:SS local time (parsed from the UTC
  * `ts` field).
  */
-function StepLog({ runId, active }) {
-  const [entries, setEntries]   = useState([])
+function StepLog({ entries, active }) {
   const [autoScroll, setAuto]   = useState(true)
   const [copied, setCopied]     = useState(false)
-  const cursorRef               = useRef(0)
   const containerRef            = useRef(null)
-  const lastRunIdRef            = useRef(runId)
-
-  // Reset cursor on run change.
-  useEffect(() => {
-    if (runId !== lastRunIdRef.current) {
-      cursorRef.current = 0
-      setEntries([])
-      lastRunIdRef.current = runId
-    }
-  }, [runId])
-
-  useEffect(() => {
-    if (!runId) return
-    let cancelled = false
-    const interval = active ? 2000 : 10000
-
-    async function tick() {
-      try {
-        const res = await workerFetch(`/admin/sync/step-log?run_id=${runId}&after_id=${cursorRef.current}&limit=500`)
-        if (!res.ok) return
-        const data = await res.json()
-        if (cancelled) return
-        if (data.rows?.length) {
-          cursorRef.current = data.next_id
-          setEntries(prev => prev.concat(data.rows))
-        }
-      } catch { /* silent */ }
-    }
-    tick()
-    const id = setInterval(tick, interval)
-    return () => { cancelled = true; clearInterval(id) }
-  }, [runId, active])
 
   // Auto-scroll on new entries.
   useEffect(() => {
@@ -909,7 +895,7 @@ function StepLog({ runId, active }) {
     } catch { /* clipboard write blocked — silent */ }
   }
 
-  if (!runId || (!active && entries.length === 0)) return null
+  if (!active && (!entries || entries.length === 0)) return null
 
   return (
     <div className="space-y-1.5">
@@ -1195,6 +1181,31 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   const [filesStatus, setFilesStatus] = useState({ usda: null, on: null })
   // Upload state surfaced by SourceFiles for the morphing bottom button.
   const [uploadState, setUploadState] = useState({ hasStaged: false, bothUploaded: false, uploading: false, cancelling: false, staged: { usda: null, on: null }, startUpload: null, cancelUpload: null })
+
+  // ── Unified operation log ──────────────────────────────────────────
+  // One continuous feed of "what's happening right now" — upload events
+  // and sync events appear in the same scroll surface. Upload events
+  // are pushed locally via appendLog(); sync events are polled from D1
+  // via the effect below and appended to the same array.
+  const [logEntries, setLogEntries] = useState([])
+  const logCursorRef = useRef(0)   // server-side cursor for sync step_log polling
+  const polledRunIdRef = useRef(null)
+
+  function clearLog() {
+    setLogEntries([])
+    logCursorRef.current = 0
+    polledRunIdRef.current = null
+  }
+
+  function appendLog(entry) {
+    setLogEntries(prev => [...prev, {
+      id:         `local-${Date.now()}-${Math.random()}`,
+      ts:         new Date().toISOString(),
+      level:      'info',
+      error_code: null,
+      ...entry,
+    }])
+  }
   // displayError is the ephemeral copy of sync_error we show in the banner.
   // The server-side sync_error is cleared the first time we observe it in a
   // non-running state, so subsequent mounts won't re-display it. This
@@ -1278,6 +1289,52 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
       fetchEta()
     }
   }, [sync?.status, fetchEta])
+
+  // ── Sync step-log poller ──────────────────────────────────────────
+  // Continuously pulls new step_log rows from D1 and appends them to
+  // the unified logEntries array. Runs while a sync is active OR if
+  // we have a run_id we haven't fully drained yet (e.g. a sync just
+  // failed and we want to see the final entries).
+  //
+  // Cursor is per-run_id — switching to a new run resets the cursor
+  // but DOES NOT clear logEntries. The log is cleared explicitly by
+  // clearLog() at the start of each new operation (Upload or Sync).
+  useEffect(() => {
+    const runId = sync?.run_id
+    if (!runId) return
+    if (!isRunning && sync?.status !== 'failed') return
+
+    // Reset cursor when the run_id changes.
+    if (polledRunIdRef.current !== runId) {
+      logCursorRef.current = 0
+      polledRunIdRef.current = runId
+    }
+
+    let cancelled = false
+    async function tick() {
+      try {
+        const res = await workerFetch(
+          `/admin/sync/step-log?run_id=${runId}&after_id=${logCursorRef.current}&limit=500`
+        )
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        if (cancelled || !data.rows?.length) return
+        logCursorRef.current = data.next_id
+        const mapped = data.rows.map(r => ({
+          id:         `srv-${r.id}`,
+          ts:         r.ts,
+          step_code:  r.step_code,
+          message:    r.message,
+          level:      r.level,
+          error_code: r.error_code,
+        }))
+        setLogEntries(prev => prev.concat(mapped))
+      } catch { /* silent */ }
+    }
+    tick()
+    const interval = setInterval(tick, 2000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [sync?.run_id, isRunning, sync?.status])
 
   // ── Ephemeral error display ────────────────────────────────────────────
   // First time we observe sync.error in a non-running state (i.e. after
@@ -1372,24 +1429,29 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
     }
   }, [isRunning, status, reviewPending])
 
-  // Step-log visibility rule (mirrors common DevOps UX):
-  //   - Show while a sync is running (live progress feed)
-  //   - Show on failure (so the error trail is visible for debugging)
-  //   - HIDE after successful completion (the result is in history)
-  //   - HIDE after cancellation (the sync was abandoned; log is noise)
-  //   - HIDE on staged review (the review dialog has its own summary)
-  //   - HIDE while uploading (the previous run's log shouldn't bleed
-  //     into a fresh operation; upload itself has its own in-box
-  //     progress bars so the user has feedback already)
-  // Same logic as a terminal: log streams while the command runs, the
-  // output stays put if it errored, but starting a new command clears
-  // the previous output.
-  const showStepLog = (isRunning || status === 'failed') && !uploadState.uploading
+  // Unified log visibility: show whenever there's anything to show
+  // (upload events, sync events, or both). The log itself clears at
+  // the start of each new operation (upload click clears it, sync
+  // click clears it if not preceded by upload), so 'has entries'
+  // is a clean signal that something interesting is happening NOW.
+  const showStepLog = uploadState.uploading
+    || isRunning
+    || status === 'failed'
+    || logEntries.length > 0
 
   // ── Actions ─────────────────────────────────────────────────────────────
   async function triggerSync() {
     setTriggering(true)
     setError('')
+    // If the user is starting a sync without a preceding upload (e.g.
+    // their files are already in the mirror from a previous session),
+    // clear any stale log so the new sync's output starts fresh.
+    // If the user JUST uploaded, the log holds their upload events —
+    // we keep those visible as context for the sync that follows.
+    if (logEntries.length === 0 || logEntries[logEntries.length - 1].step_code?.startsWith('sync_')) {
+      clearLog()
+    }
+    appendLog({ message: 'Sync requested — dispatching to GitHub Actions workflow…', step_code: 'sync_trigger' })
     try {
       const res = await workerFetch('/admin/sync', {
         method: 'POST',
@@ -1398,10 +1460,15 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
       const data = await res.json()
       if (!res.ok) {
         setError(data.error ?? 'Failed to trigger sync')
+        appendLog({ message: `Trigger failed: ${data.error ?? res.status}`, level: 'error', step_code: 'sync_trigger_failed' })
         return
       }
+      appendLog({ message: `Workflow dispatched — run ${data.run_id}, mode ${data.staged === 'true' ? 'staged' : 'commit'}`, step_code: 'sync_dispatched' })
       await fetchStatus()
-    } catch (e) { setError('Network error: ' + e.message) }
+    } catch (e) {
+      setError('Network error: ' + e.message)
+      appendLog({ message: `Network error: ${e.message}`, level: 'error', step_code: 'sync_trigger_failed' })
+    }
     finally  { setTriggering(false) }
   }
 
@@ -1545,6 +1612,8 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
               }}
               onRefreshStatus={fetchFilesStatus}
               syncRunning={isRunning}
+              onLogEvent={appendLog}
+              onLogClear={clearLog}
             />
           )}
 
@@ -1680,12 +1749,14 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
             />
           )}
 
-          {/* Verbose step log — shown only when something actionable is
-              happening (sync running OR sync failed). Successful and
-              cancelled runs hide the log so the panel doesn't carry
-              stale noise; the result lives in the history list. */}
-          {sync?.run_id && showStepLog && (
-            <StepLog runId={sync.run_id} active={isRunning} />
+          {/* Unified operation log — upload events + sync events in
+              one continuous feed. Cleared on each new operation so
+              the user only sees "what's happening now". */}
+          {showStepLog && (
+            <StepLog
+              entries={logEntries}
+              active={isRunning || uploadState.uploading}
+            />
           )}
 
           {/* Review dialog (when staged) */}
