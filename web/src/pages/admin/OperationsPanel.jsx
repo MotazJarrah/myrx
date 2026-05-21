@@ -1190,11 +1190,21 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   const [logEntries, setLogEntries] = useState([])
   const logCursorRef = useRef(0)   // server-side cursor for sync step_log polling
   const polledRunIdRef = useRef(null)
+  // Set by clearLog() — the run_id the user has explicitly dismissed
+  // (by clicking Upload or starting a fresh Sync). The polling effect
+  // skips this run_id so the old failed sync's entries don't re-flood
+  // the log after we've cleared it. Cleared automatically when a NEW
+  // sync starts (because that produces a different run_id which
+  // doesn't match the dismissed one).
+  const [dismissedRunId, setDismissedRunId] = useState(null)
 
   function clearLog() {
     setLogEntries([])
     logCursorRef.current = 0
     polledRunIdRef.current = null
+    // Remember which run we're dismissing — its entries shouldn't
+    // come back via polling.
+    setDismissedRunId(sync?.run_id || null)
   }
 
   function appendLog(entry) {
@@ -1380,6 +1390,11 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   useEffect(() => {
     const runId = sync?.run_id
     if (!runId) return
+    // Skip the run the user has dismissed (via Upload click or fresh
+    // Sync click). When a new sync starts, sync.run_id changes to a
+    // different value, which won't match dismissedRunId — polling
+    // resumes automatically for the new run.
+    if (runId === dismissedRunId) return
     if (!isRunning && sync?.status !== 'failed') return
 
     if (polledRunIdRef.current !== runId) {
@@ -1411,7 +1426,7 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
     tick()
     const interval = setInterval(tick, 2000)
     return () => { cancelled = true; clearInterval(interval) }
-  }, [sync?.run_id, isRunning, sync?.status])
+  }, [sync?.run_id, isRunning, sync?.status, dismissedRunId])
 
   // Auto-expand the panel when something actionable is happening: an
   // active sync, a failure (so the error is visible), or a staged review
@@ -1438,9 +1453,15 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   // the start of each new operation (upload click clears it, sync
   // click clears it if not preceded by upload), so 'has entries'
   // is a clean signal that something interesting is happening NOW.
+  //
+  // Special case: if the most-recent sync failed AND the user hasn't
+  // dismissed it yet, also surface the log so they can see why it
+  // failed. The moment they click Upload (or trigger a fresh Sync),
+  // clearLog() marks it dismissed and this branch goes quiet.
+  const failedNotDismissed = status === 'failed' && sync?.run_id && sync.run_id !== dismissedRunId
   const showStepLog = uploadState.uploading
     || isRunning
-    || status === 'failed'
+    || failedNotDismissed
     || logEntries.length > 0
 
   // ── Actions ─────────────────────────────────────────────────────────────
