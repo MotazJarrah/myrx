@@ -124,6 +124,10 @@ export async function querySql(sql) {
   const output = execSync(cmd, {
     encoding: 'utf8',
     stdio:    ['ignore', 'pipe', 'pipe'],
+    // Wrangler --json for a 10k-row query is ~10-15 MB. Default Node
+    // maxBuffer is 1 MB → spawnSync returns ENOBUFS the moment output
+    // overflows. Bump to 256 MB so any reasonable query fits.
+    maxBuffer: 256 * 1024 * 1024,
   })
   // wrangler --json sometimes prepends an upload-progress line before the
   // actual JSON when run with --file; with --command it's typically clean,

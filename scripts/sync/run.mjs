@@ -705,7 +705,7 @@ async function loadLiveFingerprints() {
   logStep('diff', 'Loading live food_library row fingerprints (USDA + ON only)…')
   const live = new Map()  // key = "source|source_id"  → fingerprint string
 
-  const CHUNK = 50_000
+  const CHUNK = 10_000
   let offset = 0
   while (true) {
     await bailIfCancelled()
@@ -811,7 +811,7 @@ async function writeStaged(inserts, updates, deletes) {
   let existingByKey = new Map()
   if (needUpdateLookup) {
     logStep('write', 'Loading live row data for updates + deletes (for changelog before_data field)…')
-    const CHUNK = 50_000
+    const CHUNK = 10_000
     let offset = 0
     while (true) {
       const rows = await querySql(`
@@ -929,7 +929,7 @@ async function writeCommit(dedupedRows, inserts, updates, deletes) {
   // Bulk-load existing data for updates + deletes.
   const existingByKey = new Map()
   let offset = 0
-  const CHUNK = 50_000
+  const CHUNK = 10_000
   while (true) {
     const rows = await querySql(`
       SELECT source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
