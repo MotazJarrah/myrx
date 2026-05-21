@@ -733,8 +733,14 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
     if (!sync) return
     const isActive = sync.status === 'running' || sync.status === 'pending'
     if (isActive) {
-      // A new run started — drop any stale banner and re-arm.
+      // A new run started — drop any stale banner and re-arm BOTH error
+      // sources. `error` carries local handler failures (e.g. the trigger
+      // POST timed out and surfaced "Network error: Failed to fetch");
+      // `displayError` carries the ephemeral copy of the server-side
+      // sync_error. Both need clearing on a fresh run or the banner
+      // sticks around throughout the new sync's pending/running phase.
       if (displayError) setDisplayError('')
+      if (error)        setError('')
       errorClearedRef.current = false
       return
     }
@@ -749,7 +755,7 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
         }).catch(() => {})
       }
     }
-  }, [sync, displayError])
+  }, [sync, displayError, error])
 
   // ── Derived state ───────────────────────────────────────────────────────
   // Cancel flow:

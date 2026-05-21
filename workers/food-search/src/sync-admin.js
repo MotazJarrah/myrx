@@ -107,6 +107,16 @@ export async function handleTriggerSync(request, env) {
 
   // Pre-stamp sync_state so /admin/sync/status reflects the pending run
   // even before the GitHub workflow has spun up its first job.
+  //
+  // CRITICAL: we also reset `sync_started_at`, `sync_error`, and
+  // `sync_progress` here. Without those resets the UI would compute
+  // ETA against the PREVIOUS run's started_at (often >15 min ago, so
+  // baseline-remaining = 0 → "~0s remaining" garbage), and the old
+  // error banner would persist across the new run's lifetime. Setting
+  // started_at to now() also gives the UI a stable t=0 for the entire
+  // pending → running transition, since GHA's "Mark sync started" step
+  // can take 30-60s to fire.
+  const nowIso = new Date().toISOString()
   await env.DB.batch([
     env.DB.prepare(
       `UPDATE sync_state SET value = ?, updated_at = datetime('now') WHERE key = 'sync_run_id'`
@@ -119,6 +129,18 @@ export async function handleTriggerSync(request, env) {
     ),
     env.DB.prepare(
       `UPDATE sync_state SET value = '0', updated_at = datetime('now') WHERE key = 'sync_cancel_requested'`
+    ),
+    env.DB.prepare(
+      `UPDATE sync_state SET value = ?, updated_at = datetime('now') WHERE key = 'sync_started_at'`
+    ).bind(nowIso),
+    env.DB.prepare(
+      `UPDATE sync_state SET value = '', updated_at = datetime('now') WHERE key = 'sync_completed_at'`
+    ),
+    env.DB.prepare(
+      `UPDATE sync_state SET value = '', updated_at = datetime('now') WHERE key = 'sync_error'`
+    ),
+    env.DB.prepare(
+      `UPDATE sync_state SET value = '{}', updated_at = datetime('now') WHERE key = 'sync_progress'`
     ),
   ])
 
