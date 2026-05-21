@@ -34,7 +34,7 @@ import {
 } from 'lucide-react-native'
 import { supabase } from '../lib/supabase'
 import {
-  searchFoods, getFoodPortions, calcMacros, lookupBarcode,
+  searchFoods, getFoodPortions, calcMacros, lookupBarcode, stripNameForGenericSearch,
   type FoodItem, type PortionOption,
 } from '../lib/foodLibrary'
 import { NumericInput } from './NumericInput'
@@ -973,6 +973,16 @@ export default function FoodLogDrawer({
   }
 
   // ── Barcode scan ──────────────────────────────────────────────────────────
+  // New behaviour: the UPC match is treated as a HINT, not a final answer.
+  // We look up the food to learn its name + brand, then strip those down
+  // to a generic search term and run the regular FTS search. The user
+  // picks from the results.
+  //
+  // Why: UPC matches are often wrong (mislinked entries in the database,
+  // user actually eating a different variant of the same product, stale
+  // data, etc.). Showing variants lets the user pick what matches their
+  // actual food. The scanned item itself is NOT shown in results — the
+  // search runs against the generic name only.
   async function handleBarcodeScanned(rawUpc: string) {
     setScanning(false)
     setScanState('loading')
@@ -980,10 +990,27 @@ export default function FoodLogDrawer({
     setSearchResults([])
     try {
       const food = await lookupBarcode(rawUpc)
-      if (food) {
-        setScanState(null)
-        selectFood(food)
-      } else {
+      if (!food) {
+        setScanState({ type: 'notfound' })
+        return
+      }
+      // Derive a generic search term from the matched food's name.
+      const query = stripNameForGenericSearch(food.name, food.brand)
+      if (!query) {
+        // Strip produced nothing usable — fall back to the original name.
+        setScanState({ type: 'notfound' })
+        return
+      }
+      // Run the regular search with the stripped term. The scanned food
+      // itself is discarded — only the search hits are shown.
+      const results = await searchFoods(query)
+      setScanState(null)
+      setSearchQuery(query)
+      setSearchResults(results)
+      // If the search produced zero hits, surface a notfound state so the
+      // user knows the scan didn't lead anywhere useful (rather than
+      // staring at an empty search list).
+      if (results.length === 0) {
         setScanState({ type: 'notfound' })
       }
     } catch (e: any) {

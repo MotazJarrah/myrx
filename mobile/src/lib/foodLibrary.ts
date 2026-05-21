@@ -304,3 +304,65 @@ export async function lookupBarcode(rawUpc: string): Promise<FoodItem | null> {
   const row = await res.json() as FoodRowFromDB
   return mapRow(row)
 }
+
+/**
+ * Strip a food product name down to a generic search term.
+ *
+ * UPC lookups often return the wrong item (mislinked entries, stale data,
+ * the user is actually eating a different variant). Instead of trusting
+ * the UPC match, we use its name as a seed for a regular FTS search so
+ * the user can pick the right variant from a list.
+ *
+ * The strip rules remove the parts of a product name that ANCHOR it to
+ * a specific SKU but aren't useful for finding generic equivalents:
+ *   - brand prefix         "Trader Joe's Almond Butter" → "almond butter"
+ *   - size / quantity      "Coca-Cola 12 fl oz"          → "coca cola"
+ *   - pack count           "Oreos 6 ct"                  → "oreos"
+ *   - packaging words      "Heinz Ketchup Bottle"        → "ketchup"
+ *   - parenthesized notes  "Greek Yogurt (Plain)"        → "greek yogurt"
+ *   - trailing punctuation
+ *
+ * If the strip removes everything (unusual brand-only name), falls back
+ * to the original name so the search still has something to match on.
+ */
+export function stripNameForGenericSearch(name: string, brand?: string | null): string {
+  if (!name) return ''
+  let s = name.toLowerCase().trim()
+
+  // Drop the brand if it appears anywhere in the name (some entries put
+  // the brand at the front, others in the middle).
+  if (brand) {
+    const b = brand.toLowerCase().trim()
+    if (b.length >= 2) {
+      // Escape regex special chars in the brand.
+      const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      s = s.replace(new RegExp(`\\b${escaped}\\b`, 'g'), ' ')
+    }
+  }
+
+  // Drop parenthesized descriptors.
+  s = s.replace(/\([^)]*\)/g, ' ')
+  s = s.replace(/\[[^\]]*\]/g, ' ')
+
+  // Drop size / quantity tokens (any number followed by a unit).
+  s = s.replace(/\b\d+(\.\d+)?\s*(fl\s*oz|fluid\s*ounces?|oz|ounces?|lb|lbs|pounds?|g|grams?|kg|kilograms?|ml|milliliters?|l|liters?|litres?)\b/gi, ' ')
+  // Drop pack-count tokens.
+  s = s.replace(/\b\d+\s*(ct|count|pack|pk|pieces?|servings?|bars?|cans?|bottles?|pouches?)\b/gi, ' ')
+  // Drop any leftover bare numbers (catches "12 pack" → "12" after the unit was stripped).
+  s = s.replace(/\b\d+(\.\d+)?\b/g, ' ')
+
+  // Drop common packaging words.
+  s = s.replace(/\b(can|cans|bottle|bottles|jar|jars|bag|bags|box|boxes|carton|cartons|pouch|pouches|container|containers|case|cases|tray|trays|tub|tubs|stick|sticks|tube|tubes|wrapper|sleeve|family\s*size|family\s*pack|value\s*pack|jumbo|original|classic|new|improved)\b/gi, ' ')
+
+  // Collapse punctuation + whitespace.
+  s = s.replace(/[,.\-_/:;'"!?®™©]/g, ' ')
+  s = s.replace(/\s+/g, ' ').trim()
+
+  // If we stripped everything (e.g. the name was all brand + size), fall
+  // back to the original name minus the brand so search has SOMETHING.
+  if (s.length < 2) {
+    s = name.toLowerCase().replace(/[,.\-_/:;'"!?®™©]/g, ' ').replace(/\s+/g, ' ').trim()
+  }
+
+  return s
+}
