@@ -565,62 +565,14 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
         </div>
       )}
 
-      {/* Currently-uploaded cards — one per source. Cards collapse to
-          a single line if no file is uploaded yet. */}
+      {/* Top cards — what's currently in the mirror (= what the next
+          sync will use). Read-only info: version marker + uploaded
+          date so admins can compare against source pages at a glance.
+          Delete button is the only interaction here. */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {(['usda', 'on']).map(type => {
           const meta = status?.[type]
-          const stagedFile = staged[type]
-          const prog = progress[type]
           const label = type === 'usda' ? 'USDA FoodData Central' : 'OpenNutrition'
-
-          // Three display states:
-          // 1. Uploading right now → show progress bar
-          // 2. File staged but not uploaded → show staged file info
-          // 3. File already in mirror → show meta + delete button
-          // 4. Nothing → show empty placeholder
-          if (prog) {
-            return (
-              <div key={type} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
-                <div className="flex items-center gap-2 text-xs font-medium text-amber-300">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  {label}
-                </div>
-                <div className="mt-1 text-xs tabular-nums text-muted-foreground">
-                  {fmtFileSize(prog.sent)} / {fmtFileSize(prog.total)} — {prog.pct}%
-                </div>
-                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted/40">
-                  <div
-                    className="h-full bg-amber-500 transition-[width] duration-200"
-                    style={{ width: `${prog.pct}%` }}
-                  />
-                </div>
-              </div>
-            )
-          }
-
-          if (stagedFile) {
-            return (
-              <div key={type} className="rounded-lg border border-violet-500/30 bg-violet-500/5 px-3 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 text-xs font-medium text-violet-300 min-w-0">
-                    <FileArchive className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{stagedFile.name}</span>
-                  </div>
-                  <button
-                    onClick={() => clearStaged(type)}
-                    className="text-muted-foreground/60 hover:text-foreground"
-                    title="Remove from upload queue"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground/70 tabular-nums">
-                  {fmtFileSize(stagedFile.size)} · staged for upload
-                </div>
-              </div>
-            )
-          }
 
           if (meta) {
             const version = versionFromFilename(meta.filename)
@@ -629,7 +581,7 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-xs font-medium text-emerald-400/90 min-w-0">
                     <CheckCircle2 className="h-3 w-3 shrink-0" />
-                    <span className="truncate" title={meta.filename}>{label}</span>
+                    <span className="truncate">{label}</span>
                   </div>
                   <button
                     onClick={() => deleteFile(type)}
@@ -640,8 +592,6 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
                     <Trash2 className="h-3 w-3" />
                   </button>
                 </div>
-                {/* Version + size on the first sub-line so admins can
-                    eyeball "is this the latest?" against the source page. */}
                 {version && (
                   <div className="mt-1 text-xs tabular-nums text-foreground/85 font-mono">
                     {version}
@@ -666,37 +616,127 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
         })}
       </div>
 
-      {/* Drag-drop / click-to-browse zone */}
-      <div
-        onDrop={onDrop}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onClick={onBrowse}
-        className={[
-          'flex flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors',
-          'cursor-pointer select-none px-4 py-6',
-          dragOver
-            ? 'border-violet-400 bg-violet-500/10'
-            : 'border-border/50 bg-muted/10 hover:bg-muted/20 hover:border-border/70',
-          uploading && 'opacity-50 cursor-default pointer-events-none',
-        ].filter(Boolean).join(' ')}
-      >
-        <Upload className="h-5 w-5 text-muted-foreground/60 mb-1.5" />
-        <div className="text-xs font-medium text-muted-foreground">
-          Drop ZIPs here, or click to browse
-        </div>
-        <div className="text-xs text-muted-foreground/50 mt-0.5">
-          USDA FoodData_Central_csv_*.zip + OpenNutrition opennutrition-dataset-*.zip
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".zip"
-          multiple
-          onChange={onFileInputChange}
-          className="hidden"
-        />
-      </div>
+      {/* Upload box — ONE element with drop/click handlers always
+          bound; only its contents change with state. Three visual
+          modes via background colour:
+            empty     gray dashed border, "Drop ZIPs" prompt
+            staged    violet solid border, per-file rows w/ remove
+            uploading amber solid border, per-file progress bars
+          Drop & click are active in ALL states (except while uploading)
+          so the admin can add the OTHER file mid-stage by dropping it
+          on top of the already-staged box. */}
+      {(() => {
+        const anyUploading = !!(progress.usda || progress.on)
+        const anyStaged    = !!(staged.usda || staged.on)
+
+        const boxClass = [
+          'rounded-lg border-2 transition-colors select-none',
+          anyUploading
+            ? 'border-amber-500/40 bg-amber-500/8 px-4 py-3'
+            : anyStaged
+              ? 'border-violet-500/40 bg-violet-500/8 px-4 py-3 cursor-pointer'
+              : dragOver
+                ? 'border-violet-400 border-dashed bg-violet-500/10 cursor-pointer px-4 py-6'
+                : 'border-dashed border-border/50 bg-muted/10 hover:bg-muted/20 hover:border-border/70 cursor-pointer px-4 py-6',
+        ].join(' ')
+
+        return (
+          <div
+            className={boxClass}
+            onDrop={anyUploading ? undefined : onDrop}
+            onDragOver={anyUploading ? undefined : onDragOver}
+            onDragLeave={anyUploading ? undefined : onDragLeave}
+            onClick={anyUploading ? undefined : onBrowse}
+          >
+            {anyUploading ? (
+              // Uploading — per-file progress bars, amber tint.
+              <div className="space-y-2.5">
+                {(['usda', 'on']).map(type => {
+                  const prog = progress[type]
+                  if (!prog) return null
+                  const label = type === 'usda' ? 'USDA FoodData Central' : 'OpenNutrition'
+                  return (
+                    <div key={type} className="space-y-1">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2 font-medium text-amber-300">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Uploading {label}
+                        </div>
+                        <span className="text-muted-foreground tabular-nums">
+                          {fmtFileSize(prog.sent)} / {fmtFileSize(prog.total)} · {prog.pct}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/40">
+                        <div
+                          className="h-full bg-amber-500 transition-[width] duration-200"
+                          style={{ width: `${prog.pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : anyStaged ? (
+              // Staged — file rows with remove buttons, violet tint.
+              <div className="space-y-2">
+                <div className="text-xs uppercase tracking-wider text-violet-300/80 font-medium">
+                  Ready to upload
+                </div>
+                {(['usda', 'on']).map(type => {
+                  const file = staged[type]
+                  if (!file) return null
+                  const label = type === 'usda' ? 'USDA' : 'OpenNutrition'
+                  return (
+                    <div key={type} className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-xs min-w-0">
+                        <FileArchive className="h-3 w-3 text-violet-300 shrink-0" />
+                        <span className="text-violet-200 font-medium shrink-0">{label}</span>
+                        <span className="text-foreground/80 truncate" title={file.name}>{file.name}</span>
+                        <span className="text-muted-foreground/70 tabular-nums shrink-0">
+                          · {fmtFileSize(file.size)}
+                        </span>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); clearStaged(type) }}
+                        className="text-muted-foreground/60 hover:text-foreground shrink-0"
+                        title="Remove from upload queue"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )
+                })}
+                <div className="text-xs text-muted-foreground/60 italic pt-1">
+                  Drop or click to add another file
+                </div>
+              </div>
+            ) : (
+              // Empty — drop prompt, gray dashed border.
+              <div className="flex flex-col items-center justify-center">
+                <Upload className="h-5 w-5 text-muted-foreground/60 mb-1.5" />
+                <div className="text-xs font-medium text-muted-foreground">
+                  Drop ZIPs here, or click to browse
+                </div>
+                <div className="text-xs text-muted-foreground/50 mt-0.5">
+                  USDA FoodData_Central_csv_*.zip + OpenNutrition opennutrition-dataset-*.zip
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* Always-mounted hidden file input — click handler on the box
+          opens it via fileInputRef.current.click(). Single instance
+          so the ref slot has exactly one node bound to it. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".zip"
+        multiple
+        onChange={onFileInputChange}
+        className="hidden"
+      />
 
       {error && (
         <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
