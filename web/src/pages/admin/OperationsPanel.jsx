@@ -1486,18 +1486,38 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
             <div className="flex items-center justify-between flex-wrap gap-2">
               {(() => {
                 const liveStaged = isRunning ? sync?.mode === 'staged' : stagedToggle
+                // Button-driven toggle (no hidden <input>). Avoids the
+                // browser's focus-into-view scroll jump that fires when
+                // a label's associated sr-only input takes focus — that
+                // jump was scrolling the panel every click.
                 return (
-                  <label className="flex items-center gap-2 text-[12px] cursor-pointer select-none">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={liveStaged}
+                    aria-label="Dry-run (review before commit)"
+                    onClick={() => !isRunning && setStagedToggle(s => !s)}
+                    disabled={isRunning}
+                    className={[
+                      'flex items-center gap-2 text-[12px] select-none',
+                      isRunning ? 'cursor-default' : 'cursor-pointer',
+                    ].join(' ')}
+                  >
                     <span className={`relative inline-flex items-center ${isRunning ? 'opacity-50' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={liveStaged}
-                        onChange={e => setStagedToggle(e.target.checked)}
-                        disabled={isRunning}
-                        className="sr-only peer"
+                      <span
+                        className={[
+                          'h-4 w-7 rounded-full border transition-colors',
+                          liveStaged
+                            ? 'bg-violet-500/40 border-violet-400'
+                            : 'bg-muted border-border',
+                        ].join(' ')}
                       />
-                      <span className="h-4 w-7 rounded-full bg-muted border border-border peer-checked:bg-violet-500/40 peer-checked:border-violet-400 transition-colors" />
-                      <span className="absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-foreground transition-transform peer-checked:translate-x-3" />
+                      <span
+                        className={[
+                          'absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-foreground transition-transform',
+                          liveStaged ? 'translate-x-3' : '',
+                        ].join(' ')}
+                      />
                     </span>
                     <span className={
                       isRunning
@@ -1506,7 +1526,7 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
                     }>
                       Dry-run (review before commit)
                     </span>
-                  </label>
+                  </button>
                 )
               })()}
 
