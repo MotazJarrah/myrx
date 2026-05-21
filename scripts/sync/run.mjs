@@ -241,11 +241,18 @@ async function drainSteps() {
 
 function startPhase(name) {
   phaseTimers[name] = { start: Date.now(), end: null, ms: null }
+  // Fire a 0% progress push for this phase so the UI's status pill
+  // flips from "Starting" to "Running" the moment the phase begins.
+  // (Don't await — fire and continue. The next reportPhase call
+  // overrides this if it arrives within the 2-second throttle window.)
+  reportPhase(name, 0).catch(() => {})
 }
 function endPhase(name) {
   if (!phaseTimers[name]) return
   phaseTimers[name].end = Date.now()
   phaseTimers[name].ms  = phaseTimers[name].end - phaseTimers[name].start
+  // Force-push 100% so the bar visibly fills before moving on.
+  reportPhase(name, 100).catch(() => {})
 }
 
 // ── Worker state pushes ──────────────────────────────────────────────────────
@@ -268,6 +275,58 @@ async function pushProgress(progress) {
   if (pushProgress._last && now - pushProgress._last < 2000) return
   pushProgress._last = now
   await pushState({ progress })
+}
+
+/**
+ * Phase-level progress reporter. Computes overall % across the whole
+ * sync by weighting each phase by its expected wall-clock cost:
+ *   download  10%
+ *   parse     30% (longest — USDA CSV walk takes ~4 min)
+ *   dedup      5%
+ *   diff      25%
+ *   write     25%
+ *   finalise   5%
+ *
+ * The UI reads `progress.phase` to flip the status pill from
+ * "Starting" to "Running" the moment Phase 1 begins, and reads
+ * `progress.page` + `progress.total_pages` to fill the bar.
+ * (page/total_pages naming is legacy — page = "items done within
+ * this phase", total_pages = "items total in this phase". We map
+ * pct → page/total_pages so the existing UI fill logic works.)
+ */
+const PHASE_WEIGHT = {
+  download:     10,
+  parse_usda:   25,
+  parse_on:      5,
+  dedup:         5,
+  diff:         25,
+  write_staged: 25,
+  write_commit: 25,
+  finalise:      5,
+}
+const PHASE_OFFSET = {
+  download:      0,
+  parse_usda:   10,
+  parse_on:     35,
+  dedup:        40,
+  diff:         45,
+  write_staged: 70,
+  write_commit: 70,
+  finalise:     95,
+}
+async function reportPhase(phaseName, intraPct = 0, label = '') {
+  const weight = PHASE_WEIGHT[phaseName] ?? 0
+  const offset = PHASE_OFFSET[phaseName] ?? 0
+  const overallPct = Math.min(100, Math.max(0, offset + weight * (intraPct / 100)))
+  // Force-push (bypass the 2-second throttle) on phase transitions so
+  // the UI updates immediately.
+  pushProgress._last = 0
+  await pushProgress({
+    phase: label || phaseName,
+    page:        Math.round(overallPct * 10),  // 0..1000
+    total_pages: 1000,
+    pct:         overallPct,
+  })
 }
 
 // ── Cancel polling ───────────────────────────────────────────────────────────
@@ -705,6 +764,11 @@ async function loadLiveFingerprints() {
   logStep('diff', 'Loading live food_library row fingerprints (USDA + ON only)…')
   const live = new Map()  // key = "source|source_id"  → fingerprint string
 
+  // Estimated total for progress bar — the catalog is ~470k rows; this
+  // is a rough estimate that gets refined as we load. Worst case the
+  // bar slightly overshoots/undershoots; it's just for visual feedback.
+  const ESTIMATED_TOTAL = 470_000
+
   const CHUNK = 10_000
   let offset = 0
   while (true) {
@@ -725,6 +789,10 @@ async function loadLiveFingerprints() {
     }
     offset += rows.length
     logStep('diff', `Loaded ${fmtN(live.size)} live rows so far…`)
+    // Update the overall progress bar mid-load (cap at 95% for the
+    // diff phase so the remaining 5% can be claimed by the compare).
+    const intraPct = Math.min(95, (live.size / ESTIMATED_TOTAL) * 100)
+    await reportPhase('diff', intraPct)
     if (rows.length < CHUNK) break
   }
   logStep('diff', `Loaded ${fmtN(live.size)} live rows total`)
@@ -785,7 +853,48 @@ async function diffPhase(dedupedRows) {
   endPhase('diff')
   logStep('diff', `Diff complete in ${fmtMs(phaseTimers.diff.ms)}: +${fmtN(inserts.length)} inserts · ~${fmtN(updates.length)} updates · −${fmtN(deletes.length)} deletes`)
 
-  return { inserts, updates, deletes }
+  // Reload the full live rows (not just fingerprints) ONLY if Phase 5
+  // will need them for changelog before_data. If the diff is empty
+  // OR has only inserts (no updates/deletes need before_data), skip
+  // the second load entirely. Otherwise share the data with Phase 5.
+  let liveByKey = null
+  if (updates.length > 0 || deletes.length > 0) {
+    liveByKey = await loadLiveRowsFull()
+  }
+
+  return { inserts, updates, deletes, liveByKey }
+}
+
+/**
+ * Load all live USDA + ON rows as a Map keyed by `source|source_id`,
+ * containing the FULL row data (not just fingerprints). Used by Phase
+ * 5 to populate changelog before_data fields without re-querying D1.
+ *
+ * Separated from loadLiveFingerprints() because fingerprinting only
+ * needs a hash of the fields; the changelog needs the actual values.
+ */
+async function loadLiveRowsFull() {
+  logStep('diff', 'Loading live row data for changelog before_data…')
+  const map = new Map()
+  const CHUNK = 10_000
+  let offset = 0
+  while (true) {
+    await bailIfCancelled()
+    const rows = await querySql(`
+      SELECT source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
+             fiber_g, sodium_mg, serving_g, serving_label, upc, data_type
+      FROM food_library
+      WHERE source IN ('usda', 'on')
+      ORDER BY id
+      LIMIT ${CHUNK} OFFSET ${offset};
+    `)
+    if (!rows.length) break
+    for (const r of rows) map.set(`${r.source}|${r.source_id}`, r)
+    offset += rows.length
+    if (rows.length < CHUNK) break
+  }
+  logStep('diff', `Loaded ${fmtN(map.size)} live rows`)
+  return map
 }
 
 // ── Phase 5: Write (staged → changelog | commit → atomic swap) ───────────────
@@ -797,37 +906,27 @@ async function diffPhase(dedupedRows) {
  * Batched POSTs to /admin/sync/changelog/append. We do NOT touch food_library
  * directly here — the changelog is the only side effect.
  */
-async function writeStaged(inserts, updates, deletes) {
+async function writeStaged(inserts, updates, deletes, liveByKey) {
   startPhase('write_staged')
   logStep('phase', '── Phase 5/6 — Write to sync_changelog (staged mode) ──')
 
-  const BATCH = 500
-  let pushed = 0
   const total = inserts.length + updates.length + deletes.length
 
-  // For UPDATE entries, we need the before_data (existing live row) to
-  // populate the JSON. Lazy-fetch them as we encounter the keys.
-  const needUpdateLookup = updates.length > 0 || deletes.length > 0
-  let existingByKey = new Map()
-  if (needUpdateLookup) {
-    logStep('write', 'Loading live row data for updates + deletes (for changelog before_data field)…')
-    const CHUNK = 10_000
-    let offset = 0
-    while (true) {
-      const rows = await querySql(`
-        SELECT source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
-               fiber_g, sodium_mg, serving_g, serving_label, upc, data_type
-        FROM food_library
-        WHERE source IN ('usda', 'on')
-        ORDER BY id
-        LIMIT ${CHUNK} OFFSET ${offset};
-      `)
-      if (!rows.length) break
-      for (const r of rows) existingByKey.set(`${r.source}|${r.source_id}`, r)
-      offset += rows.length
-      if (rows.length < CHUNK) break
-    }
+  // Short-circuit: no changes means nothing to stage. Skip the entire
+  // write phase — no need to even create empty changelog entries.
+  if (total === 0) {
+    logStep('write', 'No changes detected — staged write is a no-op')
+    endPhase('write_staged')
+    return
   }
+
+  const BATCH = 500
+  let pushed = 0
+
+  // For UPDATE / DELETE entries, the changelog needs before_data (the
+  // existing live row). Phase 4 already loaded this as `liveByKey` —
+  // reuse it instead of re-querying D1 (~5 min saved).
+  const existingByKey = liveByKey ?? new Map()
 
   async function flushBatch(entries) {
     if (!entries.length) return
@@ -911,39 +1010,31 @@ async function writeStaged(inserts, updates, deletes) {
  * parallel batches. This lets the admin undo a commit-mode sync just like a
  * staged sync.
  */
-async function writeCommit(dedupedRows, inserts, updates, deletes) {
+async function writeCommit(dedupedRows, inserts, updates, deletes, liveByKey) {
   startPhase('write_commit')
   logStep('phase', '── Phase 5/6 — Write to food_library (commit mode, atomic swap) ──')
+
+  const total = inserts.length + updates.length + deletes.length
+
+  // Short-circuit: no changes = the live food_library already matches
+  // the deduped union exactly. Skip the changelog write AND skip the
+  // wipe-and-rebuild — both are no-ops in this case. Saves ~10 min on
+  // a "fresh upload, no actual delta" sync.
+  if (total === 0) {
+    logStep('write', 'No changes — live food_library already matches the source. Skipping wipe + rebuild.')
+    endPhase('write_commit')
+    return
+  }
 
   // Step 1 — write changelog entries with committed=1 so the UI can show
   // the same I/U/D counts in history + so undo works.
   logStep('write', 'Recording changelog entries with committed=1 (enables undo)…')
 
-  // Same batched push logic as staged mode, but flip committed=1 server-side.
-  // We use a slightly different endpoint variant by passing committed:1 in
-  // the body — the worker honors it.
+  // Reuse the live-row Map from Phase 4 — same shape we need for
+  // changelog before_data. Saves ~5 min vs the previous re-load.
+  const existingByKey = liveByKey ?? new Map()
   const BATCH = 500
   let pushed = 0
-  const total = inserts.length + updates.length + deletes.length
-
-  // Bulk-load existing data for updates + deletes.
-  const existingByKey = new Map()
-  let offset = 0
-  const CHUNK = 10_000
-  while (true) {
-    const rows = await querySql(`
-      SELECT source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
-             fiber_g, sodium_mg, serving_g, serving_label, upc, data_type
-      FROM food_library
-      WHERE source IN ('usda', 'on')
-      ORDER BY id
-      LIMIT ${CHUNK} OFFSET ${offset};
-    `)
-    if (!rows.length) break
-    for (const r of rows) existingByKey.set(`${r.source}|${r.source_id}`, r)
-    offset += rows.length
-    if (rows.length < CHUNK) break
-  }
 
   async function flushBatch(entries) {
     if (!entries.length) return
@@ -1163,14 +1254,14 @@ async function main() {
     onRows.length   = 0
 
     // Phase 4 — Diff
-    const { inserts, updates, deletes } = await diffPhase(dedupedRows)
+    const { inserts, updates, deletes, liveByKey } = await diffPhase(dedupedRows)
     await bailIfCancelled()
 
     // Phase 5 — Write
     if (MODE === 'staged') {
-      await writeStaged(inserts, updates, deletes)
+      await writeStaged(inserts, updates, deletes, liveByKey)
     } else {
-      await writeCommit(dedupedRows, inserts, updates, deletes)
+      await writeCommit(dedupedRows, inserts, updates, deletes, liveByKey)
     }
     await bailIfCancelled()
 

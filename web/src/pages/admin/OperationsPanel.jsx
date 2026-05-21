@@ -1422,7 +1422,19 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
           level:      r.level,
           error_code: r.error_code,
         }))
-        setLogEntries(prev => prev.concat(mapped))
+        // Dedupe on append. Two ways the same row can sneak through:
+        // (1) the polling effect re-runs (deps change like sync.status
+        //     flickering starting→running) and the new effect's first
+        //     tick races with an in-flight tick from the old effect,
+        //     both reading the same cursor value before either has
+        //     advanced it; (2) the server returns overlapping ranges
+        //     on retry. Both are handled by filtering against a Set
+        //     of existing ids before concatenating.
+        setLogEntries(prev => {
+          const existingIds = new Set(prev.map(e => e.id))
+          const fresh = mapped.filter(e => !existingIds.has(e.id))
+          return fresh.length ? prev.concat(fresh) : prev
+        })
       } catch { /* silent */ }
     }
     tick()
