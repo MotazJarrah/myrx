@@ -60,7 +60,16 @@ jobs:
         with:
           node-version: '20'
 
-      # Install dependencies for both bulk_import and d1_migrate (shared lib code).
+      # Install dependencies for all three script folders.
+      # - scripts/sync (orchestrator)
+      # - scripts/bulk_import (loaders + filter rules invoked by orchestrator)
+      # - scripts/d1_migrate (shared lib code — changelog recorder etc.)
+      # Each folder has its own node_modules so Node's resolver finds the
+      # right deps regardless of where the running .mjs file lives.
+      - name: Install sync orchestrator dependencies
+        working-directory: scripts/sync
+        run: npm install
+
       - name: Install bulk_import dependencies
         working-directory: scripts/bulk_import
         run: npm ci || npm install
@@ -68,6 +77,13 @@ jobs:
       - name: Install d1_migrate dependencies
         working-directory: scripts/d1_migrate
         run: npm ci || npm install
+
+      # Install wrangler globally so `npx wrangler` resolves regardless of
+      # which folder the orchestrator's CWD ends up in. (The bulk_import
+      # d1_writer.mjs shells out via npx wrangler; without a global
+      # install, npx would fetch on-demand each time which is slow.)
+      - name: Install wrangler globally
+        run: npm install -g wrangler@latest
 
       # Resolve run_id. Worker-dispatched runs already have it via inputs;
       # cron-triggered runs generate one and stamp it back into the worker.

@@ -1,0 +1,11 @@
+{
+  "name": "myrx-sync",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Unified food-library sync orchestrator — downloads USDA + ON, applies all filter rules, writes to D1.",
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "unzipper": "^0.12.3"
+  }
+}
