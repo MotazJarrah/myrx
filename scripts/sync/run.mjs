@@ -349,6 +349,12 @@ async function findUsdaSnapshot() {
 
   // Ranged GET probe — read 1 byte, immediately cancel the body.
   // Status 200/206/304 = URL exists. 4xx/5xx = not found.
+  //
+  // Network-level failures (DNS, TCP, TLS) come back as throws, not
+  // status codes. Node wraps everything as "fetch failed" by default;
+  // we unwrap err.cause to surface the real reason — ENOTFOUND (DNS),
+  // ECONNREFUSED (TCP), CERT_HAS_EXPIRED (TLS), etc. — so debugging
+  // doesn't need a packet capture.
   async function probe(url) {
     try {
       const res = await fetch(url, {
@@ -364,7 +370,17 @@ async function findUsdaSnapshot() {
       const ok = res.status >= 200 && res.status < 400
       return { ok, status: res.status }
     } catch (err) {
-      return { ok: false, status: 0, error: err.message }
+      // Unwrap the underlying network error. err.cause is set by
+      // undici (Node's fetch impl) and carries the real diagnostic:
+      // - { code: 'ENOTFOUND', hostname: '...' } → DNS doesn't resolve
+      // - { code: 'ECONNREFUSED' } → host unreachable / no server
+      // - { code: 'ETIMEDOUT' } → connection timeout
+      // - { code: 'CERT_HAS_EXPIRED' / 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' } → TLS
+      const cause = err.cause || {}
+      const detail = cause.code
+        ? `${cause.code}${cause.hostname ? ` (${cause.hostname})` : ''}`
+        : err.message
+      return { ok: false, status: 0, error: detail }
     }
   }
 
@@ -380,19 +396,21 @@ async function findUsdaSnapshot() {
     .filter(r => r.ok)
     .sort((a, b) => b.date.localeCompare(a.date))
 
-  // Diagnostic: log a few sample status codes from failed probes so
-  // future debugging is easier. Limit to first 3 to keep the log
-  // tidy.
+  // No fallback. If every probe fails, the sync FAILS — the entire
+  // point of running a sync is to get the latest data; substituting
+  // a known-old URL would silently re-download the same data we
+  // already have. We'd rather fail loudly so the admin investigates
+  // (DNS issue? CDN outage? IP block?) than ship a useless sync.
   if (!found.length) {
-    const samples = probeResults.slice(0, 3).map(r =>
-      `${r.date}=${r.status || r.error || 'no-response'}`
+    // Log every probe's actual response so it's clear what failed
+    // and how. Status codes for HTTP failures; underlying error
+    // messages (DNS failure / connection refused / TLS handshake)
+    // for network-level failures.
+    const samples = probeResults.slice(0, 5).map(r =>
+      `${r.date}=${r.status > 0 ? `HTTP ${r.status}` : (r.error || 'no response')}`
     ).join(', ')
-    logStep('scrape_usda', `All probes failed. Sample responses: ${samples}`, { level: 'warn' })
-    // Last-resort fallback: assume the known-good URL is still valid
-    // (CDN might be having a temporary issue with probes but
-    // downloads can still succeed). Surface it as a warning.
-    logStep('scrape_usda', `Falling back to known-good snapshot: ${KNOWN_GOOD}`, { level: 'warn' })
-    return { url: `${base}${KNOWN_GOOD}.zip`, date: KNOWN_GOOD }
+    logStep('scrape_usda', `All ${probeResults.length} probes failed. Sample: ${samples}`, { level: 'error', errorCode: 'E_001' })
+    throw new Error(`USDA CDN unreachable — no candidate URL responded. Investigate network connectivity to fdc-datasets.ars.usda.gov from GitHub Actions runner.`)
   }
 
   const latest = found[0]
@@ -448,8 +466,19 @@ async function findOnSnapshot() {
  */
 async function downloadFile(url, destPath, label, progressKey) {
   fs.mkdirSync(path.dirname(destPath), { recursive: true })
-  const res = await fetch(url, { headers: { 'User-Agent': 'myrx-sync/1.0' } })
-  if (!res.ok) throw new Error(`${label} download failed: ${res.status}`)
+  let res
+  try {
+    res = await fetch(url, { headers: { 'User-Agent': 'myrx-sync/1.0' } })
+  } catch (err) {
+    // Surface the underlying network-level error code (ENOTFOUND, etc.)
+    // instead of Node's opaque "fetch failed" wrapper.
+    const cause = err.cause || {}
+    const detail = cause.code
+      ? `${cause.code}${cause.hostname ? ` (${cause.hostname})` : ''}`
+      : err.message
+    throw new Error(`${label} fetch error: ${detail} — URL: ${url}`)
+  }
+  if (!res.ok) throw new Error(`${label} download failed: HTTP ${res.status} — URL: ${url}`)
   const total = Number(res.headers.get('content-length') || 0)
   const out   = fs.createWriteStream(destPath)
   let received = 0
