@@ -76,6 +76,27 @@ function nextMonthlyCron(now = new Date()) {
   return next.toISOString()
 }
 
+/**
+ * Format the cron's recurring time-of-day in the user's local timezone +
+ * timezone abbreviation, plus the canonical UTC time. Reads naturally
+ * regardless of DST or timezone:
+ *   "11:00 PM EDT (03:00 UTC)"
+ *   "8:00 PM PDT (03:00 UTC)"
+ *   "4:00 AM CET (03:00 UTC)"
+ */
+function cronTimeLabel(nextIso) {
+  try {
+    const d = new Date(nextIso)
+    // Local time, e.g. "11:00 PM EDT".
+    const local = d.toLocaleTimeString(undefined, {
+      hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short',
+    })
+    return `Monthly cron — 1st of each month at ${local} (03:00 UTC)`
+  } catch {
+    return 'Monthly cron — 1st of each month at 03:00 UTC'
+  }
+}
+
 function durationMs(start, end) {
   if (!start || !end) return null
   return new Date(end).getTime() - new Date(start).getTime()
@@ -157,7 +178,14 @@ function ProgressBar({ status, progress, startedAt }) {
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
         <span>Phase: <span className="text-foreground/80 font-medium">{phase}</span></span>
-        {eta && <span>~{eta} remaining</span>}
+        {/* ETA: show the actual remaining estimate once it's stable
+            (pct >= 3% AND elapsed > 60s). Before that, show a
+            "Calculating…" placeholder so the user knows the estimator
+            is alive and waiting for enough data, instead of showing
+            nothing or showing a wildly inflated early extrapolation. */}
+        {eta
+          ? <span>~{eta} remaining</span>
+          : <span className="opacity-60 italic">Calculating estimate…</span>}
       </div>
       {/*
         Progress bar — two visual modes:
@@ -645,7 +673,9 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   // ── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-      {/* Header — title + status chip + collapse toggle */}
+      {/* Header — title + status chip + collapse toggle. Status auto-polls
+          every 3s while a sync runs and every 30s when idle, so there's
+          no manual refresh button — anything visible is up to date. */}
       <div className="flex items-center justify-between">
         <button
           onClick={() => setCollapsed(c => !c)}
@@ -655,13 +685,6 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
           <Database className="h-3.5 w-3.5 text-muted-foreground/50" />
           <span className="text-sm font-medium">Library Operations</span>
           <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${chip.bg}`}>{chip.label}</span>
-        </button>
-        <button
-          onClick={() => { fetchStatus(); fetchHistory() }}
-          className="p-1.5 rounded text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-          title="Refresh"
-        >
-          <RefreshCw className="h-3 w-3" />
         </button>
       </div>
 
@@ -696,7 +719,7 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
             <Stat
               label="Next scheduled"
               value={fmtShort(nextMonthlyCron())}
-              hint="Monthly cron — 1st of each month at 03:00 UTC"
+              hint={cronTimeLabel(nextMonthlyCron())}
             />
           </div>
 
