@@ -495,7 +495,44 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
     } catch { return '' }
   }
 
+  // Relative-time helper for the "uploaded N ago" hint. Caps at 'over
+  // a year' so we don't drift into noise for very old uploads.
+  function relativeTime(iso) {
+    if (!iso) return ''
+    try {
+      const ms = Date.now() - new Date(iso).getTime()
+      const days = Math.floor(ms / 86_400_000)
+      if (days < 1)   return 'today'
+      if (days === 1) return 'yesterday'
+      if (days < 7)   return `${days} days ago`
+      if (days < 30)  return `${Math.floor(days / 7)} weeks ago`
+      if (days < 365) return `${Math.floor(days / 30)} months ago`
+      return `${Math.floor(days / 365)}+ years ago`
+    } catch { return '' }
+  }
+
+  // Extract the version/date marker from the filename so the admin can
+  // compare it against what's posted on USDA / ON download pages.
+  //   FoodData_Central_csv_2026-04-30.zip   → "2026-04-30"
+  //   opennutrition-dataset-2025.1.zip      → "2025.1"
+  function versionFromFilename(name) {
+    if (!name) return null
+    const usdaMatch = /FoodData_Central_csv_(\d{4}-\d{2}-\d{2})/.exec(name)
+    if (usdaMatch) return usdaMatch[1]
+    const onMatch = /opennutrition-dataset-(\d{4}\.\d+)/.exec(name)
+    if (onMatch) return onMatch[1]
+    return null
+  }
+
   // ── Render ─────────────────────────────────────────────────────────
+  const usdaMissing = !status?.usda
+  const onMissing   = !status?.on
+  // "Upload only what's new" hint — visible when at least one file
+  // is already in the mirror. New admins (both files missing) see
+  // a simpler "upload both" prompt instead so they don't get
+  // confused before they have a baseline.
+  const hasAnyMirror = !!(status?.usda || status?.on)
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -508,6 +545,14 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
         >
           <ExternalLink className="h-3 w-3" /> Open download pages
         </button>
+      </div>
+
+      {/* Helper line — explains the upload rule. Different copy
+          depending on whether the mirror has any files yet. */}
+      <div className="text-xs text-muted-foreground/70 leading-snug">
+        {hasAnyMirror
+          ? <>Upload only the file(s) with a newer version on the source page. The other one stays put — both versions in the mirror are used for every sync.</>
+          : <>Upload both ZIPs to populate the mirror. After that, only re-upload the file that has a new version.</>}
       </div>
 
       {/* Currently-uploaded cards — one per source. Cards collapse to
@@ -568,12 +613,13 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
           }
 
           if (meta) {
+            const version = versionFromFilename(meta.filename)
             return (
               <div key={type} className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-xs font-medium text-emerald-400/90 min-w-0">
                     <CheckCircle2 className="h-3 w-3 shrink-0" />
-                    <span className="truncate" title={meta.filename}>{meta.filename}</span>
+                    <span className="truncate" title={meta.filename}>{label}</span>
                   </div>
                   <button
                     onClick={() => deleteFile(type)}
@@ -584,8 +630,15 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
                     <Trash2 className="h-3 w-3" />
                   </button>
                 </div>
-                <div className="mt-1 text-xs text-muted-foreground/70 tabular-nums">
-                  {fmtFileSize(meta.size)} · uploaded {fmtUploadedAt(meta.uploaded_at)}
+                {/* Version + size on the first sub-line so admins can
+                    eyeball "is this the latest?" against the source page. */}
+                {version && (
+                  <div className="mt-1 text-xs tabular-nums text-foreground/85 font-mono">
+                    {version}
+                  </div>
+                )}
+                <div className="mt-0.5 text-xs text-muted-foreground/70 tabular-nums">
+                  {fmtFileSize(meta.size)} · uploaded {fmtUploadedAt(meta.uploaded_at)} ({relativeTime(meta.uploaded_at)})
                 </div>
               </div>
             )
