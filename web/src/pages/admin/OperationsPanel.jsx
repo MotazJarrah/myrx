@@ -132,11 +132,21 @@ function ProgressBar({ status, progress, startedAt }) {
   let pct = null
   if (pages && page) pct = Math.min(100, Math.max(0, (page / pages) * 100))
 
-  // ETA computation: requires startedAt + a measurable rate.
+  // ETA computation. Linear extrapolation from `elapsed / pct` is wildly
+  // unstable in the first 1-2 minutes of a sync because the elapsed
+  // clock starts at workflow dispatch (which includes GHA runner boot,
+  // npm install, USDA cold-start, etc.) but real work doesn't begin
+  // until the first page is processed. From 0.4% complete the ratio
+  // produces ~28h estimates that are pure noise.
+  //
+  // Suppress ETA until we have enough data points to be meaningful:
+  //   - elapsed > 60s (past the startup spike)
+  //   - pct >= 3%  (past the warm-up phase)
+  // Past those thresholds the rate stabilises and ETA reads sensibly.
   const eta = useMemo(() => {
-    if (!startedAt || pct == null || pct === 0) return null
+    if (!startedAt || pct == null || pct < 3) return null
     const elapsed = Date.now() - new Date(startedAt).getTime()
-    if (elapsed < 5000) return null  // need 5s of warmup
+    if (elapsed < 60_000) return null
     const totalEstimated = elapsed / (pct / 100)
     const remaining = totalEstimated - elapsed
     if (remaining < 0) return null
@@ -665,19 +675,22 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
             <Stat label="MYRX (custom)" value={(sourceBreakdown.myrx ?? 0).toLocaleString()} />
           </div>
 
-          {/* Sync timing — last sync + next monthly cron.
-              When a sync is running RIGHT NOW, the "Last sync" value
-              shows the PREVIOUS completed sync (not the in-flight one).
-              The hint makes that explicit so the user doesn't think the
-              date in the value cell refers to the run they just kicked off. */}
+          {/* Sync timing.
+              "Last sync" shows the last actually-COMMITTED sync only —
+              never updates on cancellations, staged-but-not-committed
+              syncs, or failures. Reads sync.last_committed_sync_at
+              (server-side timestamp stamped only when a commit happens).
+              If no sync has been committed yet, shows '—' / 'Never'. */}
           <div className="grid grid-cols-2 gap-2">
             <Stat
-              label={isRunning ? 'Last completed sync' : 'Last sync'}
-              value={fmtShort(sync?.completed_at)}
+              label={isRunning ? 'Last committed sync' : 'Last sync'}
+              value={sync?.last_committed_sync_at ? fmtShort(sync.last_committed_sync_at) : '—'}
               hint={
                 isRunning
-                  ? 'a new sync is in progress — this date is the previous run'
-                  : (relTime(sync?.completed_at) || (sync?.started_at ? `started ${fmtShort(sync.started_at)}` : ''))
+                  ? 'a new sync is in progress — this date is the last commit'
+                  : (sync?.last_committed_sync_at
+                       ? relTime(sync.last_committed_sync_at)
+                       : 'no sync committed yet')
               }
             />
             <Stat

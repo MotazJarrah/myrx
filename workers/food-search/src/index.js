@@ -577,7 +577,11 @@ export default {
         if (r.done) break
       }
 
-      // Mark as last-committed and clear staged-review flag.
+      // Mark as last-committed and clear staged-review flag. Also stamp
+      // last_committed_sync_at — the "Last sync" stat on the UI reads
+      // this (not sync_completed_at), so it only ever shows real commit
+      // events, never cancelled or discarded syncs.
+      const nowIso = new Date().toISOString()
       await env.DB.batch([
         env.DB.prepare(
           `UPDATE sync_state SET value = ?, updated_at = datetime('now') WHERE key = 'last_committed_run_id'`
@@ -585,6 +589,11 @@ export default {
         env.DB.prepare(
           `UPDATE sync_state SET value = '0', updated_at = datetime('now') WHERE key = 'sync_staged_review'`
         ),
+        env.DB.prepare(
+          `INSERT INTO sync_state (key, value, updated_at)
+           VALUES ('last_committed_sync_at', ?, datetime('now'))
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+        ).bind(nowIso),
       ])
 
       // Rebuild FTS5 index so search picks up the newly committed rows.
@@ -789,11 +798,23 @@ export default {
         ))
       }
       // If status transitioned to 'completed' AND mode === 'commit',
-      // record last_committed_run_id for undo support.
+      // record last_committed_run_id (for undo) AND stamp
+      // last_committed_sync_at (for the "Last sync" UI stat). The UI
+      // reads last_committed_sync_at, NOT sync_completed_at — so the
+      // "Last sync" pill never updates on cancellations, only on real
+      // commit events (mode='commit' end OR /admin/sync/commit success).
       if (body.status === 'completed' && body.mode === 'commit' && body.run_id) {
-        updates.push(env.DB.prepare(
-          `UPDATE sync_state SET value = ?, updated_at = datetime('now') WHERE key = 'last_committed_run_id'`
-        ).bind(body.run_id))
+        const commitTs = body.completed_at || new Date().toISOString()
+        updates.push(
+          env.DB.prepare(
+            `UPDATE sync_state SET value = ?, updated_at = datetime('now') WHERE key = 'last_committed_run_id'`
+          ).bind(body.run_id),
+          env.DB.prepare(
+            `INSERT INTO sync_state (key, value, updated_at)
+             VALUES ('last_committed_sync_at', ?, datetime('now'))
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+          ).bind(commitTs),
+        )
       }
       // If status transitioned to 'running', clear the cancel flag
       // from any prior cancellation.

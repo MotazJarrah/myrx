@@ -165,15 +165,16 @@ export async function handleSyncStatus(request, env) {
   try { progress = JSON.parse(state['sync_progress'] ?? '{}') } catch {}
 
   return json({
-    status:                state['sync_status']             ?? 'unknown',
-    run_id:                state['sync_run_id']             || null,
-    mode:                  state['sync_mode']               || null,
-    staged_review_pending: state['sync_staged_review']      === '1',
-    last_committed_run_id: state['last_committed_run_id']   || null,
-    cancel_requested:      state['sync_cancel_requested']   === '1',
-    started_at:            state['sync_started_at']         ?? null,
-    completed_at:          state['sync_completed_at']       ?? null,
-    error:                 state['sync_error']              || null,
+    status:                  state['sync_status']             ?? 'unknown',
+    run_id:                  state['sync_run_id']             || null,
+    mode:                    state['sync_mode']               || null,
+    staged_review_pending:   state['sync_staged_review']      === '1',
+    last_committed_run_id:   state['last_committed_run_id']   || null,
+    last_committed_sync_at:  state['last_committed_sync_at']  || null,
+    cancel_requested:        state['sync_cancel_requested']   === '1',
+    started_at:              state['sync_started_at']         ?? null,
+    completed_at:            state['sync_completed_at']       ?? null,
+    error:                   state['sync_error']              || null,
     progress,
     usda: {
       last_sync_date: state['usda_last_sync_date'] || null,
