@@ -96,6 +96,7 @@ function fmtDuration(ms) {
 const STATUS_CHIP = {
   idle:          { bg: 'border-border bg-muted/30 text-muted-foreground',          label: 'Idle' },
   pending:       { bg: 'border-amber-500/30 bg-amber-500/10 text-amber-400',       label: 'Pending' },
+  starting:      { bg: 'border-amber-500/30 bg-amber-500/10 text-amber-400',       label: 'Starting…' },
   running:       { bg: 'border-amber-500/30 bg-amber-500/10 text-amber-400',       label: 'Running' },
   cancelling:    { bg: 'border-rose-500/30 bg-rose-500/10 text-rose-400',          label: 'Cancelling…' },
   cancelled:     { bg: 'border-muted-foreground/30 bg-muted/30 text-muted-foreground', label: 'Cancelled' },
@@ -190,6 +191,24 @@ function ProgressBar({ status, progress, startedAt }) {
       {pct != null && (
         <div className="text-[10px] text-muted-foreground/60 tabular-nums">
           {page.toLocaleString()} / {pages.toLocaleString()} pages — {pct.toFixed(1)}%
+        </div>
+      )}
+
+      {/* Live counters — show running tallies from the sync's progress
+          payload. Same color palette as the Recent syncs row + the
+          review dialog tiles so the user has a consistent visual
+          vocabulary: green=insert, blue=update, red=delete. */}
+      {(progress?.inserted != null || progress?.updated != null || progress?.removed != null) && (
+        <div className="flex items-center gap-3 text-xs tabular-nums pt-1">
+          <span className="text-emerald-400 font-medium">
+            +{(progress.inserted ?? 0).toLocaleString()} <span className="text-muted-foreground/60 font-normal">inserts</span>
+          </span>
+          <span className="text-sky-400 font-medium">
+            ~{(progress.updated ?? 0).toLocaleString()} <span className="text-muted-foreground/60 font-normal">updates</span>
+          </span>
+          <span className="text-rose-400 font-medium">
+            −{(progress.removed ?? 0).toLocaleString()} <span className="text-muted-foreground/60 font-normal">deletes</span>
+          </span>
         </div>
       )}
     </div>
@@ -482,16 +501,32 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   //   between those two moments, status is still 'running' AND
   //   cancel_requested is true → show 'cancelling' so the user knows
   //   their click was registered and the script is winding down.
+  //
+  // Starting vs Running:
+  //   The GHA workflow's first step posts status='running' before the
+  //   sync script makes its first USDA API call. There's a 1-3s gap
+  //   between that "I'm alive" handshake and the first page of progress
+  //   data (which carries total_pages). During that gap the progress bar
+  //   has no determinate data so it shows the indeterminate sweep.
+  //   To keep the pill consistent with the bar, we display 'starting'
+  //   (chip label "Starting…") whenever status is 'running' but no
+  //   total_pages has been reported yet. Once the first real progress
+  //   update lands, the pill flips to 'Running' and the bar transitions
+  //   from sweep to fill in the same beat.
   const status = useMemo(() => {
     if (sync?.staged_review_pending) return 'staged_review'
     if ((sync?.status === 'running' || sync?.status === 'pending') && sync?.cancel_requested) {
       return 'cancelling'
     }
+    if (sync?.status === 'running') {
+      const hasProgress = sync?.progress?.total_pages && sync?.progress?.page
+      if (!hasProgress) return 'starting'
+    }
     return sync?.status || 'unknown'
   }, [sync])
 
   const chip = STATUS_CHIP[status] || STATUS_CHIP.unknown
-  const isRunning = status === 'running' || status === 'pending' || status === 'cancelling'
+  const isRunning = status === 'running' || status === 'pending' || status === 'starting' || status === 'cancelling'
   const isCancelling = status === 'cancelling'
   const reviewPending = status === 'staged_review' && sync?.run_id
 
@@ -675,27 +710,21 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
               {/*
                 Dry-run toggle.
 
-                While a sync is running, the toggle is BOTH locked
-                (disabled prop on the input prevents state change) AND
-                visually frozen — opacity lowers, cursor changes to
-                not-allowed, and the displayed value is derived from the
-                CURRENT RUN's mode (sync.mode === 'staged') rather than
-                local state. That way the toggle always reflects what's
-                actually happening on the server, even if the user opens
-                the page mid-sync from a different browser.
+                While a sync is running, the toggle is locked at the
+                state level (disabled prop on the input prevents change)
+                AND the displayed value is derived from the CURRENT RUN's
+                mode so the UI always reflects what's actually happening.
+                Visual treatment: just dim the toggle + label to gray —
+                no cursor change, no "locked" text. Simple disabled-look.
 
-                When idle (or status === 'cancelled' / 'completed'), the
-                toggle returns to its normal interactive state and the
-                local `stagedToggle` value governs the next sync.
+                When idle, the toggle returns to normal interactive state
+                and the local `stagedToggle` governs the next sync's mode.
               */}
               {(() => {
                 const liveStaged = isRunning ? sync?.mode === 'staged' : stagedToggle
                 return (
-                  <label
-                    className={`flex items-center gap-2 text-[12px] select-none ${isRunning ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                    title={isRunning ? 'Mode is locked while a sync is running' : ''}
-                  >
-                    <span className={`relative inline-flex items-center ${isRunning ? 'opacity-60' : ''}`}>
+                  <label className="flex items-center gap-2 text-[12px] cursor-pointer select-none">
+                    <span className={`relative inline-flex items-center ${isRunning ? 'opacity-50' : ''}`}>
                       <input
                         type="checkbox"
                         checked={liveStaged}
@@ -706,9 +735,12 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
                       <span className="h-4 w-7 rounded-full bg-muted border border-border peer-checked:bg-violet-500/40 peer-checked:border-violet-400 transition-colors" />
                       <span className="absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-foreground transition-transform peer-checked:translate-x-3" />
                     </span>
-                    <span className={liveStaged ? 'text-violet-300' : 'text-muted-foreground'}>
+                    <span className={
+                      isRunning
+                        ? 'text-muted-foreground/50'
+                        : (liveStaged ? 'text-violet-300' : 'text-muted-foreground')
+                    }>
                       Dry-run (review before commit)
-                      {isRunning && <span className="ml-1 text-muted-foreground/60">— locked</span>}
                     </span>
                   </label>
                 )
