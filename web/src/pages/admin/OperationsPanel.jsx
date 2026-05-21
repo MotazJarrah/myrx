@@ -363,11 +363,9 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
     e.target.value = ''
   }
 
-  // Open both source-download pages in new tabs with one click.
-  function openDownloadPages() {
-    window.open('https://fdc.nal.usda.gov/download-datasets', '_blank', 'noopener,noreferrer')
-    window.open('https://www.opennutrition.app/download',    '_blank', 'noopener,noreferrer')
-  }
+  // Browser popup blockers reject the SECOND window.open() call in a
+  // single click handler — only the first is treated as user-initiated.
+  // So we split into two buttons; each click opens one source page.
 
   // ── Upload pipeline ─────────────────────────────────────────────────
   // Multipart chunks: 50 MB each. R2 requires part size >= 5 MB (except
@@ -535,16 +533,28 @@ function SourceFiles({ status, onUploadStateChange, onRefreshStatus, syncRunning
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <div className="text-xs uppercase tracking-wider text-muted-foreground/70 font-medium">
           Source files
         </div>
-        <button
-          onClick={openDownloadPages}
-          className="flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/20 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
-        >
-          <ExternalLink className="h-3 w-3" /> Open download pages
-        </button>
+        <div className="flex items-center gap-1.5">
+          <a
+            href="https://fdc.nal.usda.gov/download-datasets"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/20 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+          >
+            <ExternalLink className="h-3 w-3" /> USDA
+          </a>
+          <a
+            href="https://www.opennutrition.app/download"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/20 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+          >
+            <ExternalLink className="h-3 w-3" /> OpenNutrition
+          </a>
+        </div>
       </div>
 
       {/* Helper line — only when the mirror has at least one file.
