@@ -154,6 +154,32 @@ async function main() {
   await rebuildFts()
   console.log('  ✓ done')
 
+  // Set sync watermarks so the next incremental sync only fetches deltas
+  // since this snapshot, NOT a full 2020-onward re-pull.
+  //
+  // USDA: extract the snapshot date from the source_version string
+  //   "FoodData_Central_csv_2026-04-30" → "2026-04-30"
+  // ON: write the version + checksum so the diff-sync skips work when
+  //   the published version hasn't changed.
+  console.log('\n  Setting sync watermarks for incremental sync…')
+  const usdaDateMatch = /(\d{4}-\d{2}-\d{2})/.exec(usdaVersion || '')
+  const usdaSnapshotDate = usdaDateMatch?.[1] || new Date().toISOString().slice(0, 10)
+  await executeSql(
+    `INSERT INTO sync_state (key, value, updated_at)
+     VALUES ('usda_last_sync_date', ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    [usdaSnapshotDate]
+  )
+  await executeSql(
+    `INSERT INTO sync_state (key, value, updated_at)
+     VALUES ('on_last_version', ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    [onVersion || '']
+  )
+  console.log(`  ✓ usda_last_sync_date = ${usdaSnapshotDate}`)
+  console.log(`  ✓ on_last_version    = ${onVersion}`)
+  console.log('  Future syncs will fetch only deltas since this snapshot.')
+
   console.log('\nStep 10/10 — Final verification')
   const finalStats = await statsBySourceSubtype()
   printStats(finalStats, 'Final row counts (source / source_subtype)')
