@@ -143,15 +143,15 @@ What it does: pairs of chevrons flank a swipeable pill, pulsing in/out to telegr
 - **Outer chevron delay: 250 ms** behind the inner. Achieved on RN via `withDelay(250, withRepeat(withSequence(...)))`. On web via `animation-delay: 0.25s` plus `animation-fill-mode: both` (so the outer stays at opacity 0 during its delay — without that, it would show at default opacity 1 until the animation kicked in).
 - Both sides (left chevrons + right chevrons) run in the SAME phase — left-inner and right-inner pulse together, left-outer and right-outer pulse together. This creates a "marching outward" or "marching inward" rhythm depending on direction.
 - Fade in/out durations are exactly **0.25 s** each.
-- Where it's used: BW tier pill row, Weighted Standard adp-zone pill row, Sled Drag PUSH/PULL pill row, Swimming stroke pill row, and any future variant-selector pill row.
+- Where it's used: BW tier pill row, Weighted Standard adp-zone pill row, Sled Work PUSH/PULL pill row, Swimming stroke pill row, and any future variant-selector pill row.
 
 ---
 
 **Pattern 4 — Consolidated-page swipe ("whole page slides")**
 
-This is the BIG one — the canonical pattern for switching between variants of a consolidated detail page (BW assist tiers, Weighted Standard adp zones, Sled Drag PUSH/PULL, Swimming strokes, and any future N-variant page). Designed to feel as smooth as iOS native page-curl transitions while staying RN-friendly.
+This is the BIG one — the canonical pattern for switching between variants of a consolidated detail page (BW assist tiers, Weighted Standard adp zones, Sled Work PUSH/PULL, Swimming strokes, and any future N-variant page). Designed to feel as smooth as iOS native page-curl transitions while staying RN-friendly.
 
-- Reference implementation: `BodyweightConsolidatedBlock` in `mobile/app/(app)/effort/strength/[exercise].tsx`. The two cardio/strength wrappers (`SledDragConsolidatedDetail`, `SwimmingConsolidatedDetail`) mirror it byte-for-byte modulo the colour palette and the variant list.
+- Reference implementation: `BodyweightConsolidatedBlock` in `mobile/app/(app)/effort/strength/[exercise].tsx`. The two cardio/strength wrappers (`SledWorkConsolidatedDetail`, `SwimmingConsolidatedDetail`) mirror it byte-for-byte modulo the colour palette and the variant list.
 
 **Structure (top-to-bottom):**
 
@@ -165,22 +165,22 @@ This is the BIG one — the canonical pattern for switching between variants of 
   - BW assist tiers: `FULL RX → BAND → KNEE → BAND+KNEE` (no-assist hardest, most-assist easiest)
   - Weighted-standard adp zones: `STRENGTH → HYPERTROPHY → ENDURANCE` (heaviest load hardest, lightest easiest)
   - Swim strokes: `FLY → BREAST → BACK → FREE` (butterfly technically + physiologically hardest; freestyle easiest)
-- When variants are PARALLEL (different muscle groups, equipment configs, or stylistic choices with no clean hardness ordering), the order is arbitrary — pick what's intuitive. Example: Sled Drag `PUSH | PULL` (push is leg-dominant, pull is posterior-chain dominant — different stimuli, neither "harder").
+- When variants are PARALLEL (different muscle groups, equipment configs, or stylistic choices with no clean hardness ordering), the order is arbitrary — pick what's intuitive. Example: Sled Work `PUSH | PULL` (push is leg-dominant, pull is posterior-chain dominant — different stimuli, neither "harder").
 
 **Default landing slot on first mount (LOCKED — simple universal rule):**
 
-The page ALWAYS opens on **slot 0** (the leftmost pill), regardless of which variant the user logged most recently. Don't try to be clever with "most-recent" or "highest logged" heuristics — they produce surprising behaviour ("why did my Sled Drag page open on PULL?") and inconsistency across surfaces.
+The page ALWAYS opens on **slot 0** (the leftmost pill), regardless of which variant the user logged most recently. Don't try to be clever with "most-recent" or "highest logged" heuristics — they produce surprising behaviour ("why did my Sled Work page open on PULL?") and inconsistency across surfaces.
 
 Concretely:
 - **BW assist tiers** → slot 0 = highest logged tier (because `loggedTiers` array only contains logged tiers; leftmost = leftmost-of-logged = highest logged). If the user has only logged Band+Knee, the carousel only contains Band+Knee and slot 0 = Band+Knee.
 - **Swimming strokes** → slot 0 = Butterfly. All 4 stroke slots always render (for discoverability — empty-state cards on the strokes the user hasn't logged yet double as "you can train butterfly too" prompts). Trade-off accepted: a user with only freestyle logged opens the page on a butterfly empty-state and has to swipe right to find their data. Predictable over personalised.
-- **Sled Drag variants** → slot 0 = Push. Same reasoning — both PUSH and PULL slots always render; opening on the right side just because the user's last session was PULL is jarring.
+- **Sled Work variants** → slot 0 = Push. Same reasoning — both PUSH and PULL slots always render; opening on the right side just because the user's last session was PULL is jarring.
 
 **Pill label style:**
 
 - BW assist tiers and Weighted-standard adp zones use SHORT all-caps labels (`FULL RX`, `BAND+KNEE`, `STRENGTH`) — the labels are already short concepts.
 - **Swim strokes use FULL names** (`Freestyle`, `Backstroke`, `Breaststroke`, `Butterfly`) on the carousel pill. The short forms (`FREE`, `BACK`, `BREAST`, `FLY`) are reserved for the small stroke badge on the consolidated "Swimming" row in the cardio index — full names wouldn't fit there. The pill has room for the full name; readability wins.
-- Sled Drag uses `PUSH` / `PULL` everywhere (short by nature).
+- Sled Work uses `PUSH` / `PULL` everywhere (short by nature).
 - When in doubt, prefer FULL names on pills. Short forms are an optimisation for cramped layouts (index badges, tile labels), not the default.
 
 **Constants (LOCKED — copy verbatim, do not retune):**
@@ -216,7 +216,7 @@ PAGE_PADDING_HORIZONTAL = 16        // outer padding of page; used in slotWidth
 
 - **Pre-seed** the initial `slotWidth` state. The pre-seeded value MUST match what `onLayout` will eventually measure for the ScrollView wrapper. The right formula depends on whether the wrapper uses the negative-margin "edge-to-edge" trick:
   - **No negative-margin** (wrapper sits inside the normal page padding) → pre-seed `windowWidth − PAGE_PADDING_HORIZONTAL * 2` (= `windowWidth − 32`). Example: `BodyweightConsolidatedBlock`.
-  - **With negative-margin** (wrapper bleeds edge-to-edge via `marginHorizontal: -PAGE_PADDING_HORIZONTAL`) → pre-seed `windowWidth`. Example: `SwimmingConsolidatedDetail`, `SledDragConsolidatedDetail`. The wrapper's measured width is the full screen because the negative margin cancels the page padding.
+  - **With negative-margin** (wrapper bleeds edge-to-edge via `marginHorizontal: -PAGE_PADDING_HORIZONTAL`) → pre-seed `windowWidth`. Example: `SwimmingConsolidatedDetail`, `SledWorkConsolidatedDetail`. The wrapper's measured width is the full screen because the negative margin cancels the page padding.
 - Mismatched pre-seed causes a ~32 px alignment bug on first paint: the slots render at the wrong width, the initial `scrollTo(idx * slotWidth)` lands on a fractional pixel boundary, and the user sees a sliver of the adjacent slot at the screen edge. Pattern was originally introduced for BW and copy-pasted into the negative-margin wrappers without adjusting — leading to a real bug surfaced in May 2026. Always pick the formula based on the wrapper's actual width.
 - If you let it start at 0, the slots render as 0-px-wide on first paint and pop to full width when `onLayout` fires, which causes the inner detail content to lag behind the header by one frame. NEVER ship with `useState(0)`.
 - `onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}` on the ScrollView's wrapper View — still wire this up, because the pre-seed isn't perfect (split view, orientation, dynamic-island insets can differ slightly). The measurement refinement happens silently because the pre-seed is sub-pixel accurate when the formula is right.
@@ -261,7 +261,7 @@ The page padding is 16 px each side from `(app)/_layout.tsx`. The page content n
 
 **Anti-patterns (DO NOT DO):**
 
-- `key={activeVariant}` on the inner detail component to force remount. Produces a hard cutover with no slide — the whole reason BW felt smoother than the pre-refactor Sled Drag / Swimming pages.
+- `key={activeVariant}` on the inner detail component to force remount. Produces a hard cutover with no slide — the whole reason BW felt smoother than the pre-refactor Sled Work / Swimming pages.
 - Calling `setActiveVariant` synchronously from `onUpdate` (during the pan). State change should fire AFTER the slide-off animation completes, via `runOnJS` in the slide-off callback.
 - Forgetting the initial scrollTo. Result: page opens on slot 0, pill shows correct variant, body shows wrong variant.
 - Calling `scrollTo` without a `slotWidth > 0` guard. Result: NaN / Infinity scroll positions on first render before onLayout fires.
@@ -278,6 +278,67 @@ What it does: a panel slides in from below (or fades up into existence) when tog
 - **Sibling layout: wrap the parent in `<Animated.View layout={LinearTransition.duration(200)}>`** so the big-number rows slide smoothly when the panel opens above/below them.
 - Auto-close on programmatic state change (e.g., navigating to a different zone via Pattern 4) — the wrapper component should `setZoneInfoOpen(false)` in the same `setState` batch that switches the variant.
 - Where it's used: zone info panels on Weighted Standard, Assisted Machine, Carry, Swimming, Cardio Pace detail pages; band sub-state info panels on Bodyweight consolidated.
+
+**Info-pill content rule (LOCKED, May 19 2026):** the text inside an info pill / info panel is a **static string about progression-or-adaptation INTENT** for the activity. It is NOT:
+
+- Dynamic / interpolated with the user's log values (no `${beatStats.bucketRound}`, no `Best at {distUnit}`, no per-user numbers).
+- A formula explanation (no `watts = cal/min × 17.4`, no `Next = Best × 0.5%`, no `bucketed to nearest km`).
+- A re-statement of what's already shown in the hero card.
+
+It IS: a short paragraph (one to three sentences) that tells the user **what adaptation this zone / variant / activity is designed to drive, and how that adaptation is supposed to work biologically**. The user's question being answered is "why does this exist?" — not "how is it computed?" and not "what are my numbers?".
+
+Good examples (already in the codebase):
+- *"Heavy loads at low reps recruit your biggest motor units and train them to fire harder and faster. The adaptation is neural — you get stronger without adding muscle size."* (Strength adp zone)
+- *"Most of your training lives here. Z2 builds the mitochondrial density and capillary networks that determine everything above — your aerobic engine."* (Cardio endurance zone)
+- *"Knee assistance shortens your lever — the same muscles work, but with less load."* (BW assisted tier)
+
+Bad examples (what NOT to do — caught during the May 19 2026 audit):
+- *"Watts derived from cal/min × 17.4..."* (formula explanation — banned)
+- *"Best = the fastest time at {beatStats.bucketRound} {distUnit}..."* (dynamic interpolation from log — banned)
+- *"Lighter weight (~60 % of best), double the distance"* (formula explanation — banned; rewrote to *"Lighter weight, longer distance"* which describes the intent without the math)
+
+If you find yourself writing `{some.field}` inside the info panel JSX, you're violating the rule — replace with a static string. If the static string is just a re-statement of the hero card content, delete the info panel entirely instead of duplicating.
+
+This rule applies to every info pill across the app — strength, cardio, mobility, calories, settings — anywhere a user can tap a `<Info>` icon to expand context.
+
+**Chart-direction rule (LOCKED, May 19 2026):** **never show "lower is better" in any chart caption, tooltip, axis label, or accompanying copy.** Every progression chart in the app should read as "line trends UP = the user is improving" regardless of whether the underlying metric is mathematically lower-is-better (pace, assistance load, etc.) or higher-is-better (1RM, cal/min, distance).
+
+Two implementation paths to honour the rule:
+
+1. **Pace / split / assistance charts** — leave the Y-axis as the raw metric (seconds per km, lb of assistance, etc.) but set the LineChart `reversed` prop. The chart then renders smaller values at the TOP, so the line trends upward as the user improves. Caption says something neutral like `Dashed = personal best` — never `lower = better`.
+
+2. **Higher-is-better charts** (1RM, cal/min, distance, max attempts, watts) — no `reversed`, no caption framing needed. The line trends up naturally.
+
+Captions to AVOID across the app:
+- `"lower = better"`
+- `"lowest <metric> (personal best)"`
+- `"smaller is better"`
+- Any tooltip / axis-label phrasing that frames the win as a downward number movement.
+
+Captions that are fine:
+- `"Dashed = personal best"`
+- `"Dashed line = personal best weight"`
+- `"Dashed line = personal best distance"`
+- Anything that names what the dashed reference line represents, without commentary on direction.
+
+If a user-facing metric is fundamentally hard to read as "up = better" (rare — most things can be reframed via a sibling metric), consider converting the display to a derived metric: pace → speed (km/h), assistance → effective bodyweight lifted (bodyweight − assistance), etc. Picking the right anchor metric is preferable to teaching users that "lower is better."
+
+This rule was triggered May 19 2026 when the user noticed the Beat-Your-Best chart's `"lower = better"` caption and asked for an app-wide audit. Outcome: 1 caption removed (BeatYourBestDetail), 1 caption simplified ("lowest assistance (personal best)" → "personal best" on Assisted Machine detail), 1 axis flipped (Assisted Machine chart gained `reversed` so reducing assistance now reads as the line trending upward).
+
+**"Do not touch finalized surfaces" rule (LOCKED, May 19 2026):** every detail surface in this app reaches "finalized / done" status after the user has visually approved it and we've marked the activity as `done` in `docs/Activity Completion Status.xlsx`. **Once a surface is done, it is FROZEN.** When the user asks for a tweak to a NEW or in-progress activity, the change MUST be scoped to that activity ONLY — never spread out to "harmonize" or "unify" with the locked surfaces. Locked surfaces are considered design decisions the user has approved and lived with; an "improvement" to them is a REGRESSION risk.
+
+Practical interpretation:
+
+- If you find yourself thinking "let me also update Running's hero to match this new pattern" → STOP. Running is locked. Don't touch it.
+- If the user says "unify the hero rows" — they mean unify the IN-PROGRESS work with the locked surfaces' pattern, not the other way around. The locked surfaces are the reference, the new work conforms.
+- Acceptable changes to locked surfaces:
+  - Bug fixes (visual glitches, crashes, mathematically wrong numbers).
+  - Caption / copy fixes that the user explicitly calls out.
+  - Cross-platform mirroring when the user explicitly asks for it.
+  - Adjustments triggered by a NEW rule the user has just locked in (e.g., the "no lower-is-better" rule retroactively applied across all charts).
+- NOT acceptable: speculative refactors, "while I'm here" cleanups, harmonization passes the user didn't request.
+
+This rule was triggered May 19 2026 when the user asked to add watts + split + time to the Concept2 erg hero card and the assistant proposed unifying the hero pattern across all locked detail surfaces (Running, Swimming, Air Bike). The user pushed back: "i dont like that every page is different in view, we need to unify, but here's the catch... do not touch the ones we locked, i want this known, never to ever touch anything we consider finalized and done." The activities currently considered finalized and done are everything marked `done` in `docs/Activity Completion Status.xlsx` — explicitly including Running, Running (Treadmill), Swimming (all 4 strokes), Air Bike, all strength detail surfaces, and the Beat-Your-Best surfaces for Cycling / Stationary Bike / Elliptical. Future surfaces (Rucking, StairMill) are open; the in-progress erg watts integration is open. Everything else is frozen until the user explicitly unfreezes it.
 
 ---
 
@@ -705,25 +766,25 @@ The shared formula update (locked simultaneously): `estimate1RM` and `projectAll
 
 ### Carry detail card — locked design spec
 
-This is the spec for the detail page that covers **loaded carry movements** — `movements.equipment === 'carry'` — Farmer's Carry, Kettlebell Farmer's Carry, Single Arm Farmer's Carry, Suitcase Carry, Yoke Carry, Kettlebell Overhead Carry, Single Arm Overhead Carry, and the strongman-object carries (Atlas Stone Bear Hug, D-Ball Bear Hug, Husafell Stone, Keg, Sandbag, Shield, Sled Drag [Push], Sled Drag [Pull]). Progression is tracked along TWO axes simultaneously: **weight per hand / per implement** AND **distance traveled** (meters or feet, normalized to meters internally).
+This is the spec for the detail page that covers **loaded carry movements** — `movements.equipment === 'carry'` — Farmer's Carry, Kettlebell Farmer's Carry, Single Arm Farmer's Carry, Suitcase Carry, Yoke Carry, Kettlebell Overhead Carry, Single Arm Overhead Carry, and the strongman-object carries (Atlas Stone Bear Hug, D-Ball Bear Hug, Husafell Stone, Keg, Sandbag, Shield, Sled Work [Push], Sled Work [Drag]). Progression is tracked along TWO axes simultaneously: **weight per hand / per implement** AND **distance traveled** (meters or feet, normalized to meters internally).
 
-**Sled Drag variant tag (May 2026 lock):** Sled work has TWO biomechanically distinct variants on the same equipment:
-- **Sled Drag [Push]** — Prowler-style, leg-dominant (quad/glute concentric drive). Facing the sled, hands on handles, legs piston. Higher loads possible.
-- **Sled Drag [Pull]** — drag, posterior-chain dominant (hams/glutes pull). Strap or harness, sled behind. Lower loads typical.
+**Sled Work variant tag (May 2026 lock):** Sled work has TWO biomechanically distinct variants on the same equipment:
+- **Sled Work [Push]** — Prowler-style, leg-dominant (quad/glute concentric drive). Facing the sled, hands on handles, legs piston. Higher loads possible.
+- **Sled Work [Drag]** — drag, posterior-chain dominant (hams/glutes pull). Strap or harness, sled behind. Lower loads typical.
 
-Both are stored as separate movements (`Sled Drag [Push]`, `Sled Drag [Pull]`) with their own `CARRY_BENCHMARKS` entries (`mode: 'ratio'`; Push tiers: 1.0/1.5/2.0/2.5×BW; Pull tiers: 0.75/1.25/1.75/2.25×BW; all at ≥ 15 m).
+Both are stored as separate movements (`Sled Work [Push]`, `Sled Work [Drag]`) with their own `CARRY_BENCHMARKS` entries (`mode: 'ratio'`; Push tiers: 1.0/1.5/2.0/2.5×BW; Pull tiers: 0.75/1.25/1.75/2.25×BW; all at ≥ 15 m).
 
-**Consolidated detail page (locked May 2026):** the strength index collapses both variants into ONE row keyed by the base name `Sled Drag` with a small `PUSH` / `PULL` badge on the right showing whichever variant the user most recently logged. Tapping the row routes to `/effort/strength/Sled Drag` (the base name — not a real movement row in the DB).
+**Consolidated detail page (locked May 2026):** the strength index collapses both variants into ONE row keyed by the base name `Sled Work` with a small `PUSH` / `PULL` badge on the right showing whichever variant the user most recently logged. Tapping the row routes to `/effort/strength/Sled Work` (the base name — not a real movement row in the DB).
 
-The detail page detects `exercise === 'Sled Drag'` (via `isSledDragConsolidated`), fetches BOTH variants in one `or()` query (`Sled Drag [Push] ·%` OR `Sled Drag [Pull] ·%`), and dispatches to `SledDragConsolidatedDetail`. That component:
+The detail page detects `exercise === 'Sled Work'` (via `isSledDragConsolidated`), fetches BOTH variants in one `or()` query (`Sled Work [Push] ·%` OR `Sled Work [Drag] ·%`), and dispatches to `SledWorkConsolidatedDetail`. That component:
 1. Maintains an `activeVariant: 'push' | 'pull'` state (defaults to whichever variant has the most recent logged effort).
 2. Renders a simple PUSH | PULL pill toggle in CarryDetail's header (via the new `extraHeaderContent` prop).
-3. Delegates the actual page render to CarryDetail, passing `exercise={`Sled Drag [${activeVariant}]`}` (so `CARRY_BENCHMARKS` lookup + label parsing still work), `displayName="Sled Drag"` (so the h1 reads as the base name), and `efforts={filteredEfforts}` (only the active variant's efforts).
+3. Delegates the actual page render to CarryDetail, passing `exercise={`Sled Work [${activeVariant}]`}` (so `CARRY_BENCHMARKS` lookup + label parsing still work), `displayName="Sled Work"` (so the h1 reads as the base name), and `efforts={filteredEfforts}` (only the active variant's efforts).
 4. The CarryDetail render gets a `key={activeVariant}` prop so it remounts when the user toggles — clean reset of all internal state (selected zone, scroll position, info panel) per variant.
 
 The two new CarryDetail props (`displayName?: string` and `extraHeaderContent?: React.ReactNode`) are additive and have no effect when omitted — every other carry call site (Atlas Stone, Yoke, Farmer's, etc.) renders unchanged.
 
-The May 2026 cleanup also moved `Sandbag Carry`, `Sled Pull`, `Sled Push` from cardio to strength — they were loaded carry work miscategorized as cardio. `Sled Pull` → renamed to `Sled Drag [Pull]`; `Sled Push (Prowler)` → renamed to `Sled Drag [Push]`. `Sandbag Carry` added as a new strength entry (its `CARRY_BENCHMARKS` spec was already in code, but the movement row was missing from the DB).
+The May 2026 cleanup also moved `Sandbag Carry`, `Sled Pull`, `Sled Push` from cardio to strength — they were loaded carry work miscategorized as cardio. `Sled Pull` → renamed to `Sled Work [Drag]`; `Sled Push (Prowler)` → renamed to `Sled Work [Push]`. `Sandbag Carry` added as a new strength entry (its `CARRY_BENCHMARKS` spec was already in code, but the movement row was missing from the DB).
 
 **`movements.unit_lock` — community-dominant-unit forcing (locked May 2026):**
 
@@ -939,15 +1000,15 @@ This is the spec for the detail page that covers **cardio movements** on `[activ
 
 | Group | Activities | Detail page treatment |
 |-------|------------|----------------------|
-| **A — Endurance Athletes** | Running, Running (Treadmill), Cycling, Cycling (Mountain Bike), Stationary Bike, Bike Erg, Air Bike, Row Erg, Ski Erg, Skiing, Swimming, Elliptical | Full **progression plan** with Endurance/Threshold/VO2 zones (this spec) |
-| **B — Different framework needed** | Rucking, Hill Running, Trail Running | Cardio category but pace zones don't fit. Rucking progresses on load + distance (carry-like, not pace). Hill / Trail Running are terrain-confounded — they currently route through Group A's pace-zone plan as an accepted divergence until HR-zone integration lands (Phase 2). |
-| **C — Step-Based Machines** | StairMill | **Simple tracking page** (header + chart + history). Step-based conditioning needs its own round-based progression model. Deferred. |
+| **A — Endurance Athletes** | Running, Running (Treadmill), Cycling, Stationary Bike, Bike Erg, Air Bike, Row Erg, Ski Erg, Swimming, Elliptical | Full **progression plan** with Endurance/Threshold/VO2 zones (this spec) |
+| **B — Different framework needed** | Rucking | Cardio category but pace zones don't fit. Rucking progresses on load + distance (carry-like, not pace). Uses a carry-style 3-zone surface (Max Load / Distance Build / Conditioning) instead of pace zones. May 19 2026 removed Hill Running / Trail Running / Cycling (Mountain Bike) / Skiing entirely — terrain or technique confounds pace, recreational use for most users, and we can't coach honestly without HR integration. |
+| **C — Step-Based Machines** | StairMill | Floors-per-minute coaching surface (rate-anchored, mirrors Air Bike's architecture but uses floors-per-minute as the rate metric). See "StairMill detail card — locked design spec" below. |
 
-This spec covers **Group A only.** Group B's Rucking gets the simple tracking page; Hill Running and Trail Running fall through Group A's regex default to `running` and use that prescription set (terrain-aware design deferred). Group C (just StairMill after the May 17 niche-equipment cleanup) gets the simple page until a round-based model is designed.
+This spec covers **Group A only.** Group B's Rucking gets a carry-style 3-zone surface (see "Rucking detail card" spec below). Group C (StairMill) gets a floors-per-minute rate-anchored 3-zone surface (see "StairMill detail card" spec below).
 
 Determined in code by `isEnduranceAthleteActivity(activityName)` → returns true for Group A categories.
 
-**Two cardio modes still exist underneath** (`cardio_mode = 'pace'` vs `'duration'`), but Group A is all pace mode. Duration mode is Group C only, and gets the simple page.
+**Two cardio modes still exist underneath** (`cardio_mode = 'pace'` vs `'duration'`), but Group A is all pace mode. Duration mode is Group C only, and routes to its own StairMillDetail coaching surface (short-circuits before the generic DurationDetail).
 
 **Adaptation zones (3 zones, locked May 2026):**
 
@@ -1093,17 +1154,17 @@ Duration mode: Arc Trainer, StairMill.
 
 **Renamed in cardio (May 2026 cleanup — locked):**
 - `Rowing` → `Rowing (Open Water)` to disambiguate from `Row Erg` (the machine).
-- `Cross Country Skiing` → `Skiing` (in a cardio-only context, "Skiing" unambiguously means the cardio variant; downhill skiing isn't tracked here).
 
-**Final cardio movements list (19 DB rows, 16 visible activities — May 17 2026 lock, after non-cardio + niche-equipment cleanup + swim stroke consolidation):** Air Bike, Bike Erg, Cycling, Cycling (Mountain Bike), Elliptical, Hill Running, Row Erg, Rucking, Running, Running (Treadmill), Ski Erg, Skiing, StairMill, Stationary Bike, **Swimming [Freestyle], Swimming [Backstroke], Swimming [Breaststroke], Swimming [Butterfly]**, Trail Running. The 4 Swimming stroke variants collapse into a single "Swimming" row in the cardio index (so the user-visible activity count is 16 even though the movements table has 19 rows). See "Swimming detail card — locked design spec" further down for the consolidation architecture.
+**Final cardio movements list (15 DB rows, 12 visible activities — May 19 2026 lock, after recreational/terrain-confounded cleanup + swim stroke consolidation):** Air Bike, Bike Erg, Cycling, Elliptical, Row Erg, Rucking, Running, Running (Treadmill), Ski Erg, StairMill, Stationary Bike, **Swimming [Freestyle], Swimming [Backstroke], Swimming [Breaststroke], Swimming [Butterfly]**. The 4 Swimming stroke variants collapse into a single "Swimming" row in the cardio index (so the user-visible activity count is 12 even though the movements table has 15 rows). See "Swimming detail card — locked design spec" further down for the consolidation architecture.
 
-**Removed from cardio (May 17 2026, two passes):**
+**Removed from cardio (May 17–19 2026, three passes):**
 - **Pass 1 (recreational/lifestyle — not cardio training):** Walking, Walking (Treadmill), Hiking, Stair Climb (outdoor), Rowing (Open Water), Canoeing, Kayaking, Stand Up Paddleboarding, Inline Skating, Ice Skating. Rationale: transport, leisure, or outdoor activities — the user doesn't pick them with intent to improve cardio fitness, intensity isn't deliberately modulated, and a coaching prescription would be condescending. May come back as part of a separate "activity log" surface (where lifestyle movement counts toward weekly minutes / calories / streaks without a coaching layer).
 - **Pass 2 (niche-equipment / niche-user — low coverage value):** Aqua Jogging (rehab-only cross-training for injured runners; tiny user base), Roller Skiing (off-season training tool for competitive Nordic skiers only; <1% of any realistic user base), Arc Trainer (Cybex-brand machine found in ~30% of commercial gyms; most users encounter Elliptical or StairMill instead). Rationale: niche enough that removing them costs essentially no coverage and simplifies the catalog.
+- **Pass 3 (terrain-confounded / recreational + can't coach honestly without HR — May 19 2026):** Skiing (outdoor XC — snow conditions + terrain + technique confound pace, niche audience, seasonal — can't coach honestly without HR + lactate calibration), Hill Running (gradient confounds pace), Trail Running (single-track terrain confounds pace, recreational for most users), Cycling (Mountain Bike) (technical terrain confounds pace, can't coach intervals honestly without HR or power telemetry). Rationale per the May 19 audit: a strict coaching-and-progression app shouldn't display a coaching prescription it can't validate. These activities have no scientifically valid v1 coaching path with the data we have access to.
 
-**Earlier May 2026 cleanup** also moved `Sandbag Carry`, `Sled Pull`, and `Sled Push` to strength — they're loaded carries, not endurance/lifestyle movement. See Sled Drag note in the strength Carry detail spec.
+**Earlier May 2026 cleanup** also moved `Sandbag Carry`, `Sled Pull`, and `Sled Push` to strength — they're loaded carries, not endurance/lifestyle movement. See Sled Work note in the strength Carry detail spec.
 
-The mirror update lives in: the Supabase `movements` table (single source of truth for mobile) and `mobile/app/(app)/effort/cardio/[activity].tsx` (`categorizeActivity` regex, `PACE_ZONE_SESSIONS` keys, `DURATION_ZONE_SESSIONS` keys — `arc_trainer` entry removed in Pass 2), plus `mobile/src/lib/movements.ts` (`SPEED_INPUT_ACTIVITIES` set + `SPEED_MAX_KMH` map — Walking (Treadmill) removed in Pass 1). The `categorizeActivity` regex maps the remaining names to existing categories: `Skiing` → `ski_erg` (same motion); `Bike Erg` → `stationary_bike`; `Stationary Bike` → `stationary_bike`; Hill Running / Trail Running → `running` (default fallback). `web/src/lib/movements.js` may still list the removed names — web is frozen per the May 12 2026 lock, so it's allowed to lag.
+The mirror update lives in: the Supabase `movements` table (single source of truth for mobile) and `mobile/app/(app)/effort/cardio/[activity].tsx` (`categorizeActivity` regex, `PACE_ZONE_SESSIONS` keys, `DURATION_ZONE_SESSIONS` keys), plus `mobile/src/lib/movements.ts` (`SPEED_INPUT_ACTIVITIES` set + `SPEED_MAX_KMH` map). After Pass 3 the `categorizeActivity` regex no longer maps `skiing` (the outdoor activity) to `ski_erg`; only `ski erg` itself matches that category. `web/src/lib/movements.js` is kept in sync where practical, but web is frozen per the May 12 2026 lock so minor drift is allowed.
 
 **Out of v1 scope (deferred, locked):**
 - **RPE rating field** on log form — adds no value to zone calculations (pace IS the zone proxy until HR lands). Revisit if coaches request it after the coaching surface is live.
@@ -1117,42 +1178,306 @@ The mirror update lives in: the Supabase `movements` table (single source of tru
 
 ---
 
-### Row Erg detail surface — locked polish spec
+### Concept2 ergs (Row Erg / Bike Erg / Ski Erg) — locked design spec (May 19 2026)
 
-Row Erg (Concept2) keeps the generic pace-mode `PaceDetail` component but ships with **Concept2-canonical display formatting** rather than a separate detail component. The pace-zone framework (E/T/V) fits rowing perfectly — rowing IS aerobic / threshold / VO2 work — but the language and units differ from running/cycling:
+All three Concept2 PM5-powered ergs share the same flywheel mechanics, the same display console, and the same coaching surface in MyRX. They route through the generic `PaceDetail` component with shared erg-aware branching — NOT three separate components — because the pace-zone framework (Endurance / Threshold / VO2 Max) fits all three identically. What differs is per-activity labels and rest-cue verbs, handled inline via `isRowErgActivity` / `isConcept2ErgActivity` predicates.
 
-1. **Distance always renders in INTEGER METERS**, never km/mi. The Concept2 community is universally metric; "5K piece" is logged as `5000 m`, not `5 km`. The log form uses an integer-meter wheel (step 100, min 0, max 30000) — same shape as the Swimming form, but with the unit hardcoded to `m` (not pulled from a profile preference; rowing is universally meters).
-2. **Pace renders as "split per 500m"**, not per-km/mi. The industry-standard rowing pace metric. `4:00/km` becomes `2:00/500m`. Storage stays in seconds-per-km for cross-cardio uniformity; the per-500m is a display-layer transform via `pacePer500mFromSecsPerKm(secsPerKm)`.
-3. **The word "pace" becomes "split"** in user-visible copy. "Best pace —" becomes "Best split —"; "at steady conversation pace" in the cue becomes "at a steady 1:55/500m split"; the chart tooltip label changes from "Pace" to "Split". The word "Pace" doesn't appear on Row Erg surfaces.
-4. **Canonical session distances** in `PACE_ZONE_SESSIONS.rowing` (LOCKED):
-   - **Endurance**: 2K, 5K, 10K (the canonical aerobic distances — 2K is the test, 5K is the standard medium piece, 10K is the long piece)
-   - **Threshold**: 4×500m, 5×1000m (canonical T-pace test sets used at every level from masters to Olympic prep)
-   - **VO2 Max**: 6×500m, 8×500m (Norwegian sprint sets; 8×500m is widely benchmarked)
-   - Stored as `{ distanceKm: total, intervalReps: N }` like every other rowing PACE_ZONE_SESSIONS entry; the per-rep distance falls out as `total ÷ reps`.
-5. **Interval rest cue uses "paddle" instead of "jog"**. Rowers don't "jog 60 seconds between cruise intervals" — they paddle easy. The buildPlanStep cue construction has a Row-Erg-specific restNote: "Paddle easy 60 sec between cruise intervals" / "Equal-time paddle recovery between intervals".
+**1. Distance display rule (LOCKED — applies to all 3 ergs):**
 
-**Implementation summary (LOCKED — what NOT to refactor):**
+Distance ALWAYS renders in metric, regardless of the user's `distance_unit` profile preference. The PM5 console is universally metric worldwide; Concept2 athletes (rowers, OCR competitors, Crossfitters, swimmers cross-training) think in meters and kilometers regardless of locale.
 
-- **No separate component**: Row Erg stays inside `PaceDetail`. Conditional branching via `isRowErgActivity(activity)` in:
-  - Header subtitle ("Best split — …")
-  - buildPlanStep (distance via `fmtDistForActivity`, cue split-reference, paddle restNote)
-  - Chart yTickFormatter / tooltipValueFormatter / tooltipLabel (per-500m display)
-  - Log list right-side metric (per-500m split)
+- `<1 km` → integer meters (`"500 m"`, `"999 m"`)
+- `≥1 km` → km with sensible precision (`"1.5 km"`, `"5 km"`, `"10 km"`). Trailing zeros stripped: `5.00 km` reads as `5 km`; `1.50 km` reads as `1.5 km`.
+
+Implemented in `fmtDistForActivity(activity, distKm, distUnit)` which short-circuits on `isConcept2ErgActivity(activity)` and ignores `distUnit` entirely.
+
+**2. Pace display rule (LOCKED):**
+
+Pace renders as **split per 500m** — the canonical Concept2 metric across all three ergs. Storage stays in seconds-per-km for cross-cardio uniformity; the per-500m is a display-layer transform via `pacePer500mFromSecsPerKm(secsPerKm)` (divides by 2 and formats as `m:ss/500m`).
+
+- Header subtitle: `Best — m:ss/500m · NNN W` (split AND watts, side by side, both `TickerNumber`-animated).
+- Chart Y-axis labels, tooltip values, log-list right-side metric — all per-500m.
+- The word "Pace" doesn't appear on erg surfaces; "Best —" replaces "Best pace —".
+
+**3. Watts↔pace formula (LOCKED — verified against Concept2's published table):**
+
+Concept2's official pace-to-watts formula:
+
+```
+pace_m_per_s = 1000 / pace_sec_per_km
+watts = 2.80 × (pace_m_per_s)³
+```
+
+Mathematically equivalent to Concept2's documented `watts = 2.80 / (pace_sec_per_meter)³`. Cross-check against Concept2's published values:
+
+| Pace | m/s | Computed watts | Concept2 published |
+|------|-----|----------------|---------------------|
+| 2:00/500m | 4.167 | 203 W | ~203 W ✓ |
+| 1:45/500m | 4.762 | 302 W | ~302 W ✓ |
+| 2:30/500m | 3.333 | 104 W | ~104 W ✓ |
+
+The cubic relationship comes from fluid-resistance drag on the flywheel (same physics as bike aerodynamics: power scales with velocity cubed in a drag-dominated system). The 2.80 J/m drag-factor constant is set by Concept2's PM5 calibration and is identical across Row Erg, Bike Erg, and Ski Erg — they share the same engine.
+
+Implementation: `pacePer500mToWatts(secsPerKm)` in `mobile/src/lib/movements.ts`. Returns rounded integer watts (PM5 consoles display ints).
+
+**Per-erg note:** The Bike Erg's PM5 calibrates flywheel revolutions to display "distance" in a way that gives equivalent power to Row Erg at the same pace. The Ski Erg uses the same flywheel mechanics. So applying the same formula across all three is **industry standard** (Concept2's own online pace-watts calculator uses the unified formula).
+
+**4. Hero card — 4 rows for ergs (LOCKED):**
+
+The PaceDetail hero card renders 4 stacked TickerNumber rows for Concept2 ergs ONLY (1 extra row vs. the generic 3-row hero):
+
+1. **Workout goal** — `8 km` (continuous) or `5 × 600 m` (interval). Big amber, fontSize 30.
+2. **Time** — `:30` per interval or `37:30` total. Descriptor "to complete" or "per interval".
+3. **Checkpoint assist** — sub-distance pacing reading (e.g. "`200 m` at 50 sec / `500 m` at 2:05 / `1 km` at 4:10"). The user reads this mid-rep on the PM5 to verify they haven't drifted off target pace. Hidden when the rep is too short (<500m) to benefit from a checkpoint.
+4. **Watts target** — `203 W`, derived from the prescribed zone pace via the Concept2 formula. Descriptor "watts target".
+
+Row 4 is hidden on every non-erg activity. Conditional via `selectedStep.ergWattsTarget != null`. Same `TickerNumber` styling as the other 3 rows.
+
+**Why 4 rows and not 3:** the PM5 displays BOTH pace and watts simultaneously on its console. A coach prescribing erg work always gives both. Forcing the user to mentally derive one from the other defeats the point of the coaching surface — the watts target is a direct PM5-readable number, not a derivation.
+
+**5. Cue line construction (LOCKED):**
+
+The cue does NOT mention watts (watts lives on Row 4). The cue focuses on workout structure + checkpoint pacing. For Row Erg specifically, "pace" is replaced with "split" and the per-500m split is referenced inline:
+
+- Endurance continuous (Row Erg): `"Row 5 km in 25:00 at a steady 2:30/500m split — aim for 2:30 at 500 m."`
+- Threshold interval (Row Erg): `"Row 4 × 1 km at 2:05/500m split (4:10 each)."`
+- Endurance continuous (Bike Erg / Ski Erg): `"Pedal 15 km in 45:00 at steady conversation pace — aim for 4:00 at 1 km."`
+- Threshold interval (Bike Erg / Ski Erg): `"Glide 4 × 1 km in 4:10 each — aim for 2:05 at 500 m."`
+
+Verb is activity-aware: `Row` for Row Erg, `Pedal` for Bike Erg, `Glide` for Ski Erg.
+
+**6. Rest cue verb (LOCKED):**
+
+- **Row Erg**: `"Paddle easy 60 sec between cruise intervals"` / `"Equal-time paddle recovery between intervals"`. Rowers paddle easy between reps, they don't jog.
+- **Bike Erg / Ski Erg**: `"Easy pedal 60 sec between cruise intervals"` (bike) / `"Easy glide 60 sec between cruise intervals"` (ski). Activity-verb interpolated from `getActivityVerb`.
+
+**7. Adaptation zones (LOCKED — Daniels' offsets applied uniformly across all 3 ergs):**
+
+| Zone | Pace offset (sec/km) | Effect on a 200 W rower (~2:00/500m best) |
+|------|----------------------|-------------------------------------------|
+| Endurance | +60 | ~2:30/500m, ~104 W |
+| Threshold | +10 | ~2:05/500m, ~179 W |
+| VO2 Max | −15 | ~1:52.5/500m, ~247 W |
+
+These watts fall within ±10% of published Concept2 zone watts (UT2/AT/AN) for an athlete with the same baseline. The Daniels' running offsets translate to rowing/cycling/skiing power zones cleanly because of the cubic pace↔watts relationship — small pace changes produce zone-appropriate watts changes.
+
+**Why Daniels' offsets instead of Concept2's UT2/UT1/AT/TR/AN naming:** modern polarized coaching has converged on 3-zone (Endurance / Threshold / VO2) across endurance disciplines (Stephen Seiler, Iñigo San Millán, Norwegian sprint method). MyRX uses E/T/V uniformly across running, swimming, cycling, AND ergs so the user learns ONE zone model. Concept2's 5-zone naming is an old rowing-specific convention.
+
+**8. Canonical session distances per zone (LOCKED — `PACE_ZONE_SESSIONS`):**
+
+Row Erg:
+- Endurance: 2K, 5K, 10K (2K is the test distance; 5K is the standard medium piece; 10K is the long piece)
+- Threshold: 4×500m, 5×1000m (canonical T-pace test sets used at every level from masters to Olympic prep)
+- VO2 Max: 6×500m, 8×500m (Norwegian sprint sets; 8×500m is widely benchmarked)
+
+Bike Erg / Ski Erg: shares the same `rowing` entry in `PACE_ZONE_SESSIONS` (because the distances translate cleanly — a 5K row, a 5K bike erg, and a 5K ski erg are all roughly 20-25 min steady-state efforts at the same fitness level).
+
+**9. Limitations + deferred (out of v1 scope):**
+
+- **`bestPaceSecs` anchoring** assumes the user's best logged pace ≈ their 5K race pace. If they only logged a 500m sprint or a 60-min steady, offsets produce slightly skewed zone targets. Same limitation exists across every pace activity in the system — not erg-specific. Acceptable for advisory coaching.
+- **Stroke rate (SPM)** — Concept2 PM5 displays stroke rate alongside split. v2.
+- **Drag factor** — Concept2 setting that affects perceived effort. Out of scope; users self-set this on the machine.
+- **2K benchmark test mode** — the canonical rowing/erg benchmark. Would warrant a dedicated "test mode" log entry + benchmark tracking on the detail page. v2.
+- **Watts-based logging** — currently we derive watts from pace. If the user logs an interval session, they don't enter watts directly; the system computes them from pace. v2 if users ask.
+- **Sport-specific bike/ski erg movements** — Bike Erg is sometimes set up for HIIT-style "max calories in 60 sec" tests; Ski Erg has "100m sprint" benchmark sets. v2.
+
+**10. Implementation summary (LOCKED — what NOT to refactor):**
+
+- **No separate components**: all 3 ergs route through `PaceDetail` with conditional branching via `isRowErgActivity` (for Row Erg's "split" language) and `isConcept2ErgActivity` (for all 3 ergs' watts row, metric distance, and metric subtitle).
 - **Helpers in `mobile/src/lib/movements.ts`**:
   - `ROW_ERG_ACTIVITY` = `'Row Erg'`
-  - `isRowErgActivity(name)` — true iff name equals ROW_ERG_ACTIVITY
+  - `CONCEPT2_ERG_ACTIVITIES` = `Set(['Row Erg', 'Bike Erg', 'Ski Erg'])`
+  - `isRowErgActivity(name)` / `isConcept2ErgActivity(name)`
   - `pacePer500mFromSecsPerKm(secsPerKm)` — formats per-500m split string
-- **Log form (`cardio.tsx`)** — new `isRowMode = isRowErgActivity(activity)` mirrors the swim-mode pattern: integer-meter wheel, locked `m` unit chip (no toggle), `mm:ss` time. Save label: `Row Erg · 5000 m in 18:30`. Save value: standard `X:XX/km` pace (same as other pace activities, the per-500m display is a read-time transform).
-- **Activities list** — Row Erg rows show `Best split — N:NN/500m` (uses `pacePer500mFromSecsPerKm(act.secs)`).
+  - `pacePer500mToWatts(secsPerKm)` — Concept2 watts formula
+- **`PlanStep.ergWattsTarget: number | null`** — new field, set only for Concept2 ergs. Null for everyone else.
+- **`fmtDistForActivity`** — short-circuits on `isConcept2ErgActivity` to apply metric rule, ignoring `distUnit`.
+- **Log form (`cardio.tsx`)** — `isRowMode = isRowErgActivity(activity)` already shipped for Row Erg; Bike Erg and Ski Erg still use the generic km/mi log form (acceptable divergence — log form polish for all 3 ergs is v2).
 
-**Why polish instead of a separate component:** the pace-zone framework genuinely fits rowing — Concept2 athletes train in exactly the E/T/V structure under their own naming. Building a dedicated `RowErgDetail` would duplicate ~80% of `PaceDetail` for the sake of swapping a few labels and units. The display-layer branching adds ~30 lines to PaceDetail vs ~400 LOC duplication. If rowing-specific features creep in later (stroke rate tracking, watts-based zones, 2K test mode), revisit the architecture then.
+**Activities list** — Row Erg shows `Best split — N:NN/500m`; Bike Erg and Ski Erg fall through to `Best pace — N:NN/km`. Cosmetic divergence accepted for v1.
+
+---
+
+### Rucking detail card — locked design spec (May 19 2026)
+
+Rucking sits on the **cardio tab** by activity-tab placement but its progression model is **carry-like**, not pace-like. You get better at rucking by carrying HEAVIER or going FARTHER, not by getting FASTER. Pace is too sensitive to load and terrain to be a useful coaching anchor — a 35 lb × 3 mi ruck at 18:00/mi is a harder session than the same person walking 3 mi at 14:00/mi with no pack, and pace doesn't capture that.
+
+The detail page mirrors **Atlas Stone Bear Hug Carry's abs-mode CarryDetail** top to bottom — same hero card shape, same 4-tier ladder, same 3 adaptation zones. Same as Atlas was built kg-only, Rucking is built **lb-only**: the GoRuck / US tactical-fitness community is universally imperial, and any conversion would lose recognition of canonical benchmark weights (35 lb = GoRuck Tough). Distance is locked to miles for the same reason.
+
+**Unit locks (LOCKED):**
+- Distance → **miles** via `movements.unit_lock = 'mi'` on the Rucking row.
+- Pack weight → **pounds**, hard-coded in `RuckingDetail` and the cardio log form. The `unit_lock` column only holds ONE unit, so the weight-lock lives in code.
+
+**Tier ladder (LOCKED — `RUCK_TIER_THRESHOLDS`):**
+
+Stepped down from the GoRuck event ladder. TOUGH = the GoRuck Tough standard exactly (35 lb × 12 mi). Beginner / Intermediate / Advanced are sub-Tough progression stops. We don't include GoRuck Heavy (45 lb × 20 mi) or Selection (35 lb × 40 mi) because they require multi-hour sessions that exceed the app's 45-min session philosophy.
+
+| Tier | Pack weight (lb) | Distance (mi) |
+|------|------------------|---------------|
+| BEGINNER | 10 | 2 |
+| INTERMEDIATE | 20 | 4 |
+| ADVANCED | 30 | 8 |
+| TOUGH | 35 | 12 |
+
+Qualification: a single effort must meet BOTH thresholds simultaneously (NOT cumulative across efforts). User's "current tier" is the highest tier they've cleared.
+
+**Weight ladder (LOCKED — `RUCK_WEIGHT_LADDER_LB`):**
+
+```
+[10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80]
+```
+
+Common GoRuck Sand Plate sizes (10 / 20 / 30 / 45 lb), Rogue Echo plate sizes (10 / 15 / 20 / 25 / 30 / 35 / 40 / 45 lb), and realistic stacked combinations. MAX LOAD and CONDITIONING zone math snap to ladder rungs so prescriptions correspond to plates the user can actually load.
+
+**Adaptation zones (LOCKED — mirror Carry's exactly):**
+
+| Zone | Weight target | Distance target |
+|------|---------------|-----------------|
+| MAX LOAD | `nextLadderAbove(bestWeight)` or `bestWeight` | `bestDist` |
+| DISTANCE BUILD | `bestWeight` | `bestDist + 1 mi` |
+| CONDITIONING | `snapDownToLadder(bestWeight × 0.60)` | `bestDist × 2` |
+
+Each zone pushes ONE axis (or two for conditioning) anchored on the user's PB. Hero card renders the target + a delta string vs. the user's best (`+ 5 lb`, `same as your best`, `+ 1 mi`, etc.).
+
+**Effort label format (LOCKED):**
+
+Current format with pack weight:
+```
+Rucking · 35 lb × 2.5 mi in 45:00
+```
+
+Legacy format (pre-May-19-2026, no weight column on log form) — still parses, treated as `packLb = 0`:
+```
+Rucking · 2.5 mi in 45:00
+```
+
+`parseRuckLabel` handles both shapes. Users who logged before this spec see their old efforts at packLb = 0 (effectively bodyweight rucking).
+
+**Layout — single page, top to bottom (LOCKED):**
+
+1. **Header**: back chevron + "Rucking" h1 + subtitle `Best — N lb · N mi · TIER`. Both numbers `TickerNumber`-animated; tier label in amber.
+2. **Adaptation zone card** (`<AnimateRise delay={0}>`):
+   - Title "Adaptation zone" + help text "Pick a training focus, then aim at the next target."
+   - **Zone pill row** — single amber pill flanked by pulsing chevrons. Same Pattern-3 chevron animation + Pattern-4 swipe choreography as Air Bike's zone pill and Carry's adaptation zone pill.
+   - **Hero card** (amber chrome): top-right info pill + 2 stacked `TickerNumber` rows (weight target + distance target with delta strings) + thin separator + cue line.
+3. **Progress charts** (`<AnimateRise delay={500}>`): two stacked single-axis line charts (pack weight over time + distance over time). Mobile `LineChart` doesn't support dual axes natively, so we stack two charts — same pattern as Carry's strength detail.
+4. **Log list** (`<AnimateRise delay={500}>`): each row shows the workout shape on the left (`35 lb × 2.5 mi`) and wall-clock time on the right.
+
+**Header tags (LOCKED — mirrors strength's equipment-pill convention):**
+
+Below the "Best —" subtitle row, two stacked badges:
+1. **Category pill**: `RUCKING` — same chrome as every other cardio detail page's category tag (small amber `s.categoryBadge`).
+2. **Tier pill**: `BEGINNER` / `INTERMEDIATE` / `ADVANCED` / `TOUGH` — same chrome, only rendered when the user's logged efforts clear a tier.
+
+Both pills use the same amber-tinted `s.categoryBadge` style so they read as stacked tags. The tier pill explicitly mirrors Atlas Stone Bear Hug Carry's tier badge below its CARRY pill — same visual pattern, just amber instead of blue.
+
+**No in-app tier ladder card.** An earlier draft included a "Rucking tiers" card with all four tiers, criteria, and achievement checkmarks. Removed May 19 2026 — the rucking community already knows the GoRuck tier scale, so the card was redundant chrome. The user's current tier still surfaces as the small TIER pill in the header.
+
+**Cardio log form changes (`cardio.tsx`):**
+
+When `isRuckMode = isRuckingActivity(activity)`, the pace-mode triple-grid is replaced with a **3-wheel layout**: `Pack Weight | Distance | Time`. Pack Weight is integer-lb with step 5, range 0–150. Distance is decimal `XX.X` mi (locked, no toggle). Time stays `mm:ss`. Both Pack Weight and Distance render with inline unit suffixes — no separate Unit chip column.
+
+Live chip below the grid shows `Ruck — N lb × N mi` (the two-axis headline metric) and a secondary `Pace — m:ss/mi` chip (derived read-only). Pace is shown but not stored as the primary metric.
+
+**Components / helpers (LOCKED):**
+
+- `mobile/src/lib/movements.ts`: `RUCKING_ACTIVITY = 'Rucking'`, `isRuckingActivity(name)`.
+- `mobile/app/(app)/effort/cardio/[activity].tsx`: `RuckTier`, `RUCK_TIER_*`, `RUCK_ZONE_*`, `RUCK_WEIGHT_LADDER_LB`, `parseRuckLabel`, `classifyRuckTier`, `snapDownToRuckLadder`, `nextRuckLadderAbove`, `RuckingDetail` component.
+- `cardio.tsx`: `isRuckMode` + `packWeightValue` state + Pack Weight wheel + rucking-aware save label.
+- Dispatch in `CardioDetail` checks `isRuckingActivity(activity)` AFTER the air-bike check and BEFORE swim/beat-your-best/PaceDetail.
 
 **Out of v1 scope (deferred):**
+- **Terrain factor** (hill vs. flat) — affects difficulty. v2 when GPS integration lands.
+- **Elevation gain** — same as terrain. v2.
+- **Pack type / fit metrics** — out of scope; user logs the pack weight only.
+- **HR-zone integration** — would refine which adaptation zone the user actually trained. Phase 2 alongside running's HR upgrade.
+- **GoRuck Heavy / Selection tiers** — multi-hour sessions exceed the app's 45-min philosophy. Deferred.
 
-- **Stroke rate (SPM)** — Concept2 Performance Monitor displays stroke rate alongside split. Could be a third log-form field. v2.
-- **Watts** — secondary metric on the PM5 console. Could feed zones. v2 with HR / power integration.
-- **2K benchmark test mode** — the canonical rowing benchmark. Would warrant a dedicated "test mode" log entry + benchmark tracking on the detail page. v2.
-- **Drag factor** — Concept2 setting that affects perceived effort. Out of scope; users self-set this on the machine.
+---
+
+### StairMill detail card — locked design spec (May 19 2026)
+
+The StairMaster Step Mill is one of the highest-MET sustainable cardio machines (~8–12 METs at moderate-to-vigorous effort). Coaching surface mirrors **Air Bike's rate-anchored architecture** line-for-line: a single rate metric — **floors per minute (FPM)** — anchors three zones (ENDURANCE / THRESHOLD / VO2 MAX). Same mental model the user already learned from running, swimming, ergs, and air bike.
+
+**Why FPM as the rate anchor:** every Step Mill console displays FLOORS as the most prominent number. The user reads it off without thinking. FPM = `total_floors ÷ total_time_minutes`. Each zone's prescription scales linearly with peak FPM so a faster climber gets bigger floor targets per rep (wall-clock per rep stays roughly the same).
+
+**Science backing (LOCKED — same citation rule as Air Bike, real research only):**
+
+| Zone | Protocol source | Key finding |
+|------|-----------------|-------------|
+| **VO2 MAX** | Allison et al. (2017) *Med Sci Sports Exerc* | 3 × 20-sec all-out stair climbs, 3×/week → **+12% VO2peak in 6 weeks**. Drives the VO2 zone protocol (extended to 60-sec reps for Step Mill console pacing). |
+| **THRESHOLD** | Honda et al. (2014) *Diabetol Metab Syndr* | 3-min stair-climbing intervals drove metabolic adaptation. Drives the 4 × 3-min threshold protocol. |
+| **ENDURANCE** | Boreham et al. (2000) *Prev Med* | Sustained moderate stair climbing → **+17% VO2max in 8 weeks** in previously sedentary adults. Drives the 20-min continuous endurance protocol. |
+| Global framework | ACSM Guidelines 12th ed (2025) | Endorses stair climbing as vigorous-intensity (8+ METs) and supports 3-zone polarized programming across all endurance disciplines. |
+
+**Three adaptation zones (LOCKED — `STAIRMILL_ZONE_CONFIG`):**
+
+| Zone | Reps × Duration | Intensity (% peak FPM) | Rest | Example for 12 FPM user |
+|------|------------------|------------------------|------|--------------------------|
+| **ENDURANCE** | 1 × 20 min continuous | 65% | n/a | ~160 floors total at 7.8 FPM |
+| **THRESHOLD** | 4 × 3 min | 85% | 90 sec | 4 × 30 floors at 10.2 FPM |
+| **VO2 MAX** | 3 × 60 sec | 110% | 3 min full recovery | 3 × 13 floors at 13.2 FPM |
+
+VO2 zone allows above-peak intensity (110%) because short reps tolerate above-peak output. Zone names match every other cardio surface (running / swimming / ergs) — drops Air Bike's CrossFit-specific "SPRINT" naming because stair-climbing protocols use the standard exercise-science vocabulary.
+
+**Cold-start baseline (LOCKED — `genderBaselineFloorsPerMin`):**
+
+Gender-aware, mirrors Air Bike's 18 / 13 / 15 cal/min pattern. Numbers derived from typical Stairmaster Gauntlet level 8-10 sustained output at moderate-vigorous effort:
+
+- Male → 12 floors/min
+- Female → 9 floors/min
+- Other / unset → 10 floors/min
+
+Replaced by user's actual peak FPM after their first logged effort.
+
+**Effort label format (LOCKED):**
+
+Current format with floors count:
+```
+StairMill · 245 floors in 20:00
+```
+
+Legacy format (pre-May-19-2026, no floors column on log form) — still parses, treated as `floors = 0`:
+```
+StairMill · 20:00
+```
+
+`parseStairMillLabel` handles both shapes. Legacy efforts contribute to the chart timeline but don't contribute to peak FPM (since 0 floors → 0 FPM).
+
+**Save value format:** `12.3 floors/min` for new format, bare time for legacy. The value column always stores the derived rate so future detail-page reads don't need to re-parse the label.
+
+**Layout — single page, top to bottom (LOCKED):**
+
+1. **Header**: back chevron + "StairMill" h1 + `Best — N.N floors/min` subtitle (or cold-start message). `STAIR CLIMBING` category pill below the subtitle.
+2. **Progression plan card** (`<AnimateRise delay={0}>`): zone pill row with swipe gesture + 4-row hero card:
+   - Row 1: workout shape (`160 floors` or `4 × 30 floors`)
+   - Row 2: estimated wall-clock time (`20:00` or `3:00`)
+   - Row 3: target FPM rate (`7.8 floors/min`)
+   - Row 4: rest between reps (intervals only)
+3. **Chart card** (`<AnimateRise delay={250}>`): FPM over time, Y-axis NOT reversed (higher = better, mirrors Air Bike — locked chart-direction rule).
+4. **Log list** (`<AnimateRise delay={500}>`): each row shows floors + time on the left, derived FPM rate on the right.
+
+**Attribution under the hero card:** `Floors-per-minute anchored zones · Allison protocol · ACSM`. Cites real research without explaining the formula (Pattern 5 info-pill rule).
+
+**Cardio log form changes (`cardio.tsx`):**
+
+When `isStairMillMode = isStairMillActivity(activity)`, the duration-mode form swaps the single hh:mm:ss Duration wheel for a **two-column grid**: `Floors | Time`. Both wheels required (canSave guards on `floors > 0 && time > 0`). Floors is an integer wheel (step 1, range 0–500). Time stays `mm:ss`. Live chip shows derived `Climb rate — N.N floors/min`. Generic duration-mode activities (none currently — Arc Trainer was removed May 17) still use the single Duration wheel via the else-branch.
+
+**Dispatch order (LOCKED):**
+
+StairMill's `cardio_mode = 'duration'` in the DB, but `CardioDetail` short-circuits BEFORE the generic `mode === 'duration'` route via an explicit `isStairMillActivity` check. Any future duration-mode activity that gets its own coaching surface should follow the same pattern.
+
+**Components / helpers (LOCKED):**
+
+- `mobile/src/lib/movements.ts`: `STAIRMILL_ACTIVITY = 'StairMill'`, `isStairMillActivity`, `parseStairMillLabel`, `floorsPerMinFromEffort`, `genderBaselineFloorsPerMin`.
+- `mobile/app/(app)/effort/cardio/[activity].tsx`: `StairMillZone`, `STAIRMILL_ZONE_ORDER`, `STAIRMILL_ZONE_CONFIG`, `buildStairMillZoneRx`, `getStairMillZoneCue`, `StairMillDetail` component.
+- `mobile/app/(app)/cardio.tsx`: `isStairMillMode` + `floorsValue` state + Floors wheel + StairMill-aware save label.
+
+**Out of v1 scope (deferred):**
+- **Resistance level (1–20)** — secondary intensity modulator on real Step Mills. Adds complexity to the log form without proportional coaching value (FPM already captures effort intensity). v2.
+- **Tabata 20s/10s sets** — extreme HIIT prescription used in the original Allison protocol (20-sec reps). The Step Mill console's response time makes 20-sec reps hard to pace cleanly; we extended to 60-sec reps for v1. v2 with a dedicated "test mode".
+- **Empire State Building Run-Up benchmark mode** — cultural benchmark (86 floors for time). Specialty feature, defer.
+- **HR-zone integration** — would replace the FPM proxy with true HR zones. Phase 2 alongside running's HR upgrade.
 
 ---
 
@@ -1330,20 +1655,33 @@ Users with no logged air bike efforts get bootstrapped with a gender-aware basel
 
 The baseline only affects the page on first visit. After the first logged effort, the user's actual `peakCalsPerMin` replaces the baseline (peak > 0 always takes precedence). The page header reads "No efforts logged yet · using N cal/min as a starting estimate" until the user logs their first effort.
 
-**Layout — single page, top to bottom (LOCKED):**
+**Layout — Pattern L4 (LOCKED, May 19 2026):** Air Bike uses Layout L4 from `docs/Layout Design.xlsx` (`In-frame variation swipe pill / Hero card / Consolidated chart and log`) — same shape as Carry's adp-zone surface, but with amber chrome (cardio theme) instead of blue (strength). The page is a single page, top to bottom:
 
 1. **Header** — back chevron + "Air Bike" title + subtitle: `Best — N cal/min` (TickerNumber on the rate value). When no efforts: `No efforts logged yet · using N cal/min as a starting estimate`.
 2. **Progression plan card** (`<AnimateRise delay={0}>`):
-   - Title `Your progression plan` + helper text "Three zones to train, each anchored on your cal/min rate. Tap a zone to see its prescription."
-   - **Zone tile row** — 3 fixed tiles in HARDEST-FIRST order (SPRINT → THRESHOLD → AEROBIC), each showing zone label + work shape (`8 × 9 cal` or `59 cal`) + intensity (`100% effort`). Tappable to switch the hero card content below. Chevrons between tiles match cardio pattern (Pattern 3).
+   - Title `Your progression plan` + helper text "Three zones to train, each anchored on your cal/min rate. Swipe the pill to switch zones."
+   - **In-frame variation swipe pill** — single pill in the center showing the active zone (SPRINT / THRESHOLD / AEROBIC, hardest-first), flanked by pulsing amber chevrons (Pattern 3 + Pattern 4 swipe choreography). Pan gesture swipes between zones; chevron taps also navigate. Matches Carry's `carryZoneRow` pill exactly, just amber instead of blue.
    - **Hero card** (amber chrome): top-right info pill (zone label + Info icon, tappable for inline "why this zone" panel — Pattern 5). Three stacked TickerNumber rows:
-     - Row 1 = work (`8 × 9 cal` for intervals, `59 cal` for continuous AEROBIC)
-     - Row 2 = estimated wall-clock time (per rep for intervals, total for continuous)
-     - Row 3 = rest between reps (omitted for AEROBIC since it's continuous)
-   - Full coaching cue underneath the thin separator: e.g. `Sprint 9 cals as fast as you can — go max effort. Rest 45 sec, repeat 8 times. Each rep should take about 30 sec.`
-   - Attribution: `Calorie-anchored zones · gender-calibrated baseline`
+     - Row 1 = work (`8 × 9 cal` for intervals, `59 cal` for continuous AEROBIC) — sub-text "the work"
+     - Row 2 = **watts floor** with `≥` prefix (e.g. `≥ 313 W` for SPRINT at male peak rate 18 cal/min) — sub-text "hold at or above". Derived from cal/min × intensity × 17.4, NOT stored. See `calsPerMinToWatts` in movements.ts for the formula derivation (industry-standard Assault / Echo / Rogue / Schwinn conversion based on ~25 % mechanical efficiency on cycle ergs).
+     - Row 3 = estimated wall-clock time per rep (or total for AEROBIC) — sub-text "est. per rep" / "est. total"
+   - Full coaching cue underneath the thin separator: includes the watts floor AND the rest interval. e.g. SPRINT: `Sprint 9 cals as fast as you can — hold at or above 313 W. Rest 45 sec, repeat 8 times. Each rep should take about 30 sec.` AEROBIC (continuous): `Pedal 59 cals at or above 204 W — steady aerobic effort, about 5 min total.`
+   - **Info-pill expanded panel** also mentions the watts derivation: *"Watts derived from cal/min × 17.4 — standard Assault / Echo / Rogue / Schwinn conversion based on ~25 % mechanical efficiency on cycle ergs. Aim to stay AT or ABOVE the floor; exceeding it is fine. The floor scales with your gender baseline and the zone's intensity factor."*
+   - Attribution: `Cal/min anchored zones · watts derived (cal/min × 17.4) · gender-calibrated baseline`
 3. **Chart** (`<AnimateRise delay={250}>`) — cal/min rate over time. **Y-axis NOT reversed** — higher rate = better progress = line trends UP. Distinct from pace charts where the Y-axis is reversed (lower = faster = trend down). Reference line at peak rate.
 4. **Log list** (`<AnimateRise delay={500}>`) — each row shows the cal/min rate on the right.
+
+**Wattage advisory (LOCKED, May 19 2026):** users enter cal + time on the form (`isCalorieMode`); the system derives cal/min and from there derives the watts floor for each zone. Watts is NEVER an input — it's purely a coaching overlay because air bike wattage is too variable (fan-speed cubed, manufacturer calibration differences, individual metabolic efficiency) to ask the user to read off the console mid-effort. The wattage advice is a FLOOR ("at or above X W"), not a precise instantaneous target.
+
+Per-zone watts floor table for the gender-baseline cold-start (apply `calsPerMinToWatts = rate × 17.4` to baseline × intensity):
+
+| Gender | Peak cal/min | SPRINT (100 %) | THRESHOLD (85 %) | AEROBIC (65 %) |
+|---|---:|---:|---:|---:|
+| Male | 18 | 313 W | 266 W | 204 W |
+| Female | 13 | 226 W | 192 W | 147 W |
+| Other / unset | 15 | 261 W | 222 W | 170 W |
+
+After the user's first effort, `peakCalsPerMin = max observed across all efforts` and all floors recompute from that.
 
 **Log form (`cardio.tsx`) — calorie-input mode (LOCKED):**
 
@@ -1367,15 +1705,16 @@ The "Your activities" row for Air Bike shows `Best rate — N.N cal/min` on the 
 | `isAirBikeActivity(name)` | True iff name equals AIR_BIKE_ACTIVITY |
 | `parseAirBikeLabel(label)` | Parse `"Air Bike · N cal in M:SS"` → `{ cals, timeSecs }` |
 | `calsPerMinFromEffort(cals, timeSecs)` | Compute cal/min rate (returns 0 for invalid) |
+| `calsPerMinToWatts(rate)` | Convert cal/min → mechanical watts via × 17.4 (Assault/Echo standard) |
 | `genderBaselineCalsPerMin(gender)` | Cold-start baseline (18/13/15 for male/female/other) |
 
 **Out of v1 scope (deferred):**
 
 - **100-cal benchmark test** — a famous standalone benchmark ("how fast can you hit 100 cals?"). Would require a separate "test mode" on the log form and a dedicated chart line on the detail page. Defer until users ask for it.
 - **EMOM cal ladders** ("3 cal min 1, 6 cal min 2, 9 cal min 3, ...") — interval programming pattern. Out of scope; one prescription per zone for now.
-- **Watts-based zones** — air bikes also display watts. More precise than calories (calories include drivetrain efficiency assumptions) but requires the user to read a different machine field. Defer until HR / power integration phase.
+- **Watts as a primary INPUT** — v1 derives watts from cal/min for coaching advice only; the user never types watts. Reading watts off the air bike console for a primary input would require asking the user to monitor a fluctuating value mid-rep (impractical). If wattage-aware machines (e.g. Concept2 BikeErg + Erg PM5) ship as separate movements, those CAN use watts as primary input. Air Bike stays cal-input + watts-derived.
 - **Test-set tracking** — users who do a 100-cal time trial would want to log that specifically and see their best 100-cal time over time. v2.
-- **AirBikeConsolidatedDetail wrapper** — air bike has only one variant, no consolidation needed. If we ever add variants (e.g., one-arm air bike, seated vs standing), the Sled Drag / Swimming wrapper pattern applies.
+- **AirBikeConsolidatedDetail wrapper** — air bike has only one variant, no consolidation needed. If we ever add variants (e.g., one-arm air bike, seated vs standing), the Sled Work / Swimming wrapper pattern applies.
 
 ---
 
@@ -1391,14 +1730,14 @@ This is the spec for the swim-native coaching surface on `[activity].tsx` (mobil
 
 **Stroke consolidation (May 17 2026 — LOCKED):**
 
-Swimming has 4 stroke variants — Freestyle, Backstroke, Breaststroke, Butterfly — stored as separate movements in the DB (`Swimming [Freestyle]`, `Swimming [Backstroke]`, `Swimming [Breaststroke]`, `Swimming [Butterfly]`). They collapse into a single detail page via `SwimmingConsolidatedDetail`, mirroring the Sled Drag `[Push]` / `[Pull]` pattern from strength. The architecture:
+Swimming has 4 stroke variants — Freestyle, Backstroke, Breaststroke, Butterfly — stored as separate movements in the DB (`Swimming [Freestyle]`, `Swimming [Backstroke]`, `Swimming [Breaststroke]`, `Swimming [Butterfly]`). They collapse into a single detail page via `SwimmingConsolidatedDetail`, mirroring the Sled Work `[Push]` / `[Pull]` pattern from strength. The architecture:
 
 - **DB**: 4 movement rows, all `category='cardio'`, `cardio_mode='pace'`. No `Swimming` row exists; bare `'Swimming · ...'` effort labels from before this consolidation are legacy and default to Freestyle on the parse path.
 - **Cardio index (`cardio.tsx`)**: the "Your activities" aggregation collapses the 4 stroke variants (and legacy bare swim labels) under a single `Swimming` row, with the most-recently-trained stroke shown as a small `FREE` / `BACK` / `BREAST` / `FLY` badge to the right. Best pace shown is the FASTEST per-100m across all strokes.
-- **Cardio log form (`cardio.tsx`)**: the activity search returns all 4 stroke variants as separate hits (consistent with how Sled Drag's strength search returns `Sled Drag [Push]` + `Sled Drag [Pull]` separately). The user picks the stroke they swam. The form recognises any bracketed swim variant as swim mode via `isSwimActivity(activity)`; save label format is `Swimming [Backstroke] · 1500 m in 25:00`.
+- **Cardio log form (`cardio.tsx`)**: the activity search returns all 4 stroke variants as separate hits (consistent with how Sled Work's strength search returns `Sled Work [Push]` + `Sled Work [Drag]` separately). The user picks the stroke they swam. The form recognises any bracketed swim variant as swim mode via `isSwimActivity(activity)`; save label format is `Swimming [Backstroke] · 1500 m in 25:00`.
 - **Detail page route**: `/effort/cardio/Swimming` (base name from the index collapse) and `/effort/cardio/Swimming [Freestyle]` (bracketed deep links) both route to `SwimmingConsolidatedDetail`. The wrapper holds `activeStroke` state (defaults to whichever stroke was logged most recently; falls back to Freestyle if no swim efforts exist yet) and filters efforts to that stroke. Inner `SwimmingDetail` is stroke-agnostic — operates on whatever filtered list it receives.
-- **Pill carousel**: 4-variant version of the same swipe choreography used by Sled Drag and the BW assist tiers. Single amber pill in the center showing the active stroke as a short label (`FREE` / `BACK` / `BREAST` / `FLY`), flanked by pulsing chevrons. Carousel order: `FREE → BACK → BREAST → FLY` (popularity / freestyle-first). No wrap at the ends — left chevron disappears on Freestyle, right chevron disappears on Butterfly.
-- **Pill swipe gesture**: identical mechanics to the Sled Drag pill — Pan gesture, 20px threshold, 220px slide-off, 250ms slide-out / slide-in, 120ms chevron fade. Bounded by `currentIdx + direction` within `[0, SWIM_STROKE_ORDER.length - 1]` so over-swipes at the ends bounce back rather than commit.
+- **Pill carousel**: 4-variant version of the same swipe choreography used by Sled Work and the BW assist tiers. Single amber pill in the center showing the active stroke as a short label (`FREE` / `BACK` / `BREAST` / `FLY`), flanked by pulsing chevrons. Carousel order: `FREE → BACK → BREAST → FLY` (popularity / freestyle-first). No wrap at the ends — left chevron disappears on Freestyle, right chevron disappears on Butterfly.
+- **Pill swipe gesture**: identical mechanics to the Sled Work pill — Pan gesture, 20px threshold, 220px slide-off, 250ms slide-out / slide-in, 120ms chevron fade. Bounded by `currentIdx + direction` within `[0, SWIM_STROKE_ORDER.length - 1]` so over-swipes at the ends bounce back rather than commit.
 - **Per-stroke fitness**: every stroke has its own CSS estimate (computed only from that stroke's efforts), its own progression chart, and its own plan queue. Switching strokes flips both the data AND the prescription. A user might have a 1:35/100m freestyle CSS and a 2:15/100m butterfly CSS — both tracked independently, no cross-contamination.
 - **Empty states**: each stroke tab computes from only its own efforts. The user who has only swum freestyle sees the normal coaching surface on the FREE tab and an empty-state card on BACK / BREAST / FLY (`"Log your first backstroke effort and your personalized plan will appear here"`). No auto-estimating across strokes — they're physiologically different enough that the user's freestyle CSS tells us nothing about their butterfly CSS.
 
@@ -1746,6 +2085,13 @@ If the phone can't reach Metro after a network change:
 
 The user explicitly told us not to ask for the USB cable again once wireless adb is established. The cable is needed exactly ONCE to flip the switch; everything afterward — `adb logcat`, `adb shell`, `dumpsys`, `pm list`, etc. — works over WiFi until the phone reboots.
 
+**ALWAYS reconnect at session start (LOCKED, May 19 2026):** the wireless adb endpoint is sticky on the phone until reboot, but the laptop's adb daemon forgets paired WiFi devices when its own process restarts (laptop reboot, daemon kill, etc.). So at the start of every session — before touching anything mobile — run:
+```powershell
+& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.226:5555
+& "$env:ANDROID_HOME\platform-tools\adb.exe" devices    # should show the WiFi endpoint
+```
+If `adb connect` returns `connected to 10.0.0.226:5555` and `adb devices` lists `10.0.0.226:5555  device`, you're set — no cable needed. If it returns `failed to connect` or the endpoint shows up as `offline`, the daemon's wireless mode dropped (phone reboot, etc.) — then ask the user to plug in USB ONCE so you can re-run the one-time setup below.
+
 **One-time setup with the cable plugged in:**
 ```powershell
 & "$env:ANDROID_HOME\platform-tools\adb.exe" tcpip 5555
@@ -1764,6 +2110,29 @@ Start-Sleep -Seconds 2
 **Wireless adb does NOT enable Metro tunneling.** The `adb reverse` trick that lets the phone hit `http://localhost:8081` over USB has no WiFi equivalent. Once you're wireless, the dev client URL MUST be the laptop's LAN IP. If the LAN bundle stream stalls (the `Software caused connection abort` mid-multipart symptom we've hit), the fallback is to physically replug the cable, run `adb tcpip 5555` if you want to stay wireless after, then deep-link the dev client to localhost; OR fix the underlying WiFi flakiness (Windows TCP keepalive / firewall / power-save on the phone's wlan0 chip).
 
 **Do not ask the user to re-plug for diagnostics.** If `adb devices` shows the WiFi endpoint as `10.0.0.226:5555 device`, everything else works the same — `logcat`, `pidof`, `dumpsys`, `pm list packages`, `run-as <pkg>`, `cat shared_prefs/...` all run unchanged over WiFi. The only commands that fail are `adb reverse` and `adb push` to large files (slower but functional).
+
+**Reading a device-side error / red box without asking the user (LOCKED, May 19 2026):**
+
+When the user says "I have an error showing" or similar, do NOT ask them to paste it. Read it directly:
+
+```powershell
+# 1. Take a screenshot via wireless ADB — the LogBox red-box / yellow-box
+#    overlay renders as part of the device UI, so it's captured.
+adb -s 10.0.0.226:5555 exec-out screencap -p > "C:/Users/motaz/myrx-error-screen.png"
+
+# 2. Read the PNG via Claude's Read tool (multimodal — reads images natively).
+#    The error message + call stack is visible in the screenshot.
+```
+
+This works because the dev client's LogBox renders in the Android view hierarchy like any other UI. The `screencap` command captures the entire screen including the overlay. Then `Read` parses the image and surfaces the text.
+
+`adb logcat` is the fallback if the error is a silent JS warning that doesn't display a box, but for any visible red/yellow box this screencap trick is faster and surfaces the formatted error text + call stack exactly as the user sees them.
+
+**GestureDetector + view flattening (LOCKED, May 19 2026):**
+
+When wrapping a non-`<View>` element (custom component, `<NextTargetCallout>`, etc.) in a `<GestureDetector>`, the child MUST be a `<View collapsable={false}>` — gesture-handler attaches its native handler to the child's underlying Android view, and React Native's view-flattening pass can erase non-essential Views at native level, leaving the gesture without an anchor. Symptom: red-box `[react-native-gesture-handler] GestureDetector has received a child that may get view-flattened. To prevent it from misbehaving you need to wrap the child with a <View collapsable={false}>.`
+
+Plain `<View style={...}>` with explicit styles usually isn't flattened (the style forces a native node), so simple cases like `<GestureDetector><View style={...}>...</View></GestureDetector>` don't need the explicit `collapsable={false}` flag. Custom components or stateless wrappers around content (like `NextTargetCallout`) DO need it.
 
 #### Background-process output buffering (PowerShell pipelines)
 
@@ -2110,6 +2479,16 @@ When adding a new numeric display anywhere: default to plain `Text`. Add `Ticker
 **Live-chip label convention (`strength.tsx`):**
 - The "Estimated 1RM" chip below the form drops the "Est." / "Estimated" prefix when reps is exactly `1`: a 1-rep lift IS the 1RM, no `estimate1RM` projection runs in that case, and the prefix would be misleading. For 2+ reps the chip reads "Estimated 1RM" / "Est. 1RM per hand" (dumbbell variant) as before. The stored effort `value` in the DB still uses the `"Est. 1RM N unit"` shape regardless — the `parseOneRM` regex on the read path is just looking for the number; the visible label divergence is UI-only.
 
+**Category tag convention (MANDATORY — LOCKED May 19 2026):**
+
+Every detail page header MUST render a small UPPERCASE category badge BELOW the "Best —" subtitle row. The badge identifies the movement family with a short, recognisable label.
+
+- **Strength** uses `s.carryTierBadge` chrome (blue) and `equipmentPillLabel(movementRecord.equipment)` for the label — `BARBELL` / `BODYWEIGHT` / `CARRY` / `ASSIST MACHINE` / etc. Every weighted-standard, bodyweight, isometric, assisted, repsonly, and carry detail page already has it. **Sled Work consolidated** wasn't getting it before (the wrapper skips CarryDetail's header entirely) — now it gets a CARRY pill at the page-level header below the subtitle.
+- **Cardio** uses `s.categoryBadge` chrome (amber) and `cardioCategoryPillLabel(activity)` for the label — `RUNNING` / `CYCLING` / `ROWING` / `SKIING` / `AIR BIKE` / `SWIMMING` / `ELLIPTICAL` / `RUCKING` / `STAIR CLIMBING`. Applied to PaceDetail, AirBikeDetail, BeatYourBestDetail, SwimmingConsolidatedDetail, DurationDetail, and RuckingDetail.
+- **Stacked tags**: when a page also has a tier classification (Atlas Stone Bear Hug Carry's `INTERMEDIATE` etc., Rucking's `TOUGH` etc.), the tier pill stacks BELOW the category pill using the same chrome.
+
+When adding a new detail page or detail surface, always include a category badge. Skip it ONLY when the page genuinely has no category to surface (e.g. a non-movement detail page).
+
 ### Cross-platform consistency rule (MANDATORY)
 
 When the trigger is NOT an explicit `sync ...` phrase — i.e. the user reports a bug, or asks for a new update/feature/design change without naming a direction — the change MUST be cross-checked and applied across **every platform in the system where the surface exists**, not just the side currently being worked on.
@@ -2285,6 +2664,151 @@ This is the final net — if a secret somehow makes it past layers 1 and 2, push
 3. **Update the new secret** in its proper store (GHA secret, env var, etc.).
 4. **Add the leaked pattern to `scripts/git-hooks/pre-commit`** so the same shape can't slip through again.
 5. **Audit the rest of the repo** for siblings of the same secret class.
+
+## Food library architecture (LOCKED — re-running bulk_import)
+
+The food library is two layers: a Cloudflare D1 database (`myrx-food-library`)
+holding ~470K curated rows from USDA + OpenNutrition + MYRX-custom, AND the
+search/CRUD worker (`workers/food-search/`) that fronts it.
+
+**Re-importing from a fresh USDA + ON snapshot follows ONE procedure. Do
+not invent a different one. If it's failing, fix what's failing — don't
+re-architect around it.**
+
+### Bulk import — the only valid catalog rebuild path
+
+```powershell
+cd C:\Users\motaz\OneDrive\Desktop\MyRX
+node --max-old-space-size=8192 scripts/bulk_import/run.mjs
+```
+
+Pre-requisites (already in `data/usda/` and `data/on/`):
+- `scripts/bulk_import/data/usda/FoodData_Central_csv_YYYY-MM-DD/`
+  (downloaded "Full Download" ZIP from
+  https://fdc.nal.usda.gov/download-datasets, extracted)
+- `scripts/bulk_import/data/on/opennutrition-dataset-YYYY.N.zip`
+  (downloaded as-is from https://www.opennutrition.app/download)
+
+### What the bulk import does (in order)
+
+1. Pre-flight check — required files present
+2. Snapshot current row counts
+3. Wipe USDA + ON rows from D1 (**MYRX rows are NEVER touched** —
+   `wipeUsdaAndOn()` filters `WHERE source IN ('usda','on')`)
+4. Backfill MYRX audit columns
+5. Load USDA CSVs into memory + apply **Tier 1-4 filter rules (1-14)**
+   from `scripts/d1_migrate/lib/filters.mjs` during parsing
+6. Load ON ZIP into memory + apply **Tier 1-4 filter rules (1-14)**
+7. **Apply Tier 5 dedup rules (15-19) IN MEMORY** to the combined
+   USDA+ON array via `scripts/bulk_import/lib/dedup_in_memory.mjs`.
+   This is the architectural rule — see below for why.
+8. Push the deduped union (~470K rows) to D1 via `wrangler d1 execute
+   --file=...` in batches of 25K rows per file
+9. Rebuild FTS5 search index
+10. Set sync watermarks (`usda_last_sync_date` = the CSV's snapshot
+    date, `on_last_version` = the ON ZIP's version string) so future
+    incremental syncs only fetch deltas
+11. Final row-count verification + per-rule dedup summary
+
+**Total runtime: ~9-15 minutes.** Most of the time is the D1 push
+(~3-5 min) and parsing the 27M-row USDA `food_nutrient.csv` (~4 min).
+The in-memory dedup runs in ~14 seconds.
+
+### THE LAW: dedup runs in memory, BEFORE the D1 write
+
+Rules 1-14 (REPAIR + REJECT tiers) run as the loaders walk the CSV
+streams. Rules 15-19 (DEDUP tier) require cross-row comparison and
+**MUST run in Node memory before any row hits D1.**
+
+Earlier versions of the script ran Rules 15-19 as a post-import SQL
+pass (`post_import_dedup.mjs`). At ~470K rows that worked. At 2M+ rows
+— which is what the unfiltered USDA branded food catalog is — every
+monolithic DELETE in that script timed out:
+
+- **D1 has a 30-second per-query CPU budget.** Wrangler `--file`
+  execution can't extend that.
+- A `DELETE WHERE id NOT IN (SELECT MAX(id) GROUP BY ...)` over 2M
+  rows times out, regardless of indexing.
+- Even chunked self-joins on `(source, upc)` time out per chunk
+  when the join cardinality is large.
+
+The architecturally correct fix is to do dedup where the data already
+lives — in Node memory, after the loaders parse and the filter
+pipeline drops the Tier 1-4 rejects. Each dedup rule is then an O(n)
+Map operation; the whole pass finishes in ~14 seconds.
+
+The implementation is `scripts/bulk_import/lib/dedup_in_memory.mjs`.
+**Do not move the dedup back into SQL. Do not try to "optimize" by
+deduping post-import.** Both have been tried and both don't scale.
+
+### Common failure modes + fixes
+
+1. **`FATAL ERROR: Ineffective mark-compacts near heap limit` /
+   `JavaScript heap out of memory` during Pass 6 (filter rules).**
+   Cause: Node's default 4 GB heap isn't enough for the 2.1M USDA
+   row array. Fix: always run with `--max-old-space-size=8192` (8 GB).
+   12 GB if USDA ever grows past 3M rows.
+
+2. **`UNIQUE constraint failed: food_library.source,
+   food_library.source_id` during USDA push.** Cause: trying to
+   re-insert a row that's still in the table. Fix: confirm Step 3
+   (wipe) actually ran — re-run `wipeUsdaAndOn()` manually if needed.
+
+3. **`wrangler d1 execute … --file=… --json` retry-3-times-then-fail
+   on a DELETE statement.** Cause: D1's 30s query budget exceeded.
+   Almost always means someone reverted Step 7 to a post-import SQL
+   dedup. Restore the in-memory dedup path (`applyDedup`) in run.mjs.
+
+4. **`error code: 1101` from a `/admin/cleanup/...` Worker endpoint.**
+   Cause: CPU limit on the Worker, NOT D1. Worker free tier is 10ms
+   CPU per request; paid is 30s. Either chunk the worker logic into
+   ≤1000-row batches or move the heavy work to GHA + wrangler.
+
+### Free-tier note
+
+Cloudflare's documented D1 free tier limits (100K writes/day, 500MB
+per DB) are NOT strictly enforced for `wrangler d1 execute --file=...`
+uploads from the CLI. We pushed 2M+ rows in 13 minutes through that
+path with zero rejections. The HTTP D1 API DOES enforce limits — so
+per-row writes via worker fetch are still the bottleneck.
+
+This is the practical reality, not the official spec. If Cloudflare
+changes enforcement, the bulk_import would need to be batched across
+multiple days OR moved to a paid plan ($5/mo Workers Paid = 50M
+writes/day).
+
+### Sync watermark contract
+
+The bulk import sets two watermarks at Step 10. Any future incremental
+sync (cron or manual) reads them as the starting date filter:
+
+- `usda_last_sync_date` (e.g., `2026-04-30`) — sync_usda.mjs uses
+  this as `publishedDateBegin` when calling USDA's API.
+- `on_last_version` (e.g., `2025.1`) — sync_on.mjs skips its work
+  entirely if the published ON version matches.
+
+**If you ever manually wipe + reimport without bulk_import setting
+these, the next sync defaults `usda_last_sync_date` to `2020-01-01`
+and pulls ~6 years of USDA → 2,278 pages → 6-9 hours. Set the
+watermark manually in that case:**
+
+```powershell
+cd C:\Users\motaz\OneDrive\Desktop\MyRX\workers\food-search
+npx wrangler d1 execute myrx-food-library --remote --command `
+  "UPDATE sync_state SET value='YYYY-MM-DD', updated_at=datetime('now') WHERE key='usda_last_sync_date';"
+```
+
+### What CSV files to download for a fresh import
+
+Both downloads are public and free, no API key required:
+
+- USDA Full Download (~500 MB zipped, ~5 GB extracted):
+  https://fdc.nal.usda.gov/download-datasets → "Full Download"
+- OpenNutrition dataset (~270 MB zipped):
+  https://www.opennutrition.app/download → latest version
+
+The filename's embedded date IS the watermark the sync uses. Don't
+rename them.
 
 ## Supabase
 - Project ID: `xtxzfhoxyyrlxslgzvty`
