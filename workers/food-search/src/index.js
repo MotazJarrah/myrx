@@ -788,8 +788,20 @@ export default {
       const limit   = Math.min(2000, Math.max(1, Number(url.searchParams.get('limit') ?? 500) || 500))
       if (!runId) return json({ error: 'run_id required' }, 400)
 
+      // Timestamp normalisation:
+      //   - SQLite's default `datetime('now')` produces "YYYY-MM-DD HH:MM:SS"
+      //     with no T separator and no Z timezone marker. JS Date() would
+      //     interpret that as local time, so we splice in 'T' + 'Z' so the
+      //     value parses as UTC.
+      //   - The orchestrator's POST entries already carry full ISO
+      //     timestamps ("2026-05-21T12:34:56.789Z"). For those, the
+      //     splice would double-Z and break parsing. So branch on the
+      //     presence of 'T' — already-ISO values pass through verbatim.
       const { results } = await env.DB.prepare(
-        `SELECT id, REPLACE(ts, ' ', 'T') || 'Z' AS ts,
+        `SELECT id,
+                CASE WHEN ts LIKE '%T%' THEN ts
+                     ELSE REPLACE(ts, ' ', 'T') || 'Z'
+                END AS ts,
                 step_code, message, level, error_code, detail
          FROM sync_step_log
          WHERE run_id = ? AND id > ?

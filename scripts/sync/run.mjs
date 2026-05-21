@@ -301,52 +301,78 @@ async function bailIfCancelled() {
  * Scrape USDA's data-type page for the latest FoodData Central CSV bundle.
  * USDA publishes monthly snapshots; the URL changes every release.
  *
+ * The download URLs live at `https://fdc-datasets.ars.usda.gov/` (NOT
+ * `fdc.nal.usda.gov` which is the directory page itself). Our regex is
+ * host-agnostic — match any URL containing `FoodData_Central_csv_YYYY-MM-DD.zip`
+ * — so we survive future host changes too.
+ *
+ * Note: the directory page issues a 302 redirect (HTTPS → HTTP, with
+ * trailing slash). Pass `redirect: 'follow'` (the default in fetch())
+ * and request the trailing-slash URL up front to avoid one round-trip.
+ *
  * Returns the snapshot URL + date string ("2026-04-30" format).
  */
 async function findUsdaSnapshot() {
-  logStep('scrape_usda', 'Scraping USDA snapshot URL from data-type page…')
-  const res = await fetch('https://fdc.nal.usda.gov/download-datasets', {
-    headers: { 'User-Agent': 'myrx-sync/1.0' },
+  logStep('scrape_usda', 'Scraping USDA snapshot URL from download-datasets page…')
+  const res = await fetch('https://fdc.nal.usda.gov/download-datasets/', {
+    headers: { 'User-Agent': 'myrx-sync/1.0', 'Accept': 'text/html' },
+    redirect: 'follow',
   })
   if (!res.ok) throw new Error(`USDA page fetch failed: ${res.status}`)
   const html = await res.text()
-  // Look for the most recent FoodData_Central_csv_YYYY-MM-DD.zip link.
-  const matches = html.matchAll(/https:\/\/fdc\.nal\.usda\.gov\/[^"']*FoodData_Central_csv_(\d{4}-\d{2}-\d{2})\.zip/g)
+  // Host-agnostic match — works whether the file is hosted at
+  // fdc.nal.usda.gov, fdc-datasets.ars.usda.gov, or anywhere else USDA
+  // might move it to.
+  const matches = html.matchAll(/https?:\/\/[^\s"'<>]*FoodData_Central_csv_(\d{4}-\d{2}-\d{2})\.zip/g)
   let latest = null
   for (const m of matches) {
     if (!latest || m[1] > latest.date) latest = { url: m[0], date: m[1] }
   }
-  if (!latest) throw new Error('No FoodData_Central_csv URL found on USDA page')
-  logStep('scrape_usda', `Found USDA snapshot: ${latest.date}`)
+  if (!latest) {
+    // Diagnostic dump — the page format may have changed. Surface a
+    // short snippet so we can update the regex.
+    const snippet = html.slice(0, 600).replace(/\s+/g, ' ')
+    logStep('scrape_usda', `Page returned ${html.length} bytes — snippet: ${snippet}`, { level: 'warn' })
+    throw new Error('No FoodData_Central_csv URL found on USDA page (regex needs update?)')
+  }
+  logStep('scrape_usda', `Found USDA snapshot: ${latest.date} at ${latest.url}`)
   return latest
 }
 
 /**
  * Scrape OpenNutrition's download page for the latest dataset ZIP.
+ * URLs live at `https://downloads.opennutrition.app/`. Regex stays
+ * host-agnostic for the same reason as USDA.
+ *
  * Returns the ZIP URL + version string ("2025.1" format).
  */
 async function findOnSnapshot() {
   logStep('scrape_on', 'Scraping OpenNutrition snapshot URL from download page…')
   const res = await fetch('https://www.opennutrition.app/download', {
-    headers: { 'User-Agent': 'myrx-sync/1.0' },
+    headers: { 'User-Agent': 'myrx-sync/1.0', 'Accept': 'text/html' },
+    redirect: 'follow',
   })
   if (!res.ok) throw new Error(`ON page fetch failed: ${res.status}`)
   const html = await res.text()
-  // Look for opennutrition-dataset-YYYY.N.zip
-  const matches = html.matchAll(/https?:\/\/[^"'\s]+opennutrition-dataset-(\d{4}\.\d+)\.zip/g)
+  // Look for opennutrition-dataset-YYYY.N.zip — any host.
+  const matches = html.matchAll(/https?:\/\/[^\s"'<>]*opennutrition-dataset-(\d{4}\.\d+)\.zip/g)
   let latest = null
   for (const m of matches) {
     if (!latest || m[1] > latest.version) latest = { url: m[0], version: m[1] }
   }
   if (!latest) {
-    // Fallback: maybe the page uses relative URLs. Try the conventional pattern.
-    const rel = html.match(/(\/[^"'\s]*opennutrition-dataset-(\d{4}\.\d+)\.zip)/)
+    // Last-ditch: maybe a relative path. Try common host prefixes.
+    const rel = html.match(/(\/[^"'\s<>]*opennutrition-dataset-(\d{4}\.\d+)\.zip)/)
     if (rel) {
-      latest = { url: `https://www.opennutrition.app${rel[1]}`, version: rel[2] }
+      latest = { url: `https://downloads.opennutrition.app${rel[1]}`, version: rel[2] }
     }
   }
-  if (!latest) throw new Error('No opennutrition-dataset ZIP URL found on ON page')
-  logStep('scrape_on', `Found ON dataset: version ${latest.version}`)
+  if (!latest) {
+    const snippet = html.slice(0, 600).replace(/\s+/g, ' ')
+    logStep('scrape_on', `Page returned ${html.length} bytes — snippet: ${snippet}`, { level: 'warn' })
+    throw new Error('No opennutrition-dataset ZIP URL found on ON page (regex needs update?)')
+  }
+  logStep('scrape_on', `Found ON dataset: version ${latest.version} at ${latest.url}`)
   return latest
 }
 

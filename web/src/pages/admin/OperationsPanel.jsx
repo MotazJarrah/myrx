@@ -348,10 +348,14 @@ function StepLog({ runId, active }) {
           {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
         </div>
       </div>
+      {/* Box is FIXED height (h-48 = 12rem = 192 px). Always exactly
+          that tall regardless of entry count, so the panel layout
+          doesn't shift around as the feed grows. Older entries scroll
+          out of view (with auto-scroll to bottom on new entries). */}
       <div
         ref={containerRef}
         onScroll={onScroll}
-        className="max-h-64 overflow-y-auto rounded-lg border border-border/40 bg-muted/10 px-3 py-2 font-mono"
+        className="h-48 overflow-y-auto rounded-lg border border-border/40 bg-muted/10 px-3 py-2 font-mono"
         style={{ fontSize: '12px', lineHeight: '1.5' }}
       >
         {entries.length === 0 ? (
@@ -361,6 +365,11 @@ function StepLog({ runId, active }) {
             const ts = (() => {
               try {
                 const d = new Date(e.ts)
+                // Guard against invalid dates (returns NaN from get* methods).
+                // The worker now branches on whether ts contains 'T' so
+                // already-ISO values pass through verbatim — but old rows
+                // written before that fix may still produce NaN here.
+                if (isNaN(d.getTime())) return ''
                 const pad = n => String(n).padStart(2, '0')
                 return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
               } catch { return '' }
@@ -605,7 +614,13 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   // navigate away and come back."
   const [displayError, setDisplayError] = useState('')
   const errorClearedRef = useRef(false)
-  const [collapsed,   setCollapsed]   = useState(false)
+  // Start COLLAPSED on page load — the panel is the user's "control deck"
+  // for sync operations, not a primary surface. They open it deliberately
+  // (or it auto-opens when something needs attention; see effect below).
+  const [collapsed,   setCollapsed]   = useState(true)
+  // Tracks whether we've auto-expanded for the current actionable state so
+  // we don't fight the user if they collapse again mid-run.
+  const autoExpandedRef = useRef(false)
   const [stagedToggle,setStagedToggle]= useState(false)
   const [triggering,  setTriggering]  = useState(false)
   const [reviewing,   setReviewing]   = useState(false)
@@ -734,6 +749,37 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   const isRunning = status === 'running' || status === 'pending' || status === 'starting' || status === 'cancelling'
   const isCancelling = status === 'cancelling'
   const reviewPending = status === 'staged_review' && sync?.run_id
+
+  // Auto-expand the panel when something actionable is happening: an
+  // active sync, a failure (so the error is visible), or a staged review
+  // waiting on the admin. Idle / completed / cancelled states leave the
+  // user-chosen collapse state alone (so the panel stays out of the way
+  // unless the admin opens it).
+  //
+  // The ref tracks "have we already auto-expanded for this state?" so
+  // we don't keep re-opening after the user manually collapses mid-run.
+  useEffect(() => {
+    const needsAttention = isRunning || status === 'failed' || reviewPending
+    if (needsAttention && !autoExpandedRef.current) {
+      setCollapsed(false)
+      autoExpandedRef.current = true
+    } else if (!needsAttention) {
+      // Reset the auto-expand latch when the state clears, so the next
+      // problem reopens the panel.
+      autoExpandedRef.current = false
+    }
+  }, [isRunning, status, reviewPending])
+
+  // Step-log visibility rule (mirrors common DevOps UX):
+  //   - Show while a sync is running (live progress feed)
+  //   - Show on failure (so the error trail is visible for debugging)
+  //   - HIDE after successful completion (the result is in history)
+  //   - HIDE after cancellation (the sync was abandoned; log is noise)
+  //   - HIDE on staged review (the review dialog has its own summary)
+  // Same logic as a terminal: log streams while the command runs, the
+  // output stays put if it errored, but `make clean` doesn't keep
+  // showing the last build's stdout forever.
+  const showStepLog = isRunning || status === 'failed'
 
   // ── Actions ─────────────────────────────────────────────────────────────
   async function triggerSync() {
@@ -900,10 +946,11 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
             />
           )}
 
-          {/* Verbose step log — shown while running, and after a sync
-              completes (until the user navigates away or another run
-              rotates the retention window). */}
-          {sync?.run_id && (
+          {/* Verbose step log — shown only when something actionable is
+              happening (sync running OR sync failed). Successful and
+              cancelled runs hide the log so the panel doesn't carry
+              stale noise; the result lives in the history list. */}
+          {sync?.run_id && showStepLog && (
             <StepLog runId={sync.run_id} active={isRunning} />
           )}
 
