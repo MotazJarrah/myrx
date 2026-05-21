@@ -185,7 +185,7 @@ function ProgressBar({ status, progress, startedAt }) {
             nothing or showing a wildly inflated early extrapolation. */}
         {eta
           ? <span>~{eta} remaining</span>
-          : <span className="opacity-60 italic">Calculating estimate…</span>}
+          : <span className="opacity-60 italic">Calculating estimated time…</span>}
       </div>
       {/*
         Progress bar — two visual modes:
