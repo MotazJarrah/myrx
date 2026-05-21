@@ -1,5 +1,18 @@
 name: Sync Food Library
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Triggers:
+#   workflow_dispatch       admin clicks "Sync now" in the food-library UI;
+#                           the worker dispatches this workflow with the
+#                           run_id + staged + force inputs.
+#   schedule (monthly cron) runs on the 1st of every month at 03:00 UTC.
+#                           USDA's monthly publication cadence is the upper
+#                           bound on useful sync frequency; ON updates every
+#                           ~3 months but a monthly cron catches it without
+#                           lag. Pre-stamps a generated run_id so the worker
+#                           sees the same identifier in /admin/sync/state.
+# ─────────────────────────────────────────────────────────────────────────────
+
 on:
   workflow_dispatch:
     inputs:
@@ -7,10 +20,17 @@ on:
         description: 'Force full re-sync even if checksums match'
         required: false
         default: 'false'
+      staged:
+        description: 'Staged mode (true=write to changelog only, false=commit live)'
+        required: false
+        default: 'false'
+      run_id:
+        description: 'Sync run identifier (worker-generated; empty = cron auto-generates)'
+        required: false
+        default: ''
 
-  # Optional: uncomment to enable a weekly safety-net sync
-  # schedule:
-  #   - cron: '0 6 * * 0'   # Sundays at 06:00 UTC
+  schedule:
+    - cron: '0 3 1 * *'   # 03:00 UTC on the 1st of every month
 
 jobs:
   sync:
@@ -23,6 +43,13 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID:  ${{ secrets.CF_ACCOUNT_ID }}
       D1_DATABASE_ID:         ${{ secrets.D1_DATABASE_ID }}
       USDA_API_KEY:           ${{ secrets.USDA_API_KEY }}
+      FOOD_ADMIN_KEY:         ${{ secrets.FOOD_ADMIN_KEY }}
+      WORKER_URL:             https://myrx-food-search.motaz-jarrah.workers.dev
+      # Pass run_id + mode through to the sync scripts. The
+      # changelog-recorder lib reads these. Cron-triggered runs have
+      # no input; we generate a run_id below in the "Resolve run_id"
+      # step before the sync scripts execute.
+      SYNC_MODE:              ${{ github.event.inputs.staged == 'true' && 'staged' || 'commit' }}
 
     steps:
       - name: Checkout
@@ -37,26 +64,37 @@ jobs:
         working-directory: scripts/d1_migrate
         run: npm ci
 
+      # ── Resolve run_id ──────────────────────────────────────────────────────
+      # Worker-dispatched runs already have run_id in inputs. Cron-triggered
+      # runs don't, so we generate one and stamp it back into the worker
+      # via /admin/sync/state so the admin UI can track the run.
+      - name: Resolve run_id
+        id: runid
+        run: |
+          if [ -n "${{ github.event.inputs.run_id }}" ]; then
+            RUN_ID="${{ github.event.inputs.run_id }}"
+            echo "Using worker-dispatched run_id: $RUN_ID"
+          else
+            TS=$(date -u +%Y%m%d%H%M%S)
+            RAND=$(openssl rand -hex 4)
+            RUN_ID="sync_${TS}_${RAND}"
+            echo "Generated cron run_id: $RUN_ID"
+            # Tell the worker about this run_id so the UI can track it.
+            curl -fsS -X POST "$WORKER_URL/admin/sync/state" \
+              -H "Authorization: Bearer $FOOD_ADMIN_KEY" \
+              -H "Content-Type: application/json" \
+              -d "{\"run_id\":\"$RUN_ID\",\"mode\":\"commit\",\"status\":\"running\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" || true
+          fi
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "SYNC_RUN_ID=$RUN_ID" >> $GITHUB_ENV
+
       # ── Mark sync as started ────────────────────────────────────────────────
       - name: Mark sync started in D1
         run: |
-          node -e "
-          import('./scripts/d1_migrate/lib/d1.mjs').then(async ({ createD1Client }) => {
-            const db = createD1Client({
-              accountId:  process.env.CLOUDFLARE_ACCOUNT_ID,
-              databaseId: process.env.D1_DATABASE_ID,
-              apiToken:   process.env.CLOUDFLARE_API_TOKEN,
-            })
-            const now = new Date().toISOString()
-            await db.batch([
-              { sql: \"UPDATE sync_state SET value='running',  updated_at=datetime('now') WHERE key='sync_status'\" },
-              { sql: \"UPDATE sync_state SET value=?, updated_at=datetime('now') WHERE key='sync_started_at'\", params: [now] },
-              { sql: \"UPDATE sync_state SET value='',  updated_at=datetime('now') WHERE key='sync_error'\" },
-              { sql: \"UPDATE sync_state SET value='{}', updated_at=datetime('now') WHERE key='sync_progress'\" },
-            ])
-            console.log('Sync marked as started:', now)
-          })
-          "
+          curl -fsS -X POST "$WORKER_URL/admin/sync/state" \
+            -H "Authorization: Bearer $FOOD_ADMIN_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"running\",\"run_id\":\"${{ steps.runid.outputs.RUN_ID }}\",\"started_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":\"\",\"progress\":{}}" || true
 
       # ── USDA incremental sync ───────────────────────────────────────────────
       - name: Sync USDA (attempt 1)
@@ -94,42 +132,23 @@ jobs:
         run: node scripts/d1_migrate/sync_on.mjs
 
       # ── Mark completed ──────────────────────────────────────────────────────
-      - name: Mark sync completed in D1
+      # Worker's /admin/sync/state endpoint handles the staged-vs-commit
+      # bookkeeping: if mode='staged', it sets sync_staged_review=1 so the
+      # UI shows the review dialog. If mode='commit', it records the run
+      # as last_committed_run_id for undo support.
+      - name: Mark sync completed in worker
         if: success()
         run: |
-          node -e "
-          import('./scripts/d1_migrate/lib/d1.mjs').then(async ({ createD1Client }) => {
-            const db = createD1Client({
-              accountId:  process.env.CLOUDFLARE_ACCOUNT_ID,
-              databaseId: process.env.D1_DATABASE_ID,
-              apiToken:   process.env.CLOUDFLARE_API_TOKEN,
-            })
-            const now = new Date().toISOString()
-            await db.batch([
-              { sql: \"UPDATE sync_state SET value='completed', updated_at=datetime('now') WHERE key='sync_status'\" },
-              { sql: \"UPDATE sync_state SET value=?, updated_at=datetime('now') WHERE key='sync_completed_at'\", params: [now] },
-            ])
-            console.log('Sync marked as completed:', now)
-          })
-          "
+          curl -fsS -X POST "$WORKER_URL/admin/sync/state" \
+            -H "Authorization: Bearer $FOOD_ADMIN_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"completed\",\"run_id\":\"${{ steps.runid.outputs.RUN_ID }}\",\"mode\":\"$SYNC_MODE\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" || true
 
       # ── Mark failed (always runs on failure) ────────────────────────────────
-      - name: Mark sync failed in D1
+      - name: Mark sync failed in worker
         if: failure()
         run: |
-          node -e "
-          import('./scripts/d1_migrate/lib/d1.mjs').then(async ({ createD1Client }) => {
-            const db = createD1Client({
-              accountId:  process.env.CLOUDFLARE_ACCOUNT_ID,
-              databaseId: process.env.D1_DATABASE_ID,
-              apiToken:   process.env.CLOUDFLARE_API_TOKEN,
-            })
-            const now = new Date().toISOString()
-            await db.batch([
-              { sql: \"UPDATE sync_state SET value='failed', updated_at=datetime('now') WHERE key='sync_status'\" },
-              { sql: \"UPDATE sync_state SET value=?, updated_at=datetime('now') WHERE key='sync_completed_at'\", params: [now] },
-              { sql: \"UPDATE sync_state SET value='One or more sync steps failed after 3 attempts. Check GitHub Actions logs.', updated_at=datetime('now') WHERE key='sync_error'\" },
-            ])
-            console.log('Sync marked as failed:', now)
-          })
-          "
+          curl -fsS -X POST "$WORKER_URL/admin/sync/state" \
+            -H "Authorization: Bearer $FOOD_ADMIN_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"failed\",\"run_id\":\"${{ steps.runid.outputs.RUN_ID }}\",\"completed_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"error\":\"One or more sync steps failed after 3 attempts. Check GitHub Actions logs.\"}" || true

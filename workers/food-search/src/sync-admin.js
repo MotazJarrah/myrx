@@ -76,14 +76,54 @@ export async function handleTriggerSync(request, env) {
     }, 409)
   }
 
-  // Parse optional `force` input from request body
+  // Parse optional `force` + `staged` inputs from request body.
+  // `staged=true` means the sync writes changelog entries but does NOT
+  // apply them to food_library — the user reviews + commits manually.
+  // `staged=false` (default) means the sync auto-commits at the end.
   let force = 'false'
+  let staged = 'false'
   try {
     const body = await request.json()
-    if (body?.force === true || body?.force === 'true') force = 'true'
+    if (body?.force === true  || body?.force  === 'true') force  = 'true'
+    if (body?.staged === true || body?.staged === 'true') staged = 'true'
   } catch { /* no body is fine */ }
 
-  // Dispatch GitHub Actions workflow
+  // Block if a staged sync is awaiting review — user must commit or
+  // discard before triggering another.
+  if (state['sync_staged_review'] === '1') {
+    return json({
+      error:   'A staged sync is awaiting review. Commit or discard it before running another sync.',
+      status:  'staged_review',
+      run_id:  state['sync_run_id'] ?? null,
+    }, 409)
+  }
+
+  // Generate a fresh run_id for this sync. Sync scripts pass this back
+  // via /admin/sync/state + /admin/sync/changelog/append. Format:
+  // YYYYMMDDTHHmmss + 8 random hex.
+  const ts = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 15)
+  const rand = crypto.randomUUID().replace(/-/g, '').slice(0, 8)
+  const runId = `sync_${ts}_${rand}`
+
+  // Pre-stamp sync_state so /admin/sync/status reflects the pending run
+  // even before the GitHub workflow has spun up its first job.
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE sync_state SET value = ?, updated_at = datetime('now') WHERE key = 'sync_run_id'`
+    ).bind(runId),
+    env.DB.prepare(
+      `UPDATE sync_state SET value = ?, updated_at = datetime('now') WHERE key = 'sync_mode'`
+    ).bind(staged === 'true' ? 'staged' : 'commit'),
+    env.DB.prepare(
+      `UPDATE sync_state SET value = 'pending', updated_at = datetime('now') WHERE key = 'sync_status'`
+    ),
+    env.DB.prepare(
+      `UPDATE sync_state SET value = '0', updated_at = datetime('now') WHERE key = 'sync_cancel_requested'`
+    ),
+  ])
+
+  // Dispatch GitHub Actions workflow with run_id + mode passed through
+  // as inputs. The workflow forwards them as env vars to the sync scripts.
   const dispatchUrl = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${WORKFLOW_FILE}/dispatches`
   const ghRes = await fetch(dispatchUrl, {
     method:  'POST',
@@ -94,18 +134,22 @@ export async function handleTriggerSync(request, env) {
       'Content-Type': 'application/json',
       'User-Agent':   'myrx-food-worker/1.0',
     },
-    body: JSON.stringify({ ref, inputs: { force } }),
+    body: JSON.stringify({ ref, inputs: { force, staged, run_id: runId } }),
   })
 
   if (!ghRes.ok) {
     const errText = await ghRes.text().catch(() => '')
+    // Revert sync_status if the dispatch failed.
+    await env.DB.prepare(
+      `UPDATE sync_state SET value = 'failed', updated_at = datetime('now') WHERE key = 'sync_status'`
+    ).run()
     return json({
       error:   `GitHub dispatch failed: ${ghRes.status}`,
       detail:  errText,
     }, 502)
   }
 
-  return json({ triggered: true, workflow: WORKFLOW_FILE, ref, force }, 202)
+  return json({ triggered: true, workflow: WORKFLOW_FILE, ref, force, staged, run_id: runId }, 202)
 }
 
 // ── GET /admin/sync/status ────────────────────────────────────────────────────
@@ -121,10 +165,15 @@ export async function handleSyncStatus(request, env) {
   try { progress = JSON.parse(state['sync_progress'] ?? '{}') } catch {}
 
   return json({
-    status:       state['sync_status']       ?? 'unknown',
-    started_at:   state['sync_started_at']   ?? null,
-    completed_at: state['sync_completed_at'] ?? null,
-    error:        state['sync_error']        || null,
+    status:                state['sync_status']             ?? 'unknown',
+    run_id:                state['sync_run_id']             || null,
+    mode:                  state['sync_mode']               || null,
+    staged_review_pending: state['sync_staged_review']      === '1',
+    last_committed_run_id: state['last_committed_run_id']   || null,
+    cancel_requested:      state['sync_cancel_requested']   === '1',
+    started_at:            state['sync_started_at']         ?? null,
+    completed_at:          state['sync_completed_at']       ?? null,
+    error:                 state['sync_error']              || null,
     progress,
     usda: {
       last_sync_date: state['usda_last_sync_date'] || null,

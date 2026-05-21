@@ -49,3 +49,26 @@ CREATE VIRTUAL TABLE IF NOT EXISTS food_fts USING fts5(
   content_rowid = id,
   tokenize = 'unicode61 remove_diacritics 1'
 );
+
+-- Sync changelog table — full schema in migrations/0007_sync_changelog.sql.
+-- Captures every insert/update/delete from a sync run so we can support
+-- the dry-run-toggle staged-commit model and undo-last-sync. See the
+-- migration file for the full rationale.
+CREATE TABLE IF NOT EXISTS sync_changelog (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id          TEXT    NOT NULL,
+  operation       TEXT    NOT NULL CHECK (operation IN ('insert','update','delete')),
+  food_source     TEXT    NOT NULL,
+  food_source_id  TEXT    NOT NULL,
+  before_data     TEXT,
+  after_data      TEXT,
+  committed       INTEGER NOT NULL DEFAULT 0,
+  reverted        INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS sync_changelog_run_id_idx
+  ON sync_changelog(run_id);
+
+CREATE INDEX IF NOT EXISTS sync_changelog_run_committed_idx
+  ON sync_changelog(run_id, committed, reverted);

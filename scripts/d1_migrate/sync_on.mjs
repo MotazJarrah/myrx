@@ -27,7 +27,12 @@ import { withRetry }                          from './lib/retry.mjs'
 import { getState, setState, updateProgress,
          setFinalStatus }                     from './lib/sync-state.mjs'
 import { normalizeUpc, parseNameByBrand,
-         shouldSkip, foodsEqual }             from './lib/normalize.mjs'
+         foodsEqual }                         from './lib/normalize.mjs'
+import { enrichFood, getFilterReason }       from './lib/filters.mjs'
+import { shouldApplyToLiveDb, isChangelogEnabled,
+         recordInsert, recordUpdate, recordDelete,
+         flushAll, isCancelRequested,
+         pushSyncState }                      from './lib/changelog-recorder.mjs'
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 
@@ -210,6 +215,7 @@ async function run() {
   const toInsert      = []
   const toUpdate      = []
   const myrxSuperseded = []  // source_ids of MYRX items superseded by ON
+  const filterStats   = {}   // rule-rejection counts (same shape as USDA sync)
 
   await streamOnTsv(zipPath, row => {
     const upc = normalizeUpc(row.ean_13)
@@ -222,21 +228,32 @@ async function run() {
     }
 
     const macros  = extractOnMacros(row.nutrition_100g)
-    if (macros.kcal === 0) return        // zero-cal excluded
-
     const serving = extractOnServing(row.serving)
     const parsed  = parseNameByBrand(row.name ?? '')
 
-    const candidate = {
-      source_id:     row.id,
-      name:          parsed.name  || row.name?.trim() || null,
-      brand:         parsed.brand || null,
+    let candidate = {
+      source:         'on',
+      source_id:      row.id,
+      name:           parsed.name  || row.name?.trim() || null,
+      brand:          parsed.brand || null,
       upc,
+      data_type:      'branded',
+      source_subtype: 'on_branded',  // required for filter Rules 5 + 14
       ...macros,
       ...serving,
     }
 
-    if (shouldSkip({ upc: candidate.upc, kcal: candidate.kcal })) return
+    // ── 19-rule filter pipeline (same as USDA sync + bulk import) ──────
+    // Tier 1 REPAIR (title-case, kcal backfill) then Tier 2-4 REJECT.
+    // Replaces the legacy `if (macros.kcal === 0) return` skip and the
+    // shouldSkip check below — those are now subsumed by Rule 8 (all-
+    // zero macros) + Rule 6 (short names).
+    candidate = enrichFood(candidate)
+    const reason = getFilterReason(candidate)
+    if (reason) {
+      filterStats[reason] = (filterStats[reason] || 0) + 1
+      return
+    }
 
     seenIds.add(row.id)
     const existing = existingOn.get(row.id)
@@ -248,6 +265,15 @@ async function run() {
     }
   })
 
+  const totalFiltered = Object.values(filterStats).reduce((a, b) => a + b, 0)
+  if (totalFiltered > 0) {
+    const breakdown = Object.entries(filterStats)
+      .sort((a, b) => b[1] - a[1])
+      .map(([rule, n]) => `${rule}=${n}`)
+      .join(', ')
+    console.log(`     filter pipeline: ${totalFiltered.toLocaleString()} dropped (${breakdown})`)
+  }
+
   // Rows in DB but not in new TSV → delete
   const toDelete = [...existingOn.keys()].filter(id => !seenIds.has(id))
 
@@ -257,66 +283,135 @@ async function run() {
   // ── Apply changes ───────────────────────────────────────────────────────────
   console.log('\nStep 5/5  Applying changes to D1…')
 
+  // Record changelog entries for ALL operations (insert/update/delete)
+  // BEFORE running the live D1 batches. This way we capture the same
+  // change set whether we're in staged or commit mode.
+  if (isChangelogEnabled()) {
+    for (const r of toInsert) {
+      recordInsert({
+        source: 'on', source_id: r.source_id, source_subtype: 'on_branded',
+        name: r.name, brand: r.brand,
+        kcal: r.kcal, protein_g: r.protein_g, fat_g: r.fat_g, carbs_g: r.carbs_g,
+        fiber_g: r.fiber_g, sodium_mg: r.sodium_mg,
+        serving_g: r.serving_g, serving_label: r.serving_label,
+        servings_per_container: null, data_type: 'branded', upc: r.upc,
+        imported_at: null, last_synced_at: null, source_version: null,
+      })
+    }
+    // For updates, we need to fetch the existing row first. We already
+    // know which ids are being updated (existingOn map) — pull those rows.
+    for (const r of toUpdate) {
+      const { results: prev } = await db.query(
+        `SELECT * FROM food_library WHERE source='on' AND source_id=? LIMIT 1`,
+        [r.source_id]
+      )
+      if (prev?.[0]) {
+        recordUpdate(prev[0], {
+          source: 'on', source_id: r.source_id, source_subtype: 'on_branded',
+          name: r.name, brand: r.brand,
+          kcal: r.kcal, protein_g: r.protein_g, fat_g: r.fat_g, carbs_g: r.carbs_g,
+          fiber_g: r.fiber_g, sodium_mg: r.sodium_mg,
+          serving_g: r.serving_g, serving_label: r.serving_label,
+          servings_per_container: null, data_type: 'branded', upc: r.upc,
+          imported_at: prev[0].imported_at, last_synced_at: null, source_version: null,
+        })
+      }
+    }
+    // Deletes — fetch before snapshot for undo support.
+    for (const id of toDelete) {
+      const { results: prev } = await db.query(
+        `SELECT * FROM food_library WHERE source='on' AND source_id=? LIMIT 1`, [id]
+      )
+      if (prev?.[0]) recordDelete(prev[0])
+    }
+    // MYRX superseded deletes too.
+    for (const r of myrxSupersededUniq) {
+      const { results: prev } = await db.query(
+        `SELECT * FROM food_library WHERE source='myrx' AND source_id=? LIMIT 1`,
+        [r.source_id]
+      )
+      if (prev?.[0]) recordDelete(prev[0])
+    }
+  }
+
   // Inserts — all kept ON rows have UPCs (the `if (!upc) return` filter
   // earlier in this script enforces it), so data_type is always 'branded'.
-  for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
-    const batch = toInsert.slice(i, i + BATCH_SIZE)
-    await db.batch(batch.map(r => ({
-      sql: `INSERT OR IGNORE INTO food_library
-              (source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
-               fiber_g, sodium_mg, serving_g, serving_label, upc, data_type)
-            VALUES ('on',?,?,?,?,?,?,?,?,?,?,?,?,'branded')`,
-      params: [r.source_id, r.name, r.brand, r.kcal, r.protein_g, r.fat_g,
-               r.carbs_g, r.fiber_g, r.sodium_mg, r.serving_g, r.serving_label, r.upc],
-    })))
-    process.stdout.write(`\r  Inserted ${Math.min(i + BATCH_SIZE, toInsert.length).toLocaleString()} / ${toInsert.length.toLocaleString()}`)
-  }
-
-  // Updates — re-assert data_type so any prior null-state gets corrected.
-  for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
-    const batch = toUpdate.slice(i, i + BATCH_SIZE)
-    await db.batch(batch.map(r => ({
-      sql: `UPDATE food_library SET
-              name=?, brand=?, kcal=?, protein_g=?, fat_g=?, carbs_g=?,
-              fiber_g=?, sodium_mg=?, serving_g=?, serving_label=?, upc=?,
-              data_type='branded'
-            WHERE source='on' AND source_id=?`,
-      params: [r.name, r.brand, r.kcal, r.protein_g, r.fat_g, r.carbs_g,
-               r.fiber_g, r.sodium_mg, r.serving_g, r.serving_label, r.upc, r.source_id],
-    })))
-    process.stdout.write(`\r  Updated ${Math.min(i + BATCH_SIZE, toUpdate.length).toLocaleString()} / ${toUpdate.length.toLocaleString()}`)
-  }
-
-  // Deletes (ON rows no longer in TSV)
-  for (let i = 0; i < toDelete.length; i += BATCH_SIZE) {
-    const batch = toDelete.slice(i, i + BATCH_SIZE)
-    await db.batch(batch.map(id => ({
-      sql:    `DELETE FROM food_library WHERE source='on' AND source_id=?`,
-      params: [id],
-    })))
-  }
-
-  // Delete MYRX items superseded by ON
-  if (myrxSupersededUniq.length > 0) {
-    console.log(`\n  Removing ${myrxSupersededUniq.length} MYRX item(s) superseded by ON…`)
-    for (const { upc, source_id } of myrxSupersededUniq) {
-      console.log(`    ↳ MYRX source_id=${source_id} UPC=${upc}`)
-    }
-    for (let i = 0; i < myrxSupersededUniq.length; i += BATCH_SIZE) {
-      const batch = myrxSupersededUniq.slice(i, i + BATCH_SIZE)
+  // source_subtype = 'on_branded' so Rule 14 (negligible branded entries)
+  // applies, mirroring USDA's 'branded_food' subtype.
+  if (shouldApplyToLiveDb()) {
+    for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+      const batch = toInsert.slice(i, i + BATCH_SIZE)
       await db.batch(batch.map(r => ({
-        sql:    `DELETE FROM food_library WHERE source='myrx' AND source_id=?`,
-        params: [r.source_id],
+        sql: `INSERT OR IGNORE INTO food_library
+                (source, source_id, name, brand, kcal, protein_g, fat_g, carbs_g,
+                 fiber_g, sodium_mg, serving_g, serving_label, upc, data_type, source_subtype)
+              VALUES ('on',?,?,?,?,?,?,?,?,?,?,?,?,'branded','on_branded')`,
+        params: [r.source_id, r.name, r.brand, r.kcal, r.protein_g, r.fat_g,
+                 r.carbs_g, r.fiber_g, r.sodium_mg, r.serving_g, r.serving_label, r.upc],
+      })))
+      process.stdout.write(`\r  Inserted ${Math.min(i + BATCH_SIZE, toInsert.length).toLocaleString()} / ${toInsert.length.toLocaleString()}`)
+      if (await isCancelRequested()) {
+        console.log('\n  ⚠ Cancel requested — aborting ON inserts')
+        return
+      }
+    }
+
+    // Updates — re-assert data_type + source_subtype so any prior null-state
+    // gets corrected.
+    for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
+      const batch = toUpdate.slice(i, i + BATCH_SIZE)
+      await db.batch(batch.map(r => ({
+        sql: `UPDATE food_library SET
+                name=?, brand=?, kcal=?, protein_g=?, fat_g=?, carbs_g=?,
+                fiber_g=?, sodium_mg=?, serving_g=?, serving_label=?, upc=?,
+                data_type='branded', source_subtype='on_branded'
+              WHERE source='on' AND source_id=?`,
+        params: [r.name, r.brand, r.kcal, r.protein_g, r.fat_g, r.carbs_g,
+                 r.fiber_g, r.sodium_mg, r.serving_g, r.serving_label, r.upc, r.source_id],
+      })))
+      process.stdout.write(`\r  Updated ${Math.min(i + BATCH_SIZE, toUpdate.length).toLocaleString()} / ${toUpdate.length.toLocaleString()}`)
+    }
+
+    // Deletes (ON rows no longer in TSV)
+    for (let i = 0; i < toDelete.length; i += BATCH_SIZE) {
+      const batch = toDelete.slice(i, i + BATCH_SIZE)
+      await db.batch(batch.map(id => ({
+        sql:    `DELETE FROM food_library WHERE source='on' AND source_id=?`,
+        params: [id],
       })))
     }
+
+    // Delete MYRX items superseded by ON
+    if (myrxSupersededUniq.length > 0) {
+      console.log(`\n  Removing ${myrxSupersededUniq.length} MYRX item(s) superseded by ON…`)
+      for (const { upc, source_id } of myrxSupersededUniq) {
+        console.log(`    ↳ MYRX source_id=${source_id} UPC=${upc}`)
+      }
+      for (let i = 0; i < myrxSupersededUniq.length; i += BATCH_SIZE) {
+        const batch = myrxSupersededUniq.slice(i, i + BATCH_SIZE)
+        await db.batch(batch.map(r => ({
+          sql:    `DELETE FROM food_library WHERE source='myrx' AND source_id=?`,
+          params: [r.source_id],
+        })))
+      }
+    }
+
+    console.log('\n  ✓ Changes applied')
+  } else {
+    console.log('\n  ⓘ Staged mode — D1 writes skipped. User must Commit to apply.')
   }
 
-  console.log('\n  ✓ Changes applied')
+  // Flush any remaining buffered changelog entries.
+  await flushAll()
 
   // ── Rebuild FTS ─────────────────────────────────────────────────────────────
-  console.log('\n  Rebuilding FTS5 index…')
-  await db.query(`INSERT INTO food_fts(food_fts) VALUES ('rebuild')`)
-  console.log('  ✓ FTS rebuilt')
+  // Only meaningful when changes actually landed in food_library. In staged
+  // mode the commit endpoint rebuilds FTS after applying the changelog.
+  if (shouldApplyToLiveDb()) {
+    console.log('\n  Rebuilding FTS5 index…')
+    await db.query(`INSERT INTO food_fts(food_fts) VALUES ('rebuild')`)
+    console.log('  ✓ FTS rebuilt')
+  }
 
   // ── Save state ──────────────────────────────────────────────────────────────
   await setState(db, 'on_last_checksum', newChecksum)
