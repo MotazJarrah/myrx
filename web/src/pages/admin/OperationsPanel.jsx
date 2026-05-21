@@ -1290,51 +1290,9 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
     }
   }, [sync?.status, fetchEta])
 
-  // ── Sync step-log poller ──────────────────────────────────────────
-  // Continuously pulls new step_log rows from D1 and appends them to
-  // the unified logEntries array. Runs while a sync is active OR if
-  // we have a run_id we haven't fully drained yet (e.g. a sync just
-  // failed and we want to see the final entries).
-  //
-  // Cursor is per-run_id — switching to a new run resets the cursor
-  // but DOES NOT clear logEntries. The log is cleared explicitly by
-  // clearLog() at the start of each new operation (Upload or Sync).
-  useEffect(() => {
-    const runId = sync?.run_id
-    if (!runId) return
-    if (!isRunning && sync?.status !== 'failed') return
-
-    // Reset cursor when the run_id changes.
-    if (polledRunIdRef.current !== runId) {
-      logCursorRef.current = 0
-      polledRunIdRef.current = runId
-    }
-
-    let cancelled = false
-    async function tick() {
-      try {
-        const res = await workerFetch(
-          `/admin/sync/step-log?run_id=${runId}&after_id=${logCursorRef.current}&limit=500`
-        )
-        if (!res.ok || cancelled) return
-        const data = await res.json()
-        if (cancelled || !data.rows?.length) return
-        logCursorRef.current = data.next_id
-        const mapped = data.rows.map(r => ({
-          id:         `srv-${r.id}`,
-          ts:         r.ts,
-          step_code:  r.step_code,
-          message:    r.message,
-          level:      r.level,
-          error_code: r.error_code,
-        }))
-        setLogEntries(prev => prev.concat(mapped))
-      } catch { /* silent */ }
-    }
-    tick()
-    const interval = setInterval(tick, 2000)
-    return () => { cancelled = true; clearInterval(interval) }
-  }, [sync?.run_id, isRunning, sync?.status])
+  // (Sync step-log poller moved below the `isRunning` declaration —
+  // it depends on that variable and would hit a temporal dead zone
+  // if registered here.)
 
   // ── Ephemeral error display ────────────────────────────────────────────
   // First time we observe sync.error in a non-running state (i.e. after
@@ -1408,6 +1366,52 @@ export function OperationsPanel({ stats: pageStats, onRefreshStats }) {
   const isRunning = status === 'running' || status === 'pending' || status === 'starting' || status === 'cancelling'
   const isCancelling = status === 'cancelling'
   const reviewPending = status === 'staged_review' && sync?.run_id
+
+  // ── Sync step-log poller ──────────────────────────────────────────
+  // Continuously pulls new step_log rows from D1 and appends them to
+  // the unified logEntries array. Runs while a sync is active OR if
+  // we have a run_id we haven't fully drained yet (e.g. a sync just
+  // failed and we want to see the final entries).
+  //
+  // Has to live BELOW the `isRunning` declaration — registering this
+  // effect higher in the function body would hit a temporal dead
+  // zone when its dependency array is evaluated at render time
+  // (const declarations aren't accessible before their initializer).
+  useEffect(() => {
+    const runId = sync?.run_id
+    if (!runId) return
+    if (!isRunning && sync?.status !== 'failed') return
+
+    if (polledRunIdRef.current !== runId) {
+      logCursorRef.current = 0
+      polledRunIdRef.current = runId
+    }
+
+    let cancelled = false
+    async function tick() {
+      try {
+        const res = await workerFetch(
+          `/admin/sync/step-log?run_id=${runId}&after_id=${logCursorRef.current}&limit=500`
+        )
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        if (cancelled || !data.rows?.length) return
+        logCursorRef.current = data.next_id
+        const mapped = data.rows.map(r => ({
+          id:         `srv-${r.id}`,
+          ts:         r.ts,
+          step_code:  r.step_code,
+          message:    r.message,
+          level:      r.level,
+          error_code: r.error_code,
+        }))
+        setLogEntries(prev => prev.concat(mapped))
+      } catch { /* silent */ }
+    }
+    tick()
+    const interval = setInterval(tick, 2000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [sync?.run_id, isRunning, sync?.status])
 
   // Auto-expand the panel when something actionable is happening: an
   // active sync, a failure (so the error is visible), or a staged review
