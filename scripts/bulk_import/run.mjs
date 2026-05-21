@@ -159,22 +159,29 @@ async function main() {
   //
   // USDA: extract the snapshot date from the source_version string
   //   "FoodData_Central_csv_2026-04-30" → "2026-04-30"
-  // ON: write the version + checksum so the diff-sync skips work when
-  //   the published version hasn't changed.
+  // ON: write the version string so the diff-sync skips work when the
+  //   published version hasn't changed.
+  //
+  // NOTE: `executeSql()` in d1_writer.mjs accepts only a SQL string,
+  // not bound parameters — values must be inlined into the SQL. Both
+  // values here are well-formed dates/version strings with no special
+  // characters, so direct inlining is safe (still wrap in single
+  // quotes for SQL literal syntax).
   console.log('\n  Setting sync watermarks for incremental sync…')
   const usdaDateMatch = /(\d{4}-\d{2}-\d{2})/.exec(usdaVersion || '')
   const usdaSnapshotDate = usdaDateMatch?.[1] || new Date().toISOString().slice(0, 10)
+  // Escape any embedded single quotes defensively.
+  const usdaSnapshotDateEsc = usdaSnapshotDate.replace(/'/g, "''")
+  const onVersionEsc        = (onVersion || '').replace(/'/g, "''")
   await executeSql(
     `INSERT INTO sync_state (key, value, updated_at)
-     VALUES ('usda_last_sync_date', ?, datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    [usdaSnapshotDate]
+     VALUES ('usda_last_sync_date', '${usdaSnapshotDateEsc}', datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;`
   )
   await executeSql(
     `INSERT INTO sync_state (key, value, updated_at)
-     VALUES ('on_last_version', ?, datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-    [onVersion || '']
+     VALUES ('on_last_version', '${onVersionEsc}', datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;`
   )
   console.log(`  ✓ usda_last_sync_date = ${usdaSnapshotDate}`)
   console.log(`  ✓ on_last_version    = ${onVersion}`)
