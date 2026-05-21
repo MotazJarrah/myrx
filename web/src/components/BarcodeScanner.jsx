@@ -2,11 +2,35 @@
  * BarcodeScanner
  * Full-screen camera overlay using @zxing/browser.
  * Calls onScan(rawText) on first read, onClose() on dismiss.
+ *
+ * Camera selection: requests the REAR camera explicitly via
+ * facingMode='environment'. The previous version passed `undefined` as
+ * the deviceId which lets the browser pick — on phones this defaults
+ * to the FRONT camera, which is useless for scanning a barcode the
+ * user is holding in front of them.
+ *
+ * Format hints: only scans UPC/EAN families (what every food product
+ * barcode uses — UPC-A, UPC-E, EAN-13, EAN-8). Drops QR codes, Code
+ * 128, Data Matrix, etc. that the reader would otherwise try every
+ * frame. Big perf + reliability win on slower phones.
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
+import { BarcodeFormat, DecodeHintType } from '@zxing/library'
 import { X, Camera } from 'lucide-react'
+
+// Pre-build the hints map once — only the four barcode formats found on
+// retail food packaging. Excluding QR/Data Matrix/Code 128 makes each
+// decode pass faster and reduces false positives on busy packaging.
+const SCAN_HINTS = new Map()
+SCAN_HINTS.set(DecodeHintType.POSSIBLE_FORMATS, [
+  BarcodeFormat.UPC_A,
+  BarcodeFormat.UPC_E,
+  BarcodeFormat.EAN_13,
+  BarcodeFormat.EAN_8,
+])
+SCAN_HINTS.set(DecodeHintType.TRY_HARDER, true)
 
 export function BarcodeScanner({ onScan, onClose }) {
   const videoRef    = useRef(null)
@@ -15,11 +39,24 @@ export function BarcodeScanner({ onScan, onClose }) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const reader = new BrowserMultiFormatReader()
+    const reader = new BrowserMultiFormatReader(SCAN_HINTS)
     let stopped  = false
 
-    reader.decodeFromVideoDevice(
-      undefined,
+    // Request the rear-facing camera explicitly. On phones this is what
+    // the user actually wants — they hold the device with the screen
+    // facing them and aim the back at the barcode. `ideal` instead of
+    // `exact` so desktop browsers (no rear camera) still get the only
+    // available camera rather than failing outright.
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:      { ideal: 1280 },
+        height:     { ideal: 720 },
+      },
+    }
+
+    reader.decodeFromConstraints(
+      constraints,
       videoRef.current,
       (result, _err, controls) => {
         controlsRef.current = controls
@@ -34,7 +71,7 @@ export function BarcodeScanner({ onScan, onClose }) {
       setError(
         msg.toLowerCase().includes('permission')
           ? 'Camera permission denied. Please allow camera access and try again.'
-          : msg.toLowerCase().includes('device')
+          : msg.toLowerCase().includes('device') || msg.toLowerCase().includes('found')
           ? 'No camera found on this device.'
           : `Camera error: ${msg}`
       )
@@ -80,7 +117,10 @@ export function BarcodeScanner({ onScan, onClose }) {
                 <span className="absolute top-0 right-0 h-5 w-5 border-t-2 border-r-2 border-primary rounded-tr" />
                 <span className="absolute bottom-0 left-0  h-5 w-5 border-b-2 border-l-2 border-primary rounded-bl" />
                 <span className="absolute bottom-0 right-0 h-5 w-5 border-b-2 border-r-2 border-primary rounded-br" />
-                <span className="absolute left-0 right-0 top-1/2 h-px bg-primary/70 animate-scanline" />
+                {/* Scanline — animated `top` from 0% to ~100% via the
+                    `scanline` keyframes defined in tailwind.config.js.
+                    No static `top` class because the animation drives it. */}
+                <span className="absolute left-0 right-0 h-px bg-primary/70 animate-scanline" />
               </div>
             </div>
 
