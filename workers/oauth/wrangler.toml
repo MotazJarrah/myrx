@@ -1,0 +1,36 @@
+name = "myrx-oauth"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+account_id = "d42e96189bfa3cacb2aaab8231eb0097"
+
+# Production route: catch /oauth/* on myrxfit.com BEFORE Cloudflare Pages.
+# Strava / Fitbit / etc. providers redirect to /oauth/callback/<platform> after
+# the user authenticates; this worker handles those callbacks. The web app
+# (Cloudflare Pages) keeps every other path.
+[[routes]]
+pattern   = "myrxfit.com/oauth/*"
+zone_name = "myrxfit.com"
+
+[vars]
+# Public config. OAuth Client IDs are returned to the browser in the authorize
+# URL, so they're not secret per the OAuth 2.0 spec — but Client SECRETS are.
+# After registering each provider, paste the Client ID below and redeploy.
+STRAVA_CLIENT_ID = ""
+FITBIT_CLIENT_ID = ""
+POLAR_CLIENT_ID  = "d315fe6b-5a61-48b5-8224-83f22a311d36"
+
+SUPABASE_URL     = "https://xtxzfhoxyyrlxslgzvty.supabase.co"
+
+# Mobile deep link the OAuth callback redirects to once token exchange succeeds.
+# Receives ?platform=<p>&status=ok|error[&reason=...] in the query string.
+MOBILE_DEEP_LINK = "myrx://oauth/done"
+
+# Secrets to configure via `wrangler secret put <NAME>` (NEVER commit):
+#   STRAVA_CLIENT_SECRET        Strava OAuth client secret
+#   FITBIT_CLIENT_SECRET        Fitbit OAuth client secret
+#   POLAR_CLIENT_SECRET         Polar AccessLink OAuth client secret
+#   SUPABASE_SERVICE_ROLE_KEY   Supabase service-role JWT (writes user_integrations)
+#   OAUTH_TOKEN_ENC_KEY         base64(32 bytes) AES-256-GCM key for token encryption
+#                               Generate: `openssl rand -base64 32`
+#   OAUTH_STATE_SIGNING_KEY     base64(32 bytes) HMAC-SHA256 key for OAuth state
+#                               Generate: `openssl rand -base64 32`

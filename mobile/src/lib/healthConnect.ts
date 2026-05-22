@@ -36,11 +36,48 @@
  */
 
 import { Platform } from 'react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 
 // react-native-health-connect is Android-only — importing on iOS will
 // throw at runtime because there's no native module. We import lazily
 // inside each function so iOS doesn't blow up on module load.
 type HCModule = typeof import('react-native-health-connect')
+
+// "Manually disconnected by the user" flag. Persisted across app
+// restarts so the disconnect intent sticks even though Android 14+
+// only actually revokes permissions on next process restart (which
+// means the SDK keeps reporting the OLD granted set for one boot
+// after the user taps Disconnect).
+//
+// Lifecycle:
+//   - Set to '1' inside disconnect().
+//   - Cleared inside requestPermissions() the moment the user
+//     actually re-grants something through the system UI.
+//   - Honored inside grantedPermissions() — if the flag is set, we
+//     return [] regardless of what the SDK reports.
+//
+// This is the fix for the bug where the user tapped Disconnect, the
+// UI flipped to "Connect" immediately, but on the next app reload the
+// row re-showed as "Connected" because the SDK still reported the
+// pre-revoke permission set.
+const DISCONNECTED_KEY = 'myrx.healthConnect.disconnected'
+
+async function isManuallyDisconnected(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(DISCONNECTED_KEY)) === '1'
+  } catch {
+    return false
+  }
+}
+
+async function setManuallyDisconnected(value: boolean): Promise<void> {
+  try {
+    if (value) await AsyncStorage.setItem(DISCONNECTED_KEY, '1')
+    else       await AsyncStorage.removeItem(DISCONNECTED_KEY)
+  } catch {
+    /* ignore — best effort */
+  }
+}
 
 let _hcModuleCache: HCModule | null = null
 function getHC(): HCModule | null {
@@ -118,6 +155,10 @@ export async function initialize(): Promise<boolean> {
 const PERMISSIONS_TO_REQUEST = [
   { accessType: 'read' as const, recordType: 'ExerciseSession' as const },
   { accessType: 'read' as const, recordType: 'HeartRate' as const },
+  // RestingHeartRate is a separate record type (one daily reading) —
+  // distinct from HeartRate's continuous samples. Powers the daily-HR
+  // timeline page's resting-HR baseline + recovery metrics.
+  { accessType: 'read' as const, recordType: 'RestingHeartRate' as const },
   { accessType: 'read' as const, recordType: 'Steps' as const },
   { accessType: 'read' as const, recordType: 'Distance' as const },
   { accessType: 'read' as const, recordType: 'TotalCaloriesBurned' as const },
@@ -139,9 +180,14 @@ export async function requestPermissions(): Promise<string[]> {
     // Returned permissions have shape { accessType, recordType }; convert
     // to a flat list of recordType strings for the caller (UI just
     // needs to know which data types we can read).
-    return granted
+    const list = granted
       .map((p: any) => p?.recordType as string | undefined)
       .filter((s): s is string => !!s)
+    // User actually granted something through the system UI — clear any
+    // prior manual-disconnect flag so future grantedPermissions() calls
+    // report the real SDK state.
+    if (list.length > 0) await setManuallyDisconnected(false)
+    return list
   } catch {
     return []
   }
@@ -154,6 +200,11 @@ export async function requestPermissions(): Promise<string[]> {
  * without forcing the permission prompt.
  */
 export async function grantedPermissions(): Promise<string[]> {
+  // If the user manually tapped Disconnect, treat as not-connected even
+  // though Android 14+ may still be reporting the pre-revoke permission
+  // set until next process restart. The flag is cleared the moment the
+  // user re-grants something via requestPermissions().
+  if (await isManuallyDisconnected()) return []
   const hc = getHC()
   if (!hc) return []
   try {
@@ -175,6 +226,10 @@ export async function grantedPermissions(): Promise<string[]> {
  */
 export async function disconnect(): Promise<void> {
   const hc = getHC()
+  // ALWAYS persist the disconnect intent, even on iOS or when the
+  // native module isn't available — the user clicked Disconnect, the
+  // UI should treat them as disconnected regardless of platform state.
+  await setManuallyDisconnected(true)
   if (!hc) return
   try {
     await hc.revokeAllPermissions()
@@ -262,6 +317,42 @@ export interface RecentHeartRateSample {
   /** ISO timestamp. */
   time: string
   bpm:  number
+}
+
+export interface RecentRestingHeartRate {
+  /** ISO timestamp the reading was recorded. Typically one per day. */
+  time: string
+  bpm:  number
+}
+
+/**
+ * Pull daily resting heart rate readings from Health Connect.
+ *
+ * RestingHeartRate is a SEPARATE record type from HeartRate — it's
+ * the daily summary value (typically the minimum sustained HR overnight
+ * or during quiet wake periods), not a sample within continuous data.
+ * Samsung Health computes and writes one of these per day; Garmin /
+ * Whoop / Fitbit do similarly.
+ */
+export async function fetchRecentRestingHeartRate(daysBack = 30): Promise<RecentRestingHeartRate[]> {
+  const hc = getHC()
+  if (!hc) return []
+  try {
+    await hc.initialize()
+    const result = await hc.readRecords('RestingHeartRate', {
+      timeRangeFilter: {
+        operator: 'between',
+        startTime: isoNDaysAgo(daysBack),
+        endTime:   isoNow(),
+      },
+    })
+    return (result.records || []).map((r: any) => ({
+      time: (r.time as string) ?? (r.startTime as string),
+      bpm:  r.beatsPerMinute as number,
+    }))
+  } catch {
+    return []
+  }
 }
 
 /**

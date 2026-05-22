@@ -1,6 +1,20 @@
-const CACHE = 'myrx-assets-v3'
-const SHELL_CACHE = 'myrx-shell-v3'
+const CACHE = 'myrx-assets-v4'
+const SHELL_CACHE = 'myrx-shell-v4'
 
+// IMPORTANT — bfcache compatibility:
+//   - `self.skipWaiting()` is OK: it controls how fast a NEW SW takes
+//     over its first install. No bfcache impact.
+//   - `self.clients.claim()` IS NOT OK on a SPA that wants bfcache.
+//     Calling it forces the new SW to take control of every existing
+//     client immediately, which fires `serviceworker-claimed` in
+//     Chrome's bfcache machinery and evicts every cached page. The
+//     practical symptom: every tab-switch back to the app reloads from
+//     scratch. We DO NOT need claim() because the SW's only job here is
+//     stale-while-revalidate caching of static assets — old SW handles
+//     existing tabs fine; new SW takes over on the next cold navigation.
+// References:
+//   https://web.dev/articles/bfcache (search "serviceworker-claimed")
+//   https://developer.chrome.com/docs/web-platform/bfcache-notrestoredreasons
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', e => {
   e.waitUntil(
@@ -8,7 +22,7 @@ self.addEventListener('activate', e => {
       Promise.all(keys.filter(k => k !== CACHE && k !== SHELL_CACHE).map(k => caches.delete(k)))
     )
   )
-  self.clients.claim()
+  // DO NOT call self.clients.claim() — see comment above.
 })
 
 self.addEventListener('fetch', e => {

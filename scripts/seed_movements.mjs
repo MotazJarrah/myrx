@@ -25,12 +25,16 @@ function isDumbbell(name) {
   return DUMBBELL_KEYWORDS.some(kw => lower.includes(kw))
 }
 
-// Mirror of cardio duration set from movements.js
+// Mirror of cardio duration set from movements.js. May 2026 cleanup removed
+// Jump Rope (covered by Single/Double Unders in strength), agility drills
+// (Agility Ladder Drills, Carioca, Lateral Shuffles, Line Drills),
+// sprint-style (Box Step Overs, Shuttle Run, Slideboard), conditioning fluff
+// (Battle Ropes, Shadow Boxing, Speed Bag), floor-work cardio (Bear Crawl,
+// Crab Walk, Low Crawl), and the duplicate variants (Cycling Indoor Trainer,
+// Indoor Cycling, Curved Treadmill, Swimming Open Water). See CLAUDE.md
+// "Cardio coaching-surface detail card — locked design spec" for rationale.
 const CARDIO_DURATION_SET = new Set([
-  'Agility Ladder Drills', 'Arc Trainer', 'Battle Ropes', 'Bear Crawl',
-  'Box Step Overs', 'Carioca', 'Crab Walk', "Jacob's Ladder", 'Jump Rope',
-  'Lateral Shuffles', 'Line Drills', 'Low Crawl', 'Shadow Boxing',
-  'Shuttle Run', 'Slideboard', 'Speed Bag', 'StairMill', 'VersaClimber',
+  'Arc Trainer', 'StairMill',
 ])
 
 // ── Escape single quotes for SQL ──────────────────────────────────────────────

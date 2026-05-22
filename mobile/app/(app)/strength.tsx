@@ -152,6 +152,17 @@ function bwTierFromVariantName(name: string): BwTier {
   return 'rx'
 }
 
+// Sled Work has two parallel variants — Push and Pull — stored as
+// separate movements in the DB but collapsed into a single index row
+// keyed by the base name "Sled Work". See SledDragConsolidatedDetail
+// in [exercise].tsx for the detail-page wrapper.
+const SLED_WORK_BASE_NAME = 'Sled Work'
+function sledVariantFromName(name: string): SledVariant | null {
+  if (name === 'Sled Work [Push]') return 'push'
+  if (name === 'Sled Work [Drag]') return 'drag'
+  return null
+}
+
 function bwTierBadgeLabel(tier: BwTier): string {
   switch (tier) {
     case 'band+knee': return 'B+K'
@@ -170,12 +181,47 @@ function parseRepsFromBwLabel(label: string | null | undefined): number | null {
   return null
 }
 
+type SledVariant = 'push' | 'drag'
+
+// Shared fields populated for any row that's a member of an admin-added
+// variant family. The "Your Movements" row renders the badge whenever
+// `variantShortLabel` is set, regardless of which kind of movement it is —
+// makes the badge truly generic across iso / assisted / carry / weighted
+// families. `mostRecentVariantFullName` is the bracketed variant name (e.g.
+// "Test [Test 1]") so tapping the row can route correctly when needed.
+type FamilyBadgeFields = {
+  variantShortLabel?: string | null;
+  mostRecentVariantFullName?: string;
+}
+
 type MoveBest =
-  | { name: string; kind: 'isometric'; bestSecs: number }
-  | { name: string; kind: 'assisted';  bestAssistance: number; unit: string }
-  | { name: string; kind: 'carry';     bestDist: number }
+  | ({ name: string; kind: 'isometric'; bestSecs: number } & FamilyBadgeFields)
+  | ({ name: string; kind: 'assisted';  bestAssistance: number; unit: string } & FamilyBadgeFields)
+  | ({ name: string; kind: 'carry';     bestDist: number } & FamilyBadgeFields)
   | { name: string; kind: 'bodyweight-consolidated'; bestByTier: Record<BwTier, number>; highestTier: BwTier; canHaveTiers: boolean }
-  | { name: string; kind: 'strength';  oneRM: number; unit: string }
+  // Sled Work consolidates [Push] and [Pull] variants into one row keyed
+  // by the base name "Sled Work". Tapping the row routes to the
+  // consolidated detail page (SledDragConsolidatedDetail) which has a
+  // PUSH | DRAG toggle. mostRecentVariant drives the small badge shown
+  // on the right of the row so the user can see at a glance which
+  // variant they last trained.
+  | { name: string; kind: 'sled-work-consolidated'; bestByVariant: Record<SledVariant, number>; mostRecentVariant: SledVariant }
+  | {
+      name: string;
+      kind: 'strength';
+      oneRM: number;
+      unit: string;
+      /** Set for variant rows (parent_movement_id != null) so a row keyed by
+       *  the PARENT's display name can render a small badge for the most-
+       *  recently-logged variant — mirrors the Sled Work PUSH/DRAG and
+       *  Swimming FREE/BACK/BREAST/FLY pattern, but data-driven from
+       *  movements.variant_short_label instead of hardcoded constants.
+       *  Undefined for standalone strength movements. */
+      variantShortLabel?: string | null;
+      /** Full bracketed name of the most-recent variant ("Bone [Ex 2]")
+       *  so tapping the row can route to that variant's detail page. */
+      mostRecentVariantFullName?: string;
+    }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -193,6 +239,20 @@ export default function Strength() {
   const [kneeAssist, setKneeAssist] = useState(false)
   const [unit,       setUnit]       = useState<'lb' | 'kg'>((profile?.weight_unit as 'lb' | 'kg') || 'lb')
   useEffect(() => { if (profile?.weight_unit) setUnit(profile.weight_unit as 'lb' | 'kg') }, [profile?.weight_unit])
+  // Carry distance unit — only matters on the carry log form. Independent
+  // from the weight unit (you can carry a 60 kg stone for 50 ft, or a 100 lb
+  // bag for 15 m — both are valid). Initial value follows the user's profile
+  // distance_unit preference (`mi` → ft, `km` → m); subsequent toggles by
+  // the user are session-local. Storage is always canonical meters — ft
+  // values get converted at save time. See saveEffort + Carry detail page
+  // distance display.
+  const [carryDistUnit, setCarryDistUnit] = useState<'m' | 'ft'>(
+    profile?.distance_unit === 'mi' ? 'ft' : 'm'
+  )
+  useEffect(() => {
+    if (profile?.distance_unit === 'mi') setCarryDistUnit('ft')
+    else if (profile?.distance_unit === 'km') setCarryDistUnit('m')
+  }, [profile?.distance_unit])
 
   // ── UI state ───────────────────────────────────────────────────────────────
   const [saved,        setSaved]        = useState(false)
@@ -206,7 +266,37 @@ export default function Strength() {
 
   // ── DB movements (cached) ──────────────────────────────────────────────────
   const dbMovements     = useMovements()
-  const strengthRecords = useMemo(() => dbMovements.filter(m => m.category === 'strength'), [dbMovements])
+  // Hide family-PARENT rows from the movement-search dropdown. A family
+  // parent is a row with no parent_movement_id but with children pointing
+  // at it (admin-added families like "Bone", and the existing Swimming /
+  // Sled Work parents). The user logs against a specific variant (e.g.
+  // "Bone [Ex 1]"), never the family parent itself — same convention as
+  // Sled Work / Swimming, which is why those families never showed their
+  // parent name in the search.
+  const familyParentIds = useMemo(() => {
+    const ids = new Set<string>()
+    dbMovements.forEach(m => {
+      if (m.parent_movement_id) ids.add(m.parent_movement_id)
+    })
+    return ids
+  }, [dbMovements])
+  // Filter from the search dropdown:
+  //   - non-strength rows
+  //   - family parents (admin uses the variant rows for logging)
+  //   - DEPRECATED rows — keeps them off the new-log search list so the
+  //     user can't add new efforts against a retired movement. The
+  //     movement itself stays in dbMovements so the "Your Movements"
+  //     section + detail page still work for historical efforts the
+  //     user already logged. Mirror of the Deprecate semantics in the
+  //     admin Movement Library.
+  const strengthRecords = useMemo(
+    () => dbMovements.filter(m =>
+      m.category === 'strength'
+      && !familyParentIds.has(m.id)
+      && !m.deprecated
+    ),
+    [dbMovements, familyParentIds],
+  )
   const strengthNames   = useMemo(() => strengthRecords.map(m => m.name), [strengthRecords])
 
   // ── Reset on any meaningful field change ───────────────────────────────────
@@ -248,12 +338,19 @@ export default function Strength() {
       setDistance(''); setWeight(''); setReps(''); setTimeStr('')
       return
     }
-    // Reps: start at 1 (the wheel min).
+    // Reps: start at 1. KEEPING this as 1 (not 0) because "0 reps" isn't a
+    // meaningful set — reps are an integer count of completed lifts, and
+    // showing 0 invites confusion. (May 2026 blank-slate audit kept this
+    // exception; cardio dials and the other strength dials below moved to 0.)
     setReps('1')
-    // Distance: only for carry; start at 5 m (the wheel min).
-    setDistance(isCarry ? '5' : '')
-    // Time: only for isometric; start at 00:01 (1 second, the lowest plausible).
-    setTimeStr(isIsometric ? '00:01' : '')
+    // Distance: only for carry; starts at the wheel's MIN SCROLLABLE value
+    // — 5 m or 15 ft depending on `carryDistUnit`. Carrying 0 isn't a
+    // meaningful effort; the wheel hard-stops at the per-unit min. Save is
+    // enabled from the start since both 5 m and 15 ft > 0.
+    setDistance(isCarry ? (carryDistUnit === 'ft' ? '15' : '5') : '')
+    // Time: only for isometric; start at 00:00 (blank slate — May 2026 lock,
+    // was 00:01). Save remains disabled until the user dials up.
+    setTimeStr(isIsometric ? '00:00' : '')
     // Weight: start at the wheel's minimum — ladder[0] for ladder movements,
     // else the equipment-class wheel `min`. For bodyweight added load and
     // assisted machines this is 0.
@@ -269,7 +366,7 @@ export default function Strength() {
     } else {
       setWeight('')
     }
-  }, [exercise, unit, isIsometric, isCarry, movementRecord]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [exercise, unit, carryDistUnit, isIsometric, isCarry, movementRecord]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Suggestion mode ─────────────────────────────────────────────────────────
   const suggestionMode = !isAdmin && !exercise && pendingQuery.trim() !== '' &&
@@ -379,11 +476,18 @@ export default function Strength() {
     if (isCarry) {
       const w = Number(weight); const d = Number(distance)
       if (!w || !d || d <= 0) return
+      // Canonical storage is metres regardless of which unit the user
+      // entered. Convert ft → m at save time (1 ft = 0.3048 m, rounded to
+      // 1 dp). Detail page reads the stored metres value and converts back
+      // to the user's preferred display unit.
+      const distInMeters = carryDistUnit === 'ft'
+        ? Math.round(d * 0.3048 * 10) / 10
+        : d
       setSaveError('')
       await supabase.from('efforts').insert({
         user_id: user.id, type: 'strength',
-        label: `${exercise} · ${w} ${unit} × ${d} m`,
-        value: `${d} m @ ${w} ${unit}`,
+        label: `${exercise} · ${w} ${unit} × ${distInMeters} m`,
+        value: `${distInMeters} m @ ${w} ${unit}`,
       })
       setSaved(true); setTimeout(resetForm, 1500); return
     }
@@ -466,24 +570,85 @@ export default function Strength() {
             : name
           const rec = dbMovements.find(m => m.name === baseName)
 
+          // ── Family detection (admin-added variant families) ─────────────
+          // If this row has a parent_movement_id, every branch below should
+          // KEY the map by the parent's display name instead of the
+          // variant's name, AND store the variant_short_label so the row
+          // renders the badge. This is what makes the badge work
+          // uniformly across iso / assisted / carry / weighted family
+          // movements — without it, only weighted-standard families had
+          // the badge.
+          //
+          // Sled Work routes through its dedicated `sled-work-consolidated`
+          // kind elsewhere; no need to special-case here. Bodyweight
+          // variants have their own consolidation (BW tiers) and admin
+          // won't add a second variant layer.
+          const familyParent = rec?.parent_movement_id
+            ? dbMovements.find(m => m.id === rec.parent_movement_id) ?? null
+            : null
+          const familyKey      = familyParent?.name ?? null
+          const familyShort    = familyParent ? (rec?.variant_short_label || null) : null
+          const familyFullName = familyParent ? name : undefined
+          // Resolve to: parent name when family, else original variant name.
+          const mapKey = familyKey ?? name
+
           if (rec?.strength_type === 'isometric') {
             const secs = parseDurationSecs(e.value)
             if (secs === null) return
-            const ex = map.get(name) as Extract<MoveBest, { kind: 'isometric' }> | undefined
-            if (!ex || secs > ex.bestSecs) map.set(name, { name, bestSecs: secs, kind: 'isometric' })
+            const ex = map.get(mapKey) as Extract<MoveBest, { kind: 'isometric' }> | undefined
+            // Family-aware: efforts in ascending created_at order, so the
+            // LAST seen variant for the family becomes the badge.
+            if (!ex || secs > ex.bestSecs) {
+              map.set(mapKey, { name: mapKey, bestSecs: secs, kind: 'isometric', variantShortLabel: familyShort, mostRecentVariantFullName: familyFullName })
+            } else if (familyKey) {
+              // Best stays; just refresh the most-recent-variant badge.
+              map.set(mapKey, { ...ex, variantShortLabel: familyShort, mostRecentVariantFullName: familyFullName })
+            }
           } else if (rec?.equipment === 'assisted') {
             const assistM = e.label.match(/·\s*([\d.]+)\s*(\w+)\s*assist/)
             if (!assistM) return
             const assistance = parseFloat(assistM[1]); const u = assistM[2]
-            const ex = map.get(name) as Extract<MoveBest, { kind: 'assisted' }> | undefined
-            if (!ex || assistance < (ex.bestAssistance ?? Infinity))
-              map.set(name, { name, bestAssistance: assistance, unit: u, kind: 'assisted' })
+            const ex = map.get(mapKey) as Extract<MoveBest, { kind: 'assisted' }> | undefined
+            if (!ex || assistance < (ex.bestAssistance ?? Infinity)) {
+              map.set(mapKey, { name: mapKey, bestAssistance: assistance, unit: u, kind: 'assisted', variantShortLabel: familyShort, mostRecentVariantFullName: familyFullName })
+            } else if (familyKey) {
+              map.set(mapKey, { ...ex, variantShortLabel: familyShort, mostRecentVariantFullName: familyFullName })
+            }
           } else if (rec?.equipment === 'carry') {
             const distM = e.label.match(/×\s*([\d.]+)\s*m/)
             if (!distM) return
             const dist = parseFloat(distM[1])
-            const ex = map.get(name) as Extract<MoveBest, { kind: 'carry' }> | undefined
-            if (!ex || dist > (ex.bestDist ?? 0)) map.set(name, { name, bestDist: dist, kind: 'carry' })
+            // Sled Work consolidation: both [Push] and [Pull] variants
+            // collapse into a single row keyed by the base name "Sled Work".
+            // Tracks bestDist per variant + the most-recent-effort variant
+            // so the row badge shows where the user was last training.
+            // Efforts are processed in ascending `created_at` order — so the
+            // LAST variant seen for any Sled Work effort becomes the
+            // mostRecentVariant, which the consolidated detail page reads
+            // to set its default active toggle.
+            const sledVariant = sledVariantFromName(name)
+            if (sledVariant !== null) {
+              const ex = map.get(SLED_WORK_BASE_NAME) as Extract<MoveBest, { kind: 'sled-work-consolidated' }> | undefined
+              if (!ex) {
+                map.set(SLED_WORK_BASE_NAME, {
+                  name: SLED_WORK_BASE_NAME,
+                  kind: 'sled-work-consolidated',
+                  bestByVariant: { push: 0, drag: 0, [sledVariant]: dist },
+                  mostRecentVariant: sledVariant,
+                })
+              } else {
+                const prevBest = ex.bestByVariant[sledVariant] ?? 0
+                const newBestByVariant = { ...ex.bestByVariant, [sledVariant]: Math.max(prevBest, dist) }
+                map.set(SLED_WORK_BASE_NAME, { ...ex, bestByVariant: newBestByVariant, mostRecentVariant: sledVariant })
+              }
+            } else {
+              const ex = map.get(mapKey) as Extract<MoveBest, { kind: 'carry' }> | undefined
+              if (!ex || dist > (ex.bestDist ?? 0)) {
+                map.set(mapKey, { name: mapKey, bestDist: dist, kind: 'carry', variantShortLabel: familyShort, mostRecentVariantFullName: familyFullName })
+              } else if (familyKey) {
+                map.set(mapKey, { ...ex, variantShortLabel: familyShort, mostRecentVariantFullName: familyFullName })
+              }
+            }
           } else if (rec?.equipment === 'bodyweight') {
             // Consolidated bodyweight branch — all four tiers collapse into
             // one row keyed by baseName. See CLAUDE.md "Bodyweight
@@ -515,8 +680,23 @@ export default function Strength() {
           } else {
             const parsed = parseOneRM(e.value)
             if (!parsed) return
-            const ex = map.get(name) as Extract<MoveBest, { kind: 'strength' }> | undefined
-            if (!ex || parsed.oneRM > ex.oneRM) map.set(name, { name, oneRM: parsed.oneRM, unit: parsed.unit, kind: 'strength' })
+            // Family-aware: uses mapKey (parent name when family, else
+            // variant name) + sets badge fields. The shared logic at top
+            // of the dispatch computed familyKey / familyShort /
+            // familyFullName once.
+            const ex = map.get(mapKey) as Extract<MoveBest, { kind: 'strength' }> | undefined
+            if (!ex || parsed.oneRM > ex.oneRM) {
+              map.set(mapKey, {
+                name: mapKey,
+                oneRM: parsed.oneRM,
+                unit: parsed.unit,
+                kind: 'strength',
+                variantShortLabel: familyShort,
+                mostRecentVariantFullName: familyFullName,
+              })
+            } else if (familyKey) {
+              map.set(mapKey, { ...ex, variantShortLabel: familyShort, mostRecentVariantFullName: familyFullName })
+            }
           }
         })
         setMovements([...map.values()].sort((a, b) => a.name.localeCompare(b.name)))
@@ -602,11 +782,14 @@ export default function Strength() {
               <View style={[s.field, s.gridLarge]}>
                 <Text style={s.label}>Assistance ↓</Text>
                 <WheelInput>
+                  {/* No inline unit — the adjacent UnitToggle declares it.
+                      Universal rule: any wheel paired with a UnitToggle
+                      shows only the value; the toggle is the source of
+                      truth for the unit display. */}
                   <PhantomWheel
                     value={Number(weight) || 0}
                     onChange={(n) => setWeight(String(n))}
                     step={5} min={0} max={unit === 'kg' ? 90 : 200}
-                    unit={unit}
                   />
                 </WheelInput>
               </View>
@@ -641,15 +824,20 @@ export default function Strength() {
 
         ) : isCarry ? (
           <>
-            <View style={s.tripleGrid}>
-              <View style={[s.field, s.gridLarge]}>
+            {/* Quad grid: [Weight] [Unit] [Distance] [Unit]. Both unit
+                toggles use the locked 48 px width; the two wheels split the
+                remaining space evenly. Inline units stripped from BOTH
+                wheel values — the toggles to their right declare the unit,
+                so the wheel content is just the number (smaller, fits the
+                tighter column). */}
+            <View style={s.quadGrid}>
+              <View style={[s.field, s.gridQuadLarge]}>
                 <Text style={s.label}>Weight</Text>
                 <WheelInput>
                   <PhantomWheel
                     value={Number(weight) || defaultWeight('carry', unit)}
                     onChange={(n) => setWeight(String(n))}
                     {...weightWheelProps('carry', unit, exercise)}
-                    unit={unit}
                   />
                 </WheelInput>
               </View>
@@ -661,23 +849,37 @@ export default function Strength() {
                   <UnitToggle value={unit} options={['lb', 'kg'] as const} onChange={setUnit} vertical />
                 )}
               </View>
-              <View style={[s.field, s.gridLarge]}>
-                <Text style={s.label}>Distance (m)</Text>
+              <View style={[s.field, s.gridQuadLarge]}>
+                <Text style={s.label}>Distance</Text>
                 <WheelInput>
+                  {/* Wheel range depends on the selected distance unit:
+                        m   → step 5, min 5, max 100  (5–100 m)
+                        ft  → step 5, min 15, max 300 (15–300 ft, ≈ same coverage)
+                      100 m / 300 ft covers virtually every realistic carry —
+                      WSM events top out around 30 m, CrossFit WODs at 100 m,
+                      sled push/pull at 40 m. Anything longer is rucking
+                      (which lives in cardio). State always stores the
+                      displayed value as-is; saveEffort converts ft → m
+                      before persisting (canonical storage = m). */}
                   <PhantomWheel
-                    value={Number(distance) || 50}
+                    value={Number(distance) || (carryDistUnit === 'ft' ? 15 : 5)}
                     onChange={(n) => setDistance(String(n))}
-                    step={5} min={5} max={500}
-                    unit="m"
+                    step={5}
+                    min={carryDistUnit === 'ft' ? 15 : 5}
+                    max={carryDistUnit === 'ft' ? 300 : 100}
                   />
                 </WheelInput>
+              </View>
+              <View style={[s.field, s.gridUnit]}>
+                <Text style={s.label}>Unit</Text>
+                <UnitToggle value={carryDistUnit} options={['ft', 'm'] as const} onChange={setCarryDistUnit} vertical />
               </View>
             </View>
             {Number(weight) > 0 && Number(distance) > 0 && (
               <ChipBlue>
                 <Dumbbell size={14} color={palette.blue[400]} />
                 <Text style={s.chipLabel}>
-                  {(Number(weight) * Number(distance)).toLocaleString()} {unit}·m of work
+                  {(Number(weight) * Number(distance)).toLocaleString()} {unit}·{carryDistUnit} of work
                 </Text>
               </ChipBlue>
             )}
@@ -730,11 +932,14 @@ export default function Strength() {
                       : (isDumbbell ? 'Per hand' : 'Weight')}
                   </Text>
                   <WheelInput>
+                    {/* No inline unit — the adjacent UnitToggle / unitLock
+                        chip declares it. Universal rule across the app:
+                        wheels paired with a unit toggle show only the
+                        value, never the unit. */}
                     <PhantomWheel
                       value={Number(weight) || (isBodyweightExercise ? 0 : defaultWeight(movementRecord?.equipment, unit))}
                       onChange={(n) => setWeight(String(n))}
                       {...weightWheelProps(movementRecord?.equipment, unit, exercise)}
-                      unit={unit}
                     />
                   </WheelInput>
                 </View>
@@ -869,7 +1074,15 @@ export default function Strength() {
             {movements.map((mov, i) => (
               <Pressable
                 key={mov.name}
-                onPress={() => router.push(`/effort/strength/${encodeURIComponent(mov.name)}` as any)}
+                onPress={() => {
+                  // mov.name is the PARENT's display name for variant
+                  // families (e.g. "Bone"). The detail page detects this
+                  // route, fetches all variant efforts in one query, and
+                  // renders the Sled Work-style consolidated chrome with
+                  // a pill carousel switching between variants. Default
+                  // active variant = the most-recently logged one.
+                  router.push(`/effort/strength/${encodeURIComponent(mov.name)}` as any)
+                }}
                 style={({ pressed }) => [
                   s.listRow,
                   i < movements.length - 1 && s.listRowDivider,
@@ -882,16 +1095,40 @@ export default function Strength() {
                     <>
                       <Text style={s.listRowSub}>Best hold</Text>
                       <Text style={s.listRowVal}>{fmtDuration(mov.bestSecs)}</Text>
+                      {mov.variantShortLabel && <VariantBadge label={mov.variantShortLabel} />}
                     </>
                   ) : mov.kind === 'assisted' ? (
                     <>
                       <Text style={s.listRowSub}>Best assist</Text>
                       <Text style={s.listRowVal}>{mov.bestAssistance} {mov.unit}</Text>
+                      {mov.variantShortLabel && <VariantBadge label={mov.variantShortLabel} />}
                     </>
                   ) : mov.kind === 'carry' ? (
                     <>
                       <Text style={s.listRowSub}>Best dist.</Text>
                       <Text style={s.listRowVal}>{mov.bestDist} m</Text>
+                      {mov.variantShortLabel && <VariantBadge label={mov.variantShortLabel} />}
+                    </>
+                  ) : mov.kind === 'sled-work-consolidated' ? (
+                    <>
+                      <Text style={s.listRowSub}>Best dist.</Text>
+                      <Text style={s.listRowVal}>{mov.bestByVariant[mov.mostRecentVariant]} m</Text>
+                      {/* Variant badge — shows whichever side (PUSH / DRAG)
+                          the user last logged. Tapping the row lands the
+                          consolidated detail page on that variant by
+                          default. */}
+                      <View style={{
+                        borderWidth: 1, borderColor: withAlpha(palette.blue[500], 0.3),
+                        backgroundColor: withAlpha(palette.blue[500], 0.15),
+                        paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+                      }}>
+                        <Text style={{
+                          fontSize: 9, fontWeight: '700', textTransform: 'uppercase',
+                          letterSpacing: 0.5, color: palette.blue[400],
+                        }}>
+                          {mov.mostRecentVariant === 'push' ? 'PUSH' : 'DRAG'}
+                        </Text>
+                      </View>
                     </>
                   ) : mov.kind === 'bodyweight-consolidated' ? (
                     <>
@@ -916,6 +1153,7 @@ export default function Strength() {
                     <>
                       <Text style={s.listRowSub}>Est. 1RM</Text>
                       <Text style={s.listRowVal}>{mov.oneRM} {mov.unit}</Text>
+                      {mov.kind === 'strength' && mov.variantShortLabel && <VariantBadge label={mov.variantShortLabel} />}
                     </>
                   )}
                   <ChevronRight size={16} color={colors.mutedForeground} />
@@ -931,6 +1169,28 @@ export default function Strength() {
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
+
+// Small blue badge shown next to a row's "best" value when the row is the
+// most-recently-logged variant of an admin-added family. Same chrome as
+// the hardcoded Sled Work PUSH/DRAG badge, but data-driven from
+// movements.variant_short_label so every equipment type's families
+// inherit the badge automatically (iso / assisted / carry / weighted).
+function VariantBadge({ label }: { label: string }) {
+  return (
+    <View style={{
+      borderWidth: 1, borderColor: withAlpha(palette.blue[500], 0.3),
+      backgroundColor: withAlpha(palette.blue[500], 0.15),
+      paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
+    }}>
+      <Text style={{
+        fontSize: 9, fontWeight: '700', textTransform: 'uppercase',
+        letterSpacing: 0.5, color: palette.blue[400],
+      }}>
+        {label}
+      </Text>
+    </View>
+  )
+}
 
 function ChipBlue({ children }: { children: React.ReactNode }) {
   return (
@@ -1012,6 +1272,16 @@ const s = StyleSheet.create({
   errorText:{ color: colors.destructive, fontSize: 12, lineHeight: 16 },
 
   tripleGrid: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
+  // Quad grid for the carry log form (May 2026 lock): four columns —
+  // [Weight wheel] [Weight Unit toggle] [Distance wheel] [Distance Unit toggle].
+  // The two unit toggles use the locked 48 px width; the two wheels split
+  // the remaining space evenly via `gridQuadLarge: flex 1`. With 3 gaps
+  // (8 px each = 24) and 2 unit toggles (48 each = 96), the two wheels get
+  // ~83 px each on a 360 dp phone — enough for three-digit values
+  // ("250", "500") in JetBrainsMono Bold because we dropped the inline
+  // unit suffix from both wheels.
+  quadGrid:   { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
+  gridQuadLarge: { flex: 1 },
   // gridLarge = primary wheels (Weight / Distance / Reps for the numeric input)
   // gridSmall = secondary wheels (Reps in the carry/assisted layouts)
   // gridUnit  = the Unit column — fixed pixel width so it renders the

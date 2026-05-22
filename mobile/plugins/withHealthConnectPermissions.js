@@ -40,6 +40,10 @@ const { withAndroidManifest } = require('@expo/config-plugins')
 const HEALTH_CONNECT_READ_PERMISSIONS = [
   'android.permission.health.READ_EXERCISE',
   'android.permission.health.READ_HEART_RATE',
+  // Separate record type from HeartRate — daily resting HR readings
+  // (one per day) used for recovery scoring + as the floor of the
+  // daily HR timeline chart.
+  'android.permission.health.READ_RESTING_HEART_RATE',
   'android.permission.health.READ_STEPS',
   'android.permission.health.READ_DISTANCE',
   'android.permission.health.READ_TOTAL_CALORIES_BURNED',

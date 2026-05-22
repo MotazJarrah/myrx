@@ -3,6 +3,19 @@ import LegalLayout from './LegalLayout'
 export default function CookiePolicy() {
   return (
     <LegalLayout title="Cookie Policy" effectiveDate="May 9, 2026">
+      <div className="not-prose my-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+        <div className="text-sm text-muted-foreground">
+          You can change your cookie choice at any time.
+        </div>
+        <button
+          type="button"
+          onClick={() => { if (typeof window !== 'undefined' && typeof window.openCookieBanner === 'function') window.openCookieBanner() }}
+          className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
+        >
+          Update cookie preferences
+        </button>
+      </div>
+
       <h2>1. About this policy</h2>
       <p>
         This Cookie Policy explains how MyRX, operated by Northern Princess LLC,

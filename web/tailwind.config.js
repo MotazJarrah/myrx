@@ -57,9 +57,18 @@ export default {
       },
       keyframes: {
         shrink: { '0%': { width: '100%' }, '100%': { width: '0%' } },
+        // Barcode scanner aim overlay — the thin horizontal line travels
+        // from the top of the aim frame to the bottom and back, giving
+        // the user a visual cue that the scanner is live. Uses `top`
+        // (not transform) so it overrides the static `top-1/2`
+        // positioning class in BarcodeScanner.jsx during the animation.
+        scanline: { from: { top: '0%' }, to: { top: 'calc(100% - 1px)' } },
       },
       animation: {
-        shrink: 'shrink 3s linear forwards',
+        shrink:   'shrink 3s linear forwards',
+        // `alternate` so the line bounces between top and bottom without
+        // a hard snap. 2s = one full top→bottom→top cycle (4s round trip).
+        scanline: 'scanline 2s ease-in-out infinite alternate',
       },
     },
   },

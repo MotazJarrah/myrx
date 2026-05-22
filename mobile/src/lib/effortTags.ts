@@ -71,7 +71,6 @@ export const TAG_STYLES: Record<string, TagStyle> = {
   Cycling:   tag(p.orange[500],  p.orange[400],  p.orange[400]),
   Rowing:    tag(p.amber[600],   p.amber[500],   p.amber[500]),
   Swimming:  tag(p.yellow[400],  p.yellow[400],  p.yellow[400]),
-  Skiing:    tag(p.amber[300],   p.amber[300],   p.amber[300]),
   Metcon:    tag(p.orange[600],  p.orange[500],  p.orange[500]),
   Agility:   tag(p.yellow[600],  p.yellow[500],  p.yellow[500]),
   Mobility:  tag(p.amber[400],   p.amber[300],   p.amber[300]),
@@ -116,11 +115,14 @@ function getCardioSubtype(activityName: string): string {
   // canoe/kayak/paddle/sup/roller-ski regexes left in place for back-compat
   // with any orphan historical effort labels — the movements themselves are
   // removed from the cardio list but old logs may still carry these names.
-  if (/run|sprint|jog|trail|walk|hik|ruck|ice skat|inline skat|stair climb|roller ski/.test(lower)) return 'Endurance'
+  // May 19 2026 cleanup: removed `trail`, `hill` (Trail Running, Hill Running
+  // removed entirely; no orphan labels left) AND the bare `ski` → Skiing
+  // tag (outdoor Skiing removed entirely). `ski erg` still matches the
+  // `Rowing` branch above (Concept2 ergs grouped under Rowing tag colour).
+  if (/run|sprint|jog|walk|hik|ruck|ice skat|inline skat|stair climb|roller ski/.test(lower)) return 'Endurance'
   if (/cycl|bike|spin/.test(lower)) return 'Cycling'
   if (/row|canoe|kayak|paddle|sup|paddleboard|ski erg/.test(lower)) return 'Rowing'
   if (/swim|aqua/.test(lower)) return 'Swimming'
-  if (/ski/.test(lower)) return 'Skiing'
   if (/sled|carry/.test(lower)) return 'Functional'
   return 'Machine'
 }

@@ -45,6 +45,17 @@ export function AuthProvider({ children }) {
     })
 
     // Subsequent auth state changes
+    //
+    // CRITICAL: only re-fetch the profile on events where the underlying
+    // profile data could have actually changed (SIGNED_IN, USER_UPDATED).
+    // TOKEN_REFRESHED fires every time Supabase silently rotates the JWT —
+    // which happens automatically when the tab regains focus after being
+    // backgrounded. If we re-fetched on TOKEN_REFRESHED, every tab-switch
+    // would set `profileLoading = true` → ProtectedLayout would render its
+    // "Loading…" placeholder → every child page (admin forms, log forms,
+    // detail pages) would UNMOUNT and remount, blowing away unsaved form
+    // state. INITIAL_SESSION is similarly redundant — the initial
+    // `getSession()` call above already handled it.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         // Clear everything atomically — no async fetch, no race condition
@@ -55,8 +66,26 @@ export function AuthProvider({ children }) {
       }
 
       const sessionUser = session?.user ?? null
-      if (sessionUser) {
-        setUser(sessionUser)
+      if (!sessionUser) return
+
+      // Only events that imply the profile or auth user actually changed
+      // trigger a re-fetch. Token rotation is a no-op for our state.
+      const shouldRefetchProfile =
+        event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'PASSWORD_RECOVERY'
+
+      // CRITICAL — make every setState in this listener idempotent. On
+      // TOKEN_REFRESHED, the session user is the SAME human (same id) but
+      // a NEW JS object reference. Calling `setUser(sessionUser)`
+      // unconditionally would update the state with a new reference, which
+      // (a) re-renders every component reading `useAuth()`, and (b) busts
+      // memoization in any downstream hook keyed on the user object.
+      // We compare by id and skip the setState when the user hasn't
+      // actually changed — that's the only way to guarantee NO React
+      // tree churn on a tab-switch token refresh. Combined with the
+      // profile-refetch skip below, this listener becomes a true no-op
+      // for token refreshes — no state churn, no remount, no flicker.
+      setUser(prev => (prev?.id === sessionUser.id ? prev : sessionUser))
+      if (shouldRefetchProfile) {
         fetchProfile(sessionUser.id)
       }
     })

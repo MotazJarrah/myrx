@@ -18,6 +18,10 @@ dist-ssr
 .env.*
 !.env.example
 
+# Wrangler local secrets (used for dev + as the source from which we `wrangler secret put`)
+.dev.vars
+**/.dev.vars
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

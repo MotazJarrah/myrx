@@ -12,7 +12,7 @@
  * Authenticated guard: redirects unauthenticated users to /(auth)/sign-in.
  */
 
-import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 import {
   View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator, Image,
 } from 'react-native'
@@ -29,6 +29,7 @@ import SuggestionSheet from '../../src/components/SuggestionSheet'
 import { BiometricLockGate } from '../../src/components/BiometricLockGate'
 import { colors, alpha, palette } from '../../src/theme'
 import { isProfileComplete } from '../../src/lib/profile'
+import { shellScrollRef } from '../../src/lib/shellScroll'
 
 // ── Nav config — mirrors `links` array in Navbar.jsx ─────────────────────────
 const NAV_LINKS = [
@@ -144,9 +145,15 @@ export default function AppShellLayout() {
   // would otherwise persist across navigations — opening any deep page
   // would land you wherever the previous page had scrolled to. This effect
   // resets the scroll to 0 the instant the pathname changes.
-  const scrollRef = useRef<ScrollView | null>(null)
+  //
+  // The ref is hoisted to a module-level singleton (`shellScrollRef` from
+  // `lib/shellScroll`) so child routes can also scroll the shell to top
+  // imperatively — e.g. deleting the last effort of a Sled Work variant
+  // collapses the page from PUSH+DRAG to DRAG-only; the user wants to see
+  // the new DRAG header at the top, not stay scrolled where the effort
+  // list was. Pages call `scrollShellToTop()` from the shared lib.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ x: 0, y: 0, animated: false })
+    shellScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false })
   }, [pathname])
 
   // Match web: chat enabled flag from profile
@@ -220,7 +227,7 @@ export default function AppShellLayout() {
           />
 
           <ScrollView
-            ref={scrollRef}
+            ref={shellScrollRef}
             style={s.scroll}
             contentContainerStyle={s.scrollContent}
             showsVerticalScrollIndicator={false}

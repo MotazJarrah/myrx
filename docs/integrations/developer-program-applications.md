@@ -219,6 +219,15 @@ Whoop's flow: sign in with your existing Whoop account → register a new
 app in the developer dashboard → declare scopes → wait for review →
 receive Client ID + Client Secret.
 
+> **Important:** the app developer does NOT need to own a Whoop band. End
+> users connect their own bands via the OAuth flow we build. If Whoop's
+> developer signup happens to require a Whoop login, create a free
+> account (no band needed) with the standard identity below. If that's
+> blocked entirely, escalate via Whoop's partner team
+> (`partners@whoop.com` or the "Contact Sales / Partnerships" link on
+> whoop.com) — do NOT skip the integration. Whoop matters because users
+> who buy Whoop tend to be exactly the data-driven athletes MyRX targets.
+
 **Application content:**
 
 - **App name:** MyRX
@@ -287,10 +296,17 @@ emails back within a week to confirm receipt and ask follow-up questions.
 Paste each platform's response below as it comes in.
 
 ### Samsung Health SDK
-- Submission date: `[DATE]`
-- Status: `[PENDING / APPROVED / REJECTED]`
+- Submission date: **2026-05-18**
+- Status: **PENDING** (Samsung said ~3 days to respond — faster than the 1-2 wk doc estimate)
+- Business Account: **Northern Princess LLC** (created 2026-05-18 during the application; LLC, US, 1-10 employees, business industries Fitness & Sports + Health Monitoring, type B2B + B2C, est. global revenue $0)
+- App registered: **MyRX** (package `com.myrx.app`, projected launch 18 Nov 2026)
+- Debug SHA-256 submitted: `FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C` (production SHA-256 to be added once we have a release keystore for Play Store)
+- Read data types granted: Heart rate, Exercise with location, Sleep, Steps, Activity summary, Body composition, User profile
+- Write data types: none (read-only)
+- Attachments uploaded: Data Flow Diagram (`docs/integrations/samsung-data-flow.pdf`), UX Screenshots (4 JPGs from `photos/`)
+- Outbound contact email: `motaz.jarrah@hotmail.com` (Samsung Account email, immutable). Approval notification expected to that inbox.
 - App ID (assigned by Samsung): `[FILL IN]`
-- Client Key / SHA-256 registered: `[FILL IN]`
+- Client Key: `[FILL IN]`
 - Approval notes:
 
 ### Garmin Health API
@@ -308,11 +324,16 @@ Paste each platform's response below as it comes in.
 - Approval notes:
 
 ### Polar AccessLink
-- Submission date: `[DATE]`
-- Status: `[PENDING / APPROVED / REJECTED]`
-- Client ID: `[FILL IN]`
-- Client Secret: store in `wrangler secret put POLAR_CLIENT_SECRET`
-- Approval notes:
+- Submission date: **2026-05-19**
+- Status: **APPROVED — instant** (Polar's "1-2 weeks" estimate didn't apply; they issued credentials on submit confirmation)
+- Client ID: `d315fe6b-5a61-48b5-8224-83f22a311d36`
+- Client Secret: stored in `workers/oauth/.dev.vars` (gitignored). On first worker deploy, run `wrangler secret put POLAR_CLIENT_SECRET` from that file then DELETE the secret value from `.dev.vars` (keep the file empty/header-only).
+- Scopes enabled: Exercise data, Daily activity data, Physical information data (all three toggled on at registration)
+- Authorization redirect URL registered: `https://myrxfit.com/oauth/callback/polar`
+- Business profile: Northern Princess LLC, 2821 Braeburn Circle, Ann Arbor MI 48108, USA
+- Business contact: team@myrxfit.com
+- Account login email: motaz.jarrah@hotmail.com (the existing Polar/Polar Flow account email — used for the AccessLink admin login at admin.polaraccesslink.com)
+- License: AccessLink Limited License Agreement accepted on Northern Princess LLC's behalf
 
 ### Strava (no approval needed, register-and-go)
 - Registration date: `[DATE — DO THIS WEEK]`

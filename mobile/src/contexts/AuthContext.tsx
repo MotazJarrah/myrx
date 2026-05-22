@@ -187,6 +187,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false)
     })
 
+    // CRITICAL: only re-fetch the profile on events where the underlying
+    // profile data could have actually changed (SIGNED_IN, USER_UPDATED).
+    // TOKEN_REFRESHED fires every time Supabase silently rotates the JWT —
+    // which happens automatically when the app comes to the foreground
+    // after being backgrounded. If we re-fetched on TOKEN_REFRESHED, every
+    // foreground transition would set `profileLoading = true` → the shell
+    // could render its skeleton → every active page (forms, detail pages)
+    // would unmount and remount, blowing away unsaved form state.
+    // INITIAL_SESSION is similarly redundant — `getSession()` above handles
+    // it. Web's AuthContext has the equivalent guard (May 2026).
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         setUser(null)
@@ -195,8 +205,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return
       }
       const u = session?.user ?? null
-      if (u) {
-        setUser(u)
+      if (!u) return
+
+      const shouldRefetchProfile =
+        event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'PASSWORD_RECOVERY'
+
+      // Idempotent setUser — skip the state update entirely when the user
+      // id is unchanged. Stops TOKEN_REFRESHED from triggering re-renders.
+      setUser(prev => (prev?.id === u.id ? prev : u))
+      if (shouldRefetchProfile) {
         fetchProfile(u.id)
       }
     })

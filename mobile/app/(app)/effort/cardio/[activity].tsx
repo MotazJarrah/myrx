@@ -30,7 +30,7 @@ import Animated, {
   withDelay,
   runOnJS,
 } from 'react-native-reanimated'
-import { Gesture, GestureDetector } from 'react-native-gesture-handler'
+import { Gesture, GestureDetector, ScrollView as GHScrollView } from 'react-native-gesture-handler'
 import { useLocalSearchParams, router } from 'expo-router'
 import { ChevronLeft, ChevronRight, Info } from 'lucide-react-native'
 import Skeleton from '../../../../src/components/Skeleton'
@@ -40,6 +40,7 @@ import AnimateRise from '../../../../src/components/AnimateRise'
 import LineChart from '../../../../src/components/LineChart'
 import { useAuth } from '../../../../src/contexts/AuthContext'
 import { supabase } from '../../../../src/lib/supabase'
+import { scrollShellToTop } from '../../../../src/lib/shellScroll'
 import { useMovements } from '../../../../src/hooks/useMovements'
 import {
   isSpeedMachine,
@@ -60,12 +61,40 @@ import {
   isAirBikeActivity,
   parseAirBikeLabel,
   calsPerMinFromEffort,
+  calsPerMinToWatts,
   genderBaselineCalsPerMin,
   // Row Erg display helpers — distances render in meters, pace as
   // per-500m split (Concept2 convention). Detail page stays on
   // PaceDetail with conditional branching for rowing.
   isRowErgActivity,
+  isConcept2ErgActivity,
   pacePer500mFromSecsPerKm,
+  pacePer500mToWatts,
+  // Rucking — cardio-tab activity with carry-style coaching surface.
+  // Mirrors Atlas Stone Bear Hug Carry's design (abs-mode tier ladder +
+  // load × distance hero) because rucking progresses on load + miles,
+  // not pace. Distance locked to mi via unit_lock; pack weight locked
+  // to lb in the detail/log code (the unit_lock column only holds one
+  // unit). See "Rucking detail card — locked design spec" in CLAUDE.md.
+  RUCKING_ACTIVITY,
+  isRuckingActivity,
+  // Cardio category pill label — every cardio detail page renders this
+  // as a static badge below the "Best —" subtitle row. Mirrors strength's
+  // equipmentPillLabel('carry') / equipmentPillLabel('barbell') tag pattern.
+  cardioCategoryPillLabel,
+  // StairMill — coaching surface anchored on floors per minute (FPM).
+  // Mirrors Air Bike's rate-anchored architecture but uses floors as the
+  // rate metric (every Step Mill console displays FLOORS as the most
+  // prominent number). See "StairMill detail card — locked design spec"
+  // in CLAUDE.md.
+  STAIRMILL_ACTIVITY,
+  isStairMillActivity,
+  parseStairMillLabel,
+  floorsPerMinFromEffort,
+  genderBaselineFloorsPerMin,
+  // Rucking ladder (single source of truth — used by both the log
+  // form wheel and the detail page's zone math).
+  RUCK_WEIGHT_LADDER_LB,
 } from '../../../../src/lib/movements'
 import { colors, palette, alpha, withAlpha, fonts } from '../../../../src/theme'
 
@@ -152,12 +181,20 @@ function fmtDist(distKm: number, distUnit: 'km' | 'mi' = 'km'): string {
 
 // Activity-aware distance formatter — used by buildPlanStep + PaceDetail
 // so per-activity conventions override the default fmtDist behaviour:
-//   • Row Erg → always integer meters ("5000 m", "500 m") regardless of
-//     distance magnitude. Concept2 convention is universally metric and
-//     never uses km / mi.
+//   • Concept2 ergs (Row Erg / Bike Erg / Ski Erg) — always metric,
+//     regardless of the user's mi/km profile preference. The PM5
+//     console displays everything in meters / km universally; rowers
+//     and erg users worldwide think in metric regardless of locale.
+//     Sub-1km in integer meters ("500 m"), ≥1km in km ("5 km",
+//     "2.5 km"). Locked May 19 2026.
 //   • Everything else → fmtDist (sub-1km/mi in meters, larger in km/mi).
 function fmtDistForActivity(activity: string, distKm: number, distUnit: 'km' | 'mi'): string {
-  if (isRowErgActivity(activity)) return `${Math.round(distKm * 1000)} m`
+  if (isConcept2ErgActivity(activity)) {
+    if (distKm < 1) return `${Math.round(distKm * 1000)} m`
+    // ≥ 1 km: trim trailing zeros, max 2 decimals under 5 km, max 1 over.
+    const decimals = distKm < 5 ? 2 : 1
+    return `${distKm.toFixed(decimals).replace(/\.?0+$/, '')} km`
+  }
   return fmtDist(distKm, distUnit)
 }
 
@@ -269,17 +306,17 @@ function categorizeActivity(activityName: string): ActivityCategory {
 
   // Pace-mode categories (order: most-specific first)
   if (/swim/.test(lower))                                       return 'swimming'
-  // "Ski Erg" must match BEFORE "skiing" / "rowing" — the bare-word checks
-  // below would otherwise swallow it.
+  // "Ski Erg" must match BEFORE the bare-word "ski" check — the
+  // outdoor cross-country `Skiing` movement was removed May 19 2026
+  // (terrain + technique + snow conditions confound pace; can't coach
+  // honestly without HR, niche audience).
   if (/ski erg/.test(lower))                                    return 'ski_erg'
-  // Outdoor skiing shares the ski-erg motion and gets the same zone
-  // prescriptions (Roller Skiing was removed May 17 2026 — niche to
-  // competitive Nordic skiers off-season training only).
-  if (/skiing/.test(lower))                                     return 'ski_erg'
   if (/row erg/.test(lower))                                    return 'rowing'
   if (/air bike|assault bike|airdyne/.test(lower))              return 'air_bike'
   if (/spin|stationary|recumbent|bike erg/.test(lower))         return 'stationary_bike'
   if (/ellipt/.test(lower))                                     return 'elliptical'
+  // Mountain-bike outdoor was removed May 19 2026 — terrain confounds
+  // pace zones. Only flat outdoor + stationary cycling remain.
   if (/cycl|bike/.test(lower))                                  return 'cycling'
   if (/ruck/.test(lower))                                       return 'rucking'
 
@@ -288,9 +325,9 @@ function categorizeActivity(activityName: string): ActivityCategory {
   // was removed May 17 2026 as a niche gym machine).
   if (/stair/.test(lower))                                      return 'stair_climber'
 
-  // Default for run / treadmill / hill running / trail running / anything
-  // unmatched. Hill / Trail Running route here even though terrain confounds
-  // pace zones — accepted divergence until HR-zone integration lands.
+  // Default for run / treadmill / anything unmatched. Hill Running and
+  // Trail Running were removed May 19 2026 — terrain confounds pace
+  // zones, recreational use for most users.
   return 'running'
 }
 
@@ -305,12 +342,36 @@ function categorizeActivity(activityName: string): ActivityCategory {
 // (rehab niche), Roller Skiing (Nordic-skier niche), and Arc Trainer
 // (gym-equipment niche) for similar low-coverage / niche-only reasons.
 const ENDURANCE_ATHLETE_CATEGORIES: ActivityCategory[] = [
-  'running', 'cycling', 'stationary_bike', 'air_bike',
-  'rowing', 'ski_erg', 'swimming', 'elliptical',
+  'running', 'air_bike',
+  'rowing', 'ski_erg', 'swimming',
 ]
 
 function isEnduranceAthleteActivity(activityName: string): boolean {
   return ENDURANCE_ATHLETE_CATEGORIES.includes(categorizeActivity(activityName))
+}
+
+// Activities that route to the "Beat Your Best" simple-progression surface
+// (L9 from docs/Layout Design.xlsx — locked May 19 2026). These are
+// activities where we can't anchor on scientifically-honest zone coaching:
+//
+//   • cycling outdoor       — pace confounded by wind/gradient/drafting;
+//                             cycling community programs by power (FTP),
+//                             but we have no power telemetry.
+//   • stationary_bike       — "distance" is FAKE (cadence × assumed
+//                             resistance — varies by machine model);
+//                             power meters not universal.
+//   • elliptical            — fake distance, no canonical training
+//                             methodology (elites don't train on it).
+//
+// For these, the right model is "beat your best time at this distance" —
+// honest about what manual-logging data can support, sidesteps the false
+// precision of zone prescriptions we can't validate. See L9 spec.
+const BEAT_YOUR_BEST_CATEGORIES: ActivityCategory[] = [
+  'cycling', 'stationary_bike', 'elliptical',
+]
+
+function isBeatYourBestActivity(activityName: string): boolean {
+  return BEAT_YOUR_BEST_CATEGORIES.includes(categorizeActivity(activityName))
 }
 
 // Classify a logged effort into one of the three zones based on its pace
@@ -747,6 +808,11 @@ interface PlanStep {
    *  machines don't need this row because the machine holds speed constant —
    *  there's no mid-interval drift to verify against a sub-distance split. */
   pacingCheckpoint: { value: string; descriptor: string } | null
+  /** Concept2 ergs ONLY (Row / Bike / Ski). When set, the hero card adds
+   *  a 4th row showing the watts target derived from the zone pace via
+   *  Concept2's official watts↔pace formula. Null for everyone else —
+   *  the 4th row is hidden. Locked May 19 2026. */
+  ergWattsTarget:   number | null
 }
 
 function generatePlanQueue(
@@ -928,6 +994,16 @@ function buildPlanStep(
   const isRowErg     = isRowErgActivity(activity)
   const splitDisplay = isRowErg ? pacePer500mFromSecsPerKm(zonePace) : null
 
+  // Concept2 ergs (Row / Bike / Ski) — all three share the PM5 console
+  // and the same Concept2 watts↔pace formula. Derive a watts target from
+  // the prescribed zone pace and surface it as the hero card's 4th row
+  // (NOT in the cue — the cue stays focused on workout structure +
+  // checkpoint pacing; watts gets its own dedicated row to keep the
+  // hero readable). Locked May 19 2026.
+  const isC2Erg        = isConcept2ErgActivity(activity)
+  const wattsTarget    = isC2Erg ? pacePer500mToWatts(zonePace) : 0
+  const ergWattsTarget = isC2Erg && wattsTarget > 0 ? wattsTarget : null
+
   if (!isInterval) {
     const totalDist = fmtDistForActivity(activity, rx.totalKm, distUnit)
     const totalTime = fmtSecs(rx.totalSecs)
@@ -941,7 +1017,7 @@ function buildPlanStep(
         ? `${verb.imperative} ${totalDist} in ${totalTime} at a steady ${splitDisplay} split${pacingSentence}.`
         : `${verb.imperative} ${totalDist} in ${totalTime} at steady conversation pace${pacingSentence}.`
     return {
-      zone, rx, restDays, restLabel, pacingCheckpoint, shortSpeed,
+      zone, rx, restDays, restLabel, pacingCheckpoint, shortSpeed, ergWattsTarget,
       shortWork: totalDist,
       shortTime: totalTime,
       cue,
@@ -974,7 +1050,7 @@ function buildPlanStep(
       ? `${verb.imperative} ${rx.numReps} × ${repDist} at ${splitDisplay} split (${repTime} each).`
       : `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each${pacingSentence}.`
   return {
-    zone, rx, restDays, restLabel, pacingCheckpoint, shortSpeed,
+    zone, rx, restDays, restLabel, pacingCheckpoint, shortSpeed, ergWattsTarget,
     shortWork: `${rx.numReps} × ${repDist}`,
     shortTime: repTime,
     cue,
@@ -1137,11 +1213,12 @@ function getActivityVerb(activity: string): { imperative: string; lower: string 
   const lower = activity.toLowerCase()
   if (/swim/.test(lower))                                         return { imperative: 'Swim',  lower: 'swim'  }
   if (/row erg/.test(lower))                                      return { imperative: 'Row',   lower: 'row'   }
-  if (/ski erg|skiing/.test(lower))                               return { imperative: 'Ski',   lower: 'ski'   }
+  if (/ski erg/.test(lower))                                      return { imperative: 'Ski',   lower: 'ski'   }
   if (/cycl|bike|spin|stationary/.test(lower))                    return { imperative: 'Pedal', lower: 'pedal' }
   if (/ruck/.test(lower))                                         return { imperative: 'Ruck',  lower: 'ruck'  }
   if (/ellipt/.test(lower))                                       return { imperative: 'Glide', lower: 'glide' }
-  // Default: running (includes Hill Running, Trail Running, Running, Running (Treadmill))
+  // Default: Running + Running (Treadmill). Hill / Trail / outdoor Skiing
+  // were removed May 19 2026 (terrain-confounded, recreational).
   return { imperative: 'Run', lower: 'run' }
 }
 
@@ -1255,6 +1332,47 @@ function BackButton() {
 
 // ── Main route component ────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// renderCardioInnerDetail — single source of truth for "given an activity +
+// its efforts, render the right detail component". Used by both the
+// standalone route AND the family wrapper, so a family slot is just this
+// helper called with the variant's name + filtered efforts + hideHeader=true.
+// New cardio detail components (or new dispatch rules) only need to be
+// added here once.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderCardioInnerDetail(params: {
+  activity: string
+  efforts: Effort[]
+  distUnit: 'km' | 'mi'
+  swimUnit: 'm' | 'yd'
+  mode: 'pace' | 'duration'
+  onDelete: (id: string) => void
+  onAddEffort: (label: string, value: string) => Promise<void>
+  hideHeader?: boolean
+}) {
+  const { activity, efforts, distUnit, swimUnit, mode, onDelete, onAddEffort, hideHeader } = params
+  if (isStairMillActivity(activity)) {
+    return <StairMillDetail efforts={efforts} onDelete={onDelete} hideHeader={hideHeader} />
+  }
+  if (mode === 'duration') {
+    return <DurationDetail activity={activity} efforts={efforts} onDelete={onDelete} hideHeader={hideHeader} />
+  }
+  if (isAirBikeActivity(activity)) {
+    return <AirBikeDetail efforts={efforts} onDelete={onDelete} hideHeader={hideHeader} />
+  }
+  if (isRuckingActivity(activity)) {
+    return <RuckingDetail efforts={efforts} onDelete={onDelete} hideHeader={hideHeader} />
+  }
+  if (isBeatYourBestActivity(activity)) {
+    return <BeatYourBestDetail activity={activity} efforts={efforts} distUnit={distUnit} onDelete={onDelete} hideHeader={hideHeader} />
+  }
+  if (isSwimActivity(activity)) {
+    return <SwimmingConsolidatedDetail efforts={efforts} swimUnit={swimUnit} onDelete={onDelete} />
+  }
+  return <PaceDetail activity={activity} efforts={efforts} distUnit={distUnit} onDelete={onDelete} onAddEffort={onAddEffort} hideHeader={hideHeader} />
+}
+
 export default function CardioDetailRoute() {
   const { activity: rawActivity } = useLocalSearchParams<{ activity: string }>()
   const activity = typeof rawActivity === 'string' ? decodeURIComponent(rawActivity) : ''
@@ -1267,6 +1385,27 @@ export default function CardioDetailRoute() {
 
   const dbMovements = useMovements()
   const movementRecord = dbMovements.find(m => m.name === activity) ?? null
+
+  // ── Family detection (admin-added cardio variant families) ────────────
+  // If the URL is a parent name with admin-added variants, route to
+  // CardioFamilyConsolidatedDetail (mirror of strength's wrapper). Excludes
+  // hardcoded cardio families (Swimming) because they have their own
+  // dedicated consolidation path. The check is on `exerciseFromUrl`-
+  // equivalent (the route param), NOT the family-aware activity, so the
+  // detection is stable regardless of any downstream shadowing.
+  const isHardcodedCardioFamilyRoute = activity === SWIMMING_BASE_NAME || activity.startsWith('Swimming [')
+  const cardioFamilyParent = isHardcodedCardioFamilyRoute
+    ? null
+    : (dbMovements.find(m => m.name === activity && !m.parent_movement_id) ?? null)
+  const cardioFamilyVariants = useMemo(
+    () => cardioFamilyParent
+      ? dbMovements
+          .filter(m => m.parent_movement_id === cardioFamilyParent.id)
+          .slice()
+          .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
+      : [],
+    [cardioFamilyParent, dbMovements],
+  )
 
   // Movement-level unit lock overrides profile preference. Rucking is locked
   // to 'mi' (community-dominated unit — GoRuck and US tactical fitness use
@@ -1281,6 +1420,15 @@ export default function CardioDetailRoute() {
 
   const [efforts, setEfforts] = useState<Effort[]>([])
   const [loading, setLoading] = useState(true)
+
+  // FAMILY ROUTE — if the URL is a parent name and it has variants, the
+  // entire page dispatches to the consolidated wrapper. Early return
+  // BEFORE the standalone fetch useEffect so the parent name never tries
+  // to query its own non-existent efforts (efforts live under variant
+  // names). The wrapper does its own family-wide fetch.
+  if (cardioFamilyParent && cardioFamilyVariants.length >= 2) {
+    return <CardioFamilyConsolidatedDetail parent={cardioFamilyParent} variants={cardioFamilyVariants} />
+  }
 
   async function handleDeleteEffort(id: string) {
     setEfforts(prev => prev.filter(e => e.id !== id))
@@ -1375,34 +1523,18 @@ export default function CardioDetailRoute() {
     )
   }
 
-  if (mode === 'duration') {
-    return <DurationDetail activity={activity} efforts={efforts} onDelete={handleDeleteEffort} />
-  }
-  // Air Bike routes to its own AirBikeDetail because the calorie-based
-  // training model is fundamentally different from pace zones:
-  //   • The user's best metric is cal/min (rate), not per-km pace.
-  //   • Zones are AEROBIC / THRESHOLD / SPRINT (CrossFit / HIIT names),
-  //     anchored on the user's peak cal/min rate.
-  //   • Calorie targets scale linearly with the user's rate — a faster
-  //     athlete gets more cals per interval.
-  //   • Chart Y-axis is NON-reversed (higher rate = trend UP).
-  // See "Air Bike detail card — locked design spec" in CLAUDE.md.
-  if (isAirBikeActivity(activity)) {
-    return <AirBikeDetail efforts={efforts} onDelete={handleDeleteEffort} />
-  }
-  // Swimming gets its own consolidated component because:
-  //   • Hero card layout is fundamentally different (3 values not 2 —
-  //     reps × distance + pace + leaving interval).
-  //   • CSS-anchored zone math operates in per-100m space, not per-km.
-  //   • 4 stroke variants (Freestyle / Backstroke / Breaststroke /
-  //     Butterfly) collapse into one detail page with a stroke pill
-  //     carousel at the top, mirroring Sled Drag's PUSH / PULL pattern.
-  // Same outer chrome (header + plan card + chart + log list); the
-  // wrapper injects the pill row, inner SwimmingDetail renders the rest.
-  if (swimMode) {
-    return <SwimmingConsolidatedDetail efforts={efforts} swimUnit={swimUnit} onDelete={handleDeleteEffort} />
-  }
-  return <PaceDetail activity={activity} efforts={efforts} distUnit={distUnit} onDelete={handleDeleteEffort} onAddEffort={handleAddEffort} />
+  // All dispatch lives in `renderCardioInnerDetail` — single source of
+  // truth shared with CardioFamilyConsolidatedDetail. New cardio detail
+  // components / new dispatch rules only need to be added there once.
+  return renderCardioInnerDetail({
+    activity,
+    efforts,
+    distUnit,
+    swimUnit,
+    mode,
+    onDelete: handleDeleteEffort,
+    onAddEffort: handleAddEffort,
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1410,13 +1542,17 @@ export default function CardioDetailRoute() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function PaceDetail({
-  activity, efforts, distUnit, onDelete, onAddEffort,
+  activity, efforts, distUnit, onDelete, onAddEffort, hideHeader,
 }: {
   activity:    string
   efforts:     Effort[]
   distUnit:    'km' | 'mi'
   onDelete:    (id: string) => void
   onAddEffort: (label: string, value: string) => Promise<void>
+  /** Suppresses page-level header when rendered as a slot inside
+   *  CardioFamilyConsolidatedDetail. Wrapper provides one header for
+   *  the whole family. */
+  hideHeader?: boolean
 }) {
   // Only Group A (endurance athletes) gets the progression plan. Rucking
   // is in cardio but progresses on load + distance rather than pace zones —
@@ -1490,6 +1626,7 @@ function PaceDetail({
           what the user enters on the log form and reads off the console);
           for Row Erg, show "Best split — m:ss/500m" (Concept2 standard);
           for everyone else, show "Best pace — m:ss/km" as before. */}
+      {!hideHeader && (
       <View>
         <BackButton />
         <Text style={s.h1}>{activity}</Text>
@@ -1508,9 +1645,13 @@ function PaceDetail({
                 fontWeight="600"
               />
             </>
-          ) : isRowErgActivity(activity) ? (
+          ) : isConcept2ErgActivity(activity) ? (
+            // Row Erg, Bike Erg, Ski Erg — all Concept2 PM5-powered ergs
+            // share the same physics. Show split per 500m (canonical Concept2
+            // pace metric) AND derived watts (canonical power metric — what
+            // the PM5 console reads natively and what coaches program in).
             <>
-              <Text style={s.subText}>Best split — </Text>
+              <Text style={s.subText}>Best — </Text>
               <TickerNumber
                 value={
                   bestPaceSecs > 0 && bestPaceSecs !== Infinity
@@ -1521,6 +1662,17 @@ function PaceDetail({
                 color={palette.amber[400]}
                 fontWeight="600"
               />
+              {bestPaceSecs > 0 && bestPaceSecs !== Infinity && (
+                <>
+                  <Text style={[s.subText, { color: palette.amber[400] }]}> · </Text>
+                  <TickerNumber
+                    value={`${pacePer500mToWatts(bestPaceSecs)} W`}
+                    fontSize={14}
+                    color={palette.amber[400]}
+                    fontWeight="600"
+                  />
+                </>
+              )}
             </>
           ) : (
             <>
@@ -1534,7 +1686,12 @@ function PaceDetail({
             </>
           )}
         </View>
+        {/* Cardio category tag — mirrors strength's equipment pill pattern. */}
+        <View style={s.categoryBadge}>
+          <Text style={s.categoryBadgeText}>{cardioCategoryPillLabel(activity)}</Text>
+        </View>
       </View>
+      )}
 
       {/* Progression plan card. The tile row is the navigation; the details
           card below is driven by the SELECTED tile. Chevrons between tiles
@@ -1688,6 +1845,19 @@ function PaceDetail({
                   </Text>
                 </View>
               ) : null}
+              {/* Row 4: Watts target — Concept2 ergs ONLY (Row / Bike / Ski).
+                  All three have a PM5 console that reads watts directly off
+                  the flywheel; the prescribed zone pace maps to a watts
+                  target via Concept2's pace↔watts formula. Hidden on every
+                  other activity. Locked May 19 2026. */}
+              {selectedStep.ergWattsTarget != null && (
+                <View style={s.heroValueRow}>
+                  <TickerNumber value={`${selectedStep.ergWattsTarget} W`} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                  <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                    watts target
+                  </Text>
+                </View>
+              )}
             </Animated.View>
 
             {/* Cue — work + pace sentence on line 1. Rest descriptor on its
@@ -1816,6 +1986,43 @@ function PaceDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PlanStripScroll — horizontal scroller for the upcoming-plan tile row.
+// Wrapped in a GestureDetector with a Native gesture so its native scroll
+// can `blocksExternalGesture` the outer stroke pager (in
+// SwimmingConsolidatedDetail). Without this, the outer pagingEnabled
+// stroke pager intercepts every horizontal swipe inside the plan strip
+// and the user can never scroll to plan steps 4–8.
+// ─────────────────────────────────────────────────────────────────────────────
+function PlanStripScroll({
+  outerScrollGesture,
+  children,
+}: {
+  outerScrollGesture?: ReturnType<typeof Gesture.Native>
+  children: React.ReactNode
+}) {
+  const innerNative = useMemo(() => {
+    let g = Gesture.Native()
+    if (outerScrollGesture) {
+      g = g.blocksExternalGesture(outerScrollGesture)
+    }
+    return g
+  }, [outerScrollGesture])
+
+  return (
+    <GestureDetector gesture={innerNative}>
+      <GHScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ alignItems: 'center', paddingVertical: 4, paddingHorizontal: 2 }}
+        style={{ marginHorizontal: -2 }}
+      >
+        {children}
+      </GHScrollView>
+    </GestureDetector>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SwimmingConsolidatedDetail — 4-stroke wrapper around SwimmingDetail
 // ─────────────────────────────────────────────────────────────────────────────
 // The 4 stroke variants (Swimming [Freestyle/Backstroke/Breaststroke/
@@ -1824,7 +2031,7 @@ function PaceDetail({
 // from strength: the wrapper holds activeStroke state, filters efforts
 // to that stroke, and renders the inner SwimmingDetail with
 // `extraHeaderContent` (the pill row) injected. Pill swipe choreography
-// matches the BW tier carousel and Sled Drag exactly:
+// matches the BW tier carousel and Sled Work exactly:
 //   • Single pill in the center showing the active stroke
 //   • Pulsing chevrons on both sides (only present where there's a stroke
 //     to navigate to — no wrap-around at the ends FREE / FLY)
@@ -1840,20 +2047,6 @@ function SwimmingConsolidatedDetail({
   swimUnit: 'm' | 'yd'
   onDelete: (id: string) => void
 }) {
-  // Default active stroke = ALWAYS slot 0 (leftmost = butterfly).
-  // Universal rule across every consolidated carousel — see CLAUDE.md
-  // Pattern 4. Even if the user has only logged freestyle, the page
-  // opens on butterfly. Trade-off accepted: a user with one logged
-  // stroke sees an empty-state card on butterfly and has to swipe
-  // right to find their data, BUT every consolidated page opens the
-  // same way (left edge), which is more predictable than per-page
-  // "most-recent" / "hardest logged" heuristics. Empty-state cards on
-  // the other strokes also double as discoverability for "you can train
-  // butterfly too" prompts.
-  const defaultStroke: SwimStroke = SWIM_STROKE_ORDER[0]
-
-  const [activeStroke, setActiveStroke] = useState<SwimStroke>(defaultStroke)
-
   // Pre-filter efforts per stroke once so we don't re-filter inside every
   // ScrollView slot's SwimmingDetail. Each slot just looks up its own list.
   const effortsByStroke = useMemo(() => {
@@ -1867,10 +2060,42 @@ function SwimmingConsolidatedDetail({
     return map
   }, [efforts])
 
+  // Only render strokes the user has actually logged — if the user deletes
+  // every Butterfly effort, the FLY pill and slot disappear, the page
+  // collapses to the remaining strokes. Same behaviour as Sled Work's
+  // variant filter (CLAUDE.md Pattern 4 — strokes follow hardest-first
+  // ordering, filtered by logged efforts). If NO efforts exist at all,
+  // we fall back to the full SWIM_STROKE_ORDER so the page still renders
+  // with discoverability empty-state cards (otherwise a user with zero
+  // swim efforts would see a fully blank page).
+  const STROKE_ORDER = useMemo(() => {
+    const filtered = SWIM_STROKE_ORDER.filter(s => effortsByStroke[s].length > 0)
+    return filtered.length > 0 ? filtered : SWIM_STROKE_ORDER
+  }, [effortsByStroke])
+
+  // Default active stroke = ALWAYS slot 0 of the FILTERED list — so when
+  // the user deletes their last Butterfly entry, the page snaps to slot 0
+  // of what remains (Breaststroke if logged, etc.). Universal "always slot
+  // 0" rule across consolidated carousels — see CLAUDE.md Pattern 4.
+  const defaultStroke: SwimStroke = STROKE_ORDER[0]
+
+  const [activeStroke, setActiveStroke] = useState<SwimStroke>(defaultStroke)
+
+  // If the active stroke disappears (user deleted its last effort while
+  // viewing it), snap to slot 0 of the filtered list AND scroll the shell
+  // back to top so the user sees the new active stroke's header.
+  useEffect(() => {
+    if (!STROKE_ORDER.includes(activeStroke)) {
+      setActiveStroke(STROKE_ORDER[0])
+      scrollShellToTop()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [STROKE_ORDER])
+
   // Header subtitle — show the ACTIVE stroke's CSS. Updates on swipe (just
   // a TickerNumber re-render, not a wrapper-level animation). The wrapper
   // header otherwise stays positionally static — only the body inside the
-  // paged ScrollView physically slides. Mirrors the Sled Drag consolidated
+  // paged ScrollView physically slides. Mirrors the Sled Work consolidated
   // wrapper, which also surfaces the active variant's best in its subtitle.
   const activeStrokeCSS = useMemo(
     () => riegelProjectCSS(effortsByStroke[activeStroke]),
@@ -1900,6 +2125,14 @@ function SwimmingConsolidatedDetail({
 
   const scrollRef = useRef<ScrollView>(null)
 
+  // Expose the outer pager's native scroll as a Gesture.Native() so the
+  // inner SwimmingDetail's horizontal plan-tile ScrollView can claim its
+  // own swipes via `simultaneousWithExternalGesture`. Without this, the
+  // outer pagingEnabled pager grabs every horizontal swipe and the inner
+  // plan strip can never scroll. Same pattern as Sled Work's pill swipe
+  // fix in strength/[exercise].tsx.
+  const outerScrollGesture = useMemo(() => Gesture.Native(), [])
+
   // On initial mount, scroll to the active stroke's slot (so the page
   // doesn't land on slot 0 if the user's most-recent stroke is e.g.
   // butterfly). animated:false because this is the initial landing.
@@ -1908,7 +2141,7 @@ function SwimmingConsolidatedDetail({
     if (initialScrollDoneRef.current) return
     if (slotWidth <= 0) return
     if (!scrollRef.current) return
-    const idx = SWIM_STROKE_ORDER.indexOf(activeStroke)
+    const idx = STROKE_ORDER.indexOf(activeStroke)
     if (idx < 0) return
     scrollRef.current.scrollTo({ x: idx * slotWidth, animated: false })
     initialScrollDoneRef.current = true
@@ -1918,20 +2151,21 @@ function SwimmingConsolidatedDetail({
   // taps and the pill Pan gesture (via runOnJS). Updates state AND
   // programmatically scrolls the body, so the two animations are
   // synchronized (pill flies off → body slides → pill comes back in
-  // from opposite side).
+  // from opposite side). Uses the FILTERED STROKE_ORDER so chevron taps
+  // skip strokes the user hasn't logged.
   const navigateStroke = (direction: -1 | 1) => {
-    const currentIdx = SWIM_STROKE_ORDER.indexOf(activeStroke)
+    const currentIdx = STROKE_ORDER.indexOf(activeStroke)
     const newIdx = currentIdx + direction
-    if (newIdx < 0 || newIdx >= SWIM_STROKE_ORDER.length) return
-    setActiveStroke(SWIM_STROKE_ORDER[newIdx])
+    if (newIdx < 0 || newIdx >= STROKE_ORDER.length) return
+    setActiveStroke(STROKE_ORDER[newIdx])
     if (slotWidth > 0 && scrollRef.current) {
       scrollRef.current.scrollTo({ x: newIdx * slotWidth, animated: true })
     }
   }
 
-  const currentIdx = SWIM_STROKE_ORDER.indexOf(activeStroke)
+  const currentIdx = STROKE_ORDER.indexOf(activeStroke)
   const hasPrev    = currentIdx > 0
-  const hasNext    = currentIdx < SWIM_STROKE_ORDER.length - 1
+  const hasNext    = currentIdx < STROKE_ORDER.length - 1
 
   // ── Pill swipe gesture (BW-style choreography) ──────────────────────────
   const SWIM_SWIPE_THRESHOLD_PX = 20
@@ -1961,7 +2195,7 @@ function SwimmingConsolidatedDetail({
         const past = Math.abs(event.translationX) > SWIM_SWIPE_THRESHOLD_PX
 
         const targetIdx = currentIdx + direction
-        const validDirection = targetIdx >= 0 && targetIdx < SWIM_STROKE_ORDER.length
+        const validDirection = targetIdx >= 0 && targetIdx < STROKE_ORDER.length
 
         if (!past || !validDirection) {
           // Bounce back to center; chevrons re-appear.
@@ -2017,6 +2251,9 @@ function SwimmingConsolidatedDetail({
         ) : (
           <Text style={s.subText}>No {SWIM_STROKE_LABELS[activeStroke].full.toLowerCase()} efforts logged yet</Text>
         )}
+        <View style={s.categoryBadge}>
+          <Text style={s.categoryBadgeText}>{cardioCategoryPillLabel(SWIMMING_BASE_NAME)}</Text>
+        </View>
 
         {/* Pill row — also static, sits between header and the paged
             body. The pill animates in-place during swipes (slide off /
@@ -2030,7 +2267,7 @@ function SwimmingConsolidatedDetail({
                   onPress={() => navigateStroke(-1)}
                   style={s.swimStrokeChevronPressable}
                   hitSlop={8}
-                  accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[SWIM_STROKE_ORDER[currentIdx - 1]].full}`}
+                  accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[STROKE_ORDER[currentIdx - 1]].full}`}
                 >
                   <AmberAnimatedChevron direction="left" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
                   <View style={{ marginLeft: -6 }}>
@@ -2066,7 +2303,7 @@ function SwimmingConsolidatedDetail({
                   onPress={() => navigateStroke(1)}
                   style={s.swimStrokeChevronPressable}
                   hitSlop={8}
-                  accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[SWIM_STROKE_ORDER[currentIdx + 1]].full}`}
+                  accessibilityLabel={`Switch to ${SWIM_STROKE_LABELS[STROKE_ORDER[currentIdx + 1]].full}`}
                 >
                   <AmberAnimatedChevron direction="right" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
                   <View style={{ marginLeft: -6 }}>
@@ -2091,42 +2328,50 @@ function SwimmingConsolidatedDetail({
         onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}
         style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}
       >
-        <ScrollView
-          ref={scrollRef}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          decelerationRate="fast"
-          onMomentumScrollEnd={e => {
-            if (slotWidth === 0) return
-            const x = e.nativeEvent.contentOffset.x
-            const idx = Math.round(x / slotWidth)
-            const targetStroke = SWIM_STROKE_ORDER[idx]
-            if (targetStroke && targetStroke !== activeStroke) {
-              setActiveStroke(targetStroke)
-            }
-          }}
-        >
-          {SWIM_STROKE_ORDER.map(stroke => (
-            <View
-              key={stroke}
-              style={{
-                width: slotWidth,
-                paddingHorizontal: PAGE_PADDING_HORIZONTAL,
-              }}
-            >
-              <SwimmingDetail
-                activity={`${SWIMMING_BASE_NAME} [${SWIM_STROKE_LABELS[stroke].full}]`}
-                displayName={SWIMMING_BASE_NAME}
-                efforts={effortsByStroke[stroke]}
-                swimUnit={swimUnit}
-                onDelete={onDelete}
-                emptyStateLabel={SWIM_STROKE_LABELS[stroke].full.toLowerCase()}
-                hideHeader
-              />
-            </View>
-          ))}
-        </ScrollView>
+        {/* GHScrollView (gesture-handler's drop-in replacement) participates
+            in v2 gesture composition cleanly — combined with the Native
+            gesture wrap below, the inner SwimmingDetail's plan-tile
+            ScrollView can claim horizontal scrolls inside its own bounds
+            without the outer stroke pager intercepting them. */}
+        <GestureDetector gesture={outerScrollGesture}>
+          <GHScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            decelerationRate="fast"
+            onMomentumScrollEnd={e => {
+              if (slotWidth === 0) return
+              const x = e.nativeEvent.contentOffset.x
+              const idx = Math.round(x / slotWidth)
+              const targetStroke = STROKE_ORDER[idx]
+              if (targetStroke && targetStroke !== activeStroke) {
+                setActiveStroke(targetStroke)
+              }
+            }}
+          >
+            {STROKE_ORDER.map(stroke => (
+              <View
+                key={stroke}
+                style={{
+                  width: slotWidth,
+                  paddingHorizontal: PAGE_PADDING_HORIZONTAL,
+                }}
+              >
+                <SwimmingDetail
+                  activity={`${SWIMMING_BASE_NAME} [${SWIM_STROKE_LABELS[stroke].full}]`}
+                  displayName={SWIMMING_BASE_NAME}
+                  efforts={effortsByStroke[stroke]}
+                  swimUnit={swimUnit}
+                  onDelete={onDelete}
+                  emptyStateLabel={SWIM_STROKE_LABELS[stroke].full.toLowerCase()}
+                  hideHeader
+                  outerScrollGesture={outerScrollGesture}
+                />
+              </View>
+            ))}
+          </GHScrollView>
+        </GestureDetector>
       </View>
     </View>
   )
@@ -2164,6 +2409,7 @@ function SwimmingDetail({
   extraHeaderContent,
   emptyStateLabel,
   hideHeader,
+  outerScrollGesture,
 }: {
   activity: string
   efforts:  Effort[]
@@ -2174,7 +2420,7 @@ function SwimmingDetail({
   displayName?:        string
   /** Optional content rendered directly under the subtitle. Used by the
    *  consolidated wrapper to inject the FREE / BACK / BREAST / FLY stroke
-   *  pill row with its swipe gesture. Same pattern as Sled Drag's
+   *  pill row with its swipe gesture. Same pattern as Sled Work's
    *  CarryDetail wrapper injecting the PUSH / PULL toggle. */
   extraHeaderContent?: React.ReactNode
   /** Override for the empty-state cue ("Log your first ___ effort and
@@ -2187,6 +2433,15 @@ function SwimmingDetail({
    *  paged ScrollView so it stays static while the body slides between
    *  strokes — matches BW's "whole page slides" pattern. */
   hideHeader?:         boolean
+  /** When this SwimmingDetail is a slot inside the consolidated stroke
+   *  pager (SwimmingConsolidatedDetail), the outer pager's native scroll
+   *  is exposed as a Gesture.Native(). The inner plan-tile horizontal
+   *  ScrollView wraps itself in a GestureDetector that
+   *  `simultaneousWithExternalGesture`s on this so horizontal swipes
+   *  inside the plan strip stay with the inner scroll (instead of the
+   *  outer stroke pager intercepting them). No-op when SwimmingDetail
+   *  is rendered standalone (currently unused but kept for symmetry). */
+  outerScrollGesture?: ReturnType<typeof Gesture.Native>
 }) {
   // CSS proxy via Riegel projection — the lowest projected per-100m pace
   // across all efforts. Improves automatically as the user logs faster
@@ -2266,13 +2521,14 @@ function SwimmingDetail({
 
           {/* Tile row — 8 upcoming swim sessions. Each tile shows the zone
               label, the work shape (reps × distance), and the target pace.
-              The leaving interval is on the hero card (too noisy for tiles). */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ alignItems: 'center', paddingVertical: 4, paddingHorizontal: 2 }}
-            style={{ marginHorizontal: -2 }}
-          >
+              The leaving interval is on the hero card (too noisy for tiles).
+              The inner ScrollView wraps itself in a Gesture.Native() that
+              `blocksExternalGesture(outerScrollGesture)` — so when the user
+              swipes horizontally on the plan tiles, this scroll wins over
+              the outer stroke pager. Without this, the outer pagingEnabled
+              pager grabs every horizontal swipe and the plan strip can never
+              be scrolled to see steps 4-8. */}
+          <PlanStripScroll outerScrollGesture={outerScrollGesture}>
             {planQueue.map((step, idx) => {
               const isSelected = selectedStepIdx === idx
               const isLast     = idx === planQueue.length - 1
@@ -2305,7 +2561,7 @@ function SwimmingDetail({
                 </Fragment>
               )
             })}
-          </ScrollView>
+          </PlanStripScroll>
 
           {/* Hero card — three stacked TickerNumber rows. Row 1 = work
               (reps × distance), Row 2 = target pace per 100m, Row 3 =
@@ -2473,6 +2729,427 @@ function SwimmingDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BeatYourBestDetail — L9 simple-progression surface (May 19 2026 lock).
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// For activities where we can't honestly coach with zones (no HR, no power,
+// no canonical methodology): Cycling outdoor, Stationary Bike, Elliptical.
+// Earlier May 19 we shipped a 3-zone L4 structural-prescription surface
+// here, but the prescriptions ("4 × 5 min hard") were aspirational without
+// effort validation — too much UI for what amounts to "do intervals if you
+// feel like it." Replaced with a leaner model: just show the user their
+// PR and a small push target.
+//
+// Hero card (no pill, no zones):
+//   • Row 1 — Best: fastest time logged at the user's most-recent distance,
+//     bucketed to the nearest km/mi for grouping (so 5.1 km and 5.0 km
+//     count as the same PR).
+//   • Row 2 — Next: Best minus a small delta (5 sec floor, ~0.5 % scaled).
+//     When the user beats Next, it auto-becomes the new Best on next render.
+//   • Cue line: "Beat your best — try X distance in Y time. About N sec
+//     faster than your current PR."
+//
+// Most-recent effort is in the log list below, so we DON'T duplicate it
+// in the hero — the only two numbers that matter are Best (your achievement)
+// and Next (your target).
+//
+// Math anchors on the user's MOST-RECENT distance because that's what they
+// just did and what they're most likely to do again. If their last session
+// was 30 km, the page nudges them to beat their best 30 km time. If they
+// shift to 50 km, the anchor floats with them.
+//
+// Empty state: < 1 effort → "Log your first session" message. No PR + Next
+// to compute against.
+
+// Canonical distances (kilometres) for the 5-row goal card. Same set
+// across all three Beat-Your-Best activities (Cycling outdoor, Stationary
+// Bike, Elliptical) — locked May 19 2026. These are globally-recognised
+// race / interval distances; the user's per-row time targets are computed
+// by Riegel-projecting EVERY logged effort to each distance and taking the
+// minimum (the user's best pace × the canonical distance, accounting for
+// pace decay at longer distances and pace gain at shorter ones).
+const CANONICAL_DISTANCES_KM: readonly number[] = [0.5, 1, 3, 5, 10]
+
+function fmtCanonicalDistance(distKm: number): string {
+  // Always render the canonical distance in its natural form, regardless
+  // of the user's unit preference. 500 m / 1 km / 3 km / 5 km / 10 km
+  // are globally-recognised race distances; converting them to ugly mi
+  // values (0.31 mi, 0.62 mi, etc.) would obscure that recognition.
+  if (distKm < 1) return `${Math.round(distKm * 1000)} m`
+  return `${distKm} km`
+}
+
+function BeatYourBestDetail({
+  activity, efforts, distUnit, onDelete, hideHeader,
+}: {
+  activity: string
+  efforts:  Effort[]
+  distUnit: 'km' | 'mi'
+  onDelete: (id: string) => void
+  /** Suppresses page-level header for family slot rendering. */
+  hideHeader?: boolean
+}) {
+  const [infoOpen, setInfoOpen] = useState(false)
+
+  // Best PACE overall — used for the header subtitle.
+  let bestEffort:  Effort | null = null
+  let bestPaceSecs = Infinity
+  efforts.forEach(e => {
+    const secs = parsePaceToSecs(e.value)
+    if (secs !== null && secs < bestPaceSecs) { bestPaceSecs = secs; bestEffort = e }
+  })
+  const hasBestPace = bestPaceSecs > 0 && bestPaceSecs !== Infinity
+
+  // Per-canonical-distance targets via Riegel projection.
+  //
+  // For each canonical distance D, project every logged effort (d, t) to
+  // an equivalent time at D using Riegel's law:
+  //
+  //   T_D = t × (D / d)^1.06
+  //
+  // Take MIN across all efforts — that's the user's best demonstrated
+  // ability at D. Because every effort gets projected to every canonical
+  // distance, a 4.9 km effort and a 5.1 km effort both contribute to the
+  // 5 km row with near-identical projected times (Riegel's exponent is
+  // close to 1 for nearby distances, so small distance deltas cause small
+  // time deltas). No explicit "tolerance" bucketing needed — the math
+  // naturally normalises off-by-a-little logging.
+  //
+  // The push delta scales with distance — sec-floor of 2 / proportional
+  // 0.5 % above. A 500 m row gets a ~2 sec push, a 10 km row gets ~20 sec.
+  const distanceTargets = useMemo(() => {
+    return CANONICAL_DISTANCES_KM.map(D => {
+      let bestProjectedSecs = Infinity
+      for (const e of efforts) {
+        const p = parseEffortLabel(e.label)
+        if (!p || p.distKm <= 0 || p.timeSecs == null || p.timeSecs <= 0) continue
+        const projected = p.timeSecs * (D / p.distKm) ** 1.06
+        if (projected < bestProjectedSecs) bestProjectedSecs = projected
+      }
+      if (bestProjectedSecs === Infinity) {
+        return { distanceKm: D, bestSecs: null, nextSecs: null, pushSecs: 0 }
+      }
+      const bestRounded = Math.round(bestProjectedSecs)
+      const push = Math.max(2, Math.round(bestRounded * 0.005))
+      const nextRounded = Math.max(1, bestRounded - push)
+      return { distanceKm: D, bestSecs: bestRounded, nextSecs: nextRounded, pushSecs: push }
+    })
+  }, [efforts])
+
+  // Chart data — pace over time. The Y-axis is REVERSED in the chart
+  // props so faster pace renders at the TOP — the line still trends
+  // upward as the user improves, even though smaller-second values are
+  // "better" mathematically. No "lower is better" caption text — the
+  // visual direction speaks for itself.
+  const chartData = efforts
+    .map(e => {
+      const paceSecs = parsePaceToSecs(e.value)
+      if (paceSecs === null) return { ts: e.created_at, y: -1 }
+      return { ts: e.created_at, y: paceSecs }
+    })
+    .filter(d => d.y >= 0)
+
+  return (
+    <View style={s.page}>
+
+      {/* Header — h1 + "Best 1k" subtitle. The subtitle mirrors the
+          1 km row's Best value (Riegel-projected) so the two never
+          disagree numerically. Both pull from the same `distanceTargets`
+          calc, just rendered in two places. 1 km is chosen as the
+          headline distance because it's the most universal cycling /
+          stationary reference. */}
+      {!hideHeader && (
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{activity}</Text>
+        {distanceTargets[1]?.bestSecs != null && (
+          <View style={s.subRow}>
+            <Text style={s.subText}>Best 1k — </Text>
+            <TickerNumber
+              value={fmtSecs(distanceTargets[1].bestSecs)}
+              fontSize={14}
+              color={palette.amber[400]}
+              fontWeight="600"
+            />
+          </View>
+        )}
+        <View style={s.categoryBadge}>
+          <Text style={s.categoryBadgeText}>{cardioCategoryPillLabel(activity)}</Text>
+        </View>
+      </View>
+      )}
+
+      {/* Goal card — five stacked rows, one per canonical distance.
+          Each row shows the user's projected Best time + Next-target
+          (small push). Riegel projection means a 4.9 km effort and a
+          5.1 km effort both contribute to the 5 km row with near-
+          identical projected times — no explicit bucketing/tolerance
+          needed. The detail page is only reachable when the user has
+          at least one logged effort, so we never hit a fully-empty
+          state here; the per-row guard handles the edge case of an
+          effort row that failed to parse (shouldn't happen but
+          defended). */}
+      <AnimateRise delay={0} style={s.card}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={s.h2}>Your goals</Text>
+          <Pressable
+            onPress={() => setInfoOpen(o => !o)}
+            style={s.heroZonePillButton}
+          >
+            <Text style={s.heroZonePillText} numberOfLines={1}>
+              PROGRESSION
+            </Text>
+            <Info size={11} color={palette.amber[400]} />
+          </Pressable>
+        </View>
+
+        {infoOpen && (
+          <Animated.View
+            entering={FadeInUp.duration(200)}
+            exiting={FadeOutUp.duration(180)}
+            style={s.heroInfoPanel}
+          >
+            <Text style={s.heroInfoPanelTitle}>Beat your best</Text>
+            <Text style={s.heroInfoPanelBody}>
+              The simplest form of progression — go a little faster than your best at each canonical distance, every time you train. Small consistent improvements compound. Each row shows what to chase next.
+            </Text>
+          </Animated.View>
+        )}
+
+        <View style={{ marginTop: 12, gap: 6 }}>
+          {distanceTargets.map(t => (
+            <View key={t.distanceKm} style={s.canonicalDistanceRow}>
+              <Text style={s.canonicalDistanceLabel}>
+                {fmtCanonicalDistance(t.distanceKm)}
+              </Text>
+              {t.bestSecs != null && t.nextSecs != null ? (
+                <View style={s.canonicalDistanceValuesInline}>
+                  <Text style={s.canonicalDistanceSub}>Best</Text>
+                  <TickerNumber
+                    value={fmtSecs(t.bestSecs)}
+                    fontSize={14}
+                    color={palette.amber[400]}
+                    fontWeight="700"
+                  />
+                  <Text style={[s.canonicalDistanceSub, { marginLeft: 8 }]}>Aim for</Text>
+                  <TickerNumber
+                    value={fmtSecs(t.nextSecs)}
+                    fontSize={14}
+                    color={palette.amber[400]}
+                    fontWeight="700"
+                  />
+                  <Text style={s.canonicalDistanceDelta}>
+                    ↓ {t.pushSecs}s
+                  </Text>
+                </View>
+              ) : (
+                <Text style={[s.subText, { fontSize: 12 }]}>—</Text>
+              )}
+            </View>
+          ))}
+        </View>
+
+        {/* Attribution + projection-accuracy hint. Matches the
+            attribution-line pattern from Running ("Riegel · Daniels' ·
+            Seiler · pace zones & polarized 80/20"), Air Bike
+            ("Cal/min anchored zones · watts derived (cal/min × 17.4) ·
+            gender-calibrated baseline"), and Swimming. Names the
+            methodology (Riegel) without explaining the formula. */}
+        <Text style={[s.tinyText, { marginTop: 10 }]}>
+          Riegel projection · 5 canonical distances
+        </Text>
+        <Text style={[s.tinyText, { marginTop: 4, fontStyle: 'italic' }]}>
+          Log sessions at different distances to refine your targets — the more variety in your training history, the more accurate the projection.
+        </Text>
+      </AnimateRise>
+
+      {/* Chart — pace over time, axis REVERSED so faster pace lands at
+          the TOP. The line still trends upward as the user improves,
+          which is how every other chart in the app reads. No "lower is
+          better" framing in the caption — the visual handles it. */}
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
+          <Text style={s.h2}>Pace over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={hasBestPace ? bestPaceSecs : null}
+            yWidth={52}
+            yTickFormatter={(v) => fmtPaceStr(v, distUnit)}
+            tooltipValueFormatter={(v) => fmtPaceStr(v, distUnit)}
+            tooltipLabel="Pace"
+            lineColor={palette.amber[400]}
+            reversed
+            caption={
+              <Text style={s.tinyText}>Dashed = your fastest pace</Text>
+            }
+          />
+        </AnimateRise>
+      )}
+
+      {/* History — each row shows pace on the right. */}
+      <AnimateRise delay={500} style={s.cardNoPad}>
+        <View style={s.listHeader}>
+          <Text style={s.listHeaderText}>All entries</Text>
+        </View>
+        <View>
+          {[...efforts].reverse().map((e, i, arr) => (
+            <DeleteAction
+              key={e.id}
+              onDelete={() => onDelete(e.id)}
+              style={i < arr.length - 1 ? s.listRowDivider : undefined}
+              bg={colors.card}
+            >
+              <View style={s.listRow}>
+                <View style={{ flex: 1, marginRight: 12 }}>
+                  <Text style={s.listRowName}>
+                    {e.label.split(' · ').slice(1).join(' · ')}
+                  </Text>
+                  <Text style={s.listRowDate}>
+                    {new Date(e.created_at).toLocaleDateString()}
+                  </Text>
+                </View>
+                <Text style={s.valAmber}>{convertStoredPace(e.value, distUnit)}</Text>
+              </View>
+            </DeleteAction>
+          ))}
+        </View>
+      </AnimateRise>
+
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StructuralCardioDetail — superseded by BeatYourBestDetail (May 19 2026).
+// The original 3-zone L4 implementation lived here briefly before we agreed
+// that aspirational prescriptions without effort validation weren't worth
+// the UI complexity. Kept as a comment header so future readers searching
+// for it find the trail. The component itself and its config table have
+// been deleted; see git history if needed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RuckingDetail — carry-style coaching surface (May 19 2026 lock)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Rucking is cardio by activity-tab placement but its progression is carry-like.
+// You get better by carrying HEAVIER or going FARTHER, not by getting FASTER.
+// Pace is too sensitive to load + terrain to be a useful coaching anchor.
+// The detail page mirrors Atlas Stone Bear Hug Carry's design top-to-bottom
+// (abs-mode tier ladder + load × distance hero + 3 adaptation zones).
+//
+// Unit locks are hard:
+//   • Distance → MILES (movements.unit_lock = 'mi' on the Rucking row).
+//   • Pack weight → POUNDS (hard-coded in code; unit_lock holds only one unit).
+// The rucking community is universally imperial — GoRuck events, US tactical
+// fitness programs, and every published ruck protocol use lb × mi worldwide.
+
+type RuckTier = 'beginner' | 'intermediate' | 'advanced' | 'tough'
+const RUCK_TIER_ORDER: readonly RuckTier[] = ['beginner', 'intermediate', 'advanced', 'tough']
+const RUCK_TIER_LABELS: Record<RuckTier, string> = {
+  beginner: 'BEGINNER', intermediate: 'INTERMEDIATE', advanced: 'ADVANCED', tough: 'TOUGH',
+}
+const RUCK_TIER_RANK: Record<RuckTier, number> = {
+  beginner: 1, intermediate: 2, advanced: 3, tough: 4,
+}
+
+// Civilian-friendly tier scale stepped from the GoRuck event ladder.
+// Reference points: GoRuck Light = 20 lb × 6 mi in 3 hours; GoRuck Tough =
+// 35 lb × 12 mi in 3 hours; GoRuck Heavy = 45 lb × 20 mi in 12 hours; GoRuck
+// Selection = 35 lb × 40 mi (extreme).
+//
+// The TOUGH tier here = the GoRuck Tough standard exactly (the universally
+// recognized ruck benchmark). Beginner / Intermediate / Advanced are
+// progression stops below it. We don't include Heavy/Selection because they
+// require multi-hour sessions that exceed the app's 45-min total-session
+// philosophy — when users hit Tough we surface congratulations, not push
+// them toward Selection.
+const RUCK_TIER_THRESHOLDS: Record<RuckTier, [number, number]> = {
+  beginner:     [10, 2],
+  intermediate: [20, 4],
+  advanced:     [30, 8],
+  tough:        [35, 12],
+}
+
+// RUCK_WEIGHT_LADDER_LB is imported from movements.ts — single source of
+// truth shared between this detail page's zone snapping and the cardio log
+// form's pack-weight wheel.
+
+// Adaptation zones — mirror Carry's structure exactly. Each zone pushes one
+// axis (or two for conditioning) anchored on the user's actual PB.
+type RuckZone = 'max_load' | 'distance_build' | 'conditioning'
+const RUCK_ZONE_ORDER: readonly RuckZone[] = ['max_load', 'distance_build', 'conditioning']
+
+interface RuckZoneCfg { label: string; whyText: string }
+const RUCK_ZONE_CONFIG: Record<RuckZone, RuckZoneCfg> = Object.freeze({
+  max_load:       { label: 'MAX LOAD',       whyText: 'Heavier pack, same distance. Trains posterior-chain strength, grip stamina, and the mental fortitude that defines GoRuck-style events.' },
+  distance_build: { label: 'DISTANCE BUILD', whyText: 'Same pack, longer distance. Builds cardiovascular base and foot durability — the foundation of every long ruck.' },
+  conditioning:   { label: 'CONDITIONING',   whyText: 'Lighter pack, longer distance. Trains aerobic capacity without the orthopedic stress of heavy loads. Ideal recovery between hard sessions.' },
+})
+
+// Parse a rucking effort label.
+//   Current format:  "Rucking · 35 lb × 2.5 mi in 45:00"
+//   Legacy format:   "Rucking · 2.5 mi in 45:00"  (packLb defaults to 0)
+// Legacy labels remain valid — users who logged before the May 19 2026 spec
+// see their old efforts with weight = 0 (bodyweight rucking, which is just
+// walking, but the parse still works).
+function parseRuckLabel(label: string | null | undefined): { packLb: number; distMi: number; timeSecs: number } | null {
+  if (!label) return null
+  const part = label.split(' · ')[1] ?? ''
+  // Current format with pack weight
+  const m1 = part.match(/(\d+)\s*lb\s*[×x]\s*([\d.]+)\s*mi\s+in\s+(\d+:\d{2}(?::\d{2})?)/)
+  if (m1) {
+    return { packLb: parseInt(m1[1], 10), distMi: parseFloat(m1[2]), timeSecs: parseTimeStr(m1[3]) ?? 0 }
+  }
+  // Legacy format without pack weight
+  const m2 = part.match(/([\d.]+)\s*mi\s+in\s+(\d+:\d{2}(?::\d{2})?)/)
+  if (m2) {
+    return { packLb: 0, distMi: parseFloat(m2[1]), timeSecs: parseTimeStr(m2[2]) ?? 0 }
+  }
+  return null
+}
+
+// Classify the user's highest cleared tier from their effort history.
+// An effort qualifies for a tier when packLb ≥ minLb AND distMi ≥ minMi
+// in the SAME effort (not cumulative across efforts). Returns null when
+// no effort meets even the beginner threshold.
+function classifyRuckTier(efforts: Effort[]): RuckTier | null {
+  let highest: RuckTier | null = null
+  for (const e of efforts) {
+    const p = parseRuckLabel(e.label)
+    if (!p) continue
+    for (const tier of RUCK_TIER_ORDER) {
+      const [minLb, minMi] = RUCK_TIER_THRESHOLDS[tier]
+      if (p.packLb >= minLb && p.distMi >= minMi) {
+        if (!highest || RUCK_TIER_RANK[tier] > RUCK_TIER_RANK[highest]) {
+          highest = tier
+        }
+      }
+    }
+  }
+  return highest
+}
+
+// Snap a value DOWN to the largest rung ≤ value. Returns ladder[0] when
+// value is below the lowest rung (we never prescribe 0 lb).
+function snapDownToRuckLadder(value: number, ladder: readonly number[]): number {
+  let result = ladder[0]
+  for (const v of ladder) {
+    if (v <= value) result = v
+    else break
+  }
+  return result
+}
+
+// Smallest rung above value, or null when value is ≥ heaviest rung.
+function nextRuckLadderAbove(value: number, ladder: readonly number[]): number | null {
+  for (const v of ladder) {
+    if (v > value) return v
+  }
+  return null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AirBikeDetail — calorie-anchored coaching surface (May 17 2026 lock)
 // ─────────────────────────────────────────────────────────────────────────────
 // Air bikes are fan-resistance machines (Assault, Echo, Rogue, Schwinn).
@@ -2546,16 +3223,19 @@ const AIR_BIKE_ZONE_CONFIG: Record<AirBikeZone, AirBikeZoneCfg> = Object.freeze(
 interface AirBikeZoneRx {
   /** Cals per rep (for interval zones) or total cals (for continuous). */
   calsPerRep:        number
+  /** Wattage floor — the user should sustain AT or ABOVE this watt value
+   *  for the duration of each rep. Derived from cal/min × 0.85/0.65/1.0
+   *  × 17.4 (Assault/Echo standard conversion). Floor-advisory, not
+   *  a precise instantaneous target — ±10 % is fine. */
+  wattsFloor:        number
   /** Estimated wall-clock time per rep in seconds. */
   estimatedSecsPerRep: number
   /** Number of reps (1 for continuous). */
   reps:              number
   /** Rest between reps in seconds (0 for continuous). */
   restSecs:          number
-  /** Short label for tile display. */
+  /** Short label for tile / pill display. */
   shortWork:         string  // "8 × 9 cal"
-  /** Short rate label for tile. */
-  shortRate:         string  // "100% effort"
 }
 
 function buildAirBikeZoneRx(zone: AirBikeZone, peakCalsPerMin: number): AirBikeZoneRx {
@@ -2567,37 +3247,43 @@ function buildAirBikeZoneRx(zone: AirBikeZone, peakCalsPerMin: number): AirBikeZ
   // Estimated time at the prescribed intensity. The user does each rep
   // "as fast as they can" but this gives them a rough wall-clock anchor.
   const estimatedSecsPerRep = Math.round((calsPerRep / (peakCalsPerMin * cfg.intensity)) * 60)
+  // Watts floor for the zone — derived from the zone's effective cal/min
+  // rate (peak × intensity) and the standard 17.4 W-per-cal/min conversion.
+  // See `calsPerMinToWatts` for the formula derivation.
+  const wattsFloor = calsPerMinToWatts(peakCalsPerMin * cfg.intensity)
   const shortWork = cfg.reps > 1
     ? `${cfg.reps} × ${calsPerRep} cal`
     : `${calsPerRep} cal`
-  const shortRate = `${Math.round(cfg.intensity * 100)}% effort`
   return {
     calsPerRep,
+    wattsFloor,
     estimatedSecsPerRep,
     reps:     cfg.reps,
     restSecs: cfg.restSecs,
     shortWork,
-    shortRate,
   }
 }
 
 function getAirBikeZoneCue(zone: AirBikeZone, rx: AirBikeZoneRx): string {
   const cfg = AIR_BIKE_ZONE_CONFIG[zone]
   if (cfg.reps === 1) {
-    return `Ride continuously and hit ${rx.calsPerRep} cals at a comfortable conversational pace. Aim for about ${Math.round(cfg.durationMin)} minutes of steady output.`
+    // Continuous zone — no rest, one effort.
+    return `Pedal ${rx.calsPerRep} cals at or above ${rx.wattsFloor} W — steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
   }
   if (zone === 'sprint') {
-    return `Sprint ${rx.calsPerRep} cals as fast as you can — go max effort. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+    return `Sprint ${rx.calsPerRep} cals as fast as you can — hold at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   // threshold
-  return `Hold ${rx.calsPerRep} cals at a sustained hard pace — uncomfortable but doable. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+  return `Hold ${rx.calsPerRep} cals at a sustained hard pace — keep watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
 }
 
 function AirBikeDetail({
-  efforts, onDelete,
+  efforts, onDelete, hideHeader,
 }: {
   efforts:  Effort[]
   onDelete: (id: string) => void
+  /** Suppresses page-level header for family slot rendering. */
+  hideHeader?: boolean
 }) {
   const { profile } = useAuth()
 
@@ -2653,10 +3339,77 @@ function AirBikeDetail({
     [selectedZone, selectedRx],
   )
 
+  // ── L4 swipe pill state (matches Carry / Settings / Sled Work patterns) ─
+  const currentIdx = AIR_BIKE_ZONE_ORDER.indexOf(selectedZone)
+  const hasPrev    = currentIdx > 0
+  const hasNext    = currentIdx >= 0 && currentIdx < AIR_BIKE_ZONE_ORDER.length - 1
+  const AIR_BIKE_SWIPE_THRESHOLD_PX = 20
+  const AIR_BIKE_SLIDE_OFFSCREEN_PX = 220
+  const AIR_BIKE_SLIDE_DURATION_MS  = 250
+  const airBikePillTranslateX        = useSharedValue(0)
+  const airBikeChevronOpacityOverride = useSharedValue(1)
+
+  const navigateZone = (direction: -1 | 1) => {
+    const target = currentIdx + direction
+    if (target < 0 || target >= AIR_BIKE_ZONE_ORDER.length) return
+    setSelectedZone(AIR_BIKE_ZONE_ORDER[target])
+    setZoneInfoOpen(false)
+  }
+
+  const airBikePillSwipeGesture = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-25, 25])
+      .onStart(() => {
+        'worklet'
+        airBikeChevronOpacityOverride.value = withTiming(0, { duration: 120 })
+      })
+      .onUpdate((event) => {
+        'worklet'
+        airBikePillTranslateX.value = event.translationX
+      })
+      .onEnd((event) => {
+        'worklet'
+        const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
+        const past = Math.abs(event.translationX) > AIR_BIKE_SWIPE_THRESHOLD_PX
+        const targetIdx = currentIdx + direction
+        const validDirection = targetIdx >= 0 && targetIdx < AIR_BIKE_ZONE_ORDER.length
+        if (!past || !validDirection) {
+          airBikePillTranslateX.value = withTiming(0, { duration: 200 })
+          airBikeChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          return
+        }
+        const slideOff = direction === 1 ? -AIR_BIKE_SLIDE_OFFSCREEN_PX : AIR_BIKE_SLIDE_OFFSCREEN_PX
+        airBikePillTranslateX.value = withTiming(slideOff, { duration: AIR_BIKE_SLIDE_DURATION_MS }, (finished) => {
+          'worklet'
+          if (!finished) return
+          runOnJS(navigateZone)(direction)
+          airBikePillTranslateX.value = -slideOff
+          airBikePillTranslateX.value = withTiming(0, { duration: AIR_BIKE_SLIDE_DURATION_MS }, (settled) => {
+            'worklet'
+            if (settled) airBikeChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          })
+        })
+      })
+      .onFinalize((_event, success) => {
+        'worklet'
+        if (!success) {
+          airBikePillTranslateX.value = withTiming(0, { duration: 200 })
+          airBikeChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentIdx],
+  )
+
+  const airBikePillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: airBikePillTranslateX.value }] }))
+  const airBikeChevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: airBikeChevronOpacityOverride.value }))
+
   return (
     <View style={s.page}>
 
-      {/* Header — h1 + best cal/min subtitle */}
+      {/* Header — h1 + best cal/min subtitle + AIR BIKE category tag */}
+      {!hideHeader && (
       <View>
         <BackButton />
         <Text style={s.h1}>{AIR_BIKE_ACTIVITY}</Text>
@@ -2675,140 +3428,156 @@ function AirBikeDetail({
             No efforts logged yet · using {baselineCalsPerMin} cal/min as a starting estimate
           </Text>
         )}
+        <View style={s.categoryBadge}>
+          <Text style={s.categoryBadgeText}>{cardioCategoryPillLabel(AIR_BIKE_ACTIVITY)}</Text>
+        </View>
       </View>
+      )}
 
-      {/* Progression plan card */}
+      {/* Progression plan card — L4 layout (in-frame variation swipe pill
+          + hero + consolidated chart + log). */}
       <AnimateRise delay={0} style={s.card}>
         <Text style={s.h2}>Your progression plan</Text>
         <Text style={s.helpTextSm}>
-          Three zones to train, each anchored on your cal/min rate. Tap a zone to see its prescription.
+          Three zones to train, each anchored on your cal/min rate. Swipe the pill to switch zones.
         </Text>
 
-        {/* Zone tile row — 3 fixed zones in hardest-first order
-            (SPRINT → THRESHOLD → AEROBIC). Tappable to switch the
-            hero card content below. */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ alignItems: 'center', paddingVertical: 4, paddingHorizontal: 2 }}
-          style={{ marginHorizontal: -2 }}
-        >
-          {AIR_BIKE_ZONE_ORDER.map((zone, idx) => {
-            const isSelected = selectedZone === zone
-            const isLast     = idx === AIR_BIKE_ZONE_ORDER.length - 1
-            const rx         = buildAirBikeZoneRx(zone, effectiveRate)
-            return (
-              <Fragment key={zone}>
-                <Pressable
-                  onPress={() => { setSelectedZone(zone); setZoneInfoOpen(false) }}
-                  style={[s.queueTile, isSelected && s.queueTileSelected]}
-                >
-                  <Text style={[s.queueTileZone, isSelected && s.queueTileZoneSelected]}>
-                    {AIR_BIKE_ZONE_CONFIG[zone].shortLabel}
-                  </Text>
-                  <Text style={[s.queueTileWork, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
-                    {rx.shortWork}
-                  </Text>
-                  <Text style={[s.queueTileTime, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
-                    {rx.shortRate}
-                  </Text>
-                </Pressable>
-                {!isLast && (
-                  <View style={s.queueChevron}>
-                    <ChevronRight
-                      size={22}
-                      color={withAlpha(palette.amber[400], 0.7)}
-                      strokeWidth={2.5}
-                      style={{ transform: [{ scaleY: 1.3 }] }}
-                    />
-                  </View>
-                )}
-              </Fragment>
-            )
-          })}
-        </ScrollView>
+        {/* Pill row + hero card share the SAME swipe gesture (May 19 2026).
+            Wrapping both in a single GestureDetector means a horizontal
+            swipe anywhere from the pill row down through the hero card
+            drives the pill swipe. Pan still requires 15 px horizontal
+            travel before activating, so taps on inner Pressables (info
+            pill toggle, chevron buttons) fire normally; vertical drags
+            > 25 px fail the gesture, allowing page scroll. */}
+        <GestureDetector gesture={airBikePillSwipeGesture}>
+          <View>
+            <View style={s.airBikeZoneRow}>
+              {hasPrev ? (
+                <Animated.View style={[s.airBikeZoneChevronSlotLeft, airBikeChevronAnimatedStyle]}>
+                  <Pressable
+                    onPress={() => navigateZone(-1)}
+                    style={s.airBikeZoneChevronPressable}
+                    hitSlop={8}
+                    accessibilityLabel="Previous zone"
+                  >
+                    <AmberAnimatedChevron direction="left" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+                    <View style={{ marginLeft: -6 }}>
+                      <AmberAnimatedChevron direction="left" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+                    </View>
+                  </Pressable>
+                </Animated.View>
+              ) : (
+                <View style={s.airBikeZoneChevronSlotLeft} />
+              )}
 
-        {/* Hero card — three stacked TickerNumber rows.
-            Row 1 = work (reps × cals or "N cal continuous")
-            Row 2 = est wall-clock time per rep
-            Row 3 = rest between reps (or "no rest" for continuous) */}
-        <View style={s.hero}>
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
-            <Pressable
-              onPress={() => setZoneInfoOpen(o => !o)}
-              style={s.heroZonePillButton}
-            >
-              <Text style={s.heroZonePillText} numberOfLines={1}>
-                {selectedCfg.label}
-              </Text>
-              <Info size={11} color={palette.amber[400]} />
-            </Pressable>
-          </View>
-
-          {zoneInfoOpen && (
-            <Animated.View
-              entering={FadeInUp.duration(200)}
-              exiting={FadeOutUp.duration(180)}
-              style={s.heroInfoPanel}
-            >
-              <Text style={s.heroInfoPanelTitle}>
-                {selectedCfg.label}
-              </Text>
-              <Text style={s.heroInfoPanelBody}>
-                {selectedCfg.whyText}
-              </Text>
-            </Animated.View>
-          )}
-
-          <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
-            <View style={s.heroValueRow}>
-              <TickerNumber
-                value={selectedRx.shortWork}
-                fontSize={30}
-                color={palette.amber[400]}
-                fontWeight="700"
-              />
-              <Text style={s.heroValueDescriptor} numberOfLines={1}>
-                the work
-              </Text>
-            </View>
-
-            <View style={s.heroValueRow}>
-              <TickerNumber
-                value={fmtSecs(selectedRx.estimatedSecsPerRep)}
-                fontSize={30}
-                color={palette.amber[400]}
-                fontWeight="700"
-              />
-              <Text style={s.heroValueDescriptor} numberOfLines={1}>
-                {selectedRx.reps > 1 ? 'est. per rep' : 'est. total'}
-              </Text>
-            </View>
-
-            {selectedRx.reps > 1 && (
-              <View style={s.heroValueRow}>
-                <TickerNumber
-                  value={fmtSecs(selectedRx.restSecs)}
-                  fontSize={30}
-                  color={palette.amber[400]}
-                  fontWeight="700"
-                />
-                <Text style={s.heroValueDescriptor} numberOfLines={1}>
-                  rest between
+              <Animated.View style={[s.airBikeZonePill, airBikePillAnimatedStyle]}>
+                <Text style={s.airBikeZonePillText} numberOfLines={1}>
+                  {AIR_BIKE_ZONE_CONFIG[selectedZone].label}
                 </Text>
+              </Animated.View>
+
+              {hasNext ? (
+                <Animated.View style={[s.airBikeZoneChevronSlotRight, airBikeChevronAnimatedStyle]}>
+                  <Pressable
+                    onPress={() => navigateZone(1)}
+                    style={s.airBikeZoneChevronPressable}
+                    hitSlop={8}
+                    accessibilityLabel="Next zone"
+                  >
+                    <AmberAnimatedChevron direction="right" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+                    <View style={{ marginLeft: -6 }}>
+                      <AmberAnimatedChevron direction="right" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+                    </View>
+                  </Pressable>
+                </Animated.View>
+              ) : (
+                <View style={s.airBikeZoneChevronSlotRight} />
+              )}
+            </View>
+
+            {/* Hero card — three stacked TickerNumber rows (May 19 2026 lock).
+                Row 1 = work (reps × cals)
+                Row 2 = watts floor ("at or above" coaching cue, derived from
+                        cal/min × 0.65/0.85/1.0 × 17.4 watts/cal-per-min)
+                Row 3 = estimated wall-clock time per rep (or total for AEROBIC)
+                Rest moves to the cue line below. */}
+            <View style={s.hero}>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+                <Pressable
+                  onPress={() => setZoneInfoOpen(o => !o)}
+                  style={s.heroZonePillButton}
+                >
+                  <Text style={s.heroZonePillText} numberOfLines={1}>
+                    {selectedCfg.label}
+                  </Text>
+                  <Info size={11} color={palette.amber[400]} />
+                </Pressable>
               </View>
-            )}
-          </Animated.View>
 
-          <Animated.View
-            layout={LinearTransition.duration(200)}
-            style={s.heroSep}
-          >
-            <Text style={s.heroCue}>{selectedCue}</Text>
-          </Animated.View>
-        </View>
+              {zoneInfoOpen && (
+                <Animated.View
+                  entering={FadeInUp.duration(200)}
+                  exiting={FadeOutUp.duration(180)}
+                  style={s.heroInfoPanel}
+                >
+                  <Text style={s.heroInfoPanelTitle}>
+                    {selectedCfg.label}
+                  </Text>
+                  <Text style={s.heroInfoPanelBody}>
+                    {selectedCfg.whyText}
+                  </Text>
+                </Animated.View>
+              )}
 
-        <Text style={s.tinyText}>Calorie-anchored zones · gender-calibrated baseline</Text>
+              <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+                <View style={s.heroValueRow}>
+                  <TickerNumber
+                    value={selectedRx.shortWork}
+                    fontSize={30}
+                    color={palette.amber[400]}
+                    fontWeight="700"
+                  />
+                  <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                    the work
+                  </Text>
+                </View>
+
+                <View style={s.heroValueRow}>
+                  <TickerNumber
+                    value={`≥ ${selectedRx.wattsFloor} W`}
+                    fontSize={30}
+                    color={palette.amber[400]}
+                    fontWeight="700"
+                  />
+                  <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                    hold at or above
+                  </Text>
+                </View>
+
+                <View style={s.heroValueRow}>
+                  <TickerNumber
+                    value={fmtSecs(selectedRx.estimatedSecsPerRep)}
+                    fontSize={30}
+                    color={palette.amber[400]}
+                    fontWeight="700"
+                  />
+                  <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                    {selectedRx.reps > 1 ? 'est. per rep' : 'est. total'}
+                  </Text>
+                </View>
+              </Animated.View>
+
+              <Animated.View
+                layout={LinearTransition.duration(200)}
+                style={s.heroSep}
+              >
+                <Text style={s.heroCue}>{selectedCue}</Text>
+              </Animated.View>
+            </View>
+          </View>
+        </GestureDetector>
+
+        <Text style={s.tinyText}>Cal/min anchored zones · watts derived (cal/min × 17.4) · gender-calibrated baseline</Text>
       </AnimateRise>
 
       {/* Chart — cal/min over time. Y-axis NOT reversed (higher = better;
@@ -2878,12 +3647,879 @@ function AirBikeDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// RuckingDetail — carry-style coaching surface (May 19 2026 lock)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Top-to-bottom design mirrors Atlas Stone Bear Hug Carry's abs-mode
+// CarryDetail. See "Rucking detail card — locked design spec" in CLAUDE.md
+// for the full rationale.
+
+function RuckingDetail({
+  efforts, onDelete, hideHeader,
+}: {
+  efforts:  Effort[]
+  onDelete: (id: string) => void
+  /** Suppresses page-level header for family slot rendering. */
+  hideHeader?: boolean
+}) {
+  // Hard-locked units. Distance lock is reinforced by the unit_lock column
+  // on the Rucking movement row; weight lock lives only here in code.
+  const wUnit: 'lb' = 'lb'
+  const dUnit: 'mi' = 'mi'
+
+  // ── Parse efforts → { packLb, distMi, timeSecs, ts, id } ──────────────────
+  const parsed = useMemo(() => efforts.map(e => {
+    const p = parseRuckLabel(e.label)
+    if (!p) return null
+    return { ts: e.created_at, packLb: p.packLb, distMi: p.distMi, timeSecs: p.timeSecs, id: e.id }
+  }).filter((x): x is { ts: string; packLb: number; distMi: number; timeSecs: number; id: string } => x !== null), [efforts])
+
+  // ── Best derivations ──────────────────────────────────────────────────────
+  const bestWeight = parsed.length ? Math.max(...parsed.map(p => p.packLb)) : 0
+  const bestDistRaw = parsed.length ? Math.max(...parsed.map(p => p.distMi)) : 0
+  // Display with 1 decimal — miles have meaningful sub-mile precision
+  const bestDistDisplay = Math.round(bestDistRaw * 10) / 10
+  const currentTier = useMemo(() => classifyRuckTier(efforts), [efforts])
+  const hasTargets = bestWeight > 0 && bestDistDisplay > 0
+
+  // ── UI state ──────────────────────────────────────────────────────────────
+  const [selZone, setSelZone]           = useState<RuckZone>('max_load')
+  const [zoneInfoOpen, setZoneInfoOpen] = useState(false)
+
+  // ── Zone math (mirrors Carry's zoneMath exactly) ──────────────────────────
+  // dInc = 1 mile (round-mile DISTANCE BUILD steps); ladder handles weight.
+  const dInc = 1
+  const zoneMath = useMemo(() => {
+    const result: Record<RuckZone, { W_target: number; D_target: number; weightDeltaText: string; distDeltaText: string; cueLine: string }> = {} as Record<RuckZone, { W_target: number; D_target: number; weightDeltaText: string; distDeltaText: string; cueLine: string }>
+    for (const zone of RUCK_ZONE_ORDER) {
+      let W_target = 0
+      let D_target = 0
+      switch (zone) {
+        case 'max_load':
+          W_target = nextRuckLadderAbove(bestWeight, RUCK_WEIGHT_LADDER_LB) ?? bestWeight
+          D_target = bestDistDisplay
+          break
+        case 'distance_build':
+          W_target = bestWeight
+          D_target = bestDistDisplay + dInc
+          break
+        case 'conditioning':
+        default:
+          W_target = snapDownToRuckLadder(bestWeight * 0.60, RUCK_WEIGHT_LADDER_LB)
+          D_target = Math.round(bestDistDisplay * 2 * 10) / 10
+          break
+      }
+      // Delta strings vs user's best
+      const weightDeltaText = hasTargets
+        ? (W_target > bestWeight
+            ? `+ ${W_target - bestWeight} ${wUnit}`
+            : W_target < bestWeight
+              ? `− ${bestWeight - W_target} ${wUnit}`
+              : 'same as your best')
+        : ''
+      const dDiff = Math.round((D_target - bestDistDisplay) * 10) / 10
+      const distDeltaText = hasTargets
+        ? (dDiff > 0
+            ? `+ ${dDiff} ${dUnit}`
+            : dDiff < 0
+              ? `− ${Math.abs(dDiff)} ${dUnit}`
+              : 'same as your best')
+        : ''
+      let cueLine: string
+      if (!hasTargets) {
+        cueLine = 'Log your first ruck to see a target.'
+      } else {
+        switch (zone) {
+          case 'max_load':
+            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit} — focus on posture and step under load`
+            break
+          case 'distance_build':
+            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit} — steady cadence, manage your feet`
+            break
+          case 'conditioning':
+          default:
+            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit} — keep moving, build aerobic base`
+            break
+        }
+      }
+      result[zone] = { W_target, D_target, weightDeltaText, distDeltaText, cueLine }
+    }
+    return result
+  }, [bestWeight, bestDistDisplay, hasTargets])
+
+  // ── Pill swipe gesture (mirrors AirBikeDetail's pattern) ──────────────────
+  const currentIdx = RUCK_ZONE_ORDER.indexOf(selZone)
+  const hasPrev    = currentIdx > 0
+  const hasNext    = currentIdx >= 0 && currentIdx < RUCK_ZONE_ORDER.length - 1
+
+  const RUCK_SWIPE_THRESHOLD_PX = 20
+  const RUCK_SLIDE_OFFSCREEN_PX = 220
+  const RUCK_SLIDE_DURATION_MS  = 250
+
+  const ruckPillTranslateX         = useSharedValue(0)
+  const ruckChevronOpacityOverride = useSharedValue(1)
+
+  const navigateZone = (direction: -1 | 1) => {
+    const target = currentIdx + direction
+    if (target < 0 || target >= RUCK_ZONE_ORDER.length) return
+    setSelZone(RUCK_ZONE_ORDER[target])
+    setZoneInfoOpen(false)
+  }
+
+  const ruckPillSwipeGesture = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-25, 25])
+      .onStart(() => { 'worklet'; ruckChevronOpacityOverride.value = withTiming(0, { duration: 120 }) })
+      .onUpdate((event) => { 'worklet'; ruckPillTranslateX.value = event.translationX })
+      .onEnd((event) => {
+        'worklet'
+        const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
+        const past = Math.abs(event.translationX) > RUCK_SWIPE_THRESHOLD_PX
+        const targetIdx = currentIdx + direction
+        const validDirection = targetIdx >= 0 && targetIdx < RUCK_ZONE_ORDER.length
+        if (!past || !validDirection) {
+          ruckPillTranslateX.value = withTiming(0, { duration: 200 })
+          ruckChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          return
+        }
+        const slideOff = direction === 1 ? -RUCK_SLIDE_OFFSCREEN_PX : RUCK_SLIDE_OFFSCREEN_PX
+        ruckPillTranslateX.value = withTiming(slideOff, { duration: RUCK_SLIDE_DURATION_MS }, (finished) => {
+          'worklet'
+          if (!finished) return
+          runOnJS(navigateZone)(direction)
+          ruckPillTranslateX.value = -slideOff
+          ruckPillTranslateX.value = withTiming(0, { duration: RUCK_SLIDE_DURATION_MS }, (settled) => {
+            'worklet'
+            if (settled) ruckChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          })
+        })
+      })
+      .onFinalize((_event, success) => {
+        'worklet'
+        if (!success) {
+          ruckPillTranslateX.value = withTiming(0, { duration: 200 })
+          ruckChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentIdx],
+  )
+
+  const ruckPillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: ruckPillTranslateX.value }] }))
+  const ruckChevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: ruckChevronOpacityOverride.value }))
+
+  // ── Chart data (two stacked single-axis charts) ───────────────────────────
+  const weightChartData = useMemo(() => parsed.map(p => ({ ts: p.ts, y: p.packLb })), [parsed])
+  const distChartData   = useMemo(() => parsed.map(p => ({ ts: p.ts, y: p.distMi })), [parsed])
+
+  // ── Selected zone math ────────────────────────────────────────────────────
+  const selectedZone = zoneMath[selZone]
+  const selectedCfg  = RUCK_ZONE_CONFIG[selZone]
+
+  return (
+    <View style={s.page}>
+
+      {/* Header — h1 + best subtitle (weight + distance) + category tag +
+          tier tag (when achieved). Mirrors Atlas Stone Bear Hug Carry's
+          header: subtitle text + small uppercase category pill below it +
+          tier pill below that. Both pills use the same `categoryBadge`
+          chrome (amber for cardio); they stack vertically so the tier
+          reads as a sub-classification of the cardio category. */}
+      {!hideHeader && (
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{RUCKING_ACTIVITY}</Text>
+        {hasTargets ? (
+          <View style={s.subRow}>
+            <Text style={s.subText}>Best — </Text>
+            <TickerNumber value={`${bestWeight} ${wUnit}`} fontSize={14} color={palette.amber[400]} fontWeight="600" />
+            <Text style={[s.subText, { color: palette.amber[400] }]}> · </Text>
+            <TickerNumber value={`${bestDistDisplay} ${dUnit}`} fontSize={14} color={palette.amber[400]} fontWeight="600" />
+          </View>
+        ) : (
+          <Text style={s.subText}>No efforts logged yet</Text>
+        )}
+        <View style={s.categoryBadge}>
+          <Text style={s.categoryBadgeText}>{cardioCategoryPillLabel(RUCKING_ACTIVITY)}</Text>
+        </View>
+        {currentTier && (
+          <View style={s.categoryBadge}>
+            <Text style={s.categoryBadgeText}>{RUCK_TIER_LABELS[currentTier]}</Text>
+          </View>
+        )}
+      </View>
+      )}
+
+      {/* Adaptation zone card — pill swipe + hero card with 2 rows */}
+      <AnimateRise delay={0} style={s.card}>
+        <Text style={s.h2}>Adaptation zone</Text>
+        <Text style={s.helpTextSm}>Pick a training focus, then aim at the next target.</Text>
+
+        {/* Pill row + hero card share the SAME swipe gesture (May 19 2026).
+            Wrapping both in a single GestureDetector means a horizontal
+            swipe anywhere from the pill row down through the hero card
+            drives the pill swipe. Pan still requires 15 px horizontal
+            travel before activating, so taps on inner Pressables (info
+            pill toggle, chevron buttons) fire normally; vertical drags
+            > 25 px fail the gesture, allowing page scroll. */}
+        <GestureDetector gesture={ruckPillSwipeGesture}>
+          <View>
+            <View style={s.airBikeZoneRow}>
+              {hasPrev ? (
+                <Animated.View style={[s.airBikeZoneChevronSlotLeft, ruckChevronAnimatedStyle]}>
+                  <Pressable onPress={() => navigateZone(-1)} style={s.airBikeZoneChevronPressable} hitSlop={8} accessibilityLabel="Previous zone">
+                    <AmberAnimatedChevron direction="left" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+                    <View style={{ marginLeft: -6 }}>
+                      <AmberAnimatedChevron direction="left" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+                    </View>
+                  </Pressable>
+                </Animated.View>
+              ) : <View style={s.airBikeZoneChevronSlotLeft} />}
+
+              <Animated.View style={[s.airBikeZonePill, ruckPillAnimatedStyle]}>
+                <Text style={s.airBikeZonePillText} numberOfLines={1}>{selectedCfg.label}</Text>
+              </Animated.View>
+
+              {hasNext ? (
+                <Animated.View style={[s.airBikeZoneChevronSlotRight, ruckChevronAnimatedStyle]}>
+                  <Pressable onPress={() => navigateZone(1)} style={s.airBikeZoneChevronPressable} hitSlop={8} accessibilityLabel="Next zone">
+                    <AmberAnimatedChevron direction="right" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+                    <View style={{ marginLeft: -6 }}>
+                      <AmberAnimatedChevron direction="right" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+                    </View>
+                  </Pressable>
+                </Animated.View>
+              ) : <View style={s.airBikeZoneChevronSlotRight} />}
+            </View>
+
+            {/* Hero card — top-right info pill + 2 stacked TickerNumber rows
+                (weight target + distance target, each with delta string vs.
+                user's best) + cue line below thin separator. */}
+            <View style={s.hero}>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+                <Pressable onPress={() => setZoneInfoOpen(o => !o)} style={s.heroZonePillButton}>
+                  <Text style={s.heroZonePillText} numberOfLines={1}>{selectedCfg.label}</Text>
+                  <Info size={11} color={palette.amber[400]} />
+                </Pressable>
+              </View>
+
+              {zoneInfoOpen && (
+                <Animated.View
+                  entering={FadeInUp.duration(200)}
+                  exiting={FadeOutUp.duration(180)}
+                  style={s.heroInfoPanel}
+                >
+                  <Text style={s.heroInfoPanelTitle}>{selectedCfg.label}</Text>
+                  <Text style={s.heroInfoPanelBody}>{selectedCfg.whyText}</Text>
+                </Animated.View>
+              )}
+
+              <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+                <View style={s.heroValueRow}>
+                  <TickerNumber value={`${selectedZone.W_target} ${wUnit}`} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                  <Text style={s.heroValueDescriptor} numberOfLines={1}>{selectedZone.weightDeltaText}</Text>
+                </View>
+                <View style={s.heroValueRow}>
+                  <TickerNumber value={`${selectedZone.D_target} ${dUnit}`} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                  <Text style={s.heroValueDescriptor} numberOfLines={1}>{selectedZone.distDeltaText}</Text>
+                </View>
+              </Animated.View>
+
+              <Animated.View layout={LinearTransition.duration(200)} style={s.heroSep}>
+                <Text style={s.heroCue}>{selectedZone.cueLine}</Text>
+              </Animated.View>
+            </View>
+          </View>
+        </GestureDetector>
+
+        <Text style={[s.tinyText, { marginTop: 10 }]}>
+          Load + distance progression · GoRuck tier ladder
+        </Text>
+      </AnimateRise>
+
+      {/* Tier ladder card removed (May 19 2026 — second pass). The rucking
+          community already knows the GoRuck tier scale; surfacing it as
+          an in-app card was redundant chrome. The user's current tier
+          still appears as a small TIER pill in the header below the
+          subtitle (mirrors Atlas Stone Bear Hug Carry's tier badge). */}
+
+      {/* Progress charts — two stacked single-axis line charts (pack weight
+          + distance over time). Mobile LineChart doesn't support dual axes
+          natively, so we stack two charts — same pattern as Carry. */}
+      {parsed.length >= 1 && (
+        <AnimateRise delay={500} style={s.card}>
+          <Text style={s.h2}>Progress over time</Text>
+          <Text style={[s.helpTextSm, { marginBottom: 8, marginTop: 4 }]}>Pack weight</Text>
+          <LineChart
+            data={weightChartData}
+            referenceY={bestWeight > 0 ? bestWeight : null}
+            yWidth={42}
+            yTickFormatter={(v) => `${Math.round(v)} lb`}
+            tooltipValueFormatter={(v) => `${Math.round(v)} lb`}
+            tooltipLabel="Weight"
+            lineColor={palette.amber[400]}
+          />
+          <Text style={[s.helpTextSm, { marginTop: 16, marginBottom: 8 }]}>Distance</Text>
+          <LineChart
+            data={distChartData}
+            referenceY={bestDistRaw > 0 ? bestDistRaw : null}
+            yWidth={42}
+            yTickFormatter={(v) => `${v.toFixed(1)} mi`}
+            tooltipValueFormatter={(v) => `${v.toFixed(1)} mi`}
+            tooltipLabel="Distance"
+            lineColor={palette.amber[400]}
+          />
+        </AnimateRise>
+      )}
+
+      {/* History — each row shows the workout shape on the left (35 lb × 2.5 mi)
+          and the wall-clock time on the right. */}
+      <AnimateRise delay={500} style={s.cardNoPad}>
+        <View style={s.listHeader}>
+          <Text style={s.listHeaderText}>All entries</Text>
+        </View>
+        <View>
+          {[...efforts].reverse().map((e, i, arr) => {
+            const p = parseRuckLabel(e.label)
+            return (
+              <DeleteAction
+                key={e.id}
+                onDelete={() => onDelete(e.id)}
+                style={i < arr.length - 1 ? s.listRowDivider : undefined}
+                bg={colors.card}
+              >
+                <View style={s.listRow}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={s.listRowName}>
+                      {p
+                        ? (p.packLb > 0
+                            ? `${p.packLb} lb × ${p.distMi} mi`
+                            : `${p.distMi} mi`)
+                        : e.label.split(' · ').slice(1).join(' · ')}
+                    </Text>
+                    <Text style={s.listRowDate}>{new Date(e.created_at).toLocaleDateString()}</Text>
+                  </View>
+                  <Text style={s.valAmber}>{p ? fmtSecs(p.timeSecs) : '—'}</Text>
+                </View>
+              </DeleteAction>
+            )
+          })}
+        </View>
+      </AnimateRise>
+
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StairMillDetail — floors-per-minute coaching surface (May 19 2026 lock)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Mirrors Air Bike's rate-anchored architecture line-for-line:
+//   • Rate metric: floors-per-minute (FPM) instead of cal/min.
+//   • Cold-start: gender-aware baseline FPM until first effort logged.
+//   • Zones: ENDURANCE / THRESHOLD / VO2 MAX (same names as running /
+//     swimming / ergs — drops Air Bike's "SPRINT" naming because
+//     stair-climbing protocols use the standard exercise-science vocab).
+//   • Hardest-first slot order: VO2 → THRESHOLD → ENDURANCE.
+//   • Hero card with 4 rows: workout shape, time, rate target, rest.
+//   • Chart: FPM over time, axis NOT reversed (higher = better, mirrors
+//     Air Bike — locked chart-direction rule).
+//
+// Science backing every zone is summarised in `STAIRMILL_ZONE_CONFIG`
+// (whyText). See "StairMill detail card — locked design spec" in CLAUDE.md
+// for the full citation list.
+
+type StairMillZone = 'aerobic' | 'threshold' | 'vo2'
+const STAIRMILL_ZONE_ORDER: readonly StairMillZone[] = ['vo2', 'threshold', 'aerobic']
+
+interface StairMillZoneCfg {
+  label:       string
+  whyText:     string
+  /** Continuous zone duration in minutes (per rep for intervals; total for AEROBIC). */
+  durationMin: number
+  /** Intensity factor relative to peak FPM (0–1.1). VO2 can exceed 1.0
+   *  because short reps tolerate above-peak intensity. */
+  intensity:   number
+  /** Number of reps (1 for continuous AEROBIC zone). */
+  reps:        number
+  /** Rest between reps in seconds (0 for continuous). */
+  restSecs:    number
+}
+
+const STAIRMILL_ZONE_CONFIG: Record<StairMillZone, StairMillZoneCfg> = Object.freeze({
+  vo2: {
+    label:       'VO2 MAX',
+    whyText:     "Short max-effort sprints at the ceiling of your aerobic capacity. The Allison protocol (2017 Med Sci Sports Exerc) showed 3 × 20-sec all-out stair climbs three times per week produced a 12 % VO2peak improvement in 6 weeks — among the most efficient cardio interventions ever published. Use sparingly: 1 session per week, full recovery between reps.",
+    durationMin: 1.0,    // ~60 sec per rep (Allison protocol used 20s, extended here for Step Mill console pacing)
+    intensity:   1.10,   // 110 % of peak FPM — short reps tolerate above-peak
+    reps:        3,
+    restSecs:    180,    // 3 min full recovery between sprints
+  },
+  threshold: {
+    label:       'THRESHOLD',
+    whyText:     'Sustained hard reps at the edge of what you can hold. Trains lactate clearance and the ability to maintain high climbing output past the initial burn. Honda et al. (2014) used 3-min stair-climbing intervals to drive metabolic adaptation; comparable to Pete Pfitzinger\'s cruise interval programming. 1–2 sessions per week max.',
+    durationMin: 3.0,    // 3 min per rep — Honda protocol
+    intensity:   0.85,   // 85 % of peak FPM — "comfortably hard sustained"
+    reps:        4,
+    restSecs:    90,
+  },
+  aerobic: {
+    label:       'ENDURANCE',
+    whyText:     'Continuous moderate climbing at conversational effort. Boreham et al. (2000) showed sustained moderate stair climbing produced a 17 % VO2max improvement in 8 weeks in previously sedentary adults — the foundation that supports every higher-intensity zone above it. Stay disciplined and steady; resist the urge to push.',
+    durationMin: 20.0,   // 20 min continuous — Boreham protocol
+    intensity:   0.65,   // 65 % of peak FPM — Zone 2 conversational
+    reps:        1,
+    restSecs:    0,
+  },
+})
+
+interface StairMillZoneRx {
+  /** Floors per rep (interval zones) or total floors (continuous). */
+  floorsPerRep:       number
+  /** Target FPM the user should hold for this zone. */
+  targetFpm:          number
+  /** Estimated wall-clock time per rep in seconds. */
+  estimatedSecsPerRep: number
+  /** Number of reps (1 for continuous). */
+  reps:               number
+  /** Rest between reps in seconds (0 for continuous). */
+  restSecs:           number
+  /** Short label for hero row 1 (e.g. "4 × 30 floors" or "160 floors"). */
+  shortWork:          string
+}
+
+function buildStairMillZoneRx(zone: StairMillZone, peakFpm: number): StairMillZoneRx {
+  const cfg          = STAIRMILL_ZONE_CONFIG[zone]
+  const targetFpm    = Math.max(1, peakFpm * cfg.intensity)
+  const floorsPerRep = Math.max(1, Math.round(targetFpm * cfg.durationMin))
+  const estimatedSecsPerRep = Math.round(cfg.durationMin * 60)
+  return {
+    floorsPerRep,
+    targetFpm,
+    estimatedSecsPerRep,
+    reps:      cfg.reps,
+    restSecs:  cfg.restSecs,
+    // `shortWork` is rendered at 30px in the hero card row 1; "floors" is
+    // 2× longer than every other detail page's unit ("lb", "cal", "W"),
+    // so we abbreviate to "fl" here. Matches the log form's wheel which
+    // also uses "fl". Spelled-out "floors" still appears in the cue line
+    // (regular-size text), subtitle, chart tooltip, and live chip.
+    shortWork: cfg.reps === 1 ? `${floorsPerRep} fl` : `${cfg.reps} × ${floorsPerRep} fl`,
+  }
+}
+
+function getStairMillZoneCue(zone: StairMillZone, rx: StairMillZoneRx): string {
+  const fpm = rx.targetFpm.toFixed(1)
+  if (zone === 'aerobic') {
+    return `Climb ${rx.floorsPerRep} floors continuously at a steady ${fpm} floors/min — should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+  }
+  if (zone === 'threshold') {
+    return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at a hard sustained ${fpm} floors/min (~${fmtSecs(rx.estimatedSecsPerRep)} each). Rest ${rx.restSecs} sec between reps.`
+  }
+  // vo2
+  return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at max effort (~${fmtSecs(rx.estimatedSecsPerRep)} each). Full recovery ${Math.round(rx.restSecs / 60)} min between reps.`
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StairMill plan queue — Seiler polarized sequencing (May 20 2026 lock)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Mirrors running's `generatePlanQueue` rule-for-rule. The Allison / Boreham
+// / Honda protocols describe SESSION shapes; Stephen Seiler's polarized
+// training model describes how to ARRANGE those shapes across a week —
+// applies to every steady-state aerobic discipline including stair climbing.
+//
+// Five rules (identical to running's queue):
+//   1. No hard back-to-back — never schedule Threshold or VO2 right after
+//      another hard session.
+//   2. Don't let VO2 go stale — 10+ days since last Z5 → next is VO2.
+//   3. Don't let Threshold go stale — 7+ days since last Z4 → next is Threshold.
+//   4. Anti-stagnation interleave — after 3 Endurance steps in a row, drop in
+//      a hard step (alternates T/V).
+//   5. Default: Endurance — produces the ~80% Endurance / 20% T+V polarized
+//      split.
+
+/**
+ * Classify a logged StairMill effort into one of the three adaptation zones.
+ * Compares the effort's floors-per-minute rate against thresholds anchored
+ * on the user's peak FPM:
+ *   • fpm ≥ peak × 1.00  → vo2        (at-or-above-peak sprint pace)
+ *   • fpm ≥ peak × 0.75  → threshold  (within ~10 % of the Honda T-pace)
+ *   • otherwise          → aerobic    (Z2 conversational base)
+ *
+ * Thresholds intentionally sit BELOW each zone's intensity factor (1.10 / 0.85
+ * / 0.65) so the user's actual effort doesn't have to hit the exact target to
+ * count toward the queue's staleness clock.
+ */
+function classifyStairMillEffortZone(label: string | null | undefined, peakFpm: number): StairMillZone {
+  const parsed = parseStairMillLabel(label)
+  if (!parsed || !parsed.timeSecs || peakFpm <= 0) return 'aerobic'
+  const fpm = floorsPerMinFromEffort(parsed.floors, parsed.timeSecs)
+  if (fpm <= 0) return 'aerobic'
+  if (fpm >= peakFpm * 1.00) return 'vo2'
+  if (fpm >= peakFpm * 0.75) return 'threshold'
+  return 'aerobic'
+}
+
+/**
+ * Days since the user's most recent effort classified into a given zone.
+ * Returns 999 when they've never logged anything in that zone — that's the
+ * "stale" sentinel the queue uses to force VO2 / Threshold sessions back
+ * into rotation.
+ */
+function daysSinceLastStairMillEffortInZone(efforts: Effort[], zone: StairMillZone, peakFpm: number): number {
+  for (let i = efforts.length - 1; i >= 0; i--) {
+    if (classifyStairMillEffortZone(efforts[i].label, peakFpm) === zone) {
+      return (Date.now() - new Date(efforts[i].created_at).getTime()) / 86_400_000
+    }
+  }
+  return 999
+}
+
+interface StairMillPlanStep {
+  zone:          StairMillZone
+  rx:            StairMillZoneRx
+  cue:           string
+  /** Short label for the queue tile — e.g., "3 × 29 fl" / "160 fl". */
+  shortWork:     string
+  /** "VO2 MAX" / "THRESHOLD" / "ENDURANCE" for the tile header. */
+  zoneLabel:     string
+}
+
+function generateStairMillPlanQueue(
+  efforts:  Effort[],
+  peakFpm:  number,
+  count:    number = 8,
+): StairMillPlanStep[] {
+  if (peakFpm <= 0) return []
+
+  const lastEffort = efforts[efforts.length - 1]
+  const lastZone   = lastEffort ? classifyStairMillEffortZone(lastEffort.label, peakFpm) : null
+  const daysSinceT0 = daysSinceLastStairMillEffortInZone(efforts, 'threshold', peakFpm)
+  const daysSinceV0 = daysSinceLastStairMillEffortInZone(efforts, 'vo2',       peakFpm)
+
+  const zoneQueue: StairMillZone[] = []
+  let virtualLast  = lastZone
+  let virtualDaysT = daysSinceT0
+  let virtualDaysV = daysSinceV0
+  let endurStreak  = 0
+  let lastHard: StairMillZone | null = null
+
+  for (let i = 0; i < count; i++) {
+    let next: StairMillZone
+    if (virtualLast === 'threshold' || virtualLast === 'vo2') {
+      next = 'aerobic'
+    } else if (virtualDaysV >= 10) {
+      next = 'vo2'
+    } else if (virtualDaysT >= 7) {
+      next = 'threshold'
+    } else if (endurStreak >= 3) {
+      next = lastHard === 'threshold' ? 'vo2' : 'threshold'
+    } else {
+      next = 'aerobic'
+    }
+
+    zoneQueue.push(next)
+
+    virtualLast = next
+    if (next === 'aerobic') {
+      endurStreak++
+    } else {
+      endurStreak = 0
+      lastHard = next
+    }
+    const gapDays = next === 'aerobic' ? 1 : 2
+    virtualDaysT = next === 'threshold' ? 0 : virtualDaysT + gapDays
+    virtualDaysV = next === 'vo2'       ? 0 : virtualDaysV + gapDays
+  }
+
+  return zoneQueue.map(zone => {
+    const rx       = buildStairMillZoneRx(zone, peakFpm)
+    const cue      = getStairMillZoneCue(zone, rx)
+    const zoneLabel = STAIRMILL_ZONE_CONFIG[zone].label
+    return { zone, rx, cue, shortWork: rx.shortWork, zoneLabel }
+  })
+}
+
+function StairMillDetail({
+  efforts, onDelete, hideHeader,
+}: {
+  efforts:  Effort[]
+  onDelete: (id: string) => void
+  /** Suppresses page-level header for family slot rendering. */
+  hideHeader?: boolean
+}) {
+  const { profile } = useAuth()
+
+  // ── Peak FPM across all efforts (rate anchor) ─────────────────────────────
+  const peakFpm = useMemo(() => {
+    let peak = 0
+    for (const e of efforts) {
+      const parsed = parseStairMillLabel(e.label)
+      if (!parsed || !parsed.timeSecs) continue
+      const fpm = floorsPerMinFromEffort(parsed.floors, parsed.timeSecs)
+      if (fpm > peak) peak = fpm
+    }
+    return peak
+  }, [efforts])
+
+  const baselineFpm = useMemo(
+    () => genderBaselineFloorsPerMin(profile?.gender ?? null),
+    [profile?.gender],
+  )
+  const effectiveRate = peakFpm > 0 ? peakFpm : baselineFpm
+  const hasLoggedRate = peakFpm > 0
+
+  // ── Chart data — FPM over time, NOT reversed ──────────────────────────────
+  // Mirrors Air Bike's chart direction — higher rate = better progress =
+  // line trends UP. Cardio chart-direction rule (locked in CLAUDE.md).
+  const chartData = useMemo(() => efforts
+    .map(e => {
+      const parsed = parseStairMillLabel(e.label)
+      if (!parsed || !parsed.timeSecs) return { ts: e.created_at, y: -1 }
+      const fpm = floorsPerMinFromEffort(parsed.floors, parsed.timeSecs)
+      return { ts: e.created_at, y: fpm }
+    })
+    .filter(d => d.y >= 0)
+  , [efforts])
+
+  // ── Plan queue (polarized sequencing — Seiler model) ─────────────────────
+  // Computed per render from training history. Walks the polarized rules
+  // (no hard back-to-back, anti-staleness, anti-stagnation, default
+  // Endurance) to produce the next 8 prescribed sessions. Regenerates
+  // every time a new effort lands. Same shape running's queue uses —
+  // the tile row is the navigation, the hero card below shows the
+  // SELECTED tile's prescription.
+  const planQueue = useMemo(
+    () => generateStairMillPlanQueue(efforts, effectiveRate, 8),
+    [efforts, effectiveRate],
+  )
+
+  // ── UI state ──────────────────────────────────────────────────────────────
+  // Single piece of state — the index of the tile the user is currently
+  // viewing. Default 0 (= next system-recommended session). Same model
+  // as running's PaceDetail.
+  const [selectedStepIdx, setSelectedStepIdx] = useState(0)
+  const [zoneInfoOpen, setZoneInfoOpen]       = useState(false)
+
+  const selectedStep = planQueue[selectedStepIdx] ?? planQueue[0] ?? null
+  const selectedCfg  = selectedStep ? STAIRMILL_ZONE_CONFIG[selectedStep.zone] : null
+  const selectedRx   = selectedStep?.rx ?? null
+  const selectedCue  = selectedStep?.cue ?? ''
+
+  return (
+    <View style={s.page}>
+
+      {/* Header — h1 + best FPM subtitle + STAIR CLIMBING category tag */}
+      {!hideHeader && (
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{STAIRMILL_ACTIVITY}</Text>
+        {hasLoggedRate ? (
+          <View style={s.subRow}>
+            <Text style={s.subText}>Best — </Text>
+            <TickerNumber
+              value={`${effectiveRate.toFixed(1)} floors/min`}
+              fontSize={14}
+              color={palette.amber[400]}
+              fontWeight="600"
+            />
+          </View>
+        ) : (
+          <Text style={s.subText}>
+            No efforts logged yet · using {baselineFpm} floors/min as a starting estimate
+          </Text>
+        )}
+        <View style={s.categoryBadge}>
+          <Text style={s.categoryBadgeText}>{cardioCategoryPillLabel(STAIRMILL_ACTIVITY)}</Text>
+        </View>
+      </View>
+      )}
+
+      {/* Progression plan card — mirrors running's PaceDetail design
+          exactly: tile row at the top is the navigation, hero card below
+          shows the SELECTED tile's prescription. Default selection is
+          tile 0 (the next system-recommended session per Seiler's
+          polarized rules). The swipe pill was removed in favour of this
+          unified tile-driven model — keeps every progression-plan
+          surface in the app consistent. */}
+      {selectedStep && selectedRx && selectedCfg && (
+        <AnimateRise delay={0} style={s.card}>
+          <Text style={s.h2}>Your progression plan</Text>
+          <Text style={s.helpTextSm}>
+            This is your personalized adaptation plan — follow it to see your results improve.
+          </Text>
+
+          {/* Tile row with chevrons between each pair, indicating forward
+              direction. Selected tile (default: step 0) is highlighted. */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ alignItems: 'center', paddingVertical: 4, paddingHorizontal: 2 }}
+            style={{ marginHorizontal: -2 }}
+          >
+            {planQueue.map((step, idx) => {
+              const isSelected = selectedStepIdx === idx
+              const isLast     = idx === planQueue.length - 1
+              return (
+                <Fragment key={idx}>
+                  <Pressable
+                    onPress={() => { setSelectedStepIdx(idx); setZoneInfoOpen(false) }}
+                    style={[s.queueTile, isSelected && s.queueTileSelected]}
+                  >
+                    <Text style={[s.queueTileZone, isSelected && s.queueTileZoneSelected]} numberOfLines={1}>
+                      {step.zoneLabel}
+                    </Text>
+                    <Text style={[s.queueTileWork, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
+                      {step.shortWork}
+                    </Text>
+                    <Text style={[s.queueTileTime, isSelected && s.queueTileTextSelected]} numberOfLines={1}>
+                      {fmtSecs(step.rx.estimatedSecsPerRep)}
+                    </Text>
+                  </Pressable>
+                  {!isLast && (
+                    <View style={s.queueChevron}>
+                      <ChevronRight
+                        size={22}
+                        color={withAlpha(palette.amber[400], 0.7)}
+                        strokeWidth={2.5}
+                        style={{ transform: [{ scaleY: 1.3 }] }}
+                      />
+                    </View>
+                  )}
+                </Fragment>
+              )
+            })}
+          </ScrollView>
+
+          {/* Hero card — driven by the selected tile. Same 3-row shape
+              (workout / time / climb rate) as before, just sourced from
+              planQueue[selectedStepIdx] instead of a manually-picked
+              zone. Rest still lives in the cue line. */}
+          <View style={s.hero}>
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <Pressable onPress={() => setZoneInfoOpen(o => !o)} style={s.heroZonePillButton}>
+                <Text style={s.heroZonePillText} numberOfLines={1}>{selectedCfg.label}</Text>
+                <Info size={11} color={palette.amber[400]} />
+              </Pressable>
+            </View>
+
+            {zoneInfoOpen && (
+              <Animated.View
+                entering={FadeInUp.duration(200)}
+                exiting={FadeOutUp.duration(180)}
+                style={s.heroInfoPanel}
+              >
+                <Text style={s.heroInfoPanelTitle}>{selectedCfg.label}</Text>
+                <Text style={s.heroInfoPanelBody}>{selectedCfg.whyText}</Text>
+              </Animated.View>
+            )}
+
+            <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+              <View style={s.heroValueRow}>
+                <TickerNumber value={selectedRx.shortWork} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                  {selectedRx.reps === 1 ? 'total climb' : 'per rep'}
+                </Text>
+              </View>
+              <View style={s.heroValueRow}>
+                <TickerNumber value={fmtSecs(selectedRx.estimatedSecsPerRep)} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                <Text style={s.heroValueDescriptor} numberOfLines={1}>
+                  {selectedRx.reps === 1 ? 'to complete' : 'per rep'}
+                </Text>
+              </View>
+              <View style={s.heroValueRow}>
+                <TickerNumber value={`${selectedRx.targetFpm.toFixed(1)} fl/min`} fontSize={30} color={palette.amber[400]} fontWeight="700" />
+                <Text style={s.heroValueDescriptor} numberOfLines={1}>climb rate</Text>
+              </View>
+            </Animated.View>
+
+            <Animated.View layout={LinearTransition.duration(200)} style={s.heroSep}>
+              <Text style={s.heroCue}>{selectedCue}</Text>
+            </Animated.View>
+          </View>
+
+          <Text style={[s.tinyText, { marginTop: 10 }]}>
+            Seiler polarized 80/20 · session shapes from Allison / Honda / Boreham · ACSM
+          </Text>
+        </AnimateRise>
+      )}
+
+      {/* FPM-over-time chart */}
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
+          <Text style={s.h2}>Climb rate over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={peakFpm > 0 ? peakFpm : null}
+            yWidth={52}
+            yTickFormatter={(v) => `${v.toFixed(1)}`}
+            tooltipValueFormatter={(v) => `${v.toFixed(1)} floors/min`}
+            tooltipLabel="Climb rate"
+            lineColor={palette.amber[400]}
+            caption={
+              <Text style={s.tinyText}>Dashed = your peak climb rate</Text>
+            }
+          />
+        </AnimateRise>
+      )}
+
+      {/* History — each row shows floors + time + FPM rate */}
+      <AnimateRise delay={500} style={s.cardNoPad}>
+        <View style={s.listHeader}>
+          <Text style={s.listHeaderText}>All entries</Text>
+        </View>
+        <View>
+          {[...efforts].reverse().map((e, i, arr) => {
+            const p = parseStairMillLabel(e.label)
+            const fpm = p && p.timeSecs ? floorsPerMinFromEffort(p.floors, p.timeSecs) : 0
+            return (
+              <DeleteAction
+                key={e.id}
+                onDelete={() => onDelete(e.id)}
+                style={i < arr.length - 1 ? s.listRowDivider : undefined}
+                bg={colors.card}
+              >
+                <View style={s.listRow}>
+                  <View style={{ flex: 1, marginRight: 12 }}>
+                    <Text style={s.listRowName}>
+                      {p
+                        ? (p.floors > 0
+                            ? `${p.floors} floors in ${fmtSecs(p.timeSecs ?? 0)}`
+                            : fmtSecs(p.timeSecs ?? 0))
+                        : e.label.split(' · ').slice(1).join(' · ')}
+                    </Text>
+                    <Text style={s.listRowDate}>{new Date(e.created_at).toLocaleDateString()}</Text>
+                  </View>
+                  <Text style={s.valAmber}>
+                    {fpm > 0 ? `${fpm.toFixed(1)} fl/min` : '—'}
+                  </Text>
+                </View>
+              </DeleteAction>
+            )
+          })}
+        </View>
+      </AnimateRise>
+
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DurationDetail
 // ─────────────────────────────────────────────────────────────────────────────
 
 function DurationDetail({
-  activity, efforts, onDelete,
-}: { activity: string; efforts: Effort[]; onDelete: (id: string) => void }) {
+  activity, efforts, onDelete, hideHeader,
+}: {
+  activity: string
+  efforts: Effort[]
+  onDelete: (id: string) => void
+  /** Suppresses page-level header for family slot rendering. */
+  hideHeader?: boolean
+}) {
   // Duration mode (Group C — StairMill, the only remaining machine without
   // a distance display) is a simple tracking page in v1. No zones, no
   // progression queue — those are Endurance-Athlete concepts that don't map
@@ -2908,6 +4544,7 @@ function DurationDetail({
     <View style={s.page}>
 
       {/* Header */}
+      {!hideHeader && (
       <View>
         <BackButton />
         <Text style={s.h1}>{activity}</Text>
@@ -2915,7 +4552,11 @@ function DurationDetail({
           <Text style={s.subText}>Best session — </Text>
           <TickerNumber value={fmtSecs(bestSecs)} fontSize={14} color={palette.amber[400]} fontWeight="600" />
         </View>
+        <View style={s.categoryBadge}>
+          <Text style={s.categoryBadgeText}>{cardioCategoryPillLabel(activity)}</Text>
+        </View>
       </View>
+      )}
 
       {/* Session time chart — renders even with a single data point. */}
       {chartData.length >= 1 && (
@@ -2983,7 +4624,7 @@ const s = StyleSheet.create({
 
   // Swim stroke pill carousel (SwimmingConsolidatedDetail) — single pill
   // centered between two pulsing chevrons. Mirrors the sledVariantRow
-  // pattern from strength's Sled Drag wrapper but uses amber chrome to
+  // pattern from strength's Sled Work wrapper but uses amber chrome to
   // match the cardio theme.
   swimStrokeRow: {
     flexDirection: 'row',
@@ -3120,6 +4761,51 @@ const s = StyleSheet.create({
     paddingBottom: 4,
   },
 
+  // Canonical-distance row in the Beat-Your-Best goal card. Five rows
+  // stacked vertically. Each row is itself TWO STACKED lines (May 19 2026):
+  // distance label on top, Best/Aim-for/delta on the bottom. The two-line
+  // stack guarantees the longest labels ("10 KM" + "3:28:30" + "↓ 63s")
+  // never overlap on narrow phones — a single-line layout breaks at the
+  // 10 km row because the distance label is wider than the others.
+  // BG + border match the hero card chrome (amber 8 % fill, amber 30 %
+  // border) so the rows feel like mini-hero cards rather than separate chrome.
+  canonicalDistanceRow: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: withAlpha(palette.amber[500], 0.30),
+    backgroundColor: withAlpha(palette.amber[500], 0.08),
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  canonicalDistanceLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    color: palette.amber[400],
+  },
+  canonicalDistanceValuesInline: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    gap: 4,
+  },
+  canonicalDistanceSub: {
+    fontSize: 10,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    color: colors.mutedForeground,
+  },
+  canonicalDistanceDelta: {
+    fontSize: 10,
+    color: withAlpha(palette.amber[400], 0.75),
+    marginLeft: 6,
+  },
+
   // Chevron between tiles in the progression-plan tile row. Indicates
   // forward direction of the plan (left → right flow).
   queueChevron: {
@@ -3149,6 +4835,86 @@ const s = StyleSheet.create({
     borderRadius: 999, borderWidth: 1,
     borderColor:     withAlpha(palette.amber[500], 0.4),
     backgroundColor: withAlpha(palette.amber[500], 0.10),
+  },
+
+  // ── Air Bike L4 in-frame swipe pill (zone selector) ──────────────────────
+  // Same shape as Carry's carryZoneRow + pill — see strength/[exercise].tsx.
+  // Amber chrome instead of blue (cardio theme), wider vertical padding so
+  // the GestureDetector hit area extends comfortably above/below the pill.
+  airBikeZoneRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 12, marginBottom: 4, paddingVertical: 14,
+  },
+  airBikeZoneChevronSlotLeft: {
+    width: 56, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center',
+  },
+  airBikeZoneChevronSlotRight: {
+    width: 56, flexDirection: 'row', alignItems: 'center',
+  },
+  airBikeZoneChevronPressable: {
+    flexDirection: 'row', alignItems: 'center',
+  },
+  airBikeZonePill: {
+    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9999,
+    borderWidth: 1, borderColor: palette.amber[500],
+    backgroundColor: withAlpha(palette.amber[500], 0.15),
+  },
+  airBikeZonePillText: {
+    fontSize: 11, fontWeight: '700', textTransform: 'uppercase',
+    letterSpacing: 0.5, color: palette.amber[400],
+  },
+
+  // Cardio category badge — small amber pill rendered under the "Best —"
+  // subtitle row on every cardio detail page (RUNNING, SWIMMING, ROWING,
+  // CYCLING, etc.). Mirrors strength's `carryTierBadge` chrome but tinted
+  // amber so cardio surfaces stay visually distinct. Same shape used for
+  // the Rucking TIER badge — they're stacked vertically when both apply.
+  categoryBadge: {
+    borderWidth: 1, borderColor: withAlpha(palette.amber[500], 0.3),
+    backgroundColor: withAlpha(palette.amber[500], 0.1),
+    borderRadius: 4,
+    paddingHorizontal: 6, paddingVertical: 2,
+    marginTop: 4, alignSelf: 'flex-start',
+  },
+  categoryBadgeText: {
+    color: palette.amber[400],
+    fontSize: 10, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1.2,
+  },
+
+  // Rucking tier ladder rows — tier-badge + criteria text on the left,
+  // checkmark on the right when achieved. Mirrors Atlas's tier-badge
+  // styling but tinted amber (cardio theme).
+  ruckTierRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1, borderColor: withAlpha(palette.amber[500], 0.15),
+    backgroundColor: alpha(colors.card, 0.4),
+  },
+  ruckTierRowCurrent: {
+    borderColor: withAlpha(palette.amber[500], 0.5),
+    backgroundColor: withAlpha(palette.amber[500], 0.08),
+  },
+  ruckTierBadge: {
+    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4,
+    borderWidth: 1, borderColor: withAlpha(palette.amber[500], 0.3),
+    backgroundColor: withAlpha(palette.amber[500], 0.08),
+  },
+  ruckTierBadgeAchieved: {
+    borderColor: palette.amber[500],
+    backgroundColor: withAlpha(palette.amber[500], 0.20),
+  },
+  ruckTierBadgeText: {
+    color: withAlpha(palette.amber[400], 0.6),
+    fontSize: 10, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 1.2,
+  },
+  ruckTierBadgeTextAchieved: {
+    color: palette.amber[400],
+  },
+  ruckTierCriteria: {
+    color: colors.foreground, fontSize: 13, fontWeight: '500',
   },
   heroZonePillText: {
     fontSize: 10, fontWeight: '700',
@@ -3198,3 +4964,424 @@ const s = StyleSheet.create({
     color: palette.amber[400], fontSize: 12, lineHeight: 17, fontWeight: '600',
   },
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// renderCardioFamilyBestSubtitle — equipment-aware "Best …" subtitle helper.
+// Single source of truth for the per-variant header subtitle on cardio
+// family pages. Dispatches on the variant's activity type:
+//   - StairMill → "Best — N.N floors/min"
+//   - Air Bike → "Best — N.N cal/min"
+//   - Rucking → "Best — N lb · M mi"
+//   - Beat Your Best (Cycling outdoor, Stationary Bike, Elliptical) →
+//     "Best 1k — m:ss"
+//   - Speed-input machines → "Best speed — N.N km/h"
+//   - Concept2 ergs → "Best — m:ss/500m"
+//   - Duration mode → "Best session — m:ss"
+//   - Default (pace) → "Best pace — m:ss/km"
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderCardioFamilyBestSubtitle(
+  variant: { name: string; cardio_mode?: string | null } | null,
+  efforts: Effort[],
+  distUnit: 'km' | 'mi',
+): React.ReactNode {
+  if (!variant) return <Text style={s.subText}>No efforts logged yet</Text>
+  if (efforts.length === 0) return <Text style={s.subText}>No efforts logged yet</Text>
+
+  const activity = variant.name
+
+  // StairMill — best floors-per-min rate
+  if (isStairMillActivity(activity)) {
+    let maxFpm = 0
+    efforts.forEach(e => {
+      const parsed = parseStairMillLabel(e.label)
+      if (!parsed?.timeSecs) return
+      const fpm = floorsPerMinFromEffort(parsed.floors, parsed.timeSecs)
+      if (fpm > maxFpm) maxFpm = fpm
+    })
+    if (maxFpm <= 0) return <Text style={s.subText}>No efforts logged yet</Text>
+    return (
+      <View style={s.subRow}>
+        <Text style={s.subText}>Best — </Text>
+        <TickerNumber value={`${maxFpm.toFixed(1)} floors/min`} fontSize={14} color={palette.amber[400]} fontWeight="600" />
+      </View>
+    )
+  }
+
+  // Air Bike — best cal-per-min rate
+  if (isAirBikeActivity(activity)) {
+    let maxRate = 0
+    efforts.forEach(e => {
+      const parsed = parseAirBikeLabel(e.label)
+      if (!parsed?.timeSecs) return
+      const rate = calsPerMinFromEffort(parsed.cals, parsed.timeSecs)
+      if (rate > maxRate) maxRate = rate
+    })
+    if (maxRate <= 0) return <Text style={s.subText}>No efforts logged yet</Text>
+    return (
+      <View style={s.subRow}>
+        <Text style={s.subText}>Best — </Text>
+        <TickerNumber value={`${maxRate.toFixed(1)} cal/min`} fontSize={14} color={palette.amber[400]} fontWeight="600" />
+      </View>
+    )
+  }
+
+  // Rucking — best weight + best distance
+  if (isRuckingActivity(activity)) {
+    let maxW = 0, maxD = 0
+    efforts.forEach(e => {
+      const parsed = parseRuckLabel(e.label)
+      if (!parsed) return
+      if (parsed.packLb > maxW) maxW = parsed.packLb
+      if (parsed.distMi > maxD) maxD = parsed.distMi
+    })
+    if (maxW <= 0 && maxD <= 0) return <Text style={s.subText}>No efforts logged yet</Text>
+    return (
+      <View style={s.subRow}>
+        <Text style={s.subText}>Best — </Text>
+        <TickerNumber value={`${maxW} lb`} fontSize={14} color={palette.amber[400]} fontWeight="600" />
+        <Text style={[s.subText, { color: palette.amber[400] }]}> · </Text>
+        <TickerNumber value={`${maxD.toFixed(1)} mi`} fontSize={14} color={palette.amber[400]} fontWeight="600" />
+      </View>
+    )
+  }
+
+  // Duration-mode activities — best session time
+  if (variant.cardio_mode === 'duration') {
+    let bestSecs = 0
+    efforts.forEach(e => {
+      const secs = parseTimeStr(e.value)
+      if (secs && secs > bestSecs) bestSecs = secs
+    })
+    if (bestSecs <= 0) return <Text style={s.subText}>No efforts logged yet</Text>
+    return (
+      <View style={s.subRow}>
+        <Text style={s.subText}>Best session — </Text>
+        <TickerNumber value={fmtSecs(bestSecs)} fontSize={14} color={palette.amber[400]} fontWeight="600" />
+      </View>
+    )
+  }
+
+  // Default pace activities — best per-km pace (lowest secs-per-km)
+  let bestPace = Infinity
+  efforts.forEach(e => {
+    const secs = parsePaceToSecs(e.value)
+    if (secs && secs > 0 && secs < bestPace) bestPace = secs
+  })
+  if (!Number.isFinite(bestPace)) return <Text style={s.subText}>No efforts logged yet</Text>
+  return (
+    <View style={s.subRow}>
+      <Text style={s.subText}>Best pace — </Text>
+      <TickerNumber value={fmtPaceTick(bestPace)} fontSize={14} color={palette.amber[400]} fontWeight="600" />
+      <Text style={[s.subText, { color: palette.amber[400] }]}>/{distUnit}</Text>
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CardioFamilyConsolidatedDetail
+//
+// Sled Work / Swimming-mirror wrapper for admin-added cardio variant
+// families. Same outer chrome (header + amber pill row + paged ScrollView)
+// as strength's FamilyConsolidatedDetail, just amber-themed and routing
+// through renderCardioInnerDetail per slot.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function CardioFamilyConsolidatedDetail({
+  parent,
+  variants,
+}: {
+  parent: { id: string; name: string; cardio_mode?: string | null; unit_lock?: string | null }
+  variants: ReadonlyArray<{
+    id: string
+    name: string
+    cardio_mode?: string | null
+    unit_lock?: string | null
+    variant_short_label?: string | null
+    created_at?: string
+  }>
+}) {
+  const { user, profile } = useAuth()
+  const profileDistUnit = ((profile as any)?.distance_unit as 'km' | 'mi' | undefined) || 'km'
+  const swimUnit: 'm' | 'yd' = ((profile as any)?.swim_unit as 'm' | 'yd' | undefined) || 'm'
+  const parentDistUnit: 'km' | 'mi' = (parent.unit_lock === 'km' || parent.unit_lock === 'mi')
+    ? (parent.unit_lock as 'km' | 'mi')
+    : profileDistUnit
+
+  // Per-variant raw efforts — single query covers the whole family.
+  const [effortsByVariant, setEffortsByVariant] = useState<Record<string, Effort[]>>({})
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    if (!user || variants.length === 0) return
+    let alive = true
+    const labelFilters = variants.map(v => `label.ilike.${v.name} ·%`).join(',')
+    supabase
+      .from('efforts')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('type', 'cardio')
+      .or(labelFilters)
+      .order('created_at', { ascending: true })
+      .then(({ data }) => {
+        if (!alive) return
+        const sortedVariants = variants.slice().sort((a, b) => b.name.length - a.name.length)
+        const map: Record<string, Effort[]> = {}
+        ;(data || []).forEach((e: Effort) => {
+          const v = sortedVariants.find(sv => e.label.startsWith(`${sv.name} ·`))
+          if (!v) return
+          ;(map[v.id] ??= []).push(e)
+        })
+        setEffortsByVariant(map)
+        setLoading(false)
+      })
+    return () => { alive = false }
+  }, [user, variants])
+
+  // Only render pill + slot for variants with logged efforts (mirrors
+  // Sled Work / Swimming filter). Fallback to all variants if none have
+  // efforts (defensive — shouldn't happen because the index row wouldn't
+  // appear in the first place).
+  const loggedVariants = useMemo(() => {
+    const filtered = variants.filter(v => (effortsByVariant[v.id]?.length ?? 0) > 0)
+    return filtered.length > 0 ? filtered : variants
+  }, [variants, effortsByVariant])
+  const variantOrder = loggedVariants
+  const [activeId, setActiveId] = useState<string>('')
+  useEffect(() => {
+    if (variantOrder.length === 0) return
+    if (!activeId || !variantOrder.some(v => v.id === activeId)) {
+      setActiveId(variantOrder[0].id)
+    }
+  }, [variantOrder, activeId])
+
+  const activeVariant = variantOrder.find(v => v.id === activeId) ?? variantOrder[0] ?? null
+  const activeEfforts = effortsByVariant[activeId] ?? []
+  const currentIdx = Math.max(0, variantOrder.findIndex(v => v.id === activeId))
+  const hasPrev = currentIdx > 0
+  const hasNext = currentIdx < variantOrder.length - 1
+
+  // ── Paged ScrollView + pill swipe ─────────────────────────────────────
+  const PAGE_PADDING_HORIZONTAL = 16
+  const winWidth = useWindowDimensions().width
+  const [slotWidth, setSlotWidth] = useState(winWidth)
+  const scrollRef = useRef<ScrollView>(null)
+  const outerScrollGesture = useMemo(() => Gesture.Native(), [])
+
+  // Initial scrollTo — runs once after slotWidth is measured.
+  const initialScrollDoneRef = useRef(false)
+  useEffect(() => {
+    if (initialScrollDoneRef.current) return
+    if (slotWidth <= 0) return
+    if (!scrollRef.current) return
+    const idx = variantOrder.findIndex(v => v.id === activeId)
+    if (idx < 0) return
+    scrollRef.current.scrollTo({ x: idx * slotWidth, animated: false })
+    initialScrollDoneRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotWidth])
+
+  // Pill swipe choreography (amber chrome, same timing as strength).
+  const pillTranslateX = useSharedValue(0)
+  const chevronOpacityOverride = useSharedValue(1)
+  const SWIPE_THRESHOLD_PX = 20
+  const SLIDE_OFFSCREEN_PX = 220
+  const SLIDE_DURATION_MS  = 250
+
+  const navigateVariant = (direction: -1 | 1) => {
+    const newIdx = currentIdx + direction
+    if (newIdx < 0 || newIdx >= variantOrder.length) return
+    setActiveId(variantOrder[newIdx].id)
+    if (slotWidth > 0 && scrollRef.current) {
+      scrollRef.current.scrollTo({ x: newIdx * slotWidth, animated: true })
+    }
+  }
+
+  const pillSwipeGesture = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-25, 25])
+      .onStart(() => {
+        'worklet'
+        chevronOpacityOverride.value = withTiming(0, { duration: 120 })
+      })
+      .onUpdate(e => {
+        'worklet'
+        pillTranslateX.value = e.translationX
+      })
+      .onEnd(e => {
+        'worklet'
+        const passed = Math.abs(e.translationX) >= SWIPE_THRESHOLD_PX
+        const direction: -1 | 1 = e.translationX < 0 ? 1 : -1
+        const canMove = (direction === 1 && hasNext) || (direction === -1 && hasPrev)
+        if (!passed || !canMove) {
+          pillTranslateX.value = withTiming(0, { duration: 200 })
+          chevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          return
+        }
+        const slideOff = direction === 1 ? -SLIDE_OFFSCREEN_PX : SLIDE_OFFSCREEN_PX
+        pillTranslateX.value = withTiming(slideOff, { duration: SLIDE_DURATION_MS }, (finished) => {
+          'worklet'
+          if (!finished) return
+          runOnJS(navigateVariant)(direction)
+          pillTranslateX.value = -slideOff
+          pillTranslateX.value = withTiming(0, { duration: SLIDE_DURATION_MS }, (settled) => {
+            'worklet'
+            if (settled) chevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          })
+        })
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentIdx, hasPrev, hasNext, variantOrder.length, slotWidth],
+  )
+
+  const pillAnimStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: pillTranslateX.value }] }))
+  const chevronAnimStyle = useAnimatedStyle(() => ({ opacity: chevronOpacityOverride.value }))
+
+  const variantBracket = (name: string): string => {
+    const m = name.match(/\[(.+)\]\s*$/)
+    return m ? m[1] : name
+  }
+
+  // Loading state — skeleton mirrors the standalone route.
+  if (loading) {
+    return (
+      <View style={s.page}>
+        <Skeleton style={{ height: 36, width: 36, borderRadius: 9999, marginBottom: 8 }} />
+        <View style={{ gap: 8, marginBottom: 16 }}>
+          <Skeleton style={{ height: 22, width: 200, borderRadius: 6 }} />
+          <Skeleton style={{ height: 14, width: 280, borderRadius: 6 }} />
+        </View>
+        <View style={{ gap: 16 }}>
+          <Skeleton style={{ height: 144, width: '100%', borderRadius: 16 }} />
+          <Skeleton style={{ height: 280, width: '100%', borderRadius: 16 }} />
+          <Skeleton style={{ height: 320, width: '100%', borderRadius: 16 }} />
+        </View>
+      </View>
+    )
+  }
+
+  return (
+    <View style={s.page}>
+      {/* Static header — BackButton + parent name + per-variant subtitle */}
+      <View>
+        <BackButton />
+        <Text style={s.h1}>{parent.name}</Text>
+        {renderCardioFamilyBestSubtitle(activeVariant, activeEfforts, parentDistUnit)}
+        <View style={s.categoryBadge}>
+          <Text style={s.categoryBadgeText}>{cardioCategoryPillLabel(activeVariant?.name ?? parent.name)}</Text>
+        </View>
+
+        {/* Pill row — amber chrome mirroring Swimming consolidated. Only
+            renders when ≥ 2 variants have logged efforts (single-variant
+            families don't get a pill carousel — nothing to switch to). */}
+        {variantOrder.length >= 2 && activeVariant && (
+          <GestureDetector gesture={pillSwipeGesture}>
+            <View style={s.swimStrokeRow}>
+              {hasPrev ? (
+                <Animated.View style={[s.swimStrokeChevronSlotLeft, chevronAnimStyle]}>
+                  <Pressable
+                    onPress={() => navigateVariant(-1)}
+                    style={s.swimStrokeChevronPressable}
+                    hitSlop={8}
+                    accessibilityLabel="Previous variant"
+                  >
+                    <AmberAnimatedChevron direction="left" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+                    <View style={{ marginLeft: -6 }}>
+                      <AmberAnimatedChevron direction="left" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+                    </View>
+                  </Pressable>
+                </Animated.View>
+              ) : (
+                <View style={s.swimStrokeChevronSlotLeft} />
+              )}
+
+              <Animated.View
+                style={[
+                  {
+                    paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9999,
+                    borderWidth: 1, borderColor: palette.amber[500],
+                    backgroundColor: withAlpha(palette.amber[500], 0.15),
+                  },
+                  pillAnimStyle,
+                ]}
+              >
+                <Text style={{
+                  fontSize: 11, fontWeight: '700', textTransform: 'uppercase',
+                  letterSpacing: 0.5, color: palette.amber[400],
+                }}>
+                  {variantBracket(activeVariant.name)}
+                </Text>
+              </Animated.View>
+
+              {hasNext ? (
+                <Animated.View style={[s.swimStrokeChevronSlotRight, chevronAnimStyle]}>
+                  <Pressable
+                    onPress={() => navigateVariant(1)}
+                    style={s.swimStrokeChevronPressable}
+                    hitSlop={8}
+                    accessibilityLabel="Next variant"
+                  >
+                    <AmberAnimatedChevron direction="right" delay={0} color={withAlpha(palette.amber[400], 0.8)} />
+                    <View style={{ marginLeft: -6 }}>
+                      <AmberAnimatedChevron direction="right" delay={250} color={withAlpha(palette.amber[400], 0.8)} />
+                    </View>
+                  </Pressable>
+                </Animated.View>
+              ) : (
+                <View style={s.swimStrokeChevronSlotRight} />
+              )}
+            </View>
+          </GestureDetector>
+        )}
+      </View>
+
+      {/* Paged horizontal ScrollView — one slot per variant. */}
+      <View
+        onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}
+        style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}
+      >
+        <GestureDetector gesture={outerScrollGesture}>
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            decelerationRate="fast"
+            onMomentumScrollEnd={e => {
+              if (slotWidth === 0) return
+              const x = e.nativeEvent.contentOffset.x
+              const idx = Math.round(x / slotWidth)
+              const target = variantOrder[idx]
+              if (target && target.id !== activeId) setActiveId(target.id)
+            }}
+          >
+            {variantOrder.map(variant => {
+              const slotEfforts = effortsByVariant[variant.id] ?? []
+              const variantMode: 'pace' | 'duration' = variant.cardio_mode === 'duration' ? 'duration' : 'pace'
+              const variantDistUnit: 'km' | 'mi' = (variant.unit_lock === 'km' || variant.unit_lock === 'mi')
+                ? (variant.unit_lock as 'km' | 'mi')
+                : profileDistUnit
+              return (
+                <View
+                  key={variant.id}
+                  style={{ width: slotWidth, paddingHorizontal: PAGE_PADDING_HORIZONTAL }}
+                >
+                  {renderCardioInnerDetail({
+                    activity: variant.name,
+                    efforts: slotEfforts,
+                    distUnit: variantDistUnit,
+                    swimUnit,
+                    mode: variantMode,
+                    onDelete: () => { /* family-mode delete handled at slot level if needed */ },
+                    onAddEffort: async () => { /* family-mode add not wired — admin families don't show NEXT STEP CTA */ },
+                    hideHeader: true,
+                  })}
+                </View>
+              )
+            })}
+          </ScrollView>
+        </GestureDetector>
+      </View>
+    </View>
+  )
+}

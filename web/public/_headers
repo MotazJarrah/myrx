@@ -2,14 +2,28 @@
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
 
+# Cache-Control rules for bfcache compatibility:
+#   - NEVER use `no-store`        → hard blocker, eliminates bfcache entirely
+#   - NEVER use `no-cache`        → also a bfcache blocker per MDN's
+#     notRestoredReasons table (`response-cache-control-no-cache`).
+#     Surprises a lot of devs because of the name — `no-cache` does NOT
+#     mean "don't cache", it means "revalidate every time before serving
+#     from cache". But Chrome's bfcache treats it as a no-store signal.
+#   - `max-age=0, must-revalidate` is the bfcache-safe way to express
+#     "always revalidate before serving from cache". Same wire-level
+#     behavior as `no-cache, must-revalidate` (browser pings server with
+#     If-None-Match before every navigation), but bfcache stays enabled.
+# References:
+#   https://web.dev/articles/bfcache#never-use-no-store
+#   https://developer.mozilla.org/en-US/docs/Web/API/Performance_API/Monitoring_bfcache_blocking_reasons
 /index.html
-  Cache-Control: no-cache, no-store, must-revalidate
+  Cache-Control: max-age=0, must-revalidate
 
 /
-  Cache-Control: no-cache, no-store, must-revalidate
+  Cache-Control: max-age=0, must-revalidate
 
 /manifest.json
-  Cache-Control: no-cache, no-store, must-revalidate
+  Cache-Control: max-age=0, must-revalidate
 
 /logo-light.png
   Cache-Control: public, max-age=60

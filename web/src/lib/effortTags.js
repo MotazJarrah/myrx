@@ -52,7 +52,6 @@ export const TAG_STYLES = {
   Cycling:      'bg-orange-500/10 text-orange-400 border border-orange-400/30',
   Rowing:       'bg-amber-600/10 text-amber-500 border border-amber-500/30',
   Swimming:     'bg-yellow-400/10 text-yellow-400 border border-yellow-400/30',
-  Skiing:       'bg-amber-300/10 text-amber-300 border border-amber-300/30',
   Metcon:       'bg-orange-600/10 text-orange-500 border border-orange-500/30',
   Agility:      'bg-yellow-600/10 text-yellow-500 border border-yellow-500/30',
   Mobility:     'bg-amber-400/10 text-amber-300 border border-amber-300/30',
@@ -94,17 +93,15 @@ function getStrengthSubtype(exerciseName) {
 function getCardioSubtype(activityName) {
   const lower = activityName.toLowerCase()
 
-  // Mobility — checked first to prevent "crab walk" matching endurance
-  if (/crab walk|bear crawl|low crawl/.test(lower)) return 'Mobility'
+  // May 2026 cleanup: Mobility/Agility/Metcon regexes removed — the matching
+  // movements (crab walk, bear crawl, low crawl, agility drills, battle ropes,
+  // jump rope, speed bag, shadow boxing) are gone from the cardio list.
 
-  // Agility
-  if (/agility|carioca|lateral shuffle|line drill|shuttle|box step over|slideboard/.test(lower)) return 'Agility'
-
-  // Metcon
-  if (/battle rope|jump rope|speed bag|shadow box/.test(lower)) return 'Metcon'
-
-  // Endurance (running, walking, hiking, skating, stair climb, rucking, cross-country skiing)
-  if (/run|sprint|jog|trail|walk|hik|ruck|ice skat|inline skat|stair climb|cross country|roller ski/.test(lower)) return 'Endurance'
+  // Endurance (running, walking, hiking, skating, stair climb, rucking).
+  // May 19 2026: removed `trail` from the regex — Trail Running was removed
+  // from the catalog entirely. Old labels would only persist for historical
+  // logs that have already been DELETEd alongside the movement removal.
+  if (/run|sprint|jog|walk|hik|ruck|ice skat|inline skat|stair climb|roller ski/.test(lower)) return 'Endurance'
 
   // Cycling (bike erg matched here before generic erg)
   if (/cycl|bike|spin/.test(lower)) return 'Cycling'
@@ -114,9 +111,6 @@ function getCardioSubtype(activityName) {
 
   // Swimming
   if (/swim|aqua/.test(lower)) return 'Swimming'
-
-  // Remaining skiing (cross country already caught above)
-  if (/ski/.test(lower)) return 'Skiing'
 
   // Functional carries & sleds
   if (/sled|carry/.test(lower)) return 'Functional'

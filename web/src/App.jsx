@@ -5,6 +5,7 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { ViewModeProvider, useViewMode } from './contexts/ViewModeContext'
 import AppShell from './components/Navbar'
 import CompleteProfile from './components/CompleteProfile'
+import CookieBanner from './components/CookieBanner'
 
 // ── Lazy page imports — each becomes its own JS chunk ─────────────────────────
 // The browser downloads only the chunks the user actually visits.
@@ -95,7 +96,35 @@ function ProtectedLayout() {
   const { isClientView, setIsClientView } = useViewMode()
   const [, navigate] = useLocation()
 
-  if (loading || profileLoading) {
+  // CRITICAL — never gate on `profileLoading` alone here.
+  //
+  // `profileLoading` flips to true on every profile refetch — including
+  // ones triggered by Supabase auth events that fire on tab focus
+  // (SIGNED_IN, USER_UPDATED). If we render the "Loading…" placeholder
+  // whenever profileLoading is true, the ENTIRE protected route tree
+  // (AdminShell, AdminMovements, AdminFoodLibrary, every form, every
+  // dialog) unmounts and remounts on every tab focus. The page itself
+  // doesn't reload, but it FEELS like a reload to the user because all
+  // component state is wiped:
+  //   - Open "Add movement" form silently closes
+  //   - Typed form fields lose their contents
+  //   - Expanded operations panels collapse
+  //   - Active search query / filter / selection resets
+  //   - Scroll position jumps back to top
+  //
+  // The right gate:
+  //   - `loading` → show placeholder ONLY during the initial
+  //     getSession() call (it's true once, then stays false forever).
+  //   - `profileLoading && !profile` → show placeholder during the
+  //     initial profile fetch BEFORE we've ever received profile data.
+  //     Once we have a profile cached, subsequent silent refetches
+  //     keep the existing UI mounted.
+  //
+  // Mirrors the mobile guard in `mobile/app/(app)/_layout.tsx`.
+  // Original break: this gate was hardened in late 2025 (the CLAUDE.md
+  // "Profile refresh no longer unmounts the route tree" note), but got
+  // reverted in a later refactor. Don't revert it again.
+  if (loading || (profileLoading && !profile)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground text-sm">
         Loading…
@@ -218,6 +247,7 @@ export default function App() {
       <AuthProvider>
         <ViewModeProvider>
           <AppRoutes />
+          <CookieBanner />
         </ViewModeProvider>
       </AuthProvider>
     </ThemeProvider>

@@ -114,7 +114,7 @@ export function speedMaxTenths(activity: string, distUnit: 'km' | 'mi'): number 
 //   Swimming [Breaststroke], Swimming [Butterfly]
 //
 // They collapse into a single detail page via SwimmingConsolidatedDetail,
-// mirroring the Sled Drag [Push] / [Pull] pattern from strength. Helpers
+// mirroring the Sled Work [Push] / [Pull] pattern from strength. Helpers
 // below live in this shared lib so cardio.tsx (log form + index) and the
 // detail page can both reference the same authoritative stroke list.
 
@@ -237,6 +237,38 @@ export function pacePer500mFromSecsPerKm(secsPerKm: number | null | undefined): 
   return `${m}:${String(s).padStart(2, '0')}/500m`
 }
 
+/**
+ * Convert seconds-per-km pace to mechanical wattage on a Concept2 erg
+ * (Row Erg, Bike Erg, Ski Erg). Concept2's official pace↔watts formula:
+ *
+ *   pace_m_per_s = 1000 / pace_sec_per_km
+ *   watts = 2.80 × (pace_m_per_s)³
+ *
+ * Derivation: the Concept2 Performance Monitor's energy model assumes
+ * a 2.80 J/m drag factor at standard PM5 calibration; cubic relationship
+ * comes from fluid-resistance drag on the flywheel. Same formula applies
+ * to Row Erg, Bike Erg, and Ski Erg — they share the Concept2 engine.
+ *
+ * For a 2:00/500m split (universal rowing benchmark for ~200W workouts):
+ *   pace_sec_per_km = 240
+ *   pace_m_per_s = 1000 / 240 = 4.167
+ *   watts = 2.80 × 4.167³ ≈ 203 W  ✓ (Concept2's published table)
+ *
+ * Returns integer watts. 0 for invalid input.
+ */
+export function pacePer500mToWatts(secsPerKm: number | null | undefined): number {
+  if (!secsPerKm || secsPerKm <= 0) return 0
+  const paceMps = 1000 / secsPerKm
+  return Math.round(2.80 * paceMps ** 3)
+}
+
+export const CONCEPT2_ERG_ACTIVITIES = new Set(['Row Erg', 'Bike Erg', 'Ski Erg'])
+
+export function isConcept2ErgActivity(activity: string | null | undefined): boolean {
+  if (!activity) return false
+  return CONCEPT2_ERG_ACTIVITIES.has(activity)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Air Bike (May 17 2026)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -307,6 +339,201 @@ export function parseAirBikeLabel(label: string | null | undefined): { cals: num
 export function calsPerMinFromEffort(cals: number, timeSecs: number | null): number {
   if (!cals || !timeSecs || timeSecs <= 0) return 0
   return cals / (timeSecs / 60)
+}
+
+/**
+ * Convert a cal/min rate to mechanical wattage on an air bike (Assault,
+ * Echo, Rogue, Schwinn Airdyne). Industry-standard conversion based on
+ * the metabolic equation:
+ *
+ *   1 kcal = 4184 J
+ *   1 cal/min = 4184 J / 60 sec = ~69.7 W of metabolic energy
+ *               × 0.25 mechanical efficiency on cycle ergs (Brouwer 1957
+ *                  refined by ACSM 2018) ≈ ~17.4 W of mechanical output
+ *
+ * Accuracy ~±10 % because of fan-speed effects (air resistance scales
+ * with cube of velocity), per-manufacturer calibration differences, and
+ * individual metabolic efficiency. For floor-advisory coaching ("hold
+ * at or above X W"), ±10 % is plenty — the watts target is the EFFORT
+ * LEVEL the user should sustain, not a precise instantaneous reading.
+ *
+ * Returned watts are rounded to the nearest integer (machine consoles
+ * display ints).
+ */
+export function calsPerMinToWatts(rate: number): number {
+  if (!rate || rate <= 0) return 0
+  return Math.round(rate * 17.4)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rucking (May 19 2026)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Rucking is walking with weight on your back — universally programmed by the
+// GoRuck / military / tactical-fitness community in **pounds with miles**.
+// Despite being a cardio activity (aerobic, low-intensity, sustained), the
+// progression model is CARRY-LIKE, not pace-like — you get better by carrying
+// heavier or farther, not by getting faster. The detail page mirrors Atlas
+// Stone Bear Hug Carry's design (abs-mode tier ladder + load+distance hero
+// card + 3 adaptation zones) rather than running's pace zones.
+//
+// Unit lock: distance to MILES (already in `movements.unit_lock = 'mi'`).
+// Pack weight is hard-coded LB-only in the detail page + log form — the
+// `unit_lock` column only holds ONE unit (mi for rucking), so the weight
+// lock lives in code.
+
+export const RUCKING_ACTIVITY = 'Rucking'
+
+export function isRuckingActivity(activity: string | null | undefined): boolean {
+  return activity === RUCKING_ACTIVITY
+}
+
+/**
+ * Rucking pack weight ladder (lb) — real plate sizes available to the
+ * rucking community: GoRuck Sand Plates (10 / 20 / 30 / 45 lb), Rogue
+ * Echo plates (10 / 15 / 20 / 25 / 30 / 35 / 40 / 45 lb), and realistic
+ * stacked combinations (50 / 60 / 70 / 80 lb).
+ *
+ * Two variants:
+ *   • RUCK_WEIGHT_LADDER_LB        — math ladder used by the detail
+ *     page's zone snapping. Starts at 10 lb so conditioning never
+ *     prescribes "0 lb" (which isn't a meaningful pack weight).
+ *   • RUCK_WEIGHT_LOG_LADDER_LB    — log form wheel ladder. Prepends 0
+ *     so the user can record bodyweight rucking (no pack) explicitly.
+ */
+export const RUCK_WEIGHT_LADDER_LB: readonly number[] = [10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80]
+export const RUCK_WEIGHT_LOG_LADDER_LB: readonly number[] = [0, ...RUCK_WEIGHT_LADDER_LB]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// StairMill (May 19 2026 — coaching surface, science-backed 3-zone progression)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The StairMaster Step Mill is one of the highest-MET sustainable cardio
+// machines (~8-12 METs at moderate-to-vigorous effort). Coaching surface
+// mirrors Air Bike's architecture: a single rate metric (floors per minute)
+// anchors three zones (Endurance / Threshold / VO2 Max) — same mental model
+// the user already learned from running, swimming, ergs, and air bike.
+//
+// Science backing:
+//   • Allison et al. (2017) Med Sci Sports Exerc — "Brief Intense Stair
+//     Climbing Improves Cardiorespiratory Fitness". 3 × 20-sec sprints,
+//     3×/week → +12 % VO2peak in 6 weeks. Drives the VO2 zone protocol.
+//   • Boreham et al. (2000) Prev Med — sustained moderate stair climbing
+//     → +17 % VO2max in 8 weeks. Drives the Endurance zone protocol.
+//   • Honda et al. (2014) Diabetol Metab Syndr — 3-min interval sets for
+//     metabolic adaptation. Drives the Threshold zone protocol.
+//   • ACSM Guidelines for Exercise Testing and Prescription, 12th ed (2025)
+//     — rates stair climbing as vigorous-intensity, endorses 3-zone
+//     polarized programming.
+//
+// Rate metric: FLOORS PER MINUTE (FPM). Every Step Mill console displays
+// FLOORS as the most prominent number; the user reads it off without
+// thinking. FPM = total_floors ÷ total_time_minutes. Each zone's
+// prescription scales linearly with FPM so a faster climber gets bigger
+// floor targets per rep (wall-clock stays roughly the same).
+
+export const STAIRMILL_ACTIVITY = 'StairMill'
+
+export function isStairMillActivity(activity: string | null | undefined): boolean {
+  return activity === STAIRMILL_ACTIVITY
+}
+
+/**
+ * Baseline FPM for users who haven't logged a StairMill effort yet
+ * (cold start). Once they log any effort, their actual FPM replaces
+ * this baseline. Gender-scaled to roughly match average commercial-
+ * Step-Mill output at intermediate effort:
+ *
+ *   • male   → 12 floors/min (typical intermediate male output)
+ *   • female →  9 floors/min (typical intermediate female output)
+ *   • other / unset → 10 floors/min (averaged)
+ *
+ * Numbers derived from typical Stairmaster Gauntlet level 8-10 sustained
+ * output at moderate-vigorous effort. They're a reasonable starting point
+ * — users converge to their own rate after their first logged effort.
+ */
+export function genderBaselineFloorsPerMin(gender: string | null | undefined): number {
+  if (gender === 'male') return 12
+  if (gender === 'female') return 9
+  return 10
+}
+
+/**
+ * Parse a StairMill effort label.
+ *   New format:    "StairMill · 245 floors in 20:00"
+ *   Legacy format: "StairMill · 20:00"  (floors defaults to 0)
+ * Returns null if the label can't be parsed at all.
+ */
+export function parseStairMillLabel(label: string | null | undefined): { floors: number; timeSecs: number | null } | null {
+  if (!label) return null
+  const part = label.split(' · ')[1] ?? ''
+  // Current format with floors count
+  const m1 = part.match(/^(\d+)\s*floors?\s+in\s+(\d+:\d{2}(?::\d{2})?)$/)
+  if (m1) {
+    const floors = parseInt(m1[1], 10)
+    const timeStr = m1[2]
+    const timeParts = timeStr.split(':').map(Number)
+    let timeSecs: number | null = null
+    if (timeParts.length === 3) timeSecs = timeParts[0] * 3600 + timeParts[1] * 60 + timeParts[2]
+    else if (timeParts.length === 2) timeSecs = timeParts[0] * 60 + timeParts[1]
+    return { floors, timeSecs }
+  }
+  // Legacy duration-only format
+  const m2 = part.match(/^(\d+:\d{2}(?::\d{2})?)$/)
+  if (m2) {
+    const timeParts = m2[1].split(':').map(Number)
+    let timeSecs: number | null = null
+    if (timeParts.length === 3) timeSecs = timeParts[0] * 3600 + timeParts[1] * 60 + timeParts[2]
+    else if (timeParts.length === 2) timeSecs = timeParts[0] * 60 + timeParts[1]
+    return { floors: 0, timeSecs }
+  }
+  return null
+}
+
+/**
+ * Compute floors-per-minute rate from (floors, timeSecs).
+ * Returns 0 for invalid input.
+ */
+export function floorsPerMinFromEffort(floors: number, timeSecs: number | null): number {
+  if (!floors || !timeSecs || timeSecs <= 0) return 0
+  return floors / (timeSecs / 60)
+}
+
+/**
+ * Cardio category pill label — the small UPPERCASE tag rendered under the
+ * "Best —" subtitle on every cardio detail page. Mirrors strength's
+ * `equipmentPillLabel('barbell')` → "BARBELL" / `equipmentPillLabel('carry')`
+ * → "CARRY" pattern: every detail page identifies its movement category
+ * with a single static badge below the subtitle.
+ *
+ * Categorization rules:
+ *   • Running family (incl. Hill / Trail / Treadmill) → "RUNNING"
+ *   • Cycling family (Cycling, Stationary Bike, Bike Erg) → "CYCLING"
+ *   • Air Bike → "AIR BIKE"
+ *   • Row Erg → "ROWING"
+ *   • Ski Erg → "SKIING"  (the ski erg simulates Nordic ski technique)
+ *   • Swimming (any stroke) → "SWIMMING"
+ *   • Elliptical → "ELLIPTICAL"
+ *   • Rucking → "RUCKING"
+ *   • StairMill → "STAIR CLIMBING"
+ *
+ * Returns "CARDIO" as a generic fallback for any activity that doesn't
+ * match a known category.
+ */
+export function cardioCategoryPillLabel(activity: string | null | undefined): string {
+  if (!activity) return 'CARDIO'
+  const lower = activity.toLowerCase()
+  if (isAirBikeActivity(activity))           return 'AIR BIKE'
+  if (isRowErgActivity(activity))            return 'ROWING'
+  if (activity === 'Ski Erg')                return 'SKIING'
+  if (activity === 'Bike Erg')               return 'CYCLING'
+  if (isSwimActivity(activity))              return 'SWIMMING'
+  if (isRuckingActivity(activity))           return 'RUCKING'
+  if (lower.includes('elliptical'))          return 'ELLIPTICAL'
+  if (lower.includes('stair'))               return 'STAIR CLIMBING'
+  if (/run|jog/.test(lower))                 return 'RUNNING'
+  if (/cycl|bike/.test(lower))               return 'CYCLING'
+  return 'CARDIO'
 }
 
 const ISOMETRIC_LIST = [

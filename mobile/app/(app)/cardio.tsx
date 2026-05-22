@@ -49,6 +49,24 @@ import {
   ROW_ERG_ACTIVITY,
   isRowErgActivity,
   pacePer500mFromSecsPerKm,
+  // Rucking — distance locked to mi via unit_lock; the log form ALSO
+  // adds a pack-weight wheel (locked to lb in code, since unit_lock
+  // only holds one unit). Save label format includes pack weight:
+  //   "Rucking · 35 lb × 2.5 mi in 45:00"
+  RUCKING_ACTIVITY,
+  isRuckingActivity,
+  // Pack-weight ladder for the Rucking log form wheel — real GoRuck /
+  // Rogue plate sizes plus stacked combos, prefixed with 0 for
+  // bodyweight rucking.
+  RUCK_WEIGHT_LOG_LADDER_LB,
+  // StairMill — duration-mode activity that captures FLOORS alongside
+  // TIME so the detail page can compute floors-per-minute (rate-anchored
+  // coaching). Save label format includes floors:
+  //   "StairMill · 245 floors in 20:00"
+  STAIRMILL_ACTIVITY,
+  isStairMillActivity,
+  parseStairMillLabel,
+  floorsPerMinFromEffort,
 } from '../../src/lib/movements'
 import MovementSearch from '../../src/components/MovementSearch'
 import PhantomWheel from '../../src/components/PhantomWheel'
@@ -128,7 +146,7 @@ interface ActivityBest {
   mode:         'pace' | 'duration'
   /** Swimming-only: the most-recently-logged stroke across all 4 variants.
    *  Drives the small stroke badge (FREE / BACK / BREAST / FLY) on the
-   *  collapsed "Swimming" row in "Your activities". Mirrors the Sled Drag
+   *  collapsed "Swimming" row in "Your activities". Mirrors the Sled Work
    *  pattern where the strength row shows the most-recent variant badge. */
   swimMostRecentStroke?: SwimStroke
 }
@@ -165,7 +183,30 @@ export default function Cardio() {
 
   // ── DB movements (cached) ──────────────────────────────────────────────────
   const dbMovements   = useMovements()
-  const cardioRecords = useMemo(() => dbMovements.filter(m => m.category === 'cardio'), [dbMovements])
+  // Hide family-PARENT rows from the dropdown. Parent rows are the
+  // "Swimming" / "Sled Work" / "Bone" family entries — the user logs
+  // against a specific variant (e.g. "Swimming [Freestyle]"), never the
+  // parent name. Same filter used on the strength index.
+  const familyParentIds = useMemo(() => {
+    const ids = new Set<string>()
+    dbMovements.forEach(m => {
+      if (m.parent_movement_id) ids.add(m.parent_movement_id)
+    })
+    return ids
+  }, [dbMovements])
+  // Same filter logic as strength.tsx — hide family parents AND deprecated
+  // movements from the new-log search dropdown so deprecated activities
+  // can't accept new effort logs. They still appear on the "Your
+  // Movements" list (built from logged efforts) and their detail pages
+  // remain accessible for historical data review.
+  const cardioRecords = useMemo(
+    () => dbMovements.filter(m =>
+      m.category === 'cardio'
+      && !familyParentIds.has(m.id)
+      && !m.deprecated
+    ),
+    [dbMovements, familyParentIds],
+  )
   const cardioNames   = useMemo(() => cardioRecords.map(m => m.name), [cardioRecords])
   const movementRecord = activity ? (cardioRecords.find(m => m.name === activity) ?? null) : null
   const mode: 'pace' | 'duration' = movementRecord
@@ -205,6 +246,22 @@ export default function Cardio() {
   // on PaceDetail but with rowing-specific display formatting.
   const isRowMode = isRowErgActivity(activity)
 
+  // Rucking mode — adds a Pack Weight wheel to the form (locked to lb).
+  // Distance is already locked to mi via unit_lock on the movement row.
+  // Save label includes pack weight: "Rucking · 35 lb × 2.5 mi in 45:00".
+  // packWeightValue is in pounds; default 0 = bodyweight rucking.
+  const isRuckMode = isRuckingActivity(activity)
+  const [packWeightValue, setPackWeightValue] = useState('0')
+
+  // StairMill mode — duration-mode activity, but logs FLOORS alongside
+  // TIME so the detail page can derive floors-per-minute (the rate anchor
+  // for science-based 3-zone progression). Save label format:
+  //   "StairMill · 245 floors in 20:00"
+  // floorsValue = 0 → legacy duration-only save label ("StairMill · 20:00")
+  // which still parses on the read side.
+  const isStairMillMode = isStairMillActivity(activity)
+  const [floorsValue, setFloorsValue] = useState('0')
+
   // Swim-mode detection. Swimming has its own form layout:
   //   • Distance wheel runs in INTEGER mode (step 25) in meters or yards,
   //     not the decimal-km wheel used for running/cycling. Pool distances
@@ -228,37 +285,60 @@ export default function Cardio() {
   // distKm > 0 and timeSecs > 0) and enables as soon as the user dials
   // anything in.
   useEffect(() => {
-    if (mode === 'duration') {
+    if (isStairMillMode) {
+      // StairMill is in duration mode but ALSO captures floors. Default
+      // both wheels to 0; canSave guards on floors > 0 AND time > 0.
       setDistValue('')
       setTimeStr('00:00')
       setSpeedValue('')
       setCalsValue('')
+      setPackWeightValue('0')
+      setFloorsValue('0')
+    } else if (mode === 'duration') {
+      setDistValue('')
+      setTimeStr('00:00')
+      setSpeedValue('')
+      setCalsValue('')
+      setPackWeightValue('0')
+      setFloorsValue('0')
     } else if (isCalorieMode) {
       setDistValue('')
       setSpeedValue('')
       setCalsValue('0')         // integer calories
       setTimeStr('00:00')
+      setPackWeightValue('0')
     } else if (isSpeedMode) {
       setDistValue('0')
       setSpeedValue('0')
       setTimeStr('')           // derived from speed × distance, not user-entered
       setCalsValue('')
+      setPackWeightValue('0')
     } else if (isSwimMode || isRowMode) {
       setDistValue('0')        // integer meters
       setTimeStr('00:00')
       setSpeedValue('')
       setCalsValue('')
+      setPackWeightValue('0')
+    } else if (isRuckMode) {
+      setDistValue('0')        // decimal miles
+      setTimeStr('00:00')
+      setSpeedValue('')
+      setCalsValue('')
+      setPackWeightValue('0')  // lb — 0 default = bodyweight rucking
+      setFloorsValue('0')
     } else {
       setDistValue('0')
       setTimeStr('00:00')
       setSpeedValue('')
       setCalsValue('')
+      setPackWeightValue('0')
+      setFloorsValue('0')
     }
-  }, [mode, isSpeedMode, isSwimMode, isCalorieMode, isRowMode])
+  }, [mode, isSpeedMode, isSwimMode, isCalorieMode, isRowMode, isRuckMode, isStairMillMode])
 
   // ── Clear saved/error on any input change ──────────────────────────────────
   useEffect(() => { setSaved(false); setSaveError('') },
-    [activity, distValue, distUnit, timeStr, speedValue, calsValue])
+    [activity, distValue, distUnit, timeStr, speedValue, calsValue, packWeightValue, floorsValue])
 
   // ── Suggestion mode ────────────────────────────────────────────────────────
   const suggestionMode = !isAdmin && !activity && pendingQuery.trim() !== '' &&
@@ -338,6 +418,45 @@ export default function Cardio() {
                 name:         head,
                 displayValue: `${rate.toFixed(1)} cal/min`,
                 secs:         rate,
+                mode:         'pace',
+              })
+            }
+            return
+          }
+          // StairMill (floors-per-minute coaching surface): label =
+          // "StairMill · 245 floors in 20:00", value = "12.3 floors/min".
+          // Same shape as Air Bike — "best" = HIGHEST FPM rate, not lowest
+          // pace, and we stash the rate in `secs` (higher = better). Legacy
+          // "StairMill · 20:00" labels (no floors) yield FPM = 0 and would
+          // never win the max-rate comparison, so they're correctly
+          // ignored for the "best" calculation but still contribute to
+          // the count of logged sessions.
+          if (isStairMillActivity(head)) {
+            const parsed = parseStairMillLabel(e.label)
+            if (!parsed || !parsed.timeSecs) return
+            const rate = floorsPerMinFromEffort(parsed.floors, parsed.timeSecs)
+            const existing = map.get(head)
+            if (rate > 0 && (!existing || rate > existing.secs)) {
+              map.set(head, {
+                name:         head,
+                // "fl/min" matches the abbreviation used in the hero card
+                // and the log form wheel — keeps the activity list compact
+                // and consistent with every other rate-anchored card (Air
+                // Bike: "cal/min", ergs: "W"). The full "floors/min" still
+                // appears in the detail page subtitle / chart / log list.
+                displayValue: `${rate.toFixed(1)} fl/min`,
+                secs:         rate,
+                mode:         'pace',
+              })
+            } else if (!existing) {
+              // Legacy floors=0 entry — surface the row anyway so the user
+              // sees their StairMill activity in the list. Display a dash
+              // for the metric column until a fresh effort with floors > 0
+              // overrides it.
+              map.set(head, {
+                name:         head,
+                displayValue: '—',
+                secs:         0,
                 mode:         'pace',
               })
             }
@@ -451,11 +570,16 @@ export default function Cardio() {
 
   // Air Bike's gate is calories + time (no distance). Other pace-mode
   // activities require distance + time; duration mode just needs time.
-  const calsNum = Number(calsValue) || 0
+  // StairMill requires floors + time (the coaching surface anchors on
+  // floors-per-minute, so a floors=0 save would be useless).
+  const calsNum   = Number(calsValue)   || 0
+  const floorsNum = Number(floorsValue) || 0
   const canSave = !!activity?.trim() && (
     isCalorieMode
       ? (calsNum > 0 && effectiveTimeSecs > 0)
-      : (mode === 'pace' ? (distKm > 0 && effectiveTimeSecs > 0) : effectiveTimeSecs > 0)
+      : isStairMillMode
+        ? (floorsNum > 0 && effectiveTimeSecs > 0)
+        : (mode === 'pace' ? (distKm > 0 && effectiveTimeSecs > 0) : effectiveTimeSecs > 0)
   )
 
   const saveDisabled = suggestionMode
@@ -500,13 +624,34 @@ export default function Cardio() {
         // ("Row Erg · 5000 m in 18:30"). parseEffortLabel's existing
         // 'm' regex handles the read path.
         label = `${activity} · ${Math.round(Number(distValue))} m in ${effectiveTimeStr}`
+      } else if (isRuckMode) {
+        // Rucking save format includes pack weight:
+        //   "Rucking · 35 lb × 2.5 mi in 45:00"
+        // Pack weight = 0 → save without weight (legacy format):
+        //   "Rucking · 2.5 mi in 45:00"
+        // RuckingDetail's parseRuckLabel handles both shapes.
+        const packLb = Math.round(Number(packWeightValue) || 0)
+        const distMi = parseFloat(Number(distValue).toFixed(2))
+        label = packLb > 0
+          ? `${activity} · ${packLb} lb × ${distMi} mi in ${effectiveTimeStr}`
+          : `${activity} · ${distMi} mi in ${effectiveTimeStr}`
       } else {
         label = `${activity} · ${parseFloat(Number(distValue).toFixed(3))} ${distUnit} in ${effectiveTimeStr}`
       }
       value = livePaceKm!
     } else {
-      label = `${activity} · ${effectiveTimeStr}`
-      value = effectiveTimeStr
+      // StairMill — duration-mode but stores floors alongside time so the
+      // detail page can derive floors-per-minute. parseStairMillLabel on
+      // the read side accepts both the new format AND the legacy
+      // duration-only format for back-compat.
+      if (isStairMillMode && floorsNum > 0) {
+        label = `${activity} · ${Math.round(floorsNum)} floors in ${effectiveTimeStr}`
+        const fpm = floorsNum / (effectiveTimeSecs / 60)
+        value = `${fpm.toFixed(1)} floors/min`
+      } else {
+        label = `${activity} · ${effectiveTimeStr}`
+        value = effectiveTimeStr
+      }
     }
 
     const { error } = await supabase.from('efforts').insert({
@@ -516,6 +661,8 @@ export default function Cardio() {
     setSaved(true)
     setTimeout(() => {
       setActivity(''); setDistValue(''); setTimeStr(''); setSpeedValue(''); setCalsValue('')
+      setPackWeightValue('0')
+      setFloorsValue('0')
       setPendingQuery(''); setMovementKey(k => k + 1)
     }, 1500)
   }
@@ -555,31 +702,83 @@ export default function Cardio() {
           </Text>
         ) : !activity ? null : mode === 'duration' ? (
           <>
-            <View style={s.field}>
-              <Text style={s.label}>Duration</Text>
-              <WheelInput>
-                {/* hh:mm:ss split-reel time picker via PhantomWheel's
-                    time mode. Cardio Duration tops out at 3 hours so this
-                    is the only place in the app where the hours reel
-                    matters in practice. Controlled value is total
-                    seconds in `timeStr`. */}
-                <PhantomWheel
-                  value={parseTimeStr(timeStr) || 0}
-                  onChange={(secs) => setTimeStr(formatMmSs(secs))}
-                  time="hh:mm:ss"
-                  maxHours={3}
-                />
-              </WheelInput>
-            </View>
+            {/* StairMill log form — two-column grid: Floors | Time.
+                Both wheels required (canSave guards on floors > 0 AND
+                time > 0). Floors = the number the user reads off the
+                most prominent number on the StairMaster console.
+                Generic duration-mode activities (none currently — Arc
+                Trainer was removed May 17) still get just the Duration
+                wheel via the else-branch. */}
+            {isStairMillMode ? (
+              <>
+                <View style={s.tripleGrid}>
+                  <View style={[s.field, s.gridLarge]}>
+                    <Text style={s.label}>Floors</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={Number(floorsValue) || 0}
+                        onChange={(v) => setFloorsValue(String(v))}
+                        step={1}
+                        min={0}
+                        max={500}
+                        unit="fl"
+                      />
+                    </WheelInput>
+                  </View>
+                  <View style={[s.field, s.gridLarge]}>
+                    <Text style={s.label}>Time</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={parseTimeStr(timeStr) || 0}
+                        onChange={(secs) => setTimeStr(formatMmSs(secs))}
+                        time="mm:ss"
+                        maxMinutes={99}
+                      />
+                    </WheelInput>
+                  </View>
+                </View>
 
-            {timeSecs > 0 && (
-              <ChipAmber>
-                <Timer size={14} color={palette.amber[400]} />
-                <Text style={s.chipLabel}>Session time</Text>
-                <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
-                  {fmtSecs(timeSecs)}
-                </Text>
-              </ChipAmber>
+                {/* Live chips — primary FPM rate (the coaching anchor) +
+                    session time. Mirrors Air Bike's rate chip pattern. */}
+                {floorsNum > 0 && effectiveTimeSecs > 0 && (
+                  <ChipAmber>
+                    <Activity size={14} color={palette.amber[400]} />
+                    <Text style={s.chipLabel}>Climb rate</Text>
+                    <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
+                      {(floorsNum / (effectiveTimeSecs / 60)).toFixed(1)} floors/min
+                    </Text>
+                  </ChipAmber>
+                )}
+              </>
+            ) : (
+              <>
+                <View style={s.field}>
+                  <Text style={s.label}>Duration</Text>
+                  <WheelInput>
+                    {/* hh:mm:ss split-reel time picker via PhantomWheel's
+                        time mode. Cardio Duration tops out at 3 hours so this
+                        is the only place in the app where the hours reel
+                        matters in practice. Controlled value is total
+                        seconds in `timeStr`. */}
+                    <PhantomWheel
+                      value={parseTimeStr(timeStr) || 0}
+                      onChange={(secs) => setTimeStr(formatMmSs(secs))}
+                      time="hh:mm:ss"
+                      maxHours={3}
+                    />
+                  </WheelInput>
+                </View>
+
+                {timeSecs > 0 && (
+                  <ChipAmber>
+                    <Timer size={14} color={palette.amber[400]} />
+                    <Text style={s.chipLabel}>Session time</Text>
+                    <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
+                      {fmtSecs(timeSecs)}
+                    </Text>
+                  </ChipAmber>
+                )}
+              </>
             )}
           </>
 
@@ -641,6 +840,78 @@ export default function Cardio() {
                     "150 cal" and "5:00" are similar widths. 2-column layout
                     means the grid is more spacious than the 3-column ones.
             */}
+            {isRuckMode ? (
+              <>
+                {/* Rucking — Atlas-style quad-grid for row 1 + Time alone
+                    on row 2. Mirrors strength's carry log form
+                    byte-for-byte: 2 wheels + 2 unit chips, inline units
+                    stripped from both wheels (the unit chip to the right
+                    declares each one). Rucking sits OUTSIDE the
+                    tripleGrid wrapper because it needs two stacked rows;
+                    every other mode below is a single row of fields.
+                    • Pack Weight uses a discrete LADDER (real GoRuck /
+                      Rogue plate sizes including 0 for bodyweight
+                      rucking) — same logic as Atlas Stone's discrete
+                      kg-only stone weights.
+                    • Distance is continuous decimal mi (0.1-mi step)
+                      capped at 20.0 mi — covers GoRuck Tough's 12 mi
+                      comfortably; multi-hour Heavy / Selection events
+                      are off-app per CLAUDE.md's 45-min philosophy.
+                    • Both units are LOCKED (rucking community is
+                      universally imperial; no kg or km option). */}
+                <View style={s.quadGrid}>
+                  <View style={[s.field, s.gridQuadLarge]}>
+                    <Text style={s.label}>Pack weight</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={Number(packWeightValue) || 0}
+                        onChange={(v) => setPackWeightValue(String(v))}
+                        ladder={RUCK_WEIGHT_LOG_LADDER_LB}
+                      />
+                    </WheelInput>
+                  </View>
+                  <View style={[s.field, s.gridUnit]}>
+                    <Text style={s.label}>Unit</Text>
+                    <View style={s.unitLockedBox}>
+                      <Text style={s.unitLockedText} numberOfLines={1}>lb</Text>
+                    </View>
+                  </View>
+                  <View style={[s.field, s.gridQuadLarge]}>
+                    <Text style={s.label}>Distance</Text>
+                    <WheelInput>
+                      <PhantomWheel
+                        value={distValue === '' ? 0 : Math.max(0, Math.round(Number(distValue) * 10))}
+                        onChange={(tenths) => setDistValue(String(tenths / 10))}
+                        decimal="XX.X"
+                        min={0} max={200}
+                      />
+                    </WheelInput>
+                  </View>
+                  <View style={[s.field, s.gridUnit]}>
+                    <Text style={s.label}>Unit</Text>
+                    <View style={s.unitLockedBox}>
+                      <Text style={s.unitLockedText} numberOfLines={1}>mi</Text>
+                    </View>
+                  </View>
+                </View>
+                {/* Row 2 — Time alone, full width. Squeezing it into row 1
+                    with three other fields crowded everything off-screen
+                    on phone widths; stacking gives Time room to breathe
+                    and matches the layout pattern of the cardio Duration
+                    mode. */}
+                <View style={s.field}>
+                  <Text style={s.label}>Time</Text>
+                  <WheelInput>
+                    <PhantomWheel
+                      value={parseTimeStr(timeStr) || 0}
+                      onChange={(secs) => setTimeStr(formatMmSs(secs))}
+                      time="mm:ss"
+                      maxMinutes={99}
+                    />
+                  </WheelInput>
+                </View>
+              </>
+            ) : (
             <View style={s.tripleGrid}>
               {isCalorieMode ? (
                 <>
@@ -677,7 +948,8 @@ export default function Cardio() {
                   {/* Row Erg — integer-meter wheel, step 100. Concept2
                       community is universally metric and tracks rowing
                       distance in whole meters. Range 0-30000 covers a
-                      10K piece comfortably. */}
+                      10K piece comfortably. Inline unit dropped — the
+                      "m" locked chip to the right already declares it. */}
                   <View style={[s.field, s.gridPaceDistance]}>
                     <Text style={s.label}>Distance</Text>
                     <WheelInput>
@@ -687,7 +959,6 @@ export default function Cardio() {
                         step={100}
                         min={0}
                         max={30000}
-                        unit="m"
                       />
                     </WheelInput>
                   </View>
@@ -714,8 +985,8 @@ export default function Cardio() {
                 </>
               ) : isSwimMode ? (
                 <>
-                  {/* Distance — integer wheel, no inline unit suffix (locked
-                      chip in the middle column declares m or yd). */}
+                  {/* Distance — integer wheel. Inline unit dropped — the
+                      locked unit chip in the middle column declares m or yd. */}
                   <View style={[s.field, s.gridPaceDistance]}>
                     <Text style={s.label}>Distance</Text>
                     <WheelInput>
@@ -725,7 +996,6 @@ export default function Cardio() {
                         step={25}
                         min={0}
                         max={5000}
-                        unit={swimUnit}
                       />
                     </WheelInput>
                   </View>
@@ -796,6 +1066,9 @@ export default function Cardio() {
                 </>
               ) : (
                 <>
+                  {/* Default pace mode (outdoor running, cycling, elliptical).
+                      Inline unit dropped — the km/mi toggle in the middle
+                      column declares it. */}
                   <View style={[s.field, s.gridPaceDistance]}>
                     <Text style={s.label}>Distance</Text>
                     <WheelInput>
@@ -804,7 +1077,6 @@ export default function Cardio() {
                         onChange={(tenths) => setDistValue(String(tenths / 10))}
                         decimal="XX.X"
                         min={0} max={500}
-                        unit={distUnit}
                       />
                     </WheelInput>
                   </View>
@@ -830,6 +1102,7 @@ export default function Cardio() {
                 </>
               )}
             </View>
+            )}
 
             {/* Live chip(s) below the grid.
                   - Air Bike (calorie mode):          one chip showing cal/min rate.
@@ -865,6 +1138,31 @@ export default function Cardio() {
                       {livePaceDisplay}
                     </Text>
                   </ChipAmber>
+                </>
+              ) : null
+            ) : isRuckMode ? (
+              /* Rucking — show pack weight × distance as the headline metric
+                 (the two axes the detail page tracks). Pace is a derived
+                 read-only secondary chip. The user thinks in load + miles,
+                 not in min/mi pace. */
+              (Number(distValue) > 0 && effectiveTimeSecs > 0) ? (
+                <>
+                  <ChipAmber>
+                    <Activity size={14} color={palette.amber[400]} />
+                    <Text style={s.chipLabel}>Ruck</Text>
+                    <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
+                      {Math.round(Number(packWeightValue) || 0)} lb × {parseFloat(Number(distValue).toFixed(2))} mi
+                    </Text>
+                  </ChipAmber>
+                  {livePaceDisplay ? (
+                    <ChipAmber>
+                      <Timer size={14} color={palette.amber[400]} />
+                      <Text style={s.chipLabel}>Pace</Text>
+                      <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
+                        {livePaceDisplay}
+                      </Text>
+                    </ChipAmber>
+                  ) : null}
                 </>
               ) : null
             ) : (
@@ -970,7 +1268,7 @@ export default function Cardio() {
                        row. Shows best pace per 100m (or 100yd) across all
                        strokes, plus a small badge for the most-recent
                        stroke (FREE / BACK / BREAST / FLY). Mirrors the
-                       Sled Drag PUSH / PULL badge pattern from strength. */
+                       Sled Work PUSH / PULL badge pattern from strength. */
                     <>
                       <Text style={s.listRowSub}>Best pace</Text>
                       <Text style={s.listRowVal}>{(() => {
@@ -1101,6 +1399,13 @@ const s = StyleSheet.create({
   gridPaceDistance: { flex: 3.0 },
   gridPaceTime:     { flex: 2.1 },
 
+  // Quad grid for Rucking row 1 — [Pack Weight] [lb chip] [Distance] [mi chip].
+  // Mirrors strength's carry-mode quad grid byte-for-byte. Both wheel columns
+  // get `flex: 1` so they split the remaining space evenly after the two
+  // 48-px unit chips. Row 2 below it is the Time wheel full-width.
+  quadGrid:        { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
+  gridQuadLarge:   { flex: 1 },
+
   // Read-only unit indicator shown in place of UnitToggle when the selected
   // activity has `unit_lock` (none today; future-proof). Visual matches the
   // toggle's active state so the layout doesn't shift, but it's non-interactive.
@@ -1152,7 +1457,7 @@ const s = StyleSheet.create({
 
   // Most-recent-stroke badge on the consolidated Swimming row. Mirrors
   // the small PUSH / PULL badge that the strength index renders for the
-  // Sled Drag consolidated row.
+  // Sled Work consolidated row.
   swimStrokeBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,

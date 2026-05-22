@@ -404,11 +404,12 @@ const WEIGHTED_LIST = [
   'Keg Toss',
   'Log Clean and Press',
   'Natural Stone Lift',
+  'Sandbag Carry',
   'Sandbag Over Shoulder',
   'Sandbag to Platform',
   'Shield Carry',
-  'Sled Drag',
-  'Sled Push (Prowler)',
+  'Sled Work [Drag]',
+  'Sled Work [Push]',
   'Tire Flip',
   'Vehicle Pull',
   'Yoke Carry',
@@ -488,41 +489,44 @@ export const STRENGTH_MOVEMENTS = [...new Set([...BODYWEIGHT_LIST, ...WEIGHTED_L
 // ── Cardio movements ──────────────────────────────────────────────────────────
 
 export const CARDIO_MOVEMENTS = [
-  // Running & walking
-  'Hill Running',
+  // Running & walking — May 19 2026 cleanup: removed `Hill Running` and
+  // `Trail Running` (terrain confounds pace zones, recreational use for
+  // most users — can't coach honestly without HR integration).
   'Running',
   'Running (Treadmill)',
-  'Trail Running',
   'Walking',
   'Walking (Treadmill)',
 
-  // Cycling
+  // Cycling — May 2026 cleanup: consolidated three "indoor cycling" variants
+  // into two — `Stationary Bike` covers the generic Peloton/spin/turbo
+  // case, `Bike Erg` stays for Concept2 specifically. May 19 2026 also
+  // removed `Cycling (Mountain Bike)` — technical terrain confounds pace.
+  'Bike Erg',
   'Cycling',
-  'Cycling (Indoor Trainer)',
-  'Cycling (Mountain Bike)',
-  'Indoor Cycling',
+  'Stationary Bike',
 
-  // Rowing & paddling
+  // Rowing & paddling — May 2026 cleanup: renamed `Rowing` to
+  // `Rowing (Open Water)` to disambiguate from `Row Erg` (machine).
   'Canoeing',
   'Kayaking',
   'Row Erg',
-  'Rowing',
+  'Rowing (Open Water)',
   'Stand Up Paddleboarding',
 
-  // Skiing
-  'Cross Country Skiing',
+  // Skiing — May 19 2026 removed outdoor `Skiing` entirely (XC skiing —
+  // niche audience, seasonal, snow + terrain + technique confound pace;
+  // can't coach honestly without HR + lactate calibration). Ski Erg
+  // (Concept2 indoor machine) stays.
   'Roller Skiing',
   'Ski Erg',
 
-  // Machines
+  // Machines — May 2026 cleanup: removed `Curved Treadmill` (covered by
+  // `Running (Treadmill)`), `VersaClimber` and `Jacob's Ladder` (niche
+  // equipment, removed for cardio-list simplicity — see CLAUDE.md).
   'Air Bike',
   'Arc Trainer',
-  'Bike Erg',
-  'Curved Treadmill',
   'Elliptical',
-  "Jacob's Ladder",
   'StairMill',
-  'VersaClimber',
 
   // Stair & climbing
   'Stair Climb',
@@ -531,34 +535,24 @@ export const CARDIO_MOVEMENTS = [
   'Ice Skating',
   'Inline Skating',
 
-  // Carrying
+  // Carrying — May 2026 cleanup: moved `Sandbag Carry`, `Sled Pull`, and
+  // `Sled Push` to strength (where they belong as loaded carry work — see
+  // `CARRY_BENCHMARKS` in mobile/app/(app)/effort/strength/[exercise].tsx).
+  // `Rucking` stays in cardio because it's loaded WALKING (lifestyle/endurance
+  // activity), not a carry-style strength exercise.
   'Rucking',
-  'Sandbag Carry',
-  'Sled Pull',
-  'Sled Push',
 
-  // Swimming
+  // Swimming — May 2026 cleanup: consolidated `Swimming (Open Water)` into
+  // the bare `Swimming` entry; pool vs open-water distinction was unused.
   'Aqua Jogging',
   'Swimming',
-  'Swimming (Open Water)',
 
-  // Conditioning & HIIT
-  'Agility Ladder Drills',
-  'Battle Ropes',
-  'Box Step Overs',
-  'Carioca',
-  'Jump Rope',
-  'Lateral Shuffles',
-  'Line Drills',
-  'Shadow Boxing',
-  'Shuttle Run',
-  'Slideboard',
-  'Speed Bag',
-
-  // Crawls
-  'Bear Crawl',
-  'Crab Walk',
-  'Low Crawl',
+  // May 2026 cleanup removed Jump Rope (covered by Single/Double Unders in
+  // strength), agility drills (Agility Ladder Drills, Carioca, Lateral
+  // Shuffles, Line Drills), sprint-style (Box Step Overs, Shuttle Run,
+  // Slideboard), conditioning fluff (Battle Ropes, Shadow Boxing, Speed
+  // Bag), and floor-work cardio (Bear Crawl, Crab Walk, Low Crawl). See
+  // CLAUDE.md "Cardio coaching-surface detail card — locked design spec".
 
   // Misc
   'Hiking',
@@ -571,24 +565,8 @@ export const CARDIO_MOVEMENTS = [
  * Everything else in CARDIO_MOVEMENTS is pace-based (distance + time).
  */
 const CARDIO_DURATION_SET = new Set([
-  'Agility Ladder Drills',
   'Arc Trainer',
-  'Battle Ropes',
-  'Bear Crawl',
-  'Box Step Overs',
-  'Carioca',
-  'Crab Walk',
-  "Jacob's Ladder",
-  'Jump Rope',
-  'Lateral Shuffles',
-  'Line Drills',
-  'Low Crawl',
-  'Shadow Boxing',
-  'Shuttle Run',
-  'Slideboard',
-  'Speed Bag',
   'StairMill',
-  'VersaClimber',
 ])
 
 /**
@@ -695,11 +673,12 @@ export const CARRY_EXERCISES = new Set([
   'Keg Carry',
   'Kettlebell Farmer Carry',
   'Kettlebell Overhead Carry',
+  'Sandbag Carry',
   'Shield Carry',
   'Single Arm Farmer Carry',
   'Single Arm Overhead Carry',
-  'Sled Drag',
-  'Sled Push (Prowler)',
+  'Sled Work [Drag]',
+  'Sled Work [Push]',
   'Suitcase Carry',
   'Vehicle Pull',
   'Yoke Carry',

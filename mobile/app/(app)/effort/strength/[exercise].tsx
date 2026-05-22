@@ -28,7 +28,7 @@ import Animated, {
   withDelay,
   runOnJS,
 } from 'react-native-reanimated'
-import { Gesture, GestureDetector } from 'react-native-gesture-handler'
+import { Gesture, GestureDetector, ScrollView as GHScrollView } from 'react-native-gesture-handler'
 import { useLocalSearchParams, router } from 'expo-router'
 import { ChevronLeft, ChevronRight } from 'lucide-react-native'
 import Skeleton from '../../../../src/components/Skeleton'
@@ -38,6 +38,7 @@ import AnimateRise from '../../../../src/components/AnimateRise'
 import LineChart from '../../../../src/components/LineChart'
 import { useAuth } from '../../../../src/contexts/AuthContext'
 import { supabase } from '../../../../src/lib/supabase'
+import { scrollShellToTop } from '../../../../src/lib/shellScroll'
 import {
   estimate1RM,
   projectAllRMs,
@@ -458,8 +459,8 @@ const CARRY_BENCHMARKS: Record<string, CarryBenchmarkCfg> = Object.freeze({
   "Sandbag Carry":              { mode: 'abs',   tiers: { beginner: [25, 10],   intermediate: [50, 10],   advanced: [ 80, 10],  strongman: [110, 10] } },
   "Shield Carry":               { mode: 'abs',   tiers: { beginner: [30, 10],   intermediate: [50, 10],   advanced: [ 75, 10],  strongman: [100, 10] } },
 
-  // Sled Drag variants — May 2026 cleanup consolidated cardio's Sled Pull/Push
-  // and strength's Sled Drag / Sled Push (Prowler) into a single `Sled Drag`
+  // Sled Work variants — May 2026 cleanup consolidated cardio's Sled Pull/Push
+  // and strength's Sled Work / Sled Push (Prowler) into a single `Sled Work`
   // with two variants tagged `[Push]` and `[Pull]`. Push is leg-dominant
   // (Prowler-style, quad/glute concentric drive) so higher loads are possible;
   // Pull is posterior-chain dominant (strap or harness, hams/glutes pull)
@@ -468,8 +469,8 @@ const CARRY_BENCHMARKS: Record<string, CarryBenchmarkCfg> = Object.freeze({
   // Bryce Lewis). Ratio-mode (vs BW) makes more sense than absolute because
   // a 250 lb athlete pushing 200 lb is not equivalent to a 130 lb athlete
   // pushing the same.
-  "Sled Drag [Push]":           { mode: 'ratio', tiers: { beginner: [1.00, 15], intermediate: [1.50, 15], advanced: [2.00, 15], strongman: [2.50, 15] } },
-  "Sled Drag [Pull]":           { mode: 'ratio', tiers: { beginner: [0.75, 15], intermediate: [1.25, 15], advanced: [1.75, 15], strongman: [2.25, 15] } },
+  "Sled Work [Push]":           { mode: 'ratio', tiers: { beginner: [1.00, 15], intermediate: [1.50, 15], advanced: [2.00, 15], strongman: [2.50, 15] } },
+  "Sled Work [Drag]":           { mode: 'ratio', tiers: { beginner: [0.75, 15], intermediate: [1.25, 15], advanced: [1.75, 15], strongman: [2.25, 15] } },
 })
 
 const CARRY_TIER_ORDER:  CarryTier[]                  = ['beginner', 'intermediate', 'advanced', 'strongman']
@@ -487,7 +488,7 @@ interface CarryZoneCfg { label: string; whyText: string }
 const CARRY_ZONES: Record<CarryZone, CarryZoneCfg> = Object.freeze({
   max_load:       { label: 'MAX LOAD',       whyText: 'Heavier weight, same distance. Trains absolute strength and grip endurance under load.' },
   distance_build: { label: 'DISTANCE BUILD', whyText: 'Same weight, longer distance. Trains sustained postural control and grip stamina.' },
-  conditioning:   { label: 'CONDITIONING',   whyText: 'Lighter weight (~60 % of best), double the distance. Trains aerobic capacity and grip endurance fatigue.' },
+  conditioning:   { label: 'CONDITIONING',   whyText: 'Lighter weight, longer distance. Trains aerobic capacity and grip endurance under fatigue.' },
 })
 const CARRY_ZONE_ORDER: CarryZone[] = ['max_load', 'distance_build', 'conditioning']
 
@@ -1422,8 +1423,14 @@ function EffortsHistorySection({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function IsometricDetail({
-  exercise, efforts, onDelete,
-}: { exercise: string; efforts: Effort[]; onDelete: (id: string) => void }) {
+  exercise, efforts, onDelete, hideHeader,
+}: {
+  exercise: string
+  efforts: Effort[]
+  onDelete: (id: string) => void
+  /** Suppresses page-level header when rendered inside FamilyConsolidatedDetail. */
+  hideHeader?: boolean
+}) {
   const durations    = efforts.map(e => parseDurationSecs(e.value)).filter((s): s is number => s !== null)
   const bestSecs     = durations.length > 0 ? Math.max(...durations) : 0
   const nextMilestone = ISO_MILESTONES.find(m => m > bestSecs) ?? null
@@ -1479,6 +1486,8 @@ function IsometricDetail({
 
   return (
     <View style={s.page}>
+      {/* Header — suppressed when rendered inside FamilyConsolidatedDetail. */}
+      {!hideHeader && (
       <View>
         <BackButton />
         <Text style={s.h1}>{exercise}</Text>
@@ -1496,6 +1505,7 @@ function IsometricDetail({
           <Text style={s.carryTierBadgeText}>{phaseCfg.label}</Text>
         </View>
       </View>
+      )}
 
       <AnimateRise delay={0} style={s.card}>
         <Text style={s.h2}>Hold time milestones</Text>
@@ -1622,8 +1632,24 @@ function IsometricDetail({
 // Bodyweight gate: requires a log within the last 30 days; stale weight hides
 // the projection + hero card and shows a CTA pointing at /(app)/bodyweight.
 function AssistedMachineDetail({
-  exercise, efforts, onDelete,
-}: { exercise: string; efforts: Effort[]; onDelete: (id: string) => void }) {
+  exercise, efforts, onDelete, hideHeader, outerScrollGesture,
+}: {
+  exercise: string
+  efforts: Effort[]
+  onDelete: (id: string) => void
+  /** When true, suppresses the page-level header (BackButton + h1 +
+   *  subtitle + equipment badge) because the FamilyConsolidatedDetail
+   *  wrapper is already rendering one. Mirrors CarryDetail's prop. */
+  hideHeader?: boolean
+  /** Native gesture handle for an outer horizontal ScrollView (the
+   *  FamilyConsolidatedDetail paged ScrollView). When provided, the
+   *  inner adp-zone pill chains `.blocksExternalGesture(outerScrollGesture)`
+   *  so the pill wins horizontal touches before the outer pager
+   *  activates. Same L5 chain pattern as CarryDetail and weighted-
+   *  standard. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  outerScrollGesture?: any
+}) {
   const { user, profile } = useAuth()
   const displayUnit = (profile?.weight_unit as string) || 'lb'
   const incLb       = displayUnit === 'kg' ? 2.5 : 5
@@ -1837,46 +1863,76 @@ function AssistedMachineDetail({
   }
 
   const assistPillSwipeGesture = useMemo(
-    () => Gesture.Pan()
-      .activeOffsetX([-15, 15])
-      .failOffsetY([-25, 25])
-      .onStart(() => {
-        'worklet'
-        assistChevronOpacityOver.value = withTiming(0, { duration: 120 })
-      })
-      .onUpdate((event) => {
-        'worklet'
-        assistPillTranslateX.value = event.translationX
-      })
-      .onEnd((event) => {
-        'worklet'
-        const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
-        const allowed = direction === -1 ? assistCanGoPrev : assistCanGoNext
-        const past    = Math.abs(event.translationX) > ASSIST_SWIPE_THRESHOLD_PX
-        if (!past || !allowed) {
-          assistPillTranslateX.value     = withTiming(0, { duration: 200 })
-          assistChevronOpacityOver.value = withTiming(1, { duration: 200 })
-          return
-        }
-        const slideOff = direction === 1 ? -ASSIST_SLIDE_OFFSCREEN_PX : ASSIST_SLIDE_OFFSCREEN_PX
-        const targetIdx = assistZoneIdx + direction
-        const targetFirstRep = ASSIST_FIRST_REP_OF_ZONE[ASSIST_ZONE_ORDER[targetIdx]]
-        assistPillTranslateX.value = withTiming(slideOff, { duration: ASSIST_SLIDE_DURATION_MS }, (finished) => {
+    () => {
+      // L5 activation tuning — same pattern as CarryDetail / weighted-
+      // standard. When nested inside FamilyConsolidatedDetail's paged
+      // ScrollView, use a LOW activeOffsetX (5px) and NO failOffsetY so
+      // the inner Pan beats the outer pager to activation. Standalone
+      // (no outer) keeps the original 15/25 thresholds.
+      let g = Gesture.Pan()
+      if (outerScrollGesture) {
+        g = g.activeOffsetX([-5, 5])
+        g = g.blocksExternalGesture(outerScrollGesture)
+      } else {
+        g = g.activeOffsetX([-15, 15])
+        g = g.failOffsetY([-25, 25])
+      }
+      return g
+        .onStart(() => {
           'worklet'
-          if (!finished) return
-          runOnJS(assistScrollToZone)(targetFirstRep)
-          assistPillTranslateX.value = -slideOff
-          assistPillTranslateX.value = withTiming(0, { duration: ASSIST_SLIDE_DURATION_MS }, (settled) => {
+          assistChevronOpacityOver.value = withTiming(0, { duration: 120 })
+        })
+        .onUpdate((event) => {
+          'worklet'
+          assistPillTranslateX.value = event.translationX
+        })
+        .onEnd((event) => {
+          'worklet'
+          const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
+          const allowed = direction === -1 ? assistCanGoPrev : assistCanGoNext
+          const past    = Math.abs(event.translationX) > ASSIST_SWIPE_THRESHOLD_PX
+          if (!past || !allowed) {
+            assistPillTranslateX.value     = withTiming(0, { duration: 200 })
+            assistChevronOpacityOver.value = withTiming(1, { duration: 200 })
+            return
+          }
+          const slideOff = direction === 1 ? -ASSIST_SLIDE_OFFSCREEN_PX : ASSIST_SLIDE_OFFSCREEN_PX
+          const targetIdx = assistZoneIdx + direction
+          const targetFirstRep = ASSIST_FIRST_REP_OF_ZONE[ASSIST_ZONE_ORDER[targetIdx]]
+          assistPillTranslateX.value = withTiming(slideOff, { duration: ASSIST_SLIDE_DURATION_MS }, (finished) => {
             'worklet'
-            if (settled) assistChevronOpacityOver.value = withTiming(1, { duration: 200 })
+            if (!finished) return
+            runOnJS(assistScrollToZone)(targetFirstRep)
+            assistPillTranslateX.value = -slideOff
+            assistPillTranslateX.value = withTiming(0, { duration: ASSIST_SLIDE_DURATION_MS }, (settled) => {
+              'worklet'
+              if (settled) assistChevronOpacityOver.value = withTiming(1, { duration: 200 })
+            })
           })
         })
-      }),
+        .onFinalize((_event, success) => {
+          // L4 fix — cancelled gestures restore pill + chevrons.
+          'worklet'
+          if (!success) {
+            assistPillTranslateX.value     = withTiming(0, { duration: 200 })
+            assistChevronOpacityOver.value = withTiming(1, { duration: 200 })
+          }
+        })
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [assistZoneIdx, assistCanGoPrev, assistCanGoNext, assistTileViewportW]
+    [assistZoneIdx, assistCanGoPrev, assistCanGoNext, assistTileViewportW, outerScrollGesture]
   )
 
   const assistPillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: assistPillTranslateX.value }] }))
+
+  // Inner tile-row scroll gesture — chains blocksExternalGesture on the
+  // outer pager when present so horizontal scrolls inside the rep-max
+  // tile row drive the row, not the outer pager.
+  const assistTileRowInnerScrollGesture = useMemo(() => {
+    let g = Gesture.Native()
+    if (outerScrollGesture) g = g.blocksExternalGesture(outerScrollGesture)
+    return g
+  }, [outerScrollGesture])
   const assistChevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: assistChevronOpacityOver.value }))
 
   const chartData = parsed.map(p => ({ ts: p.ts, y: p.assistance }))
@@ -1885,6 +1941,11 @@ function AssistedMachineDetail({
 
   return (
     <View style={s.page}>
+      {/* Header — suppressed when rendered as a slot inside
+          FamilyConsolidatedDetail (hideHeader=true). The wrapper provides
+          BackButton + parent-name h1 + family-wide subtitle + badge for
+          the entire family page. */}
+      {!hideHeader && (
       <View>
         <BackButton />
         <Text style={s.h1}>{exercise}</Text>
@@ -1906,6 +1967,7 @@ function AssistedMachineDetail({
           <Text style={s.carryTierBadgeText}>{equipmentPillLabel('assisted')}</Text>
         </View>
       </View>
+      )}
 
       {/* Bodyweight gate — replaces projection + hero when bw is missing/stale */}
       {bwLoaded && !showProjectionAndHero && (
@@ -1997,8 +2059,12 @@ function AssistedMachineDetail({
             </View>
           </GestureDetector>
 
-          {/* Horizontal scrollable tile row, 1RM → 20RM. Each tile shows the
-              projected assistance value + the BW % beneath. */}
+          {/* Horizontal scrollable tile row, 1RM → 20RM. Wrapped in a
+              GestureDetector that blocks the outer pager when nested
+              inside FamilyConsolidatedDetail — without this, horizontal
+              scrolls inside the tile row drive the outer pager instead
+              of scrolling the tiles. */}
+          <GestureDetector gesture={assistTileRowInnerScrollGesture}>
           <ScrollView
             ref={assistTileScrollRef}
             horizontal
@@ -2057,6 +2123,7 @@ function AssistedMachineDetail({
               )
             })}
           </ScrollView>
+          </GestureDetector>
 
           <Text style={s.tinyText}>Epley · Brzycki · Lombardi averaged · % of bodyweight</Text>
 
@@ -2198,7 +2265,11 @@ function AssistedMachineDetail({
               min: () => 0,
               max: (mx) => Math.round(mx * 1.1),
             }}
-            caption={<Text style={s.tinyText}>Dashed line = lowest assistance (personal best)</Text>}
+            // Reversed so reducing assistance over time renders as the
+            // line trending UP — visually consistent with every other
+            // progression chart in the app (never "lower is better").
+            reversed
+            caption={<Text style={s.tinyText}>Dashed line = personal best</Text>}
           />
         </AnimateRise>
       )}
@@ -2239,6 +2310,7 @@ function AssistedMachineDetail({
 
 function CarryDetail({
   exercise, efforts, onDelete, displayName, extraHeaderContent, hideHeader,
+  outerScrollGesture,
 }: {
   exercise: string
   efforts: Effort[]
@@ -2246,9 +2318,9 @@ function CarryDetail({
   /**
    * Optional override for the `<Text style={s.h1}>` title. When passed,
    * the header shows this instead of `exercise`. Used by SledDrag's
-   * consolidated wrapper to render "Sled Drag" as the title while the
+   * consolidated wrapper to render "Sled Work" as the title while the
    * internal `exercise` prop remains the variant-tagged name
-   * ("Sled Drag [Push]" / "Sled Drag [Pull]") so benchmarks + label
+   * ("Sled Work [Push]" / "Sled Work [Drag]") so benchmarks + label
    * parsing still work.
    */
   displayName?: string
@@ -2262,13 +2334,32 @@ function CarryDetail({
   /**
    * When true, skip the entire header block (back button, h1, subtitle,
    * equipment badge, tier badge, extraHeaderContent). Used by
-   * SledDragConsolidatedDetail so the wrapper can render the page-level
+   * SledWorkConsolidatedDetail so the wrapper can render the page-level
    * header ONCE outside the paged ScrollView while each variant's body
    * (the rep-max projections card + hero + chart + log list) lives as a
    * sliding slot inside. Matches the BW consolidated-block pattern in
    * strength's main detail page.
    */
   hideHeader?: boolean
+  /**
+   * L5 fix — when this CarryDetail is rendered as a slot inside a paged
+   * horizontal ScrollView (SledWorkConsolidatedDetail), the outer
+   * ScrollView's native scroll intercepts horizontal swipes on the inner
+   * adp-zone pill row before the inner Pan gesture can activate.
+   *
+   * The wrapper exposes its outer ScrollView as a `Gesture.Native()`
+   * instance and passes it down here. The inner carry pill gesture chains
+   * `.blocksExternalGesture(outerScrollGesture)` so when the inner Pan
+   * activates (after 15 px of horizontal travel), the outer native scroll
+   * is forced to fail. Doing this at the gesture-handler level — instead
+   * of via React state + scrollEnabled — is the only way to win the race,
+   * because the outer scroll claims the touch within the first frame and
+   * React state updates always arrive too late to cancel it.
+   *
+   * No-op when CarryDetail is rendered standalone (Farmer's Carry, Yoke
+   * Carry, etc.) and the prop is omitted.
+   */
+  outerScrollGesture?: ReturnType<typeof Gesture.Native>
 }) {
   const { user, profile } = useAuth()
   // Look up the movement record so we can honour `unit_lock` (strongman / stone
@@ -2415,8 +2506,8 @@ function CarryDetail({
   // DRAG it (rope/harness). Per-movement override here keeps the cue
   // natural for each variant. Default = "Carry".
   function carryVerb(): string {
-    if (exercise === 'Sled Drag [Push]') return 'Push'
-    if (exercise === 'Sled Drag [Pull]') return 'Drag'
+    if (exercise === 'Sled Work [Push]') return 'Push'
+    if (exercise === 'Sled Work [Drag]') return 'Drag'
     return 'Carry'
   }
   const verb = carryVerb()
@@ -2618,6 +2709,19 @@ function CarryDetail({
   // can clamp the result to ±1 (lock page swipe to a single page max).
   const dragStartIdxRef = useRef(0)
 
+  // L4 "stuck mid-swipe" fallback — pagingEnabled's snap animation can be
+  // interrupted on Android when the user swipes back and forth rapidly,
+  // landing the ScrollView at a non-page-aligned offset (visibly stuck
+  // mid-zone). onMomentumScrollEnd never fires in that case because momentum
+  // is permanently cancelled. This timeout is armed in onScrollEndDrag and
+  // disarmed in onMomentumScrollEnd; if it fires, we force a programmatic
+  // scrollTo to the closest page boundary, which always lands cleanly even
+  // when native paging glitches.
+  const scrollSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (scrollSettleTimeoutRef.current) clearTimeout(scrollSettleTimeoutRef.current)
+  }, [])
+
   // On first paint after the hero ScrollView measures itself, scroll to the
   // active zone's slot (default `max_load` = idx 0) without animation so the
   // page opens directly on the right slot. Mirrors BW's `bwInitialScrollDoneRef`
@@ -2659,49 +2763,97 @@ function CarryDetail({
   }
 
   // Pan gesture + slide animation for the pill + hero — same shape as BW.
+  //
+  // L5 fix — `blocksExternalGesture(outerScrollGesture)` is the key chain
+  // when this CarryDetail is rendered as a slot inside the Sled Work
+  // consolidated wrapper. When the inner Pan activates (after 15 px of
+  // horizontal travel), the outer pager's native scroll is forced to fail,
+  // so the user's swipe drives the inner adp-zone pill instead of the
+  // outer Push/Pull pager. No-op when the prop is omitted (standalone
+  // Farmer's Carry, Yoke, etc.).
+  //
+  // L4 fix — `onFinalize` cleanup handles the "stuck mid-swipe" case
+  // where the gesture is cancelled before onEnd fires (parent ScrollView
+  // takes over, app backgrounded mid-pan, etc.). Without this, the pill
+  // would stay wherever onUpdate last set it.
   const carryPillSwipeGesture = useMemo(
-    () => Gesture.Pan()
-      .activeOffsetX([-15, 15])
-      .failOffsetY([-25, 25])
-      .onStart(() => {
-        'worklet'
-        carryChevronOpacityOverride.value = withTiming(0, { duration: 120 })
-      })
-      .onUpdate((event) => {
-        'worklet'
-        carryPillTranslateX.value = event.translationX
-      })
-      .onEnd((event) => {
-        'worklet'
-        const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
-        const directionAllowed = direction === -1 ? carryCanGoPrev : carryCanGoNext
-        const past = Math.abs(event.translationX) > CARRY_SWIPE_THRESHOLD_PX
-
-        if (!past || !directionAllowed) {
-          // Bounce back; chevrons re-appear.
-          carryPillTranslateX.value = withTiming(0, { duration: 200 })
-          carryChevronOpacityOverride.value = withTiming(1, { duration: 200 })
-          return
-        }
-
-        // Slide off → state change → teleport → slide in.
-        const slideOff = direction === 1 ? -CARRY_SLIDE_OFFSCREEN_PX : CARRY_SLIDE_OFFSCREEN_PX
-        carryPillTranslateX.value = withTiming(slideOff, { duration: CARRY_SLIDE_DURATION_MS }, (finished) => {
+    () => {
+      // activeOffsetX([-5, 5]) — very low threshold so the inner Pan beats
+      // the outer Sled Work pager's native scroll to activation by a wide
+      // margin. Once activated, `blocksExternalGesture(outerScrollGesture)`
+      // forces the outer to fail.
+      //
+      // failOffsetY INTENTIONALLY OMITTED. A natural fast horizontal swipe
+      // picks up some vertical drift, and a 25-px Y fail threshold caused
+      // the inner Pan to abort BEFORE reaching its X-activation threshold —
+      // the outer scroll then took over and the user's swipe drove the
+      // outer pager instead of the inner pill. Removing the Y fail lets the
+      // X-activation win; the only horizontal-eligible parent gesture above
+      // us is the outer page swipe, which we explicitly block.
+      //
+      // `manualActivation(false)` — explicit default. We do NOT want manual
+      // activation; gesture-handler should fire activation as soon as
+      // activeOffsetX is crossed.
+      let g = Gesture.Pan()
+        .activeOffsetX([-5, 5])
+      if (outerScrollGesture) {
+        // blocksExternalGesture: when the inner activates, the outer scroll
+        // is cancelled. simultaneousWithExternalGesture is NOT what we want
+        // — that would let BOTH scroll at once (the outer would page AND
+        // the pill would slide, which is jarring).
+        g = g.blocksExternalGesture(outerScrollGesture)
+      }
+      return g
+        .onStart(() => {
           'worklet'
-          if (!finished) return
-          runOnJS(navigateCarryZone)(direction)
-          // Teleport to opposite side, then slide in.
-          carryPillTranslateX.value = -slideOff
-          carryPillTranslateX.value = withTiming(0, { duration: CARRY_SLIDE_DURATION_MS }, (settled) => {
+          carryChevronOpacityOverride.value = withTiming(0, { duration: 120 })
+        })
+        .onUpdate((event) => {
+          'worklet'
+          carryPillTranslateX.value = event.translationX
+        })
+        .onEnd((event) => {
+          'worklet'
+          const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
+          const directionAllowed = direction === -1 ? carryCanGoPrev : carryCanGoNext
+          const past = Math.abs(event.translationX) > CARRY_SWIPE_THRESHOLD_PX
+
+          if (!past || !directionAllowed) {
+            // Bounce back; chevrons re-appear.
+            carryPillTranslateX.value = withTiming(0, { duration: 200 })
+            carryChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+            return
+          }
+
+          // Slide off → state change → teleport → slide in.
+          const slideOff = direction === 1 ? -CARRY_SLIDE_OFFSCREEN_PX : CARRY_SLIDE_OFFSCREEN_PX
+          carryPillTranslateX.value = withTiming(slideOff, { duration: CARRY_SLIDE_DURATION_MS }, (finished) => {
             'worklet'
-            if (settled) {
-              carryChevronOpacityOverride.value = withTiming(1, { duration: 200 })
-            }
+            if (!finished) return
+            runOnJS(navigateCarryZone)(direction)
+            // Teleport to opposite side, then slide in.
+            carryPillTranslateX.value = -slideOff
+            carryPillTranslateX.value = withTiming(0, { duration: CARRY_SLIDE_DURATION_MS }, (settled) => {
+              'worklet'
+              if (settled) {
+                carryChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+              }
+            })
           })
         })
-      }),
+        .onFinalize((_event, success) => {
+          'worklet'
+          // If the gesture was cancelled before onEnd, restore pill + chevrons.
+          // Without this, rapid back-and-forth swipes can leave translateX
+          // stuck wherever onUpdate last set it (L4 stuck mid-swipe).
+          if (!success) {
+            carryPillTranslateX.value = withTiming(0, { duration: 200 })
+            carryChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          }
+        })
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [carryZoneIdx, carryCanGoPrev, carryCanGoNext],
+    [carryZoneIdx, carryCanGoPrev, carryCanGoNext, outerScrollGesture],
   )
 
   const carryPillAnimatedStyle = useAnimatedStyle(() => ({
@@ -2723,10 +2875,10 @@ function CarryDetail({
   return (
     <View style={s.page}>
       {/* ── Header ──
-          When `displayName` is passed (used by SledDragConsolidatedDetail),
+          When `displayName` is passed (used by SledWorkConsolidatedDetail),
           the h1 shows that instead of `exercise` so the title can be
-          "Sled Drag" while internal logic still works with the variant-
-          tagged name "Sled Drag [Push]" / "Sled Drag [Pull]".
+          "Sled Work" while internal logic still works with the variant-
+          tagged name "Sled Work [Push]" / "Sled Work [Drag]".
           `extraHeaderContent` lets the wrapper inject the PUSH | PULL
           variant-toggle pill row right after the badges.
           When `hideHeader` is true, the entire block is skipped — the
@@ -2859,10 +3011,55 @@ function CarryDetail({
               ref={carryZoneScrollRef}
               horizontal
               pagingEnabled
+              // L4 fix — disableIntervalMomentum + snapToInterval gives the
+              // hero ScrollView stricter page-boundary snapping than plain
+              // pagingEnabled. Without these, rapid back-and-forth swipes
+              // on Android can leave the offset mid-page because pagingEnabled's
+              // native snap animation gets cancelled by the next drag before it
+              // completes. Together with the onScrollEndDrag settle-fallback
+              // below, the hero is guaranteed to land on a page boundary.
+              disableIntervalMomentum
+              snapToInterval={slotWidth > 0 ? slotWidth : undefined}
+              snapToAlignment="start"
               showsHorizontalScrollIndicator={false}
               decelerationRate="fast"
-              onScrollBeginDrag={() => { dragStartIdxRef.current = carryZoneIdx }}
+              onScrollBeginDrag={() => {
+                if (scrollSettleTimeoutRef.current) {
+                  clearTimeout(scrollSettleTimeoutRef.current)
+                  scrollSettleTimeoutRef.current = null
+                }
+                dragStartIdxRef.current = carryZoneIdx
+              }}
+              onScrollEndDrag={e => {
+                // L4 fallback — arm a settle timeout in case onMomentumScrollEnd
+                // never fires (rapid swipes can permanently cancel native momentum).
+                // After 350ms the page is forcibly snapped to the closest valid
+                // slot. Disarmed by the next onScrollBeginDrag or onMomentumScrollEnd.
+                if (slotWidth === 0) return
+                const endX = e.nativeEvent.contentOffset.x
+                if (scrollSettleTimeoutRef.current) clearTimeout(scrollSettleTimeoutRef.current)
+                scrollSettleTimeoutRef.current = setTimeout(() => {
+                  if (!carryZoneScrollRef.current) return
+                  const rawIdx = Math.round(endX / slotWidth)
+                  const start = dragStartIdxRef.current
+                  let idx = rawIdx
+                  if (idx > start + 1) idx = start + 1
+                  if (idx < start - 1) idx = start - 1
+                  if (idx < 0) idx = 0
+                  if (idx > CARRY_ZONE_ORDER.length - 1) idx = CARRY_ZONE_ORDER.length - 1
+                  carryZoneScrollRef.current.scrollTo({ x: idx * slotWidth, animated: true })
+                  const z = CARRY_ZONE_ORDER[idx]
+                  if (z && z !== carrySelZone) {
+                    setCarrySelZone(z)
+                    setCarryZoneInfoOpen(false)
+                  }
+                }, 350)
+              }}
               onMomentumScrollEnd={e => {
+                if (scrollSettleTimeoutRef.current) {
+                  clearTimeout(scrollSettleTimeoutRef.current)
+                  scrollSettleTimeoutRef.current = null
+                }
                 if (slotWidth === 0) return
                 const x = e.nativeEvent.contentOffset.x
                 const rawIdx = Math.round(x / slotWidth)
@@ -2877,10 +3074,13 @@ function CarryDetail({
                   setCarrySelZone(z)
                   setCarryZoneInfoOpen(false)
                 }
-                // If we clamped, animate to the corrected slot so the visible
-                // page lines up with the new state.
-                if (idx !== rawIdx && carryZoneScrollRef.current) {
-                  carryZoneScrollRef.current.scrollTo({ x: idx * slotWidth, animated: true })
+                // If we clamped OR landed at a non-integer offset, animate to
+                // the corrected slot so the visible page lines up with the new
+                // state. The integer-offset reconciliation is the L4 "stuck
+                // mid-swipe" defence at the momentum-end stage.
+                const expectedX = idx * slotWidth
+                if (carryZoneScrollRef.current && Math.abs(x - expectedX) > 1) {
+                  carryZoneScrollRef.current.scrollTo({ x: expectedX, animated: true })
                 }
               }}
             >
@@ -3026,9 +3226,18 @@ function CarryDetail({
         }}
         renderRight={e => {
           const p = parseCarryFromLabel(e.label)
+          // Sled Work entries get their variant ("push" / "drag") as the
+          // small label so the user can tell which side each historical
+          // effort came from when both variants are shown in the same list.
+          // Other carries (Farmer's, Yoke, Atlas Stone, etc.) keep the
+          // generic "carry" label since they have no variants.
+          const head = e.label.split(' · ')[0] ?? ''
+          let subLabel = 'carry'
+          if (head === 'Sled Work [Push]') subLabel = 'push'
+          else if (head === 'Sled Work [Drag]') subLabel = 'drag'
           return (
             <View style={{ alignItems: 'flex-end' }}>
-              <Text style={s.listRowSubLabel}>carry</Text>
+              <Text style={s.listRowSubLabel}>{subLabel}</Text>
               <Text style={s.valBlue}>{p ? `${p.weight} ${p.unit}` : '—'}</Text>
             </View>
           )
@@ -3040,10 +3249,10 @@ function CarryDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SledDragConsolidatedDetail
+// SledWorkConsolidatedDetail
 //
-// Sled Drag has two parallel variants stored as separate movements:
-// `Sled Drag [Push]` and `Sled Drag [Pull]`. They're biomechanically
+// Sled Work has two parallel variants stored as separate movements:
+// `Sled Work [Push]` and `Sled Work [Drag]`. They're biomechanically
 // different (Push = leg-dominant Prowler-style; Pull = posterior-chain
 // dominant) but use the same equipment and follow the same Carry detail
 // page model. This wrapper:
@@ -3051,45 +3260,74 @@ function CarryDetail({
 //   2. Filters the combined efforts list to whichever variant is active.
 //   3. Delegates the actual page render to CarryDetail with a tagged
 //      `exercise` prop (so CARRY_BENCHMARKS / label parsing still works)
-//      plus the `displayName="Sled Drag"` override (so the h1 reads as
+//      plus the `displayName="Sled Work"` override (so the h1 reads as
 //      the base name) and `extraHeaderContent` for the toggle pills.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SledDragConsolidatedDetail({
+function SledWorkConsolidatedDetail({
   efforts, onDelete,
 }: { efforts: Effort[]; onDelete: (id: string) => void }) {
-  type SledVariant = 'push' | 'pull'
-  const SLED_VARIANT_ORDER: readonly SledVariant[] = ['push', 'pull'] as const
+  type SledVariant = 'push' | 'drag'
+  // Canonical slot order (LEFT → RIGHT). The filtered list below preserves
+  // this relative order while dropping any variant the user hasn't logged.
+  const SLED_VARIANT_ALL: readonly SledVariant[] = ['push', 'drag'] as const
 
   const variantOf = (label: string): SledVariant | null => {
     const head = label.split(' · ')[0]
-    if (head === 'Sled Drag [Push]') return 'push'
-    if (head === 'Sled Drag [Pull]') return 'pull'
+    if (head === 'Sled Work [Push]') return 'push'
+    if (head === 'Sled Work [Drag]') return 'drag'
     return null
   }
-
-  // Default active variant = ALWAYS slot 0 (leftmost). Universal rule
-  // across every consolidated carousel in the app (BW assist tiers,
-  // Swimming strokes, Sled Drag) — see CLAUDE.md Pattern 4. For Sled
-  // Drag that's PUSH; the user can swipe to PULL once they're on the
-  // page. Most-recent-variant logic was rejected because it produced
-  // surprising "page opens on the right side" behaviour after a single
-  // PULL session.
-  const defaultVariant: SledVariant = SLED_VARIANT_ORDER[0]
-
-  const [activeVariant, setActiveVariant] = useState<SledVariant>(defaultVariant)
 
   // Pre-filter efforts per variant once so each slot inside the paged
   // ScrollView just looks up its own list. CarryDetail does its own
   // parsing on this filtered list.
   const effortsByVariant = useMemo(() => {
-    const map: Record<SledVariant, Effort[]> = { push: [], pull: [] }
+    const map: Record<SledVariant, Effort[]> = { push: [], drag: [] }
     efforts.forEach(e => {
       const v = variantOf(e.label)
       if (v) map[v].push(e)
     })
     return map
   }, [efforts])
+
+  // Only render variants the user has actually logged. If the user deletes
+  // every Push effort, the PUSH pill and Push slot disappear; the page
+  // collapses to just the Drag side. If both have efforts, both render.
+  // If neither has efforts, the consolidated row wouldn't have shown up
+  // in the strength index in the first place, so this never reaches an
+  // empty render path — but we guard with a fallback anyway so a freshly
+  // deleted "last effort" state doesn't crash.
+  const SLED_VARIANT_ORDER = useMemo(
+    () => SLED_VARIANT_ALL.filter(v => effortsByVariant[v].length > 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [effortsByVariant],
+  )
+
+  // Default active variant = ALWAYS slot 0 (leftmost) of the FILTERED list
+  // — so when the user deletes all Push entries, the page opens on Drag
+  // (the only remaining variant). Universal rule across every consolidated
+  // carousel in the app (BW assist tiers, Swimming strokes, Sled Work).
+  // See CLAUDE.md Pattern 4 — Most-recent-variant logic was rejected
+  // because it produced surprising "page opens on the right side" behaviour.
+  const defaultVariant: SledVariant = SLED_VARIANT_ORDER[0] ?? SLED_VARIANT_ALL[0]
+
+  const [activeVariant, setActiveVariant] = useState<SledVariant>(defaultVariant)
+
+  // If the active variant disappears (user deletes its last effort while
+  // viewing it), snap to the new slot 0 AND scroll the shell back to the
+  // top so the user sees the new variant's header — without this, they'd
+  // stay scrolled to wherever the deleted effort lived in the list, and
+  // wouldn't see the page is now showing DRAG (or PUSH). Skipped on
+  // initial mount because defaultVariant is already correct.
+  useEffect(() => {
+    if (!SLED_VARIANT_ORDER.includes(activeVariant)) {
+      const fallback = SLED_VARIANT_ORDER[0] ?? SLED_VARIANT_ALL[0]
+      setActiveVariant(fallback)
+      scrollShellToTop()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [SLED_VARIANT_ORDER])
 
   // ── Paged ScrollView — the "whole page slides" pattern ──────────────────
   // Two slots, one per variant. CarryDetail's body content (rep-max
@@ -3110,6 +3348,18 @@ function SledDragConsolidatedDetail({
   const [slotWidth, setSlotWidth] = useState(winWidth)
 
   const scrollRef = useRef<ScrollView>(null)
+
+  // L5 fix — expose the outer pager's native scroll as a Gesture.Native()
+  // so the inner carry pill's Pan can chain `blocksExternalGesture` on it.
+  // When the inner Pan activates (after 15 px of horizontal travel), the
+  // outer scroll is forced to fail and the user's swipe drives the inner
+  // adp-zone pill instead of the Push/Pull pager. Passed down as the
+  // `outerScrollGesture` prop on each CarryDetail slot.
+  //
+  // Memoised so the gesture identity is stable across renders — re-creating
+  // it would force gesture-handler to re-attach every frame, which can drop
+  // touches mid-swipe.
+  const outerScrollGesture = useMemo(() => Gesture.Native(), [])
 
   // Initial scroll to the default variant's slot (avoids landing on slot 0
   // when the user's most-recent variant is "pull"). Runs once per mount.
@@ -3190,6 +3440,17 @@ function SledDragConsolidatedDetail({
             }
           })
         })
+      })
+      .onFinalize((_event, success) => {
+        'worklet'
+        // L4-style safety net — if the gesture cancels before onEnd (vertical
+        // scroll takes over, app backgrounded mid-pan, etc.), restore the
+        // pill + chevrons. Without this, the pill can stay wherever onUpdate
+        // last set it after a cancelled rapid swipe.
+        if (!success) {
+          sledPillTranslateX.value = withTiming(0, { duration: 200 })
+          sledChevronOpacityOverride.value = withTiming(1, { duration: 200 })
+        }
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeVariant, slotWidth],
@@ -3202,15 +3463,61 @@ function SledDragConsolidatedDetail({
   const hasPrev    = currentIdx > 0
   const hasNext    = currentIdx < SLED_VARIANT_ORDER.length - 1
 
+  // ── Page-level "Best —" subtitle for the active variant ──────────────────
+  // Mirrors Atlas Stone Bear Hug Carry's "Best — N kg · M m" subtitle (with
+  // the same unit-aware display logic). Re-derives every render when
+  // activeVariant changes so the subtitle ticker-rolls as the user swipes
+  // between PUSH and DRAG. The CARRY equipment pill below it identifies
+  // the movement category just like every other strength detail page.
+  const { profile: sledProfile } = useAuth()
+  const sledDisplayUnit: 'lb' | 'kg' =
+    ((sledProfile?.weight_unit as string) === 'kg') ? 'kg' : 'lb'
+  const sledDistUnit: 'm' | 'ft' = sledDisplayUnit === 'kg' ? 'm' : 'ft'
+  const sledActiveParsed = useMemo(() => {
+    const list = effortsByVariant[activeVariant] ?? []
+    return list.map(e => {
+      const p = parseCarryFromLabel(e.label)
+      if (!p) return null
+      // Convert weight to display unit
+      let w = p.weight
+      if (p.unit === 'kg' && sledDisplayUnit === 'lb') w = p.weight / 0.453592
+      else if (p.unit === 'lb' && sledDisplayUnit === 'kg') w = p.weight * 0.453592
+      // distance is stored as meters; convert to ft if needed
+      const d = sledDistUnit === 'ft' ? p.dist / 0.3048 : p.dist
+      return { w, d }
+    }).filter((x): x is { w: number; d: number } => x !== null)
+  }, [effortsByVariant, activeVariant, sledDisplayUnit, sledDistUnit])
+  const sledBestWeight = sledActiveParsed.length ? Math.round(Math.max(...sledActiveParsed.map(p => p.w))) : 0
+  const sledBestDist   = sledActiveParsed.length ? Math.round(Math.max(...sledActiveParsed.map(p => p.d))) : 0
+  const sledHasBest    = sledBestWeight > 0 && sledBestDist > 0
+
   return (
     <View style={s.page}>
-      {/* Page-level header — h1 + pill row stay STATIC during swipes.
-          CarryDetail's complex per-variant subtitle (best weight / dist
-          / tier badge) lives inside the body slot, so the wrapper avoids
-          duplicating that parsing logic. */}
+      {/* Page-level header — h1 + subtitle + equipment pill + pill row, all
+          STATIC during swipes. The subtitle ticker-rolls (digit-only
+          animation) when the user swipes between PUSH and DRAG to reflect
+          the active variant's best weight × distance. CarryDetail's
+          per-variant subtitle inside each slot is hidden via the
+          `hideHeader` prop, so the page-level subtitle here is the only
+          one the user sees. */}
       <View>
         <BackButton />
-        <Text style={s.h1}>Sled Drag</Text>
+        <Text style={s.h1}>Sled Work</Text>
+        {sledHasBest ? (
+          <View style={s.subRow}>
+            <Text style={s.subText}>Best — </Text>
+            <TickerNumber value={sledBestWeight} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+            <Text style={[s.subText, s.subValueBlue]}> {sledDisplayUnit}</Text>
+            <Text style={s.subText}> · </Text>
+            <TickerNumber value={sledBestDist} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+            <Text style={[s.subText, s.subValueBlue]}> {sledDistUnit}</Text>
+          </View>
+        ) : (
+          <Text style={s.subText}>No {activeVariant === 'push' ? 'push' : 'drag'} efforts logged yet</Text>
+        )}
+        <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
+          <Text style={s.carryTierBadgeText}>{equipmentPillLabel('carry')}</Text>
+        </View>
 
         <GestureDetector gesture={sledPillSwipeGesture}>
           <View style={s.sledVariantRow}>
@@ -3246,7 +3553,7 @@ function SledDragConsolidatedDetail({
                 fontSize: 11, fontWeight: '700', textTransform: 'uppercase',
                 letterSpacing: 0.5, color: palette.blue[400],
               }}>
-                {activeVariant === 'push' ? 'PUSH' : 'PULL'}
+                {activeVariant === 'push' ? 'PUSH' : 'DRAG'}
               </Text>
             </Animated.View>
 
@@ -3282,40 +3589,59 @@ function SledDragConsolidatedDetail({
         onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}
         style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}
       >
-        <ScrollView
-          ref={scrollRef}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          decelerationRate="fast"
-          onMomentumScrollEnd={e => {
-            if (slotWidth === 0) return
-            const x = e.nativeEvent.contentOffset.x
-            const idx = Math.round(x / slotWidth)
-            const targetVariant = SLED_VARIANT_ORDER[idx]
-            if (targetVariant && targetVariant !== activeVariant) {
-              setActiveVariant(targetVariant)
-            }
-          }}
-        >
-          {SLED_VARIANT_ORDER.map(v => (
-            <View
-              key={v}
-              style={{
-                width: slotWidth,
-                paddingHorizontal: PAGE_PADDING_HORIZONTAL,
-              }}
-            >
-              <CarryDetail
-                exercise={`Sled Drag [${v === 'push' ? 'Push' : 'Pull'}]`}
-                displayName="Sled Drag"
-                efforts={effortsByVariant[v]}
-                onDelete={onDelete}
-                hideHeader
-              />
-            </View>
-          ))}
-        </ScrollView>
+        {/* GestureDetector binds the outer Native gesture to this ScrollView's
+            native scroll. The inner CarryDetail slots each receive
+            `outerScrollGesture={outerScrollGesture}` and chain
+            `blocksExternalGesture(outerScrollGesture)` in their carry pill
+            Pan — so when the inner Pan activates, the outer scroll fails.
+            Without this composition, the outer ScrollView wins every touch
+            because it claims the gesture in the first frame, before the
+            inner Pan reaches its `activeOffsetX` threshold. */}
+        {/* GHScrollView = gesture-handler's ScrollView (drop-in replacement
+            for react-native's). When wrapped in <GestureDetector gesture=
+            {Gesture.Native()}>, its native scroll cleanly participates in
+            gesture composition so `blocksExternalGesture(outerScrollGesture)`
+            on the inner pill reliably forces this scroll to fail when the
+            inner Pan activates. The native react-native ScrollView only
+            partially coordinates with v2 gesture composition — the cause of
+            the "inner pill swipes most of the time, but not always" bug. */}
+        <GestureDetector gesture={outerScrollGesture}>
+          <GHScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            decelerationRate="fast"
+            onMomentumScrollEnd={e => {
+              if (slotWidth === 0) return
+              const x = e.nativeEvent.contentOffset.x
+              const idx = Math.round(x / slotWidth)
+              const targetVariant = SLED_VARIANT_ORDER[idx]
+              if (targetVariant && targetVariant !== activeVariant) {
+                setActiveVariant(targetVariant)
+              }
+            }}
+          >
+            {SLED_VARIANT_ORDER.map(v => (
+              <View
+                key={v}
+                style={{
+                  width: slotWidth,
+                  paddingHorizontal: PAGE_PADDING_HORIZONTAL,
+                }}
+              >
+                <CarryDetail
+                  exercise={`Sled Work [${v === 'push' ? 'Push' : 'Drag'}]`}
+                  displayName="Sled Work"
+                  efforts={effortsByVariant[v]}
+                  onDelete={onDelete}
+                  hideHeader
+                  outerScrollGesture={outerScrollGesture}
+                />
+              </View>
+            ))}
+          </GHScrollView>
+        </GestureDetector>
       </View>
     </View>
   )
@@ -3326,12 +3652,14 @@ function SledDragConsolidatedDetail({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function RepsOnlyDetail({
-  exercise, efforts, onDelete, assistType = 'band',
+  exercise, efforts, onDelete, assistType = 'band', hideHeader,
 }: {
   exercise:    string
   efforts:     Effort[]
   onDelete:    (id: string) => void
   assistType?: 'band' | 'knee' | 'band+knee'
+  /** Suppresses page-level header when rendered inside FamilyConsolidatedDetail. */
+  hideHeader?: boolean
 }) {
   const isBand      = assistType !== 'knee'
   const assistLabel =
@@ -3362,6 +3690,8 @@ function RepsOnlyDetail({
 
   return (
     <View style={s.page}>
+      {/* Header — suppressed when rendered inside FamilyConsolidatedDetail. */}
+      {!hideHeader && (
       <View>
         <BackButton />
         <Text style={s.h1}>{baseName}</Text>
@@ -3371,6 +3701,7 @@ function RepsOnlyDetail({
           <Text style={[s.subText, s.subValueBlue]}> reps</Text>
         </View>
       </View>
+      )}
 
       <AnimateRise delay={0} style={s.card}>
         <Text style={s.h2}>Progress</Text>
@@ -3436,9 +3767,41 @@ function RepsOnlyDetail({
 // Main StrengthDetail (handles loading + dispatch + standard rep-based view)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function StrengthDetail() {
+// ─────────────────────────────────────────────────────────────────────────────
+// StrengthDetail — single-variant detail page.
+//
+// Default export reads the exercise from the URL. When rendered as a slot
+// inside FamilyConsolidatedDetail (admin-added variant family wrapper), the
+// wrapper passes `propExercise` to override and `propHideHeader` to suppress
+// the page-level header chrome (so the wrapper's own header is the only one
+// the user sees). Mirrors the same prop shape CarryDetail accepts when
+// rendered inside SledWorkConsolidatedDetail.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function StrengthDetail({
+  propExercise,
+  propHideHeader,
+  outerScrollGesture,
+}: {
+  propExercise?: string
+  propHideHeader?: boolean
+  /** Native gesture handle for an outer horizontal ScrollView (the family
+   *  paged ScrollView in FamilyConsolidatedDetail). When provided, the
+   *  inner adp-zone pill swipe + tile-row horizontal scroll chain
+   *  `.blocksExternalGesture(outerScrollGesture)` on themselves so they
+   *  win horizontal touches before the outer pager activates. Same
+   *  pattern Sled Work uses for CarryDetail's inner gestures. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  outerScrollGesture?: any
+} = {}) {
   const { exercise: rawExercise } = useLocalSearchParams<{ exercise: string }>()
-  const exercise = typeof rawExercise === 'string' ? decodeURIComponent(rawExercise) : ''
+  // When the props override (`propExercise`) is passed in by a wrapper
+  // (e.g. SledWorkConsolidatedDetail, the upcoming FamilyConsolidatedDetail),
+  // it takes precedence over the URL param. Lets the wrapper render N
+  // instances of StrengthDetail with different exercises, each in its
+  // own paged ScrollView slot.
+  const exerciseFromUrl = typeof rawExercise === 'string' ? decodeURIComponent(rawExercise) : ''
+  const exercise = propExercise ?? exerciseFromUrl
   const { user, profile } = useAuth()
 
   const dbMovements    = useMovements()
@@ -3512,6 +3875,7 @@ export default function StrengthDetail() {
   const wsPillTranslateX     = useSharedValue(0)
   const wsChevronOpacityOver = useSharedValue(1)
 
+
   async function handleDeleteEffort(id: string) {
     setEfforts(prev => prev.filter(e => e.id !== id))
     if (user) await supabase.from('efforts').delete().eq('id', id).eq('user_id', user.id)
@@ -3529,15 +3893,19 @@ export default function StrengthDetail() {
   const isIsometric       = movementRecord?.strength_type === 'isometric'
   const isAssistedMachine = movementRecord?.equipment === 'assisted'
   const isCarry           = movementRecord?.equipment === 'carry'
-  // Sled Drag consolidated route — the URL is the base name "Sled Drag"
+  // Sled Work consolidated route — the URL is the base name "Sled Work"
   // (without [Push] / [Pull] suffix). The actual movements in the DB are
-  // `Sled Drag [Push]` and `Sled Drag [Pull]` — when the user taps the
+  // `Sled Work [Push]` and `Sled Work [Drag]` — when the user taps the
   // collapsed row in the strength index, the route lands here with
-  // exercise === "Sled Drag" and no matching movementRecord. The
-  // dispatcher below routes to SledDragConsolidatedDetail, which fetches
+  // exercise === "Sled Work" and no matching movementRecord. The
+  // dispatcher below routes to SledWorkConsolidatedDetail, which fetches
   // both variants (via the or() query branch in the useEffect below) and
   // renders a PUSH | PULL toggle on top of CarryDetail.
-  const isSledDragConsolidated = exercise === 'Sled Drag'
+  // Anchored on `exerciseFromUrl` (the raw URL param) NOT the family-aware
+  // `exercise` shadow. If we used `exercise`, family mode would shadow it
+  // to "Sled Work [Push]" and this check would always return false, sending
+  // the page down the wrong dispatch branch.
+  const isSledWorkConsolidated = exerciseFromUrl === 'Sled Work'
   const equipmentType     = movementRecord?.equipment ?? 'barbell'
   // Bodyweight now includes ALL four tiers — the assisted suffixes are part
   // of the consolidated bodyweight detail page (see CLAUDE.md spec).
@@ -3588,11 +3956,11 @@ export default function StrengthDetail() {
             `label.ilike.${baseExercise} [Band + Knee] ·%`,
           ].join(',')
         )
-      : isSledDragConsolidated
+      : isSledWorkConsolidated
         ? query.or(
             [
-              `label.ilike.Sled Drag [Push] ·%`,
-              `label.ilike.Sled Drag [Pull] ·%`,
+              `label.ilike.Sled Work [Push] ·%`,
+              `label.ilike.Sled Work [Drag] ·%`,
             ].join(',')
           )
         : query.ilike('label', `${exercise} ·%`)
@@ -3751,11 +4119,38 @@ export default function StrengthDetail() {
   // It must therefore call the raw state-change `scrollToZone` directly at
   // the midpoint — NOT `navigateZone`, which would trigger a second slide
   // via `triggerPillSlide` and produce a "ghost pill" mid-swipe.
+  //
+  // HISTORICAL NOTE (May 19 2026): an earlier attempt added a second
+  // GestureDetector around the hero card so the hero would also be swipable.
+  // That was reverted because the pill is conceptually linked to the SLIDING
+  // TILE STRIP (rep-max projections), not the hero card itself. The hero is
+  // a derived view of the selected tile — swiping it sideways doesn't have
+  // a meaningful target. Only the pill row swipes, the tile strip scrolls
+  // horizontally, and the user taps a tile to move the hero's content.
   const wsPillSwipeGesture = useMemo(
-    () => Gesture.Pan()
-      .activeOffsetX([-15, 15])
-      .failOffsetY([-25, 25])
-      .onStart(() => {
+    () => {
+      // ── L5 activation tuning ────────────────────────────────────────
+      // When NESTED inside FamilyConsolidatedDetail's paged ScrollView,
+      // the inner Pan needs a very LOW activation threshold (5 px) and
+      // NO failOffsetY so it beats the outer pager's native scroll to
+      // activation. A natural fast horizontal swipe picks up vertical
+      // drift; a 25 px Y-fail caused the inner Pan to abort BEFORE
+      // reaching X-activation, letting the outer scroll take over and
+      // the user's swipe drove the outer pager instead of the inner
+      // pill. Mirrors the exact tuning CarryDetail uses inside
+      // SledWorkConsolidatedDetail (verified working there).
+      //
+      // STANDALONE (no outer scroll) keeps the original 15 px / 25 px
+      // thresholds — works fine when there's no competing outer pager.
+      let g = Gesture.Pan()
+      if (outerScrollGesture) {
+        g = g.activeOffsetX([-5, 5])
+        g = g.blocksExternalGesture(outerScrollGesture)
+      } else {
+        g = g.activeOffsetX([-15, 15])
+        g = g.failOffsetY([-25, 25])
+      }
+      return g.onStart(() => {
         'worklet'
         wsChevronOpacityOver.value = withTiming(0, { duration: 120 })
       })
@@ -3788,13 +4183,37 @@ export default function StrengthDetail() {
             if (settled) wsChevronOpacityOver.value = withTiming(1, { duration: 200 })
           })
         })
-      }),
+      })
+      .onFinalize((_event, success) => {
+        // L4 fix — if gesture cancelled before onEnd (outer pager took
+        // over, app backgrounded mid-pan), restore pill + chevrons.
+        // Without this, rapid back-and-forth swipes can leave translateX
+        // stuck wherever onUpdate last set it.
+        'worklet'
+        if (!success) {
+          wsPillTranslateX.value     = withTiming(0, { duration: 200 })
+          wsChevronOpacityOver.value = withTiming(1, { duration: 200 })
+        }
+      })
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [wsZoneIdx, wsCanGoPrev, wsCanGoNext, tileViewportW]
+    [wsZoneIdx, wsCanGoPrev, wsCanGoNext, tileViewportW, outerScrollGesture]
   )
 
   const wsPillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: wsPillTranslateX.value }] }))
   const wsChevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: wsChevronOpacityOver.value }))
+
+  // Tile-row inner-scroll gesture — when rendered inside the family paged
+  // ScrollView, this Native gesture chains blocksExternalGesture on the
+  // outer pager so horizontal swipes inside the tile row scroll the tile
+  // row instead of paging between variants. When no outer is present
+  // (standalone StrengthDetail), this is just a plain Native gesture
+  // with no blocking — same as not having the GestureDetector at all.
+  const tileRowInnerScrollGesture = useMemo(() => {
+    let g = Gesture.Native()
+    if (outerScrollGesture) g = g.blocksExternalGesture(outerScrollGesture)
+    return g
+  }, [outerScrollGesture])
 
   if (loading) {
     return (
@@ -3826,19 +4245,19 @@ export default function StrengthDetail() {
   }
 
   // ── Type-based routing ────────────────────────────────────────────────────
-  // Sled Drag consolidated route runs FIRST — it doesn't have a matching
-  // movementRecord (the base name "Sled Drag" isn't a DB row; only the
+  // Sled Work consolidated route runs FIRST — it doesn't have a matching
+  // movementRecord (the base name "Sled Work" isn't a DB row; only the
   // [Push] and [Pull] variants are), so the other isCarry / isAssisted /
   // etc. checks all fall through here.
-  if (isSledDragConsolidated) return <SledDragConsolidatedDetail efforts={efforts} onDelete={handleDeleteEffort} />
-  if (isIsometric)        return <IsometricDetail        exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} />
-  if (isAssistedMachine)  return <AssistedMachineDetail  exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} />
-  if (isCarry)            return <CarryDetail            exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} />
+  if (isSledWorkConsolidated) return <SledWorkConsolidatedDetail efforts={efforts} onDelete={handleDeleteEffort} />
+  if (isIsometric)        return <IsometricDetail        exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
+  if (isAssistedMachine)  return <AssistedMachineDetail  exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} outerScrollGesture={outerScrollGesture} />
+  if (isCarry)            return <CarryDetail            exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} outerScrollGesture={outerScrollGesture} />
   // Bodyweight assisted variants fall through to the consolidated render
   // below; RepsOnlyDetail is only used for non-bodyweight assist edge cases.
-  if (isBandKneeAssisted && !isBodyweightExercise) return <RepsOnlyDetail exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} assistType="band+knee" />
-  if (isBandAssisted     && !isBodyweightExercise) return <RepsOnlyDetail exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} assistType="band" />
-  if (isKneeAssisted     && !isBodyweightExercise) return <RepsOnlyDetail exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} assistType="knee" />
+  if (isBandKneeAssisted && !isBodyweightExercise) return <RepsOnlyDetail exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} assistType="band+knee" hideHeader={propHideHeader} />
+  if (isBandAssisted     && !isBodyweightExercise) return <RepsOnlyDetail exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} assistType="band"      hideHeader={propHideHeader} />
+  if (isKneeAssisted     && !isBodyweightExercise) return <RepsOnlyDetail exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} assistType="knee"      hideHeader={propHideHeader} />
 
   // ── Rep-based derivations (standard bodyweight or weighted) ──────────────
   const best = efforts.reduce<{ oneRM: number; unit: string } | null>((acc, e) => {
@@ -4081,7 +4500,11 @@ export default function StrengthDetail() {
   return (
     <View style={s.page}>
 
-      {/* Header */}
+      {/* Header — suppressed when this StrengthDetail is rendered as a
+          slot inside FamilyConsolidatedDetail (propHideHeader=true). The
+          wrapper renders its own header once at the top of the page; each
+          slot inside the paged ScrollView only renders the body content. */}
+      {!propHideHeader && (
       <View>
         <BackButton />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -4128,6 +4551,7 @@ export default function StrengthDetail() {
           <Text style={s.carryTierBadgeText}>{equipmentPillLabel(movementRecord?.equipment ?? equipmentType)}</Text>
         </View>
       </View>
+      )}
 
       {/* Bodyweight consolidated branch — see CLAUDE.md spec. */}
       {isBodyweightExercise ? (
@@ -4235,7 +4659,12 @@ export default function StrengthDetail() {
             </View>
           </GestureDetector>
 
-          {/* Horizontal scrollable tile row */}
+          {/* Horizontal scrollable tile row — wrapped in a GestureDetector
+              that chains blocksExternalGesture on the outer pager when
+              inside FamilyConsolidatedDetail. Without this, the outer
+              paged ScrollView grabs every horizontal touch first and the
+              user can never scroll through 1RM → 20RM tiles. */}
+          <GestureDetector gesture={tileRowInnerScrollGesture}>
           <ScrollView
             ref={tileScrollRef}
             horizontal
@@ -4304,6 +4733,7 @@ export default function StrengthDetail() {
               )
             })}
           </ScrollView>
+          </GestureDetector>
 
           <Text style={s.tinyText}>Epley · Brzycki · Lombardi averaged · % of 1RM</Text>
 
@@ -4857,10 +5287,10 @@ const s = StyleSheet.create({
     textTransform: 'uppercase', letterSpacing: 1.2,
   },
 
-  // Sled Drag PUSH | PULL variant toggle — mirrors the bodyweight tier
+  // Sled Work PUSH | PULL variant toggle — mirrors the bodyweight tier
   // pill choreography exactly (single pill flanked by pulsing chevrons,
   // swipe to commit with slide-off / state-change / slide-in animation).
-  // See SledDragConsolidatedDetail for the gesture worklet.
+  // See SledWorkConsolidatedDetail for the gesture worklet.
   sledVariantRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4940,7 +5370,14 @@ const s = StyleSheet.create({
   // Zone pill row (max_load / distance_build / conditioning).
   carryZoneRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 12, marginBottom: 4, paddingVertical: 6,
+    gap: 12, marginBottom: 4,
+    // Vertical padding bumped from 6 → 14 so the inner pill row exposes a
+    // taller hit area to gesture-handler. Visual chrome looks the same (the
+    // pill chip's own height controls the rendered size), but a swipe that
+    // starts a few px above or below the pill still lands inside the
+    // GestureDetector and the inner Pan claims the touch instead of
+    // falling through to the outer Sled Work pager.
+    paddingVertical: 14,
   },
   carryZoneChevronSlotLeft: {
     width: 56, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center',
@@ -5012,4 +5449,499 @@ const s = StyleSheet.create({
     fontSize: 13, lineHeight: 18,
   },
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// renderBestSubtitleFor — equipment-aware "Best …" subtitle for the family
+// page header.
+//
+// SINGLE SOURCE OF TRUTH for per-equipment subtitle logic in the family
+// wrapper. Mirrors the same format each equipment's standalone detail
+// component renders for its own header so the family page reads
+// identically to a single-variant page:
+//
+//   Weighted (barbell / dumbbell / machine / kettlebell / strongman):
+//     "Best Est. 1RM — N lb"
+//   Carry:
+//     "Best — N lb · M m"   (per-effort max weight + max distance)
+//   Isometric:
+//     "Personal best — N min N sec"
+//   Assisted:
+//     "Best Est. 1RM — N lb assist"   (lowest assistance = best)
+//   Bodyweight (unused — admin disables variants on BW):
+//     falls through to weighted default.
+//
+// Returns JSX. Falls back to a plain "No efforts logged yet" Text when
+// the active variant has zero efforts.
+//
+// Adding a new equipment type to the admin catalog requires adding one
+// case here — that's the ONLY per-equipment code change a new equipment
+// type needs in the family wrapper. Everything else (dispatch, paged
+// ScrollView, pill chrome, gestures, slot rendering) is fully generic.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function renderBestSubtitleFor(
+  variant: { equipment?: string | null; strength_type?: string | null } | null,
+  efforts: Effort[],
+): React.ReactNode {
+  if (!variant) return <Text style={s.subText}>No efforts logged yet</Text>
+
+  // Isometric — duration max
+  if (variant.strength_type === 'isometric') {
+    let maxSecs = 0
+    efforts.forEach(e => {
+      const sec = parseDurationSecs(e.value)
+      if (sec !== null && sec > maxSecs) maxSecs = sec
+    })
+    if (maxSecs <= 0) return <Text style={s.subText}>No efforts logged yet</Text>
+    return (
+      <View style={s.subRow}>
+        <Text style={s.subText}>Personal best — </Text>
+        <Text style={[s.subText, s.subValueBlue]}>{fmtDurationLong(maxSecs)}</Text>
+      </View>
+    )
+  }
+
+  // Carry — per-effort max weight + max distance
+  if (variant.equipment === 'carry') {
+    let maxW = 0, wUnit = 'lb'
+    let maxD = 0
+    efforts.forEach(e => {
+      const c = parseCarryFromLabel(e.label)
+      if (!c) return
+      if (c.weight > maxW) { maxW = c.weight; wUnit = c.unit }
+      if (c.dist > maxD) maxD = c.dist
+    })
+    if (maxW <= 0 && maxD <= 0) return <Text style={s.subText}>No efforts logged yet</Text>
+    return (
+      <View style={s.subRow}>
+        <Text style={s.subText}>Best — </Text>
+        <TickerNumber value={maxW} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+        <Text style={[s.subText, s.subValueBlue]}> {wUnit} · </Text>
+        <TickerNumber value={maxD} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+        <Text style={[s.subText, s.subValueBlue]}> m</Text>
+      </View>
+    )
+  }
+
+  // Assisted — lowest assistance = highest effective 1RM. Surface the
+  // best (smallest) assistance value the user has logged.
+  if (variant.equipment === 'assisted') {
+    let minAssist = Infinity, aUnit = 'lb'
+    efforts.forEach(e => {
+      const a = parseAssistanceFromLabel(e.label)
+      if (!a) return
+      if (a.assistance < minAssist) { minAssist = a.assistance; aUnit = a.unit }
+    })
+    if (!Number.isFinite(minAssist)) return <Text style={s.subText}>No efforts logged yet</Text>
+    return (
+      <View style={s.subRow}>
+        <Text style={s.subText}>Best — </Text>
+        <TickerNumber value={minAssist} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+        <Text style={[s.subText, s.subValueBlue]}> {aUnit} assist</Text>
+      </View>
+    )
+  }
+
+  // Default — weighted standard (barbell / dumbbell / machine / kettlebell
+  // / strongman). Max parseOneRM across the efforts.
+  let maxOneRM = 0, unit = 'lb'
+  efforts.forEach(e => {
+    const p = parseOneRM(e.value)
+    if (p && p.oneRM > maxOneRM) { maxOneRM = p.oneRM; unit = p.unit }
+  })
+  if (maxOneRM <= 0) return <Text style={s.subText}>No efforts logged yet</Text>
+  return (
+    <View style={s.subRow}>
+      <Text style={s.subText}>Best Est. 1RM — </Text>
+      <TickerNumber value={maxOneRM} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+      <Text style={[s.subText, s.subValueBlue]}> {unit}</Text>
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FamilyConsolidatedDetail
+//
+// Sled Work-mirror wrapper for admin-added variant families (Bone, etc.).
+// Byte-for-byte clone of SledWorkConsolidatedDetail's structure:
+//   1. Static header (BackButton + h1 = parent name + subtitle + equipment
+//      badge) — stays put as user swipes between variants.
+//   2. Pill row — single blue pill in centre showing the active variant's
+//      bracket label, flanked by pulsing BwAnimatedChevron pairs. Swipe-
+//      driven slide-off + slide-in choreography matching Sled Work timing
+//      (20 px threshold, 220 px slide, 250 ms duration).
+//   3. Paged horizontal ScrollView — one slot per variant. Each slot
+//      renders a full <StrengthDetail propExercise={variant.name}
+//      propHideHeader /> instance. Native paging gives the continuous
+//      "whole page slides" motion the user asked for.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function FamilyConsolidatedDetail({
+  parent,
+  variants,
+}: {
+  parent: { id: string; name: string; equipment?: string | null }
+  variants: ReadonlyArray<{
+    id: string
+    name: string
+    equipment?: string | null
+    strength_type?: string | null
+    variant_short_label?: string | null
+    created_at?: string
+  }>
+}) {
+  // Slot order = variants that have AT LEAST ONE logged effort, preserving
+  // the catalog order (already sorted by created_at in the route
+  // dispatcher). Empty variants are hidden — no pill, no slot. Universal
+  // rule mirroring Sled Work / Swimming: if Push has efforts but Drag
+  // doesn't, only the PUSH pill renders and the page collapses to one
+  // slot. If neither has efforts, the consolidated row wouldn't have
+  // shown up in the strength index in the first place, so this never
+  // reaches an empty render path — but we guard with a fallback anyway
+  // so the page survives an "all variants deleted" state.
+  //
+  // `effortsByVariant` is async-loaded below, so on first render it's an
+  // empty map → loggedVariants would be empty → render fallback. After
+  // the fetch resolves we re-derive and show the filtered list.
+  const [activeId, setActiveId] = useState<string>('')
+
+  // ── Per-variant raw efforts (drives the header subtitle) ─────────────
+  // Single query for all variants' efforts; grouped by variant id so
+  // each pill swipe is an O(1) lookup. The subtitle JSX is computed at
+  // render time by `renderBestSubtitleFor(variant, efforts)` which
+  // dispatches on the variant's equipment / strength_type — this is the
+  // ONE central place per-equipment subtitle logic lives. New equipment
+  // types added to the admin catalog need one new case in that helper;
+  // every other piece of the framework (dispatch, ScrollView, gestures,
+  // pill row) is fully generic.
+  const { user } = useAuth()
+  const [effortsByVariant, setEffortsByVariant] = useState<Record<string, Effort[]>>({})
+  useEffect(() => {
+    if (!user || variants.length === 0) return
+    let alive = true
+    const labelFilters = variants.map(v => `label.ilike.${v.name} ·%`).join(',')
+    supabase
+      .from('efforts')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('type', 'strength')
+      .or(labelFilters)
+      .then(({ data }) => {
+        if (!alive) return
+        // Sort by name length DESC so longer names win when two share a
+        // prefix (defensive — admins might create overlapping bracket
+        // suffixes).
+        const sortedVariants = variants.slice().sort((a, b) => b.name.length - a.name.length)
+        const map: Record<string, Effort[]> = {}
+        ;(data || []).forEach((e: Effort) => {
+          const variant = sortedVariants.find(v => e.label.startsWith(`${v.name} ·`))
+          if (!variant) return
+          ;(map[variant.id] ??= []).push(e)
+        })
+        setEffortsByVariant(map)
+      })
+    return () => { alive = false }
+  }, [user, variants])
+  // Filter to only variants that have at least one logged effort. Empty
+  // variants get NO pill + NO slot. Fallback: when efforts haven't loaded
+  // yet OR no variant has any efforts (defensive — shouldn't reach here
+  // because the index row wouldn't have shown up), show ALL variants so
+  // the page never renders zero slots.
+  const loggedVariants = useMemo(() => {
+    const filtered = variants.filter(v => (effortsByVariant[v.id]?.length ?? 0) > 0)
+    return filtered.length > 0 ? filtered : variants
+  }, [variants, effortsByVariant])
+  const variantOrder = loggedVariants
+
+  // Default activeId to the first logged variant once data arrives. If
+  // the current activeId points at a variant that no longer has any
+  // efforts (user deleted them all), snap to the first available.
+  useEffect(() => {
+    if (variantOrder.length === 0) return
+    if (!activeId || !variantOrder.some(v => v.id === activeId)) {
+      setActiveId(variantOrder[0].id)
+    }
+  }, [variantOrder, activeId])
+
+  // Active variant + its efforts — both used by the subtitle helper.
+  const activeVariantRow = variantOrder.find(v => v.id === activeId) ?? variantOrder[0] ?? null
+  const activeEfforts = effortsByVariant[activeId] ?? []
+  const currentIdx = Math.max(0, variantOrder.findIndex(v => v.id === activeId))
+  const hasPrev = currentIdx > 0
+  const hasNext = currentIdx < variantOrder.length - 1
+
+  // ── Paged ScrollView slot sizing (mirrors Sled Work's pattern) ─────────
+  const PAGE_PADDING_HORIZONTAL = 16
+  const winWidth = useWindowDimensions().width
+  // Pre-seed slotWidth so the initial render lays slots out correctly.
+  // Wrapper uses marginHorizontal: -PAGE_PADDING_HORIZONTAL to bleed edge-
+  // to-edge, so measured width = full screen width.
+  const [slotWidth, setSlotWidth] = useState(winWidth)
+  const scrollRef = useRef<ScrollView>(null)
+
+  // Expose the outer ScrollView's native scroll as a Gesture.Native() so
+  // inner gestures inside each variant's StrengthDetail body (adp-zone
+  // pill swipe, tile-row horizontal scroll) can chain
+  // `blocksExternalGesture(outerScrollGesture)` on themselves. When an
+  // inner gesture activates, the outer paged scroll is forced to fail
+  // and the touch drives the inner gesture instead. Without this, the
+  // outer pager wins every horizontal touch and the user can't swipe the
+  // adp-zone pill or scroll through the 1RM-20RM tiles. Mirrors the same
+  // pattern Sled Work uses for CarryDetail's inner gestures.
+  // Memoised so identity is stable across renders — re-creating it would
+  // force gesture-handler to re-attach every frame.
+  const outerScrollGesture = useMemo(() => Gesture.Native(), [])
+
+  // Initial scrollTo — runs once per mount, after slotWidth is measured,
+  // to land on activeId's slot (always slot 0 by default, but defensive
+  // in case `activeId` ever defaults to a non-zero slot via state init).
+  const initialScrollDoneRef = useRef(false)
+  useEffect(() => {
+    if (initialScrollDoneRef.current) return
+    if (slotWidth <= 0) return
+    if (!scrollRef.current) return
+    const idx = variantOrder.findIndex(v => v.id === activeId)
+    if (idx < 0) return
+    scrollRef.current.scrollTo({ x: idx * slotWidth, animated: false })
+    initialScrollDoneRef.current = true
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotWidth])
+
+  // ── Pill swipe choreography (byte-for-byte Sled Work) ─────────────────
+  const pillTranslateX        = useSharedValue(0)
+  const chevronOpacityOverride = useSharedValue(1)
+
+  const SWIPE_THRESHOLD_PX     = 20
+  const SLIDE_OFFSCREEN_PX     = 220
+  const SLIDE_DURATION_MS      = 250
+
+  // navigateVariant — direction-aware. Updates state + programmatically
+  // scrolls the body ScrollView to the new slot's offset. Used by pill
+  // chevron taps AND by the pill Pan gesture (via runOnJS in onEnd).
+  const navigateVariant = (direction: -1 | 1) => {
+    const newIdx = currentIdx + direction
+    if (newIdx < 0 || newIdx >= variantOrder.length) return
+    setActiveId(variantOrder[newIdx].id)
+    if (slotWidth > 0 && scrollRef.current) {
+      scrollRef.current.scrollTo({ x: newIdx * slotWidth, animated: true })
+    }
+  }
+
+  const pillSwipeGesture = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-25, 25])
+      .onStart(() => {
+        'worklet'
+        chevronOpacityOverride.value = withTiming(0, { duration: 120 })
+      })
+      .onUpdate(e => {
+        'worklet'
+        pillTranslateX.value = e.translationX
+      })
+      .onEnd(e => {
+        'worklet'
+        const passed = Math.abs(e.translationX) >= SWIPE_THRESHOLD_PX
+        const direction: -1 | 1 = e.translationX < 0 ? 1 : -1
+        const canMove = (direction === 1 && hasNext) || (direction === -1 && hasPrev)
+        if (!passed || !canMove) {
+          pillTranslateX.value = withTiming(0, { duration: 200 })
+          chevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          return
+        }
+        const slideOff = direction === 1 ? -SLIDE_OFFSCREEN_PX : SLIDE_OFFSCREEN_PX
+        pillTranslateX.value = withTiming(slideOff, { duration: SLIDE_DURATION_MS }, (finished) => {
+          'worklet'
+          if (!finished) return
+          runOnJS(navigateVariant)(direction)
+          pillTranslateX.value = -slideOff
+          pillTranslateX.value = withTiming(0, { duration: SLIDE_DURATION_MS }, (settled) => {
+            'worklet'
+            if (settled) chevronOpacityOverride.value = withTiming(1, { duration: 200 })
+          })
+        })
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentIdx, hasPrev, hasNext, variantOrder.length, slotWidth],
+  )
+
+  const pillAnimStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: pillTranslateX.value }] }))
+  const chevronAnimStyle = useAnimatedStyle(() => ({ opacity: chevronOpacityOverride.value }))
+
+  // Extract bracket label for pill text (e.g. "Bone [Ex 1]" → "Ex 1").
+  const variantLabel = (name: string): string => {
+    const m = name.match(/\[(.+)\]\s*$/)
+    return m ? m[1] : name
+  }
+  const activeVariant = variantOrder[currentIdx]
+
+  return (
+    <View style={s.page}>
+      {/* ── Static header ─────────────────────────────────────────────── */}
+      <View>
+        <BackButton />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={s.h1}>{parent.name}</Text>
+        </View>
+
+        {/* Best subtitle — equipment-aware, active variant only. Dispatched
+            via renderBestSubtitleFor() which picks the right format based
+            on the variant's equipment / strength_type. Single source of
+            truth for per-equipment subtitle logic in the family wrapper.
+            Updates instantly when the user swipes between variants because
+            activeEfforts re-reads effortsByVariant[activeId]. */}
+        {renderBestSubtitleFor(activeVariantRow, activeEfforts)}
+
+        {/* Equipment badge — same chrome as standalone StrengthDetail */}
+        <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
+          <Text style={s.carryTierBadgeText}>{equipmentPillLabel(parent.equipment ?? null)}</Text>
+        </View>
+
+        {/* ── Pill row — Sled Work clone ────────────────────────────── */}
+        <GestureDetector gesture={pillSwipeGesture}>
+          <View style={s.sledVariantRow}>
+            {hasPrev ? (
+              <Animated.View style={[s.sledVariantChevronSlotLeft, chevronAnimStyle]}>
+                <Pressable
+                  onPress={() => navigateVariant(-1)}
+                  style={s.sledVariantChevronPressable}
+                  hitSlop={8}
+                  accessibilityLabel="Previous variant"
+                >
+                  <BwAnimatedChevron direction="left" delay={250} color={withAlpha(palette.blue[400], 0.8)} />
+                  <View style={{ marginLeft: -6 }}>
+                    <BwAnimatedChevron direction="left" delay={0} color={withAlpha(palette.blue[400], 0.8)} />
+                  </View>
+                </Pressable>
+              </Animated.View>
+            ) : (
+              <View style={s.sledVariantChevronSlotLeft} />
+            )}
+
+            <Animated.View
+              style={[
+                {
+                  paddingHorizontal: 16, paddingVertical: 8, borderRadius: 9999,
+                  borderWidth: 1, borderColor: palette.blue[500],
+                  backgroundColor: withAlpha(palette.blue[500], 0.15),
+                },
+                pillAnimStyle,
+              ]}
+            >
+              <Text style={{
+                fontSize: 11, fontWeight: '700', textTransform: 'uppercase',
+                letterSpacing: 0.5, color: palette.blue[400],
+              }}>
+                {activeVariant ? variantLabel(activeVariant.name) : ''}
+              </Text>
+            </Animated.View>
+
+            {hasNext ? (
+              <Animated.View style={[s.sledVariantChevronSlotRight, chevronAnimStyle]}>
+                <Pressable
+                  onPress={() => navigateVariant(1)}
+                  style={s.sledVariantChevronPressable}
+                  hitSlop={8}
+                  accessibilityLabel="Next variant"
+                >
+                  <BwAnimatedChevron direction="right" delay={0} color={withAlpha(palette.blue[400], 0.8)} />
+                  <View style={{ marginLeft: -6 }}>
+                    <BwAnimatedChevron direction="right" delay={250} color={withAlpha(palette.blue[400], 0.8)} />
+                  </View>
+                </Pressable>
+              </Animated.View>
+            ) : (
+              <View style={s.sledVariantChevronSlotRight} />
+            )}
+          </View>
+        </GestureDetector>
+      </View>
+
+      {/* ── Paged horizontal ScrollView — body slides between variants ──
+            Wrapped in a GestureDetector bound to `outerScrollGesture` so
+            inner gestures (adp-zone pill swipe, tile-row scroll inside
+            each slot) can chain blocksExternalGesture on this to win
+            horizontal touches before the outer pager activates. */}
+      <View
+        onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}
+        style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}
+      >
+        <GestureDetector gesture={outerScrollGesture}>
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            decelerationRate="fast"
+            onMomentumScrollEnd={e => {
+              if (slotWidth === 0) return
+              const x = e.nativeEvent.contentOffset.x
+              const idx = Math.round(x / slotWidth)
+              const target = variantOrder[idx]
+              if (target && target.id !== activeId) setActiveId(target.id)
+            }}
+          >
+            {variantOrder.map(variant => (
+              <View
+                key={variant.id}
+                style={{ width: slotWidth, paddingHorizontal: PAGE_PADDING_HORIZONTAL }}
+              >
+                <StrengthDetail
+                  propExercise={variant.name}
+                  propHideHeader
+                  outerScrollGesture={outerScrollGesture}
+                />
+              </View>
+            ))}
+          </ScrollView>
+        </GestureDetector>
+      </View>
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Default export — route dispatcher.
+//
+// Reads the URL exercise param. If the param matches a PARENT row in the
+// movements catalog (a row with no parent_movement_id but with children
+// pointing at it via parent_movement_id), it's an admin-added variant
+// family — render FamilyConsolidatedDetail. Otherwise render a standalone
+// StrengthDetail driven by the URL.
+//
+// EXCLUDE hardcoded consolidated routes: "Sled Work" is structurally a
+// family in the DB but has its own dedicated SledWorkConsolidatedDetail
+// inside StrengthDetail's existing dispatch. Letting FamilyConsolidatedDetail
+// take over would break that path. Add more exclusions here if other
+// hardcoded families appear in the future.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function StrengthDetailRoute() {
+  const { exercise: rawExercise } = useLocalSearchParams<{ exercise: string }>()
+  const exerciseFromUrl = typeof rawExercise === 'string' ? decodeURIComponent(rawExercise) : ''
+  const dbMovements = useMovements()
+
+  const isHardcodedRoute = exerciseFromUrl === 'Sled Work'
+
+  const parent = useMemo(
+    () => isHardcodedRoute
+      ? null
+      : (dbMovements.find(m => m.name === exerciseFromUrl && !m.parent_movement_id) ?? null),
+    [dbMovements, exerciseFromUrl, isHardcodedRoute],
+  )
+  const variants = useMemo(
+    () => parent
+      ? dbMovements
+          .filter(m => m.parent_movement_id === parent.id)
+          .slice()
+          .sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
+      : [],
+    [parent, dbMovements],
+  )
+
+  if (parent && variants.length >= 2) {
+    return <FamilyConsolidatedDetail parent={parent} variants={variants} />
+  }
+  return <StrengthDetail />
+}
 

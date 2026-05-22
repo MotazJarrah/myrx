@@ -19,10 +19,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, ScrollView, Pressable, TextInput, StyleSheet, Image, ActivityIndicator, Platform, Modal,
-  useWindowDimensions,
+  useWindowDimensions, type LayoutChangeEvent,
 } from 'react-native'
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence, withDelay, runOnJS,
+  LinearTransition,
 } from 'react-native-reanimated'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { router } from 'expo-router'
@@ -65,6 +66,12 @@ import {
   clearLastSync,
   formatLastSync,
 } from '../../src/lib/lastSyncStorage'
+import {
+  startConnect  as polarStartConnect,
+  getStatus     as polarGetStatus,
+  disconnect    as polarDisconnect,
+  type ConnectionStatus as PolarStatus,
+} from '../../src/lib/integrations/polar'
 import { colors, alpha, palette } from '../../src/theme'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1973,13 +1980,14 @@ interface ConnectEntry {
   Icon:     React.ComponentType<any>
 }
 
-// Placeholder entries — every integration that isn't Health Connect yet.
+// Placeholder entries — every integration that isn't Health Connect or
+// Polar yet. (Polar Flow has its own functional card following the Health
+// Connect pattern — OAuth via the Cloudflare Worker at myrxfit.com/oauth/*.)
 const PLACEHOLDER_ENTRIES: ConnectEntry[] = [
   { name: 'Apple Health',  blurb: 'iOS · workouts, heart rate, sleep, weight, activity rings',           Icon: Heart  },
   { name: 'Strava',        blurb: 'Activity feed sync · runs, rides, swims with full GPS + HR data',     Icon: Activity },
   { name: 'Garmin Connect',blurb: 'Watches & Edge bike computers · workout details, HR zones, recovery', Icon: Watch  },
   { name: 'Whoop',         blurb: 'Strain & recovery · daily readiness, HRV, sleep quality',             Icon: Activity },
-  { name: 'Polar Flow',    blurb: 'Polar watches & H10 chest strap · workouts, HR, training load',       Icon: Watch  },
 ]
 
 function ConnectTab() {
@@ -1991,6 +1999,15 @@ function ConnectTab() {
   const [hcMessage,      setHcMessage]      = useState<string | null>(null)
 
   const hcConnected = hcGranted.length > 0
+
+  // ── Polar Flow state ───────────────────────────────────────────────────
+  // OAuth routes through the Cloudflare Worker at myrxfit.com/oauth/*.
+  // See workers/oauth/src/polar.js + mobile/src/lib/integrations/polar.ts.
+  const [polarStatus,  setPolarStatus]  = useState<PolarStatus>({
+    connected: false, connectedAt: null, expiresAt: null, providerUserId: null,
+  })
+  const [polarBusy,    setPolarBusy]    = useState<null | 'connect' | 'disconnect'>(null)
+  const [polarMessage, setPolarMessage] = useState<string | null>(null)
 
   // Hydrate availability + permission state on mount. Re-runs after any
   // state change that could affect "is this currently usable" (connect /
@@ -2068,6 +2085,60 @@ function ConnectTab() {
       setHcBusy(null)
     }
   }
+
+  // ── Polar Flow handlers ────────────────────────────────────────────────
+
+  const refreshPolarStatus = useCallback(async () => {
+    const s = await polarGetStatus()
+    setPolarStatus(s)
+  }, [])
+  useEffect(() => { refreshPolarStatus() }, [refreshPolarStatus])
+
+  async function handlePolarConnect() {
+    if (polarBusy) return
+    setPolarBusy('connect')
+    setPolarMessage(null)
+    try {
+      const result = await polarStartConnect()
+      if (result.status === 'ok') {
+        await refreshPolarStatus()
+        setPolarMessage('Connected. Sync coming next release.')
+      } else if (result.status === 'cancelled') {
+        setPolarMessage('Cancelled. Tap Connect again whenever you’re ready.')
+      } else {
+        setPolarMessage(`Couldn’t connect (${result.reason}). Try again or contact support.`)
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setPolarMessage(`Couldn’t connect — ${msg.slice(0, 80)}`)
+    } finally {
+      setPolarBusy(null)
+    }
+  }
+
+  async function handlePolarDisconnect() {
+    if (polarBusy) return
+    setPolarBusy('disconnect')
+    setPolarMessage(null)
+    try {
+      const result = await polarDisconnect()
+      if (result.status === 'ok') {
+        await refreshPolarStatus()
+        setPolarMessage('Disconnected from Polar.')
+      } else {
+        setPolarMessage(`Disconnect failed (${result.reason}).`)
+      }
+    } finally {
+      setPolarBusy(null)
+    }
+  }
+
+  // Sub-text under the Polar Flow row — mirrors Health Connect's pattern.
+  const polarSubText = polarStatus.connected
+    ? (polarStatus.connectedAt
+        ? `Connected ${formatLastSync(polarStatus.connectedAt) ?? ''}`.trim()
+        : 'Connected · ready to sync')
+    : 'Polar watches & H10 chest strap · workouts, HR, training load.'
 
   // Sub-text under the Health Connect row — surfaces state to the user.
   let hcSubText: string
@@ -2160,6 +2231,53 @@ function ConnectTab() {
         {hcMessage ? (
           <View style={s.connectMessageWrap}>
             <Text style={s.connectMessageText}>{hcMessage}</Text>
+          </View>
+        ) : null}
+      </AnimateRise>
+
+      {/* Polar Flow — functional OAuth via the Cloudflare Worker. v1 is
+          connection-only; periodic data sync ships in the next release. */}
+      <AnimateRise delay={30} style={s.cardNoPad}>
+        <View style={s.connectRow}>
+          <View style={s.connectIconWrap}>
+            <Watch size={20} color={polarStatus.connected ? colors.primary : colors.mutedForeground} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.connectName}>Polar Flow</Text>
+            <Text style={s.connectBlurb} numberOfLines={2}>{polarSubText}</Text>
+          </View>
+          {!polarStatus.connected ? (
+            <Pressable
+              onPress={handlePolarConnect}
+              disabled={polarBusy !== null}
+              style={[s.connectActionBtn, polarBusy !== null ? { opacity: 0.5 } : null]}
+            >
+              {polarBusy === 'connect'
+                ? <ActivityIndicator size="small" color={colors.primaryForeground} />
+                : <Text style={s.connectActionBtnText}>Connect</Text>}
+            </Pressable>
+          ) : (
+            <View style={s.connectActionRow}>
+              <View style={s.connectStatusPill}>
+                <Text style={s.connectStatusText}>Connected</Text>
+              </View>
+            </View>
+          )}
+        </View>
+        {polarStatus.connected ? (
+          <Pressable
+            onPress={handlePolarDisconnect}
+            disabled={polarBusy !== null}
+            style={s.connectSecondaryRow}
+          >
+            <Text style={s.connectSecondaryText}>
+              {polarBusy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
+            </Text>
+          </Pressable>
+        ) : null}
+        {polarMessage ? (
+          <View style={s.connectMessageWrap}>
+            <Text style={s.connectMessageText}>{polarMessage}</Text>
           </View>
         ) : null}
       </AnimateRise>
@@ -2285,7 +2403,7 @@ export default function EditProfile() {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>('account')
 
   // ── Pattern 4 (CLAUDE.md) — pill swipe + paged ScrollView ──────────────
-  // Same carousel mechanics used by BW assist tiers, Sled Drag PUSH/PULL,
+  // Same carousel mechanics used by BW assist tiers, Sled Work PUSH/PULL,
   // and Swimming strokes. The 4-tab settings page uses it to avoid the
   // wrapping issue that the old static 4-button bar had on narrow
   // phones ("Preferences" is 11 chars and crowded the row).
@@ -2296,6 +2414,19 @@ export default function EditProfile() {
   // rule in CLAUDE.md.
   const [slotWidth, setSlotWidth] = useState(winWidth)
   const scrollRef = useRef<ScrollView>(null)
+
+  // Per-tab content height tracking. Horizontal pagingEnabled ScrollView
+  // sizes to the TALLEST child slot, so when the active tab is shorter
+  // than Body/Security (the tallest), the slot leaves blank space below.
+  // We measure each tab's natural content height via onLayout and feed
+  // the ACTIVE tab's height into the ScrollView wrapper so the page
+  // collapses to the active tab's actual size. Switching tabs animates
+  // the height change via Reanimated's LinearTransition.
+  const [tabHeights, setTabHeights] = useState<Record<string, number>>({})
+  const onTabLayout = (key: string) => (e: LayoutChangeEvent) => {
+    const h = Math.ceil(e.nativeEvent.layout.height)
+    setTabHeights(prev => (prev[key] === h ? prev : { ...prev, [key]: h }))
+  }
 
   // Initial scrollTo to the active slot (Account = slot 0 by default).
   // Runs once after slotWidth settles. animated:false so the page lands
@@ -2330,7 +2461,7 @@ export default function EditProfile() {
   }
 
   // Pill swipe + slide animation — constants from CLAUDE.md Pattern 4
-  // (locked across BW, Sled Drag, Swimming, and now Settings).
+  // (locked across BW, Sled Work, Swimming, and now Settings).
   const SETTINGS_SWIPE_THRESHOLD_PX = 20
   const SETTINGS_SLIDE_OFFSCREEN_PX = 220
   const SETTINGS_SLIDE_DURATION_MS  = 250
@@ -2458,14 +2589,29 @@ export default function EditProfile() {
           </View>
         </GestureDetector>
 
-        {/* Paged ScrollView — 4 slots, one per tab. Each slot renders its
-            tab component. All 4 mount at once (no lazy rendering) so the
+        {/* Paged ScrollView — 5 slots, one per tab. Each slot renders its
+            tab component. All 5 mount at once (no lazy rendering) so the
             slide is smooth and the active state is instantly available.
             Negative margin bleeds the slots edge-to-edge; each slot
-            re-pads internally so content lines up with the header. */}
-        <View
+            re-pads internally so content lines up with the header.
+            The wrapper's height is bound to the ACTIVE tab's measured
+            content height so the page collapses to the right size —
+            without this, the horizontal ScrollView sizes to the TALLEST
+            tab and shorter tabs leave a huge blank space below. The
+            inner-View onLayout per slot still measures each tab's natural
+            content size (RN reports natural layout regardless of the
+            parent's height constraint), so tabHeights[key] is populated
+            after the first mount and the active-tab binding kicks in
+            on the next render. LinearTransition smoothly animates the
+            wrapper's height when the user swipes to a tab of different
+            height. */}
+        <Animated.View
+          layout={LinearTransition.duration(200)}
           onLayout={e => setSlotWidth(e.nativeEvent.layout.width)}
-          style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}
+          style={{
+            marginHorizontal: -PAGE_PADDING_HORIZONTAL,
+            height: tabHeights[activeTab],
+          }}
         >
           <ScrollView
             ref={scrollRef}
@@ -2489,15 +2635,21 @@ export default function EditProfile() {
                   paddingHorizontal: PAGE_PADDING_HORIZONTAL,
                 }}
               >
-                {tab.key === 'account'     ? <AccountTab     profile={profile} user={user} />
-                 : tab.key === 'preferences' ? <PreferencesTab profile={profile} user={user} />
-                 : tab.key === 'security'    ? <SecurityTab    profile={profile} user={user} />
-                 : tab.key === 'connect'     ? <ConnectTab />
-                 : <AboutTab />}
+                {/* Inner measure View — captures each tab's natural
+                    content height. The outer slot only constrains width,
+                    so this onLayout sees the tab's actual rendered height
+                    (subject to RN's normal flex layout). */}
+                <View onLayout={onTabLayout(tab.key)}>
+                  {tab.key === 'account'     ? <AccountTab     profile={profile} user={user} />
+                   : tab.key === 'preferences' ? <PreferencesTab profile={profile} user={user} />
+                   : tab.key === 'security'    ? <SecurityTab    profile={profile} user={user} />
+                   : tab.key === 'connect'     ? <ConnectTab />
+                   : <AboutTab />}
+                </View>
               </View>
             ))}
           </ScrollView>
-        </View>
+        </Animated.View>
 
       </View>
     </ScrollView>
