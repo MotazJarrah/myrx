@@ -2665,17 +2665,98 @@ This is the final net — if a secret somehow makes it past layers 1 and 2, push
 4. **Add the leaked pattern to `scripts/git-hooks/pre-commit`** so the same shape can't slip through again.
 5. **Audit the rest of the repo** for siblings of the same secret class.
 
-## Food library architecture (LOCKED — re-running bulk_import)
+## Food library architecture (LOCKED — May 21 2026)
 
 The food library is two layers: a Cloudflare D1 database (`myrx-food-library`)
 holding ~470K curated rows from USDA + OpenNutrition + MYRX-custom, AND the
 search/CRUD worker (`workers/food-search/`) that fronts it.
 
-**Re-importing from a fresh USDA + ON snapshot follows ONE procedure. Do
-not invent a different one. If it's failing, fix what's failing — don't
-re-architect around it.**
+**There are TWO paths to update the data and they share the same
+core pipeline. Picking the right one matters:**
 
-### Bulk import — the only valid catalog rebuild path
+| Path | When | Where it runs |
+|---|---|---|
+| **Sync orchestrator** (production) | Day-to-day. Admin clicks "Sync now" in the food library admin panel after USDA / ON release new data. Monthly cron also fires it. | GitHub Actions. Pulls source files from R2 mirror, processes them, writes to D1. |
+| **bulk_import** (full rebuild) | One-shot. Use only when D1 needs to be wiped and rebuilt from scratch (e.g. recovering from corruption, schema migration). | Locally, on the admin's laptop. Expects pre-extracted CSV/ZIP files in `scripts/bulk_import/data/`. |
+
+Both share the same loaders, filter rules, and dedup logic in
+`scripts/bulk_import/lib/`. The orchestrator at `scripts/sync/run.mjs`
+just adds: download from R2, diff against live food_library, write
+either via changelog (staged) or atomic swap (commit).
+
+### Sync orchestrator — the production update path
+
+**Why R2 mirror exists**: USDA's CDN at `fdc-datasets.ars.usda.gov`
+returns `ENOTFOUND` from every cloud-egress IP we've tested (GitHub
+Actions runners, Cloudflare sandbox, etc.). USDA appears to firewall
+or geofence non-residential IPs. **The CDN is effectively
+unreachable from any automated pipeline.** Direct fetch is not a
+viable architecture.
+
+The R2 mirror works around it: admin downloads the USDA + ON ZIPs
+manually onto their laptop (where USDA's CDN works fine), uploads
+them via the drag-drop UI in admin Food Library, and the sync
+orchestrator pulls from R2 (which is always reachable from GHA).
+
+**Release cadence reality check**: USDA publishes ~2x/year — April
+and October/November. OpenNutrition updates less often. The monthly
+cron we set up is overkill; it'll be a no-op most months because the
+data hasn't changed. That's fine — the diff will be empty and Phase
+5 short-circuits.
+
+**Files in R2**:
+- `usda/current.zip` — latest USDA FoodData Central ZIP (~460 MB)
+- `usda/meta.json` — `{ filename, size, uploaded_at }`
+- `on/current.zip` — latest OpenNutrition ZIP (~60 MB)
+- `on/meta.json` — same shape
+- Bucket: `myrx-food-mirror`, binding: `MIRROR_BUCKET` in worker
+- Files are **per-source independent** — re-upload only what's new.
+  If only USDA has a new release, drag in just that ZIP; ON stays put.
+
+**Sync phases** (`scripts/sync/run.mjs`, ~16 min end-to-end):
+1. Phase 1 — Download both ZIPs from R2 in parallel (~25 sec)
+2. Phase 2 — Parse via `loadUsda()` + `loadOn()` (filter rules 1-14
+   applied during parse) (~4 min, dominated by USDA's 27M-row
+   food_nutrient.csv)
+3. Phase 3 — Dedup rules 15-19 in memory via `applyDedup()` (~7 sec)
+4. Phase 4 — Diff against live food_library (USDA + ON only; MYRX
+   excluded; chunked 10k rows per query) (~5 min)
+5. Phase 5 — Write changelog + apply to D1 (~1 min). **Short-circuits
+   immediately if diff is empty** (no inserts/updates/deletes → skip).
+   Reuses Phase 4's loaded data so we don't double-query.
+6. Phase 6 — FTS rebuild + watermarks + sync_history row (~20 sec)
+
+**Modes**:
+- `staged` — changelog rows written with `committed=0`. Admin reviews
+  the I/U/D summary, clicks Commit (apply) or Discard (drop). Used
+  via the dry-run toggle.
+- `commit` — changelog rows + atomic swap on food_library in one go.
+  No review step.
+
+**Cancellation**: worker has `sync_cancel_requested` flag. UI sets
+it on Cancel. Orchestrator polls between phases AND every 5 seconds
+during the download phase. On cancel: pushes status='cancelled',
+worker wipes the run's changelog + step_log, state resets to idle.
+**Don't add "clear cancel flag on running transition" anywhere** —
+that bug silently swallowed user cancels for half a day.
+
+**D1 schema for sync**:
+- `sync_state` (key/value) — current status, run_id, mode, cancel
+  flag, watermarks, etc.
+- `sync_changelog` (run_id, operation, food_source, food_source_id,
+  before_data, after_data, committed, reverted) — every I/U/D per
+  run. Used for review/commit/discard/undo.
+- `sync_history` (run_id, mode, status, started_at, ended_at,
+  total_ms, phase_durations JSON, inserts, updates, deletes) — one
+  row per run, used for ETA computation (median of last 5).
+- `sync_step_log` (run_id, ts, step_code, message, level, error_code)
+  — verbose progress feed. Retention: most-recent 3 runs.
+
+**Error codes** (E_001 through E_099) — short identifiers logged in
+sync_step_log so failures can be triaged from a glance at the log
+panel. Full list at top of `scripts/sync/run.mjs`.
+
+### Bulk import — full rebuild path (rarely needed)
 
 ```powershell
 cd C:\Users\motaz\OneDrive\Desktop\MyRX
@@ -2764,6 +2845,32 @@ deduping post-import.** Both have been tried and both don't scale.
    CPU per request; paid is 30s. Either chunk the worker logic into
    ≤1000-row batches or move the heavy work to GHA + wrangler.
 
+5. **`spawnSync /bin/sh ENOBUFS` in Phase 4 (sync orchestrator).**
+   Cause: wrangler `--json` output for a large D1 query (50k-row
+   chunk) exceeded Node's default `execSync` stdout buffer (1 MB).
+   Fix: `maxBuffer: 256 * 1024 * 1024` on `execSync` in
+   `d1_writer.mjs::querySql` AND reduce CHUNK in `run.mjs` to
+   10,000 rows per query. Both layers — bigger buffer + smaller
+   chunks — survive transient network blips too.
+
+6. **`Wrangler requires at least Node.js v22.0.0` in GHA.** Wrangler
+   4.x dropped Node 20 support. `.github/workflows/sync-food-library.yml`
+   must specify `node-version: '22'` (or higher). Not 20.
+
+7. **USDA scrape returns `ENOTFOUND (fdc-datasets.ars.usda.gov)` in
+   GHA.** USDA's CDN is unreachable from cloud-egress IPs. This is
+   not a transient error — it's permanent. The architectural fix is
+   the R2 mirror (see "Sync orchestrator" above). DO NOT try to
+   re-implement direct scraping with a different probe technique,
+   different host, retries, etc. — all paths through that hostname
+   fail the same way.
+
+8. **Sync "stuck" cancelling for minutes.** Caused by the orchestrator
+   being inside a long phase (e.g. ZIP extract, USDA parse pass) that
+   doesn't poll the cancel flag. Cancel is checked at phase boundaries
+   + every 5s during downloads. ZIP extract is the longest blind spot.
+   Acceptable behaviour — the run will exit at the next checkpoint.
+
 ### Free-tier note
 
 Cloudflare's documented D1 free tier limits (100K writes/day, 500MB
@@ -2809,6 +2916,187 @@ Both downloads are public and free, no API key required:
 
 The filename's embedded date IS the watermark the sync uses. Don't
 rename them.
+
+## Cloudflare + D1 production scars
+
+Gotchas discovered the hard way. Each one cost real time. None are
+obvious from the docs.
+
+1. **D1 has a 30-second per-query CPU budget.** Wrangler `--file`
+   execution can't extend it. Monolithic operations over 2M+ rows
+   ALWAYS time out — `DELETE WHERE id NOT IN (SELECT ... GROUP BY)`,
+   self-joins on large tables, etc. Either chunk into ≤10k-row
+   batches OR move the cross-row logic to in-memory Node (see THE LAW
+   for food_library dedup).
+
+2. **`execSync` default stdout buffer is 1 MB.** Wrangler `--json`
+   output for a 50k-row query is ~50 MB → `spawnSync ENOBUFS`. Set
+   `maxBuffer: 256 * 1024 * 1024` on every `execSync` call that
+   wraps wrangler, AND keep individual query chunks at ≤10k rows.
+
+3. **Wrangler 4.x requires Node 22+.** GHA Setup-Node must specify
+   `node-version: '22'`. Wrangler refuses to start on Node 20 with
+   a "requires at least Node.js v22.0.0" error.
+
+4. **Workers Free has a 100 MB request body limit.** Anything bigger
+   (food source ZIPs are 460 MB) needs R2 multipart upload, chunked
+   from the frontend. The worker does NOT proxy the bytes through
+   itself — it just orchestrates the multipart upload via R2's API
+   (`createMultipartUpload`, `resumeMultipartUpload`, `uploadPart`,
+   `complete`).
+
+5. **R2 incomplete multipart uploads auto-clean at 7 days.** No need
+   to write a cleanup job — if a browser refresh interrupts an
+   upload mid-session, the orphan chunks expire automatically. We
+   also write a `pending.json` marker per upload so the worker can
+   abort cleanly when the user clicks Cancel.
+
+6. **R2 must be manually enabled in the Cloudflare dashboard once per
+   account.** Requires accepting R2 Terms of Service. Not automatable
+   via wrangler — `wrangler r2 bucket create` returns "Please enable
+   R2 through the Cloudflare Dashboard. [code: 10042]" until ToS is
+   accepted via the web UI.
+
+7. **`wrangler d1 execute --file` bypasses D1's HTTP API rate limits.**
+   The documented free-tier limits (100K writes/day) are enforced on
+   the HTTP API but NOT on the CLI `--file` pathway. We pushed 2M+
+   rows in 13 minutes via the CLI with zero rejections. Per-row
+   writes via worker `env.DB.prepare(...).run()` DO count against the
+   limits. This is practical reality, not documented behaviour — if
+   Cloudflare ever closes the loophole, bulk_import switches to a
+   multi-day batched run or Workers Paid ($5/mo = 50M writes/day).
+
+8. **Cloudflare Pages does NOT auto-deploy from GitHub on this
+   project.** The Pages dashboard shows commit-message-looking
+   deployments, but those are residue from a defunct Git connection.
+   The only working deploy path is `wrangler pages deploy web/dist`.
+   `git push` accomplishes nothing for the live site. Verify with:
+   ```bash
+   curl -s "https://myrxfit.com/" | grep -oE 'index-[^"]+\.js'
+   ls web/dist/assets/index-*.js
+   ```
+   Hashes must match.
+
+9. **Vite reads `.env.local` from the project root, NOT from `web/`.**
+   Need `envDir: '..'` in `vite.config.js`. Without it, build-time
+   env vars are empty strings and the bundle 401s every admin
+   endpoint. This bit us once and could bite again on any new env
+   var added.
+
+## Browser / React scars
+
+Same theme: hard-won lessons from things that don't show up in any
+documentation.
+
+1. **bfcache eviction triggers** — when these are present, the page
+   does a full reload on tab return instead of a fast snapshot
+   restore (caused the "page keeps refreshing on tab switch"
+   complaint). Avoid:
+   - `Cache-Control: no-store` or `no-cache` on the document. Use
+     `max-age=0, must-revalidate` for the same intent without
+     killing bfcache.
+   - `self.clients.claim()` in service worker (any version).
+   - WebSocket connections open at page-hide (pre-Chrome 149).
+     Disconnect Supabase realtime on `visibilitychange='hidden'`,
+     reconnect on `visible`.
+   - `TOKEN_REFRESHED` auth events firing while the page is hidden.
+
+2. **`sr-only` input inside a `<label>` triggers scroll-into-view on
+   click.** The browser focuses the (invisible) input and scrolls it
+   into view, dragging the page down. Pattern that broke the dry-run
+   toggle. Use `<button role="switch" aria-checked={state}>` for
+   custom toggles — no input element means no focus-scroll behaviour,
+   and the button has native keyboard support.
+
+3. **Chrome popup blocker rejects the SECOND `window.open()` in a
+   single click handler.** Only the first one is treated as
+   user-initiated. Bit us on a "Open both source download pages"
+   button that opened USDA + ON. Fix: split into two separate
+   buttons (or two anchor tags with `target="_blank"`), each handling
+   one URL on click.
+
+4. **`ProtectedLayout` flickering caused full-tree unmounts.** The
+   auth context briefly flips `profileLoading=true` even when
+   `profile` is already loaded (any `refreshProfile()` call). If the
+   gate is `if (loading || profileLoading) show <Skeleton/>`, every
+   profile refresh tears down the route tree. Gate on
+   `if (loading || (profileLoading && !profile))` instead — show
+   skeleton ONLY on the initial null load, never on subsequent
+   refreshes. This was the actual root cause of the "page refresh"
+   complaints (NOT bfcache, which was a separate but smaller issue).
+
+5. **Don't auto-clear server-side error state via polling.** When
+   the admin operations panel showed a stale failure message from a
+   previous run, the fix was to clear the in-DB error in a one-time
+   capture (set `errorClearedRef`, push empty error to server,
+   show in UI until next operation starts). Hammering the worker
+   to clear it via repeated POSTs would be cheaper to write but
+   nukes the audit trail.
+
+## Barcode scanner rules (web admin + mobile)
+
+Both surfaces — the web admin food-library Scan button and the
+mobile FoodLogDrawer — use the same underlying patterns.
+
+1. **1D barcode physics.** UPC/EAN/Code-128/etc. encode data in
+   vertical bar widths. The scanner reads a horizontal line of
+   pixels across the bars. If the barcode rotates 90° relative to
+   the scan line, the scanner sees one solid stripe and nothing
+   decodable. The aim frame is 4:1 (wide-to-tall) BY DESIGN — it's
+   telling the user "put a horizontally-aligned barcode here." ZXing
+   tries rotated decodes via `TRY_HARDER`, but it's slower and less
+   reliable than just holding it right.
+
+2. **Camera selection MUST be explicit.** Both web (`@zxing/browser`)
+   and mobile (`expo-camera`) default to whichever camera the browser
+   picks — on phones, that's usually the FRONT camera. Useless. Web:
+   `decodeFromConstraints({ video: { facingMode: { ideal: 'environment' } } })`.
+   Use `ideal` not `exact` so desktops without a rear camera still
+   get their available camera.
+
+3. **Format hints save real time.** Default `BrowserMultiFormatReader`
+   tries QR, Data Matrix, Code 128, Aztec, PDF417, UPC, EAN on every
+   video frame. For food packaging, only UPC-A, UPC-E, EAN-13, EAN-8
+   matter. Limiting via `DecodeHintType.POSSIBLE_FORMATS` + setting
+   `TRY_HARDER` is faster AND more reliable on busy packaging. Also
+   request `1280x720` video resolution — phones default to lower res
+   on the rear camera unless asked.
+
+4. **iOS Safari does NOT support `screen.orientation.lock`.** Even
+   in fullscreen mode, even as a PWA. Apple has refused this since
+   forever. Android Chrome supports it via fullscreen +
+   `screen.orientation.lock('portrait')`. Wrap the lock attempt in
+   try/catch and accept silent failure — the scanner still works on
+   iOS, just without orientation pinning. The visible "align
+   horizontally" hint is the cross-platform fallback.
+
+5. **OpenFoodFacts proxy fetches CAN hang.** OFF's API is slow and
+   sometimes returns malformed JSON. Wrap the fetch in an
+   `AbortController` with 8s timeout. On timeout, fall through to
+   opening the Add panel with just the UPC pre-filled — manual
+   data entry is better UX than an infinite spinner.
+
+6. **`scanError` must render at page level, not inside the panel.**
+   If the scan flow finishes without opening a panel (timeout, lookup
+   error, etc.), an error rendered inside the panel has nowhere to
+   show. Bit us when scans silently completed with nothing visible.
+
+7. **UPC match is a SEED, not a final answer.** UPC lookups too often
+   return mislinked/stale items, or the user is actually eating a
+   different variant of the same product. Mobile scan flow:
+   - Look up UPC → get the matched food's name + brand
+   - `stripNameForGenericSearch(name, brand)` strips it down to a
+     generic term (drops brand, sizes, pack counts, packaging words,
+     parens) — `"Trader Joe's Almond Butter, Creamy, 16oz Jar"` →
+     `"almond butter creamy"`
+   - Run that as a normal FTS search, drop the user into the
+     search-results view with the stripped query pre-populated
+   - The originally-matched UPC item is NOT shown in results — the
+     user picks the right variant from the generic search hits
+   - Zero hits → "Not in our library" state
+   Web admin uses a different flow (the goal there is to ADD missing
+   foods to MYRX): UPC found → open edit panel; UPC not found → fetch
+   OFF for a starter pre-fill → open add panel.
 
 ## Supabase
 - Project ID: `xtxzfhoxyyrlxslgzvty`
