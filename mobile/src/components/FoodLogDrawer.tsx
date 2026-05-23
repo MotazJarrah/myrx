@@ -19,7 +19,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, type ReactNode } from 'react'
 import {
   View, Text, Pressable, ScrollView, TextInput, Modal, ActivityIndicator,
-  StyleSheet, Keyboard, useWindowDimensions,
+  StyleSheet, Keyboard, useWindowDimensions, Alert,
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight'
@@ -944,6 +944,25 @@ export default function FoodLogDrawer({
   }
 
   // ── Slot management ───────────────────────────────────────────────────────
+  //
+  // Persistence semantics (LOCKED, May 22 2026):
+  //
+  //   • The Settings page "Meal template" → writes to
+  //     `profiles.meal_slots_default`. This is the GLOBAL template, applies
+  //     to every day.
+  //   • Adding/removing slots from inside this drawer → PER-DAY ONLY.
+  //     Never touches the global template.
+  //
+  // Per-day persistence works through `food_logs.meal_slot`: once the user
+  // saves a food into the custom slot, the row carries the slot id forever.
+  // The next time the drawer opens for that same day, the load-time merge
+  // (in the useEffect at ~line 789) re-derives the slot from any rows
+  // whose meal_slot isn't in the global template.
+  //
+  // Edge case: if the user adds a custom slot but never saves a food into
+  // it before closing the drawer, the slot is lost. That's acceptable —
+  // an empty unused slot has no persistent value, and the new Alert in
+  // handleAdd ensures the user sees and can retry any save failure.
   function insertSlot(afterIndex: number, slotDef: MealSlot) {
     setLocalSlots(prev => {
       const next = [...prev]
@@ -1029,7 +1048,7 @@ export default function FoodLogDrawer({
     setServingsPerContainer(null)
     setPortionsLoading(true)
     try {
-      const { portions: loaded, servingsPerContainer: spc } = getFoodPortions(food)
+      const { portions: loaded, servingsPerContainer: spc } = await getFoodPortions(food)
       setPortions(loaded)
       setServingsPerContainer(spc)
     } catch { /* keep base units */ }
@@ -1067,7 +1086,7 @@ export default function FoodLogDrawer({
     setServingsPerContainer(null)
     setPortionsLoading(true)
     try {
-      const { portions: loaded, servingsPerContainer: spc } = getFoodPortions(foodObj)
+      const { portions: loaded, servingsPerContainer: spc } = await getFoodPortions(foodObj)
       setPortions(loaded)
       setServingsPerContainer(spc)
       const perUnitG = item.portion_qty > 0 ? item.portion_g / item.portion_qty : 1
@@ -1106,7 +1125,18 @@ export default function FoodLogDrawer({
       })
       .select()
       .single()
-    if (error || !data) return
+    if (error || !data) {
+      // Surface the error to the user. Previously we returned silently,
+      // which let bugs like the meal_slot CHECK constraint hide behind
+      // a "Add button does nothing" symptom. Console.error too so the
+      // raw PostgREST payload shows up in logcat for debugging.
+      console.error('[FoodLogDrawer] handleAdd insert failed:', error)
+      Alert.alert(
+        "Couldn't save",
+        error?.message ?? 'Unknown error inserting food entry.',
+      )
+      return
+    }
     setEntries(prev => [...prev, data as FoodLogEntry])
     loadHabitFoods()
     setView('log')
@@ -1128,7 +1158,14 @@ export default function FoodLogDrawer({
       carbs_g:       payload.carbs,
     }
     const { error } = await supabase.from('food_logs').update(updates).eq('id', editingItem.id).eq('user_id', userId)
-    if (error) return
+    if (error) {
+      console.error('[FoodLogDrawer] handleEditSave update failed:', error)
+      Alert.alert(
+        "Couldn't save changes",
+        error?.message ?? 'Unknown error updating food entry.',
+      )
+      return
+    }
     setEntries(prev => prev.map(e => e.id === editingItem.id ? { ...e, ...updates } : e))
     setEditingItem(null)
     setView('log')
@@ -1199,7 +1236,21 @@ export default function FoodLogDrawer({
                     bottom: kbHeight + insets.bottom,
                   },
                 ]
-              : s.sheet,
+              : [
+                  s.sheet,
+                  // Pad the sheet's inner content above the Android
+                  // gesture-nav bar (back/home/recents). We use
+                  // paddingBottom (NOT marginBottom) here because the
+                  // food drawer is height: 92% — shifting the whole
+                  // sheet up by insets.bottom would push the top edge
+                  // too close to the status bar. With paddingBottom,
+                  // the sheet's outer rectangle stays anchored to the
+                  // screen bottom (background still extends behind the
+                  // OS nav so the rounded top stays at its design y),
+                  // and the inner kav (flex: 1) shrinks to fit above
+                  // the system bars.
+                  { paddingBottom: insets.bottom },
+                ],
             // translateY follows finger during header swipe-to-close
             // drag, then either continues off-screen (commit) or snaps
             // back (cancel). Same pattern as ChatSheet / SuggestionSheet.

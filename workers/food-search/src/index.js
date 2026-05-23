@@ -6,6 +6,7 @@
  *   GET /search?q=&limit=&source=   → FTS5 search
  *   GET /food/:source_id            → single food lookup
  *   GET /barcode/:upc               → barcode lookup
+ *   GET /portions?source=&source_id=→ portion variants for a food (multi-portion picker)
  *
  * Protected (Bearer FOOD_ADMIN_KEY):
  *   POST   /food                    → create MYRX food
@@ -316,6 +317,35 @@ export default {
       ).bind(upc).all()
       if (!results?.length) return json({ error: 'Not found' }, 404)
       return json(results[0])
+    }
+
+    // ── GET /portions?source=usda&source_id=173944 ───────────────────────────
+    // Returns all portion variants for a specific food.
+    //   • source     — 'usda' | 'on' | 'myrx'
+    //   • source_id  — the food's source_id (matches food_library.source_id)
+    //
+    // Results are sorted by seq_num (USDA's canonical ordering — lower =
+    // more typical portion) then by gram_weight ascending so the
+    // smallest variant comes first when seq_num ties.
+    //
+    // Empty array is a valid response — the mobile drawer falls back to
+    // base units (g/Oz/Cup) and the branded → generic search when this
+    // returns nothing.
+    if (pathname === '/portions' && method === 'GET') {
+      const source    = url.searchParams.get('source')?.trim()
+      const source_id = url.searchParams.get('source_id')?.trim()
+      if (!source || !source_id) {
+        return json({ error: 'Missing source or source_id' }, 400)
+      }
+      const { results } = await env.DB.prepare(
+        `SELECT id, seq_num, amount, measure_unit, modifier, portion_desc, gram_weight
+           FROM food_portions
+          WHERE source = ? AND source_id = ?
+          ORDER BY
+            CASE WHEN seq_num IS NULL THEN 999999 ELSE seq_num END ASC,
+            gram_weight ASC`
+      ).bind(source, source_id).all()
+      return json(results ?? [])
     }
 
     // ── POST /food ────────────────────────────────────────────────────────────

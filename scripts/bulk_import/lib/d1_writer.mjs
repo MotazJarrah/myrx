@@ -38,6 +38,13 @@ const COLS = [
   'imported_at', 'last_synced_at', 'source_version',
 ].join(', ')
 
+// food_portions column order — must match toPortionValues() below.
+const PORTION_COLS = [
+  'source', 'source_id', 'seq_num', 'amount',
+  'measure_unit', 'modifier', 'portion_desc', 'gram_weight',
+  'imported_at', 'last_synced_at',
+].join(', ')
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -69,6 +76,21 @@ function toValues(r) {
     esc(r.imported_at),
     esc(r.last_synced_at),
     esc(r.source_version),
+  ].join(',')})`
+}
+
+function toPortionValues(p) {
+  return `(${[
+    esc(p.source),
+    esc(String(p.source_id)),
+    esc(p.seq_num),
+    esc(p.amount),
+    esc(p.measure_unit),
+    esc(p.modifier),
+    esc(p.portion_desc),
+    esc(p.gram_weight),
+    esc(p.imported_at),
+    esc(p.last_synced_at),
   ].join(',')})`
 }
 
@@ -195,6 +217,74 @@ export async function statsBySource() {
 /** DELETE all USDA + ON rows. Preserves MYRX. */
 export async function wipeUsdaAndOn() {
   await executeSql(`DELETE FROM food_library WHERE source IN ('usda', 'on');`)
+}
+
+/**
+ * Flatten each food's portions[] (added by the USDA + ON loaders) into a
+ * flat list of portion rows, attaching source + source_id + audit timestamps
+ * from the parent food. Foods with no portions[] are skipped.
+ */
+export function flattenPortions(foods) {
+  const out = []
+  for (const food of foods) {
+    if (!Array.isArray(food.portions) || food.portions.length === 0) continue
+    for (const p of food.portions) {
+      if (p == null || p.gram_weight == null || p.gram_weight <= 0) continue
+      out.push({
+        source:         food.source,
+        source_id:      food.source_id,
+        seq_num:        p.seq_num ?? null,
+        amount:         p.amount ?? null,
+        measure_unit:   p.measure_unit ?? null,
+        modifier:       p.modifier ?? null,
+        portion_desc:   p.portion_desc ?? null,
+        gram_weight:    p.gram_weight,
+        imported_at:    food.imported_at ?? null,
+        last_synced_at: food.last_synced_at ?? null,
+      })
+    }
+  }
+  return out
+}
+
+/**
+ * Bulk-insert food_portions rows. Same batching strategy as
+ * bulkInsertRows — splits into ROWS_PER_FILE-sized SQL files, batches
+ * each INSERT statement to INSERT_BATCH rows.
+ */
+export async function bulkInsertPortions(portions, label = 'portions') {
+  if (!portions.length) return 0
+  fs.mkdirSync(TMP_DIR, { recursive: true })
+  const totalFiles = Math.ceil(portions.length / ROWS_PER_FILE)
+  let written = 0
+
+  for (let f = 0; f < totalFiles; f++) {
+    const start = f * ROWS_PER_FILE
+    const end   = Math.min(start + ROWS_PER_FILE, portions.length)
+    const slice = portions.slice(start, end)
+
+    const fp = path.join(TMP_DIR, `bulk_${label}_${f}.sql`)
+    const lines = []
+    for (let i = 0; i < slice.length; i += INSERT_BATCH) {
+      const chunk  = slice.slice(i, i + INSERT_BATCH)
+      const values = chunk.map(toPortionValues).join(',\n  ')
+      lines.push(`INSERT INTO food_portions (${PORTION_COLS}) VALUES\n  ${values};`)
+    }
+    fs.writeFileSync(fp, lines.join('\n') + '\n')
+
+    process.stdout.write(`\r    File ${f + 1}/${totalFiles}: ${slice.length.toLocaleString()} portions… uploading…`)
+    await executeFile(fp)
+    fs.unlinkSync(fp)
+    written += slice.length
+    process.stdout.write(` ✓  (${written.toLocaleString()} / ${portions.length.toLocaleString()})`)
+  }
+  console.log('')
+  return written
+}
+
+/** DELETE all USDA + ON portion rows. MYRX foods don't have portions yet. */
+export async function wipePortionsUsdaAndOn() {
+  await executeSql(`DELETE FROM food_portions WHERE source IN ('usda', 'on');`)
 }
 
 /** Backfill audit columns on MYRX rows that lack them. */

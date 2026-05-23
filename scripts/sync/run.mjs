@@ -106,6 +106,7 @@ import {
   executeSql, bulkInsertRows, querySql,
   statsBySource, statsBySourceSubtype,
   rebuildFts,
+  flattenPortions, bulkInsertPortions, wipePortionsUsdaAndOn,
 } from '../bulk_import/lib/d1_writer.mjs'
 
 // ── Paths ─────────────────────────────────────────────────────────────────────
@@ -1109,6 +1110,8 @@ async function writeCommit(dedupedRows, inserts, updates, deletes, liveByKey) {
   try {
     logStep('write', 'Deleting existing USDA + ON rows (MYRX preserved)…')
     await executeSql(`DELETE FROM food_library WHERE source IN ('usda', 'on');`)
+    logStep('write', 'Deleting existing USDA + ON portion rows…')
+    await wipePortionsUsdaAndOn()
 
     const usdaRows = dedupedRows.filter(r => r.source === 'usda')
     const onRows   = dedupedRows.filter(r => r.source === 'on')
@@ -1119,6 +1122,14 @@ async function writeCommit(dedupedRows, inserts, updates, deletes, liveByKey) {
 
     logStep('write', `Bulk-inserting ${fmtN(onRows.length)} ON rows…`)
     await bulkInsertRows(onRows, 'on_sync')
+    await bailIfCancelled()
+
+    // Flatten the loaders' .portions[] arrays into food_portions rows and
+    // bulk-insert. Done AFTER food_library bulk inserts so the parent
+    // rows exist (we don't enforce FKs, but logical ordering is cleaner).
+    const allPortions = flattenPortions(dedupedRows)
+    logStep('write', `Bulk-inserting ${fmtN(allPortions.length)} portion rows…`)
+    await bulkInsertPortions(allPortions, 'portions_sync')
   } catch (err) {
     logStep('write', `Atomic write failed: ${err.message}`, { level: 'error', errorCode: 'E_062' })
     throw err

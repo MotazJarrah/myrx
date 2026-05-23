@@ -232,42 +232,214 @@ export interface FoodPortionsResult {
   servingsPerContainer: number | null
 }
 
+/** Worker row shape from GET /portions. */
+interface WorkerPortionRow {
+  id:           number
+  seq_num:      number | null
+  amount:       number | null
+  measure_unit: string | null
+  modifier:     string | null
+  portion_desc: string | null
+  gram_weight:  number
+}
+
+const BASE_PORTIONS: PortionOption[] = [
+  { id: 'g',   label: 'grams',  gramWeight: 1       },
+  { id: 'oz',  label: 'ounces', gramWeight: 28.3495 },
+  { id: 'cup', label: 'cups',   gramWeight: 240     },
+]
+
+/** Build a human-readable label from a worker portion row. */
+function formatPortionLabel(p: WorkerPortionRow): string {
+  // If USDA provided a free-text portion_description (typical when the
+  // measure_unit_id was "9999"/no-standard-unit), use it as-is — those
+  // descriptions are already human-friendly ("1 medium", "1 leaf, large").
+  if (p.portion_desc && p.portion_desc.trim().length > 0) {
+    let s = p.portion_desc.trim()
+    if (p.modifier && !s.toLowerCase().includes(p.modifier.toLowerCase())) {
+      s += `, ${p.modifier}`
+    }
+    return s
+  }
+  // Otherwise assemble from amount + measure_unit (+ modifier).
+  const amt  = p.amount != null && p.amount !== 1 ? `${p.amount} ` : ''
+  const unit = p.measure_unit ?? ''
+  const mod  = p.modifier ? `, ${p.modifier}` : ''
+  const joined = `${amt}${unit}${mod}`.trim()
+  return joined || 'Serving'
+}
+
+/**
+ * Relevance score for ordering portion chips. Lower = more relevant.
+ * Combines USDA's seq_num with a few heuristics so the most "natural"
+ * portion (1 large, 1 medium, 1 leaf) ranks above regulatory NLEA
+ * servings and rare units (tsp, tbsp).
+ */
+function scorePortion(p: WorkerPortionRow): number {
+  let score = p.seq_num ?? 1000
+
+  // Single-unit ("1 X") portions are usually the most intuitive choice.
+  // Boost them strongly so they win against multi-unit cup variants.
+  if ((p.amount === null || p.amount === 1) && p.measure_unit) {
+    score -= 50
+  }
+
+  const desc = (p.portion_desc ?? '').toLowerCase()
+  const unit = (p.measure_unit ?? '').toLowerCase()
+
+  // NLEA serving = USDA's regulatory serving; rarely what the user wants.
+  if (desc.includes('nlea') || unit.includes('nlea')) score += 200
+  // tsp/tbsp are rare in food logging unless explicitly searched for.
+  if (/^(tsp|teaspoon|tbsp|tablespoon)$/i.test(unit)) score += 100
+
+  return score
+}
+
+async function fetchWorkerPortions(source: string, sourceId: string): Promise<WorkerPortionRow[]> {
+  try {
+    const url = `${FOOD_WORKER_URL}/portions?source=${encodeURIComponent(source)}&source_id=${encodeURIComponent(sourceId)}`
+    const res = await fetch(url)
+    if (!res.ok) return []
+    const data = await res.json() as WorkerPortionRow[] | null
+    return data ?? []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Branded → generic fallback. When a branded food has no portion variants
+ * beyond its single package serving, search for a generic equivalent
+ * (canonical name minus brand) and pull THAT food's portion list too.
+ *
+ * Returns portions ALREADY ranked, so the caller can concat without
+ * re-sorting.
+ */
+async function fetchGenericFallbackPortions(food: FoodItem): Promise<WorkerPortionRow[]> {
+  if (!food.brand) return []
+  // Strip the brand to derive a generic search term. Reuse the existing
+  // helper that already handles size/quantity/pack-count stripping.
+  const generic = stripNameForGenericSearch(food.name, food.brand)
+  if (!generic || generic.length < 2) return []
+
+  const candidates = await searchFoods(generic, 12)
+  // Find the first non-branded match — prefer USDA generic foods
+  // (foundation/sr_legacy) over ON generic ones, since USDA generally
+  // has richer multi-portion data.
+  const generics = candidates.filter(c =>
+    !c.brand && (c.source === 'usda' || c.source === 'on'),
+  )
+  if (generics.length === 0) return []
+  // Try the top candidates in order — first one with portion data wins.
+  for (const cand of generics.slice(0, 3)) {
+    const sid = cand.fdcId ?? cand.onId ?? cand.libraryId
+    if (!sid) continue
+    const portions = await fetchWorkerPortions(cand.source, String(sid))
+    if (portions.length > 0) return portions
+  }
+  return []
+}
+
 /**
  * Build portion options for a food.
- * Uses stored serving_g / serving_label — no external API calls.
+ *
+ * Strategy (in order):
+ *   1. Fetch worker portions for this food via /portions.
+ *   2. If branded food returned ≤1 portion, also fetch the generic
+ *      equivalent's portions (branded → generic fallback) and merge.
+ *   3. Format + rank the worker portions by relevance.
+ *   4. Interleave with base units (g / Oz / Cup) — base units go AFTER
+ *      named portions so the user sees the most-recognisable chips first.
+ *   5. If everything above produces nothing useful, fall back to the
+ *      hardcoded CATEGORY_PORTIONS list (egg sizes, bread slices, etc.)
+ *      that ships in the bundle.
+ *
+ * The function is async because (1) and (2) hit the network. Callers
+ * should already be handling a loading state on the picker.
  */
-export function getFoodPortions(food: FoodItem): FoodPortionsResult {
-  const base: PortionOption[] = [
-    { id: 'g',   label: 'grams',  gramWeight: 1       },
-    { id: 'oz',  label: 'ounces', gramWeight: 28.3495 },
-    { id: 'cup', label: 'cups',   gramWeight: 240     },
-  ]
+export async function getFoodPortions(food: FoodItem): Promise<FoodPortionsResult> {
+  const sourceId = food.fdcId ?? food.onId ?? food.libraryId
+  let workerPortions: WorkerPortionRow[] = []
 
-  const srvG    = food.servingGrams && food.servingGrams > 0 ? food.servingGrams : 100
-  const srvChip: PortionOption = { id: 'srv', label: `Serving (${Math.round(srvG)}g)`, gramWeight: srvG }
+  if (sourceId && (food.source === 'usda' || food.source === 'on')) {
+    workerPortions = await fetchWorkerPortions(food.source, String(sourceId))
+  }
 
-  // Category chips (egg sizes, bread slices, etc.)
-  const cat = CATEGORY_PORTIONS[detectCategory(food.name) ?? ''] ?? []
+  // Branded → generic fallback (decision #2 from the May 22 2026 spec).
+  // Trigger when a branded food has only its single package serving
+  // (≤1 portion), look up the generic equivalent's portions.
+  if (food.brand && workerPortions.length <= 1) {
+    const fallback = await fetchGenericFallbackPortions(food)
+    if (fallback.length > 0) {
+      // Merge — generic portions appended. They'll get sorted into place
+      // by scorePortion, but mark them with a high seq_num offset so the
+      // branded food's own serving (if any) still leads.
+      const offset = (workerPortions[0]?.seq_num ?? 0) + 1000
+      const offsetted = fallback.map(p => ({ ...p, seq_num: (p.seq_num ?? 0) + offset }))
+      workerPortions = [...workerPortions, ...offsetted]
+    }
+  }
 
-  // Synthesise a named unit chip from the stored serving label if available
-  let labelChip: PortionOption[] = []
-  if (cat.length === 0 && food.servingGrams && food.servingGrams > 0 && food.servingLabel) {
+  // Format + rank + dedupe near-duplicates by gram weight (within 1g).
+  let named: PortionOption[] = []
+  if (workerPortions.length > 0) {
+    const ranked = [...workerPortions].sort((a, b) => scorePortion(a) - scorePortion(b))
+    const seenGrams = new Set<number>()
+    for (const p of ranked) {
+      const roundedG = Math.round(p.gram_weight)
+      if (seenGrams.has(roundedG)) continue
+      seenGrams.add(roundedG)
+      named.push({
+        id:         `wp-${p.id}`,
+        label:      formatPortionLabel(p),
+        gramWeight: Math.round(p.gram_weight * 10) / 10,
+      })
+    }
+  }
+
+  // CATEGORY_PORTIONS fallback when worker had nothing.
+  if (named.length === 0) {
+    const cat = CATEGORY_PORTIONS[detectCategory(food.name) ?? ''] ?? []
+    if (cat.length > 0) named = [...cat]
+  }
+
+  // Synthesise a chip from the stored serving label as a last resort
+  // (covers the case where the food has no portions in D1 yet — e.g.
+  // a freshly-added myrx food with just its serving_g + serving_label).
+  if (named.length === 0 && food.servingGrams && food.servingGrams > 0 && food.servingLabel) {
     const match = food.servingLabel.match(/^([\d./]+)\s+(.+)$/)
     if (match) {
-      const qty   = parseFloat(match[1]) || 1
-      const unit  = match[2].trim()
-      const label = normalizeUnitLabel(unit)
+      const qty      = parseFloat(match[1]) || 1
+      const unit     = match[2].trim()
+      const label    = normalizeUnitLabel(unit)
       const perUnitG = food.servingGrams / qty
       if (!BASE_UNIT_LABELS.has(label) && perUnitG > 0) {
         const display = label !== 'Serving'
           ? label
           : unit.charAt(0).toUpperCase() + unit.slice(1)
-        labelChip = [{ id: 'lib-srv', label: display, gramWeight: Math.round(perUnitG * 10) / 10 }]
+        named = [{ id: 'lib-srv', label: display, gramWeight: Math.round(perUnitG * 10) / 10 }]
       }
     }
   }
 
-  const portions = [...base, srvChip, ...(cat.length > 0 ? cat : labelChip)]
+  // Always ALSO show the food's default serving chip (e.g. "Serving (50g)")
+  // when we have a server-stored serving_g — gives users a quick "one full
+  // serving as labeled on the package" tap.
+  const srvG = food.servingGrams && food.servingGrams > 0 ? food.servingGrams : null
+  const srvChip: PortionOption | null = srvG
+    ? { id: 'srv', label: `Serving (${Math.round(srvG)}g)`, gramWeight: srvG }
+    : null
+
+  // Final ordering — interleaved by relevance:
+  //   1. Named portions, sorted by score (most relevant first)
+  //   2. Default serving chip (if any)
+  //   3. Base units (g / Oz / Cup)
+  const portions: PortionOption[] = [
+    ...named,
+    ...(srvChip ? [srvChip] : []),
+    ...BASE_PORTIONS,
+  ]
+
   return { portions, servingsPerContainer: food.servingsPerContainer ?? null }
 }
 

@@ -37,6 +37,7 @@ import {
   wipeUsdaAndOn,
   backfillMyrxAuditColumns,
   rebuildFts,
+  flattenPortions, bulkInsertPortions, wipePortionsUsdaAndOn,
 } from './lib/d1_writer.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -113,6 +114,7 @@ async function main() {
 
   console.log('\nStep 3/10 — Wipe USDA + ON rows (MYRX preserved)')
   await wipeUsdaAndOn()
+  await wipePortionsUsdaAndOn()
   const afterWipe = await statsBySource()
   printStats(afterWipe, 'After wipe')
 
@@ -172,6 +174,15 @@ async function main() {
   if (finalOn.length) {
     console.log('\n  ON push…')
     await bulkInsertRows(finalOn, 'on')
+  }
+
+  // Portions push — flatten each food's .portions[] into food_portions
+  // rows. Always runs after food_library inserts so parent rows exist
+  // (no FK enforced, but the order is cleaner).
+  const allPortions = flattenPortions(dedupedRows)
+  if (allPortions.length) {
+    console.log(`\n  Portions push (${fmt(allPortions.length)} rows)…`)
+    await bulkInsertPortions(allPortions, 'portions')
   }
   console.log(`  ✓ Push complete in ${fmtMs(Date.now() - tPushStart)}`)
 

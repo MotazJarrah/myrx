@@ -156,6 +156,22 @@ function ProgressBar({ status, progress, startedAt, etaBaselineMs }) {
   let pct = null
   if (pages && page) pct = Math.min(100, Math.max(0, (page / pages) * 100))
 
+  // 1 Hz ticker — drives the countdown to actually count down second-by-
+  // second. Without this, the eta useMemo only re-runs when pct / startedAt
+  // / etaBaselineMs change, which means the displayed remaining time only
+  // updates when the 2 s status poll lands — visibly jumping by 2-6 s at
+  // a time. Updating nowMs every 1 s and including it in useMemo deps
+  // makes the baseline component of the eta decrement smoothly.
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    // Only tick while a run is in flight. When the run finishes, the
+    // parent will pass startedAt=null (or status will flip) and we stop
+    // the ticker. Avoids a wasted 1 Hz re-render in the idle state.
+    if (!startedAt) return
+    const id = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [startedAt])
+
   // ETA — two-tier strategy:
   //
   // 1. Baseline estimate from sync_history (median of last 5 successful runs).
@@ -172,7 +188,7 @@ function ProgressBar({ status, progress, startedAt, etaBaselineMs }) {
   // never produces "28h remaining" garbage from a 0.4% data point.
   const eta = useMemo(() => {
     if (!startedAt) return etaBaselineMs ? fmtDuration(etaBaselineMs) : null
-    const elapsed = Date.now() - new Date(startedAt).getTime()
+    const elapsed = nowMs - new Date(startedAt).getTime()
     const baselineRemaining = etaBaselineMs != null
       ? Math.max(0, etaBaselineMs - elapsed)
       : null
@@ -191,7 +207,7 @@ function ProgressBar({ status, progress, startedAt, etaBaselineMs }) {
       ? (linearRemaining * 0.5 + baselineRemaining * 0.5)
       : linearRemaining
     return fmtDuration(blended)
-  }, [pct, startedAt, etaBaselineMs])
+  }, [pct, startedAt, etaBaselineMs, nowMs])
 
   return (
     <div className="space-y-1.5">

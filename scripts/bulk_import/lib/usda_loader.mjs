@@ -15,7 +15,10 @@
  *   1. food.csv          → Map<fdc_id, partial_record> with name + data_type + category_id
  *   2. food_category.csv → resolve category_id → category name on each row
  *   3. branded_food.csv  → enrich branded rows with brand, UPC, serving
- *   4. food_portion.csv  → enrich non-branded rows with serving
+ *   4a. measure_unit.csv → Map<id, name> for portion-unit resolution
+ *   4b. food_portion.csv → collect ALL portions per food into food.portions[]
+ *                          (May 2026: was previously dropped after first match;
+ *                          full list now powers the multi-portion picker)
  *   5. food_nutrient.csv → stream-add macros (kcal, protein, fat, carbs, fiber, sodium)
  *
  * Filter philosophy: NO row-level filters during this pass. Every parseable food.csv
@@ -135,7 +138,7 @@ export async function loadUsda(usdaRoot) {
   console.log(`  Using bundle: ${version}`)
 
   // ── Pass 1: food.csv ────────────────────────────────────────────────────────
-  console.log('  Pass 1/5 — food.csv (master list)…')
+  console.log('  Pass 1/6 — food.csv (master list)…')
   const foods = new Map()  // fdc_id → record
   let skipped_no_name = 0
 
@@ -175,7 +178,7 @@ export async function loadUsda(usdaRoot) {
   console.log(`    → ${foods.size.toLocaleString()} foods loaded · ${skipped_no_name.toLocaleString()} skipped (no name)`)
 
   // ── Pass 2: food_category.csv ──────────────────────────────────────────────
-  console.log('  Pass 2/5 — food_category.csv (resolve category names)…')
+  console.log('  Pass 2/6 — food_category.csv (resolve category names)…')
   const categories = new Map()  // id → description
   await streamCsv(path.join(folder, 'food_category.csv'), row => {
     if (row.id && row.description) categories.set(row.id, row.description.trim())
@@ -189,7 +192,7 @@ export async function loadUsda(usdaRoot) {
   console.log(`    → ${categories.size.toLocaleString()} categories resolved`)
 
   // ── Pass 3: branded_food.csv ───────────────────────────────────────────────
-  console.log('  Pass 3/5 — branded_food.csv (brand, UPC, serving for branded)…')
+  console.log('  Pass 3/6 — branded_food.csv (brand, UPC, serving for branded)…')
   let brandedEnriched = 0
   await streamCsv(path.join(folder, 'branded_food.csv'), row => {
     const food = foods.get(row.fdc_id)
@@ -213,21 +216,79 @@ export async function loadUsda(usdaRoot) {
   console.log(`    → ${brandedEnriched.toLocaleString()} branded rows enriched`)
 
   // ── Pass 4: food_portion.csv ───────────────────────────────────────────────
-  console.log('  Pass 4/5 — food_portion.csv (serving for non-branded)…')
-  let portionEnriched = 0
+  //
+  // Pre-step: load measure_unit.csv so we can resolve the measure_unit_id FK
+  // to its human-readable name (e.g. id 1059 → "large"). USDA uses 9999 as
+  // the sentinel for "no standard unit" — in that case the portion's label
+  // is in `portion_description` instead.
+  console.log('  Pass 4a/6 — measure_unit.csv (resolve unit names)…')
+  const measureUnits = new Map()  // id → name
+  await streamCsv(path.join(folder, 'measure_unit.csv'), row => {
+    if (row.id && row.name) measureUnits.set(row.id, row.name.trim())
+  })
+  console.log(`    → ${measureUnits.size.toLocaleString()} measure units resolved`)
+
+  console.log('  Pass 4b/6 — food_portion.csv (multi-portion + default serving)…')
+  let portionRowsProcessed = 0
+  let foodsWithPortions    = 0
   await streamCsv(path.join(folder, 'food_portion.csv'), row => {
     const food = foods.get(row.fdc_id)
     if (!food) return
-    if (food.serving_g != null) return  // branded already set it
 
-    food.serving_g     = num(row.gram_weight)
-    food.serving_label = (row.portion_description || row.modifier || '').trim() || null
-    portionEnriched++
+    const grams = num(row.gram_weight)
+    if (grams == null || grams <= 0) return  // unusable
+
+    // Resolve measure unit. USDA uses "9999" as the sentinel for
+    // "no standard unit" — in that case the label is free-text in
+    // portion_description, and we leave measure_unit null.
+    const muId   = row.measure_unit_id?.trim()
+    const muName = (muId && muId !== '9999') ? (measureUnits.get(muId) ?? null) : null
+
+    const portion = {
+      seq_num:        row.seq_num ? parseInt(row.seq_num, 10) : null,
+      amount:         num(row.amount),
+      measure_unit:   muName,
+      modifier:       row.modifier?.trim() || null,
+      portion_desc:   row.portion_description?.trim() || null,
+      gram_weight:    grams,
+    }
+
+    if (!food.portions) {
+      food.portions = []
+      foodsWithPortions++
+    }
+    food.portions.push(portion)
+
+    // Also seed the food_library default serving from the FIRST portion
+    // (preserves the previous one-portion behaviour for the food_library
+    // row itself; the food_portions table gets the full list).
+    if (food.serving_g == null) {
+      food.serving_g     = grams
+      food.serving_label = (row.portion_description || row.modifier || muName || '').trim() || null
+    }
+    portionRowsProcessed++
   })
-  console.log(`    → ${portionEnriched.toLocaleString()} non-branded portion rows applied`)
+  console.log(`    → ${portionRowsProcessed.toLocaleString()} portion rows across ${foodsWithPortions.toLocaleString()} foods`)
+
+  // ── Pass 4c: branded foods → synthesise a portions[] entry ─────────────────
+  // Branded rows got serving_g + serving_label from Pass 3 (branded_food.csv)
+  // but no food_portion.csv entry, so they have no portions[]. Push one so
+  // the new food_portions table has an entry for them too — keeps the worker's
+  // /portions endpoint consistent across branded and generic foods.
+  for (const food of foods.values()) {
+    if (food.portions || food.serving_g == null) continue
+    food.portions = [{
+      seq_num:      1,
+      amount:       1,
+      measure_unit: null,
+      modifier:     null,
+      portion_desc: food.serving_label,
+      gram_weight:  food.serving_g,
+    }]
+  }
 
   // ── Pass 5: food_nutrient.csv (the big one) ────────────────────────────────
-  console.log('  Pass 5/5 — food_nutrient.csv (kcal / macros — this is the slow pass)…')
+  console.log('  Pass 5/6 — food_nutrient.csv (kcal / macros — this is the slow pass)…')
   let nutrientRowsProcessed = 0
   let nutrientRowsApplied   = 0
   await streamCsv(path.join(folder, 'food_nutrient.csv'), row => {

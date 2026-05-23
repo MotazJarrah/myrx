@@ -173,6 +173,24 @@ export async function loadOn(onRoot) {
       serving_label = String(serving.description).trim() || null
     }
 
+    // Build portions[] for the food_portions table. ON's `serving` JSON
+    // typically carries only ONE portion variant per food (branded foods
+    // are usually packaged with a single nutrition serving). We seed
+    // portions[] with that single entry; the branded → generic fallback
+    // in mobile fills in additional variants by querying the matching
+    // USDA generic equivalent.
+    let portions = null
+    if (serving_g != null && serving_g > 0) {
+      portions = [{
+        seq_num:      1,
+        amount:       common?.quantity ?? 1,
+        measure_unit: common?.unit ?? null,
+        modifier:     null,
+        portion_desc: serving_label,
+        gram_weight:  serving_g,
+      }]
+    }
+
     rows.push({
       source:          'on',
       source_id:       row.id,
@@ -194,6 +212,7 @@ export async function loadOn(onRoot) {
       last_synced_at:  now,
       source_version:  version,
       food_category:   onCategory,
+      portions,
     })
   })
 
