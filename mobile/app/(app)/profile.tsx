@@ -72,6 +72,15 @@ import {
   disconnect    as polarDisconnect,
   type ConnectionStatus as PolarStatus,
 } from '../../src/lib/integrations/polar'
+import {
+  availability    as samsungAvailability,
+  requestConnect  as samsungRequestConnect,
+  getStatus       as samsungGetStatus,
+  disconnect      as samsungDisconnect,
+  syncRecent      as samsungSyncRecent,
+  type Availability      as SamsungAvailability,
+  type ConnectionStatus  as SamsungConnectionStatus,
+} from '../../src/lib/integrations/samsungHealth'
 import { colors, alpha, palette } from '../../src/theme'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2009,6 +2018,21 @@ function ConnectTab() {
   const [polarBusy,    setPolarBusy]    = useState<null | 'connect' | 'disconnect'>(null)
   const [polarMessage, setPolarMessage] = useState<string | null>(null)
 
+  // ── Samsung Health state ───────────────────────────────────────────────
+  // Native Android SDK (NOT OAuth). The Samsung Health app on the device
+  // brokers the consent dialog; this app calls the SDK directly. See
+  // mobile/src/lib/integrations/samsungHealth.ts + the Kotlin module at
+  // android/app/src/main/java/com/myrx/app/samsung/SamsungHealthModule.kt.
+  const [samsungAvail,   setSamsungAvail]   = useState<SamsungAvailability>({ available: false, reason: 'loading' })
+  const [samsungStatus,  setSamsungStatus]  = useState<SamsungConnectionStatus>({
+    connected: false,
+    permissions: { heartRate: false, steps: false, exercise: false, sleep: false, bodyComposition: false },
+    connectedAt: null,
+    lastSyncedAt: null,
+  })
+  const [samsungBusy,    setSamsungBusy]    = useState<null | 'connect' | 'sync' | 'disconnect'>(null)
+  const [samsungMessage, setSamsungMessage] = useState<string | null>(null)
+
   // Hydrate availability + permission state on mount. Re-runs after any
   // state change that could affect "is this currently usable" (connect /
   // disconnect / sync).
@@ -2133,6 +2157,96 @@ function ConnectTab() {
     }
   }
 
+  // ── Samsung Health handlers ────────────────────────────────────────────
+
+  const refreshSamsungState = useCallback(async () => {
+    const [a, s] = await Promise.all([samsungAvailability(), samsungGetStatus()])
+    setSamsungAvail(a)
+    setSamsungStatus(s)
+  }, [])
+  useEffect(() => { refreshSamsungState() }, [refreshSamsungState])
+
+  async function handleSamsungConnect() {
+    if (samsungBusy) return
+    setSamsungBusy('connect')
+    setSamsungMessage(null)
+    try {
+      const result = await samsungRequestConnect()
+      if (result.status === 'ok') {
+        await refreshSamsungState()
+        const grantedNames = Object.entries(result.granted)
+          .filter(([, v]) => v)
+          .map(([k]) => k)
+        setSamsungMessage(`Connected. Granted: ${grantedNames.join(', ') || 'none'}.`)
+      } else if (result.status === 'cancelled') {
+        setSamsungMessage('Cancelled — tap Connect again whenever you’re ready.')
+      } else {
+        setSamsungMessage(`Couldn’t connect (${result.reason}). Try again or check Samsung Health is installed.`)
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setSamsungMessage(`Couldn’t connect — ${msg.slice(0, 100)}`)
+    } finally {
+      setSamsungBusy(null)
+    }
+  }
+
+  async function handleSamsungSync() {
+    if (samsungBusy) return
+    setSamsungBusy('sync')
+    setSamsungMessage(null)
+    try {
+      const summary = await samsungSyncRecent(7)
+      await refreshSamsungState()
+      if (summary.errors.length > 0) {
+        setSamsungMessage(
+          `Synced with warnings: ${summary.hrSamples} HR samples, ${summary.stepSamples} step intervals, ${summary.workouts} workouts. Issues: ${summary.errors.slice(0, 2).join('; ')}`,
+        )
+      } else {
+        setSamsungMessage(
+          `Synced ${summary.hrSamples} HR samples, ${summary.stepSamples} step intervals, and ${summary.workouts} workout${summary.workouts === 1 ? '' : 's'} (last 7 days).`,
+        )
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setSamsungMessage(`Sync failed — ${msg.slice(0, 100)}`)
+    } finally {
+      setSamsungBusy(null)
+    }
+  }
+
+  async function handleSamsungDisconnect() {
+    if (samsungBusy) return
+    setSamsungBusy('disconnect')
+    setSamsungMessage(null)
+    try {
+      const result = await samsungDisconnect()
+      await refreshSamsungState()
+      if (result.status === 'ok') {
+        setSamsungMessage('Disconnected. To fully revoke, open Samsung Health → Settings → Connected services.')
+      } else {
+        setSamsungMessage(`Disconnect failed (${result.reason}).`)
+      }
+    } finally {
+      setSamsungBusy(null)
+    }
+  }
+
+  // Sub-text under the Samsung Health row.
+  let samsungSubText: string
+  if (Platform.OS !== 'android') {
+    samsungSubText = 'Android only — Apple HealthKit support coming for iOS.'
+  } else if (!samsungAvail.available) {
+    samsungSubText = samsungAvail.reason === 'loading'
+      ? 'Checking Samsung Health availability…'
+      : 'Install Samsung Health from the Play Store to connect Galaxy Watch / Ring / Fit.'
+  } else if (!samsungStatus.connected) {
+    samsungSubText = 'Galaxy Watch · Ring · Fit · phone-tracked steps. Heart rate, workouts, sleep.'
+  } else {
+    const lastFmt = formatLastSync(samsungStatus.lastSyncedAt)
+    samsungSubText = lastFmt ? `Connected · last synced ${lastFmt}` : 'Connected · no sync yet — tap Sync now'
+  }
+
   // Sub-text under the Polar Flow row — mirrors Health Connect's pattern.
   const polarSubText = polarStatus.connected
     ? (polarStatus.connectedAt
@@ -2231,6 +2345,67 @@ function ConnectTab() {
         {hcMessage ? (
           <View style={s.connectMessageWrap}>
             <Text style={s.connectMessageText}>{hcMessage}</Text>
+          </View>
+        ) : null}
+      </AnimateRise>
+
+      {/* Samsung Health — native Android SDK (no OAuth). Galaxy Watch / Ring
+          / Fit data flows through the Samsung Health app on the device, which
+          this app reads via local IPC. See
+          mobile/src/lib/integrations/samsungHealth.ts. */}
+      <AnimateRise delay={25} style={s.cardNoPad}>
+        <View style={s.connectRow}>
+          <View style={s.connectIconWrap}>
+            <Watch size={20} color={samsungStatus.connected ? colors.primary : colors.mutedForeground} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.connectName}>Samsung Health</Text>
+            <Text style={s.connectBlurb} numberOfLines={2}>{samsungSubText}</Text>
+          </View>
+          {!samsungAvail.available ? (
+            <View style={s.connectStatusPill}>
+              <Text style={s.connectStatusText}>
+                {samsungAvail.reason === 'loading' ? 'Checking…' : 'Unavailable'}
+              </Text>
+            </View>
+          ) : !samsungStatus.connected ? (
+            <Pressable
+              onPress={handleSamsungConnect}
+              disabled={samsungBusy !== null}
+              style={[s.connectActionBtn, samsungBusy !== null ? { opacity: 0.5 } : null]}
+            >
+              {samsungBusy === 'connect'
+                ? <ActivityIndicator size="small" color={colors.primaryForeground} />
+                : <Text style={s.connectActionBtnText}>Connect</Text>}
+            </Pressable>
+          ) : (
+            <View style={s.connectActionRow}>
+              <Pressable
+                onPress={handleSamsungSync}
+                disabled={samsungBusy !== null}
+                style={[s.connectActionBtn, samsungBusy !== null ? { opacity: 0.5 } : null]}
+              >
+                {samsungBusy === 'sync'
+                  ? <ActivityIndicator size="small" color={colors.primaryForeground} />
+                  : <Text style={s.connectActionBtnText}>Sync now</Text>}
+              </Pressable>
+            </View>
+          )}
+        </View>
+        {samsungStatus.connected ? (
+          <Pressable
+            onPress={handleSamsungDisconnect}
+            disabled={samsungBusy !== null}
+            style={s.connectSecondaryRow}
+          >
+            <Text style={s.connectSecondaryText}>
+              {samsungBusy === 'disconnect' ? 'Disconnecting…' : 'Disconnect'}
+            </Text>
+          </Pressable>
+        ) : null}
+        {samsungMessage ? (
+          <View style={s.connectMessageWrap}>
+            <Text style={s.connectMessageText}>{samsungMessage}</Text>
           </View>
         ) : null}
       </AnimateRise>

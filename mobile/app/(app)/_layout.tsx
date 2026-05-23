@@ -19,7 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Slot, Link, Redirect, usePathname, router } from 'expo-router'
 import {
-  LayoutDashboard, Dumbbell, Activity, Flower2, Weight, Flame, History as HistoryIcon,
+  LayoutDashboard, Dumbbell, Activity, Flower2, Weight, Flame, Heart, History as HistoryIcon,
   LogOut, Lightbulb, MessageCircle,
 } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
@@ -30,14 +30,19 @@ import { BiometricLockGate } from '../../src/components/BiometricLockGate'
 import { colors, alpha, palette } from '../../src/theme'
 import { isProfileComplete } from '../../src/lib/profile'
 import { shellScrollRef } from '../../src/lib/shellScroll'
+import { ChartTooltipProvider } from '../../src/lib/chartTooltipScope'
 
 // ── Nav config — mirrors `links` array in Navbar.jsx ─────────────────────────
+// Heart sits right after Bodyweight so the "recovery / body state" metrics
+// cluster together visually (weight → resting HR are conceptually related —
+// both daily readiness signals).
 const NAV_LINKS = [
   { href: '/(app)/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
   { href: '/(app)/strength',   label: 'Strength',   icon: Dumbbell        },
   { href: '/(app)/cardio',     label: 'Cardio',     icon: Activity        },
   { href: '/(app)/mobility',   label: 'Mobility',   icon: Flower2         },
   { href: '/(app)/bodyweight', label: 'Bodyweight', icon: Weight          },
+  { href: '/(app)/heart',      label: 'Heart',      icon: Heart           },
   { href: '/(app)/calories',   label: 'Calories',   icon: Flame           },
   { href: '/(app)/history',    label: 'History',    icon: HistoryIcon     },
 ] as const
@@ -241,7 +246,14 @@ export default function AppShellLayout() {
             // gestures instead of the parent stealing them.
             nestedScrollEnabled
           >
-            <Slot />
+            {/* Wraps every page in a global "tap anywhere to dismiss pinned
+                chart tooltips" scope. Charts (LineChart, HrRangeChart)
+                register their dismiss handlers via useRegisterChartDismiss
+                and call markChartTouch() on press-in so their own taps
+                don't unpin the tooltip they just pinned. */}
+            <ChartTooltipProvider>
+              <Slot />
+            </ChartTooltipProvider>
           </ScrollView>
 
           <BottomNav activePath={pathname} />

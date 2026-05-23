@@ -297,17 +297,17 @@ Paste each platform's response below as it comes in.
 
 ### Samsung Health SDK
 - Submission date: **2026-05-18**
-- Status: **PENDING** (Samsung said ~3 days to respond — faster than the 1-2 wk doc estimate)
+- Status: **APPROVED 2026-05-20 05:08 AM** (~36 hours after the 2026-05-18 04:27 PM submission — much faster than Samsung's "~3 days" estimate and the public-doc "1-2 weeks")
 - Business Account: **Northern Princess LLC** (created 2026-05-18 during the application; LLC, US, 1-10 employees, business industries Fitness & Sports + Health Monitoring, type B2B + B2C, est. global revenue $0)
 - App registered: **MyRX** (package `com.myrx.app`, projected launch 18 Nov 2026)
 - Debug SHA-256 submitted: `FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C` (production SHA-256 to be added once we have a release keystore for Play Store)
 - Read data types granted: Heart rate, Exercise with location, Sleep, Steps, Activity summary, Body composition, User profile
 - Write data types: none (read-only)
 - Attachments uploaded: Data Flow Diagram (`docs/integrations/samsung-data-flow.pdf`), UX Screenshots (4 JPGs from `photos/`)
-- Outbound contact email: `motaz.jarrah@hotmail.com` (Samsung Account email, immutable). Approval notification expected to that inbox.
-- App ID (assigned by Samsung): `[FILL IN]`
-- Client Key: `[FILL IN]`
-- Approval notes:
+- Outbound contact email: `motaz.jarrah@hotmail.com` (Samsung Account email, immutable).
+- **No "App ID" or "Client Key" credentials issued.** The Samsung Health Data SDK does NOT use OAuth — Samsung verifies the calling app by package name + signing-key SHA-256 (both already registered). Earlier `[FILL IN]` placeholders for these fields were leftover from when we mistakenly assumed Samsung used OAuth. There is nothing to embed in the app config beyond what's already there.
+- AAR file to download: `samsung-health-data-api-1.1.0.aar` (v1.1.0, released 2026-03-12) from https://developer.samsung.com/health/data → "Download SDK". Place at `mobile/android/app/libs/`. License forbids redistribution so it's gitignored.
+- Build wiring: see `mobile/plugins/withSamsungHealth.js` (Expo config plugin), `mobile/android/app/src/main/java/com/myrx/app/samsung/` (native module), `mobile/src/lib/integrations/samsungHealth.ts` (JS service).
 
 ### Garmin Health API
 - Submission date: `[DATE]`

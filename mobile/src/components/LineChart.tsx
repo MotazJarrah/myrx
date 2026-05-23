@@ -15,10 +15,11 @@
  * value chip; tap again on empty space to dismiss.
  */
 
-import { useState, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { View, Text, Pressable, StyleSheet, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native'
 import Svg, { Path, Line as SvgLine, Circle, Text as SvgText } from 'react-native-svg'
 import { colors, palette, fonts } from '../theme'
+import { useChartTooltipScope, useRegisterChartDismiss } from '../lib/chartTooltipScope'
 
 interface ChartPoint {
   ts: string  // ISO timestamp
@@ -159,6 +160,14 @@ export default function LineChart({
   const [width,    setWidth]     = useState(0)
   const [activeIx, setActiveIx]  = useState<number | null>(null)
 
+  // Register with the global chart-tooltip scope so a tap anywhere on the
+  // surrounding page (other cards, header, scroll) dismisses this chart's
+  // pinned tooltip. markChartTouch in onPressIn prevents the scope from
+  // unpinning the tooltip the chart just pinned.
+  const dismiss = useCallback(() => setActiveIx(null), [])
+  useRegisterChartDismiss(dismiss)
+  const { markChartTouch } = useChartTooltipScope()
+
   function onLayout(e: LayoutChangeEvent) {
     setWidth(e.nativeEvent.layout.width)
   }
@@ -205,6 +214,7 @@ export default function LineChart({
 
   // ── Touch handling: nearest point by x distance ─────────────────────────
   function onPressIn(e: GestureResponderEvent) {
+    markChartTouch()
     const x = e.nativeEvent.locationX
     let bestIx = 0
     let bestDist = Infinity
@@ -228,6 +238,9 @@ export default function LineChart({
     return { left, top, dt, tipW, tipH }
   })() : null
 
+  // Tap-anywhere-outside dismiss is handled globally by the
+  // ChartTooltipProvider at the (app)/_layout level — no local outer
+  // responder needed. Tap-same-point-to-deselect logic stays in onPressIn.
   return (
     <View>
       <View style={{ height }} onLayout={onLayout}>

@@ -728,7 +728,15 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
                     bottom: kbHeight + insets.bottom,
                   },
                 ]
-              : s.sheet,
+              : [
+                  s.sheet,
+                  // Lift the sheet above the Android gesture-nav bar
+                  // (back/home/recents). Without this, the sheet's
+                  // input bar / action buttons render BEHIND the OS
+                  // buttons because the Modal is statusBarTranslucent
+                  // and extends edge-to-edge through the system bars.
+                  { marginBottom: insets.bottom },
+                ],
             // translateY follows the user's finger during the
             // header swipe-to-close drag, then either continues
             // off-screen (commit) or snaps back (cancel).

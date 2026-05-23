@@ -12,6 +12,7 @@
  */
 
 import { useEffect, type ReactNode } from 'react'
+import type { GestureResponderEvent } from 'react-native'
 import Animated, {
   useSharedValue, useAnimatedStyle, withDelay, withTiming, Easing,
 } from 'react-native-reanimated'
@@ -20,12 +21,19 @@ interface Props {
   children: ReactNode
   delay?: number
   style?: any
+  /**
+   * Optional non-intercepting touch listeners. Forwarded to the underlying
+   * Animated.View. Used by the Heart page to dismiss the chart's pinned
+   * tooltip when the user taps any other card on the page.
+   */
+  onTouchStart?: (e: GestureResponderEvent) => void
+  onTouchEnd?:   (e: GestureResponderEvent) => void
 }
 
 // cubic-bezier(0.16, 1, 0.3, 1) — keep the curve identical to the web
 const RISE_EASING = Easing.bezier(0.16, 1, 0.3, 1)
 
-export default function AnimateRise({ children, delay = 0, style }: Props) {
+export default function AnimateRise({ children, delay = 0, style, onTouchStart, onTouchEnd }: Props) {
   const opacity = useSharedValue(0)
   const ty      = useSharedValue(8)
 
@@ -39,5 +47,13 @@ export default function AnimateRise({ children, delay = 0, style }: Props) {
     transform: [{ translateY: ty.value }],
   }))
 
-  return <Animated.View style={[animStyle, style]}>{children}</Animated.View>
+  return (
+    <Animated.View
+      style={[animStyle, style]}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
+      {children}
+    </Animated.View>
+  )
 }
