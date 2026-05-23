@@ -37,7 +37,17 @@ function TickerDigit({ digit, position }) {
     const el = innerRef.current
     if (!el) return
 
-    const from = prevIdx.current ?? 0 // start from top of column on first run
+    // On first mount (prevIdx still null), force `from` to be DIFFERENT from
+    // the target so every digit always animates regardless of its value.
+    // Before: `prevIdx.current ?? 0` meant a digit whose targetIdx happened
+    // to be 0 (forward column → digit 0; reverse column → digit 9) skipped
+    // the animation entirely, because from === targetIdx triggered the
+    // early return below. That manifested as e.g. the tenth digit of a
+    // "X.9 km/h" speed display not rolling on page open.
+    const isFirstMount = prevIdx.current === null
+    const from = isFirstMount
+      ? (targetIdx === 0 ? 9 : 0)
+      : prevIdx.current
     prevIdx.current = targetIdx
 
     // Cancel any in-flight WAAPI animation; lock the element at the start pos

@@ -848,7 +848,15 @@ export default function FoodLogDrawer({
         calories, protein_g: protein, fat_g: fat, carbs_g: carbs,
       })
       .select().single()
-    if (error || !data) return
+    if (error || !data) {
+      // Surface the error instead of silently returning. Mirrors the
+      // mobile Alert fix from May 22 2026 — previously a save failure
+      // (RLS rejection, schema mismatch, etc.) produced a "did nothing"
+      // symptom that was confusing to debug.
+      console.error('[FoodLogDrawer] handleAdd insert failed:', error)
+      window.alert(`Couldn't save: ${error?.message ?? 'Unknown error inserting food entry.'}`)
+      return
+    }
     setEntries(prev => [...prev, data])
     loadHabitFoods()
     setView('log')
@@ -860,7 +868,11 @@ export default function FoodLogDrawer({
   async function handleEditSave({ portion_label, portion_qty, portion_g, calories, protein, fat, carbs }) {
     const updates = { meal_slot: activeMealSlot, portion_label, portion_qty, portion_g, calories, protein_g: protein, fat_g: fat, carbs_g: carbs }
     const { error } = await supabase.from('food_logs').update(updates).eq('id', editingItem.id).eq('user_id', userId)
-    if (error) return
+    if (error) {
+      console.error('[FoodLogDrawer] handleEditSave update failed:', error)
+      window.alert(`Couldn't save changes: ${error?.message ?? 'Unknown error updating food entry.'}`)
+      return
+    }
     setEntries(prev => prev.map(e => e.id === editingItem.id ? { ...e, ...updates } : e))
     setEditingItem(null)
     setView('log')

@@ -3,6 +3,7 @@ import { Route, Switch, Redirect, useLocation } from 'wouter'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ViewModeProvider, useViewMode } from './contexts/ViewModeContext'
+import { ChartTooltipProvider } from './lib/chartTooltipScope'
 import AppShell from './components/Navbar'
 import CompleteProfile from './components/CompleteProfile'
 import CookieBanner from './components/CookieBanner'
@@ -16,6 +17,7 @@ const Dashboard       = lazy(() => import('./pages/Dashboard'))
 const Strength        = lazy(() => import('./pages/Strength'))
 const Cardio          = lazy(() => import('./pages/Cardio'))
 const Bodyweight      = lazy(() => import('./pages/Bodyweight'))
+const Heart           = lazy(() => import('./pages/Heart'))
 const Calories        = lazy(() => import('./pages/Calories'))
 const History         = lazy(() => import('./pages/History'))
 const EditProfile     = lazy(() => import('./pages/EditProfile'))
@@ -77,6 +79,7 @@ function EndUserRoutes({ isAdmin, onSwitchToAdminView }) {
           <Route path="/strength"                    component={Strength} />
           <Route path="/cardio"                      component={Cardio} />
           <Route path="/bodyweight"                  component={Bodyweight} />
+          <Route path="/heart"                       component={Heart} />
           <Route path="/calories"                    component={Calories} />
           <Route path="/history"                     component={History} />
           <Route path="/profile"                     component={EditProfile} />
@@ -246,8 +249,15 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <ViewModeProvider>
-          <AppRoutes />
-          <CookieBanner />
+          {/* ChartTooltipProvider — global tap-anywhere-to-dismiss for
+              chart tooltips. Charts (HrRangeChart, LineChart, etc.)
+              register via useRegisterChartDismiss; this provider listens
+              for document-level clicks and unpins everything that wasn't
+              a chart's own click. See web/src/lib/chartTooltipScope.jsx. */}
+          <ChartTooltipProvider>
+            <AppRoutes />
+            <CookieBanner />
+          </ChartTooltipProvider>
         </ViewModeProvider>
       </AuthProvider>
     </ThemeProvider>

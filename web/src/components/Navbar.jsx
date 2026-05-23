@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import {
   Dumbbell, Activity, Weight, Flame, History,
   LayoutDashboard, LogOut, Flower2, ShieldCheck,
-  MessageCircle, Lightbulb,
+  MessageCircle, Lightbulb, Heart,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import ChatDrawer from './ChatDrawer'
@@ -17,6 +17,7 @@ const links = [
   { href: '/cardio',    label: 'Cardio',    icon: Activity },
   { href: '/mobility',  label: 'Mobility',  icon: Flower2 },
   { href: '/bodyweight',label: 'Bodyweight',icon: Weight },
+  { href: '/heart',     label: 'Heart',     icon: Heart },
   { href: '/calories',  label: 'Calories',  icon: Flame },
   { href: '/history',   label: 'History',   icon: History },
 ]

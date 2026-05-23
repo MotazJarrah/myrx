@@ -1911,13 +1911,33 @@ A React + Vite SPA (web, frozen) + React Native / Expo app (mobile, active) — 
 
 There is a **React Native (Expo) port of this app** at `C:\Users\motaz\OneDrive\Desktop\MyRX\mobile\`. It targets the same Supabase backend.
 
-**⚠ Web is FROZEN for design + feature parity (locked 2026-05-12).** Mobile is now the active surface for ALL new feature work and design iteration. The web app continues to run against the same Supabase backend and read the same data, but it does NOT receive design or feature parity updates anymore. Touch the web codebase ONLY when:
-  - A database schema change would cause the web app to crash or render broken output (in which case apply the minimum compatibility patch — read the new column tolerantly, fall back gracefully when fields are missing).
-  - The user explicitly asks for a web change.
+**⚠ Web freeze REVERSED (unlocked 2026-05-23).** Mobile and web are now BOTH active surfaces. Every mobile feature that landed between 2026-05-12 and 2026-05-23 (multi-portion picker, self-coached plan wizard + edit chips + goal-reached, food drawer fixes, Heart page, Samsung Health integration UI, all new Strength detail variants like weighted-standard adp zones / BW consolidated tier pager / assisted machine / carry zones / iso milestones / sled work consolidated, all new Cardio coaching surfaces like PaceDetail E/T/V zones / AirBike / Rucking / StairMill / Swimming consolidated / Concept2 erg watts, etc.) is now WEB DEBT that must be ported back to the web app.
 
-This reverses the previous "web is source of truth, mobile mirrors" rule. Going forward, **mobile leads.** When the two diverge, mobile is correct and web is allowed to lag. Don't mirror new mobile work back to web unless the user asks. Don't run `npm run build` or `wrangler pages deploy` after a mobile-side change — only deploy web when you've actually changed web files.
+Reason for the reversal: the user QAs their own client experience on web (via the "Client View" link in the admin portal that drops them into their own end-user account at `myrxfit.com/dashboard`, `/strength`, `/cardio`, etc.). With web frozen, that experience visibly diverged from mobile and the user surfaced it as a regression — *"none of the mobile updates we did were reflected to the admin client view, we need to reflect all updates code by code, line by line"*.
 
-The historical 1:1 mirroring rule still applies to the legacy surfaces that were locked before 2026-05-12 (every variant in `StrengthDetail.jsx`, Bodyweight consolidated, Iso, Assisted, Carry up through the last shared deploy). Those surfaces are paired and should stay that way until the user explicitly retires the web side.
+We briefly tried an architectural shortcut (React Native Web aliasing to share components between mobile and web) on 2026-05-23 — it surfaced enough runtime issues (global undefined, React duplicate-instance, useContext throws) that we reverted the whole experiment. The committed plan is the boring path: **port every mobile-only surface to a native web React equivalent**. Different stacks, same UX, same data, same locked rules.
+
+Going forward:
+  - Mobile and web BOTH receive every design/feature change.
+  - The 1:1 mirroring rule from the pre-2026-05-12 era is back in force.
+  - When making a non-trivial change, audit BOTH surfaces (`web/src/` AND `mobile/`) before declaring done.
+  - The cross-platform consistency rule (further down) is the active gating rule. The web freeze paragraph is dead.
+
+Mobile-to-web translation reference (used during the May 23 2026 catch-up port; keep around for ongoing parity work):
+
+| Mobile | → Web equivalent |
+|---|---|
+| `<View>` `<Text>` `<Pressable>` | `<div>` `<span>` `<button>` |
+| `StyleSheet` + `theme.ts` | Tailwind classes (already aligned by convention — colors + spacing + radius scale match) |
+| Reanimated 4 worklets | CSS `@keyframes` + `transition` properties |
+| `react-native-svg` | Plain SVG (same element API) |
+| `PhantomWheel` (gesture wheel input) | HTML number input + ▼/▲ steppers, or scroll-snap on touch |
+| `lucide-react-native` | `lucide-react` (already in web deps) |
+| `expo-router` `<Link>` | Wouter `<Link>` |
+| `useSafeAreaInsets()` | Not needed on web (no status bar / gesture nav) |
+| `useFocusEffect` | `useEffect` (web doesn't have tab focus/blur the same way) |
+
+The big design specs (animation Patterns 1-7, all the locked detail-card specs for strength/cardio/etc., tile conventions, info-pill content rule, chart-direction rule, "do not touch finalized surfaces" rule) all apply IDENTICALLY on web. Same colors, same hex values, same spacing scale, same locked behaviour. The translation is mechanical — the design language is shared.
 
 ### Current mobile port status
 

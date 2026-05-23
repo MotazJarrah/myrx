@@ -168,46 +168,225 @@ export async function searchFoods(query, limit = 60) {
 }
 
 // ── Portions ───────────────────────────────────────────────────────────────────
+//
+// May 23 2026 port from mobile/src/lib/foodLibrary.ts. The mobile rewrite
+// added:
+//   1. Multi-portion fetch via the worker's GET /portions?source=&source_id=
+//   2. Relevance ranking (single-unit size descriptors win over cup/tbsp/tsp)
+//   3. Label cleanup (strip dimensional parentheticals + title-case)
+//   4. Branded → generic fallback (when branded ≤1 portion, search generic
+//      equivalent and merge that food's portions in)
+//   5. CATEGORY_PORTIONS fallback when worker returns empty
+//
+// getFoodPortions is now ASYNC. Callers must await it.
+
+const BASE_PORTIONS = [
+  { id: 'g',   label: 'grams',  gramWeight: 1       },
+  { id: 'oz',  label: 'ounces', gramWeight: 28.3495 },
+  { id: 'cup', label: 'cups',   gramWeight: 240     },
+]
+
+/** Strip dimensional parentheticals like "(7" to 7-7/8" long)" from a
+ *  modifier — keeps content-bearing parentheticals like "(4.86 large eggs)". */
+function stripDimensionalParens(s) {
+  if (!s) return s
+  const stripped = s.replace(
+    /\s*\([^)]*(?:["']|inch|cm|mm|long|wide|tall|short|less than|greater than)[^)]*\)/gi,
+    '',
+  ).trim()
+  return stripped.length >= 2 ? stripped : s
+}
+
+/** Title-case every word in a portion label so "1 medium" → "1 Medium". */
+function titleCaseLabel(s) {
+  return s.replace(/(^|[\s,/\-])(\p{L})/gu, (_, sep, c) => sep + c.toUpperCase())
+}
+
+/** Build a human-readable label from a worker portion row. */
+function formatPortionLabel(p) {
+  const cleanMod  = p.modifier      ? stripDimensionalParens(p.modifier)      : null
+  const cleanDesc = p.portion_desc  ? stripDimensionalParens(p.portion_desc)  : null
+
+  if (cleanDesc && cleanDesc.length > 0) {
+    let s = cleanDesc
+    if (cleanMod && !s.toLowerCase().includes(cleanMod.toLowerCase())) {
+      s += `, ${cleanMod}`
+    }
+    return titleCaseLabel(s)
+  }
+
+  const parts = []
+  if (p.amount != null) parts.push(String(p.amount))
+  if (p.measure_unit) {
+    parts.push(p.measure_unit)
+    if (cleanMod) parts.push(`, ${cleanMod}`)
+  } else if (cleanMod) {
+    parts.push(cleanMod)
+  }
+  const joined = parts.join(' ').replace(/\s+,/g, ',').trim()
+  return joined ? titleCaseLabel(joined) : 'Serving'
+}
+
+/** Relevance score for ordering portion chips. Lower = more relevant. */
+function scorePortion(p) {
+  let score = p.seq_num ?? 1000
+
+  const stripParens = s => (s ?? '').replace(/\s*\([^)]*\)/g, ' ').toLowerCase()
+  const combined = `${stripParens(p.portion_desc)} ${(p.measure_unit ?? '').toLowerCase()} ${stripParens(p.modifier)}`
+
+  if      (/\bextra\s+small\b/.test(combined)) score -= 20
+  else if (/\bextra\s+large\b/.test(combined)) score -= 40
+  else if (/\bmedium\b/.test(combined))        score -= 100
+  else if (/\blarge\b/.test(combined))         score -= 80
+  else if (/\bsmall\b/.test(combined))         score -= 60
+  else if (/\bjumbo\b/.test(combined))         score -= 30
+
+  if (p.amount === null || p.amount === 1) score -= 5
+
+  if (/\bcup\b/.test(combined))                          score += 30
+  if (/\btbsp\b|\btablespoon\b/.test(combined))          score += 60
+  if (/\btsp\b|\bteaspoon\b/.test(combined))             score += 80
+  if (/\bnlea\b/.test(combined))                         score += 200
+
+  return score
+}
+
+async function fetchWorkerPortions(source, sourceId) {
+  try {
+    const url = `${FOOD_WORKER_URL}/portions?source=${encodeURIComponent(source)}&source_id=${encodeURIComponent(sourceId)}`
+    const res = await fetch(url)
+    if (!res.ok) return []
+    const data = await res.json()
+    return data ?? []
+  } catch {
+    return []
+  }
+}
+
+/** Branded → generic fallback. */
+async function fetchGenericFallbackPortions(food) {
+  if (!food.brand) return []
+  const generic = stripNameForGenericSearch(food.name, food.brand)
+  if (!generic || generic.length < 2) return []
+
+  const candidates = await searchFoods(generic, 12)
+  const generics = candidates.filter(c =>
+    !c.brand && (c.source === 'usda' || c.source === 'on'),
+  )
+  if (generics.length === 0) return []
+  for (const cand of generics.slice(0, 3)) {
+    const sid = cand.fdcId ?? cand.onId ?? cand.libraryId
+    if (!sid) continue
+    const portions = await fetchWorkerPortions(cand.source, String(sid))
+    if (portions.length > 0) return portions
+  }
+  return []
+}
 
 /**
- * Build portion options for a food.
- * Uses stored serving_g / serving_label — no external API calls.
+ * Build portion options for a food. Now async — fetches multi-portion
+ * data from the worker, ranks by relevance, interleaves base units,
+ * falls back to CATEGORY_PORTIONS + the stored serving label.
  */
-export function getFoodPortions(food) {
-  const base = [
-    { id: 'g',   label: 'grams',  gramWeight: 1       },
-    { id: 'oz',  label: 'ounces', gramWeight: 28.3495 },
-    { id: 'cup', label: 'cups',   gramWeight: 240     },
-  ]
+export async function getFoodPortions(food) {
+  const sourceId = food.fdcId ?? food.onId ?? food.libraryId
+  let workerPortions = []
 
-  const srvG    = food.servingGrams > 0 ? food.servingGrams : 100
-  const srvChip = { id: 'srv', label: `Serving (${Math.round(srvG)}g)`, gramWeight: srvG }
+  if (sourceId && (food.source === 'usda' || food.source === 'on')) {
+    workerPortions = await fetchWorkerPortions(food.source, String(sourceId))
+  }
 
-  // Category chips (egg sizes, bread slices, etc.)
-  const cat = CATEGORY_PORTIONS[detectCategory(food.name)] ?? []
+  // Branded → generic fallback.
+  if (food.brand && workerPortions.length <= 1) {
+    const fallback = await fetchGenericFallbackPortions(food)
+    if (fallback.length > 0) {
+      const offset = (workerPortions[0]?.seq_num ?? 0) + 1000
+      const offsetted = fallback.map(p => ({ ...p, seq_num: (p.seq_num ?? 0) + offset }))
+      workerPortions = [...workerPortions, ...offsetted]
+    }
+  }
 
-  // Synthesise a named unit chip from the stored serving label if available
-  // e.g. servingLabel="1 Tbsp", servingGrams=14 → Tbsp chip at 14g
-  let labelChip = []
-  if (cat.length === 0 && food.servingGrams > 0 && food.servingLabel) {
-    // Try to parse "qty unit" from servingLabel
+  let named = []
+  if (workerPortions.length > 0) {
+    const ranked = [...workerPortions].sort((a, b) => scorePortion(a) - scorePortion(b))
+    const seenGrams = new Set()
+    for (const p of ranked) {
+      const roundedG = Math.round(p.gram_weight)
+      if (seenGrams.has(roundedG)) continue
+      seenGrams.add(roundedG)
+      named.push({
+        id:         `wp-${p.id}`,
+        label:      formatPortionLabel(p),
+        gramWeight: Math.round(p.gram_weight * 10) / 10,
+      })
+    }
+  }
+
+  if (named.length === 0) {
+    const cat = CATEGORY_PORTIONS[detectCategory(food.name)] ?? []
+    if (cat.length > 0) named = [...cat]
+  }
+
+  if (named.length === 0 && food.servingGrams && food.servingGrams > 0 && food.servingLabel) {
     const match = food.servingLabel.match(/^([\d./]+)\s+(.+)$/)
     if (match) {
-      const qty   = parseFloat(match[1]) || 1
-      const unit  = match[2].trim()
-      const label = normalizeUnitLabel(unit)
+      const qty      = parseFloat(match[1]) || 1
+      const unit     = match[2].trim()
+      const label    = normalizeUnitLabel(unit)
       const perUnitG = food.servingGrams / qty
       if (!BASE_UNIT_LABELS.has(label) && perUnitG > 0) {
         const display = label !== 'Serving'
           ? label
           : unit.charAt(0).toUpperCase() + unit.slice(1)
-        labelChip = [{ id: 'lib-srv', label: display, gramWeight: Math.round(perUnitG * 10) / 10 }]
+        named = [{ id: 'lib-srv', label: display, gramWeight: Math.round(perUnitG * 10) / 10 }]
       }
     }
   }
 
-  const portions = [...base, srvChip, ...(cat.length > 0 ? cat : labelChip)]
+  const srvG = food.servingGrams && food.servingGrams > 0 ? food.servingGrams : null
+  const srvChip = srvG
+    ? { id: 'srv', label: `Serving (${Math.round(srvG)}g)`, gramWeight: srvG }
+    : null
+
+  const portions = [
+    ...named,
+    ...(srvChip ? [srvChip] : []),
+    ...BASE_PORTIONS,
+  ]
   return { portions, servingsPerContainer: food.servingsPerContainer ?? null }
+}
+
+// ── Generic-search helper (used by branded fallback) ─────────────────────────
+
+/**
+ * Strip a food product name down to a generic search term. Mirror of
+ * mobile's stripNameForGenericSearch (kept here so the branded fallback
+ * runs without needing the mobile module).
+ */
+export function stripNameForGenericSearch(name, brand) {
+  if (!name) return ''
+  let s = name.toLowerCase().trim()
+
+  if (brand) {
+    const b = brand.toLowerCase().trim()
+    if (b.length >= 2) {
+      const escaped = b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      s = s.replace(new RegExp(`\\b${escaped}\\b`, 'g'), ' ')
+    }
+  }
+
+  s = s.replace(/\([^)]*\)/g, ' ')
+  s = s.replace(/\[[^\]]*\]/g, ' ')
+  s = s.replace(/\b\d+(\.\d+)?\s*(fl\s*oz|fluid\s*ounces?|oz|ounces?|lb|lbs|pounds?|g|grams?|kg|kilograms?|ml|milliliters?|l|liters?|litres?)\b/gi, ' ')
+  s = s.replace(/\b\d+\s*(ct|count|pack|pk|pieces?|servings?|bars?|cans?|bottles?|pouches?)\b/gi, ' ')
+  s = s.replace(/\b\d+(\.\d+)?\b/g, ' ')
+  s = s.replace(/\b(can|cans|bottle|bottles|jar|jars|bag|bags|box|boxes|carton|cartons|pouch|pouches|container|containers|case|cases|tray|trays|tub|tubs|stick|sticks|tube|tubes|wrapper|sleeve|family\s*size|family\s*pack|value\s*pack|jumbo|original|classic|new|improved)\b/gi, ' ')
+  s = s.replace(/[,.\-_/:;'"!?®™©]/g, ' ')
+  s = s.replace(/\s+/g, ' ').trim()
+  if (s.length < 2) {
+    s = name.toLowerCase().replace(/[,.\-_/:;'"!?®™©]/g, ' ').replace(/\s+/g, ' ').trim()
+  }
+  return s
 }
 
 // ── Macros ─────────────────────────────────────────────────────────────────────

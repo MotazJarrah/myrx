@@ -7,11 +7,18 @@ import {
 } from '../lib/calorieFormulas'
 import {
   Flame, Clock, TrendingDown, TrendingUp, Utensils,
-  X, Plus, UtensilsCrossed,
+  X, Plus, UtensilsCrossed, ChevronRight,
 } from 'lucide-react'
 import CalorieStrip from '../components/CalorieStrip'
 import FoodLogDrawer from '../components/FoodLogDrawer'
 import TickerNumber from '../components/TickerNumber'
+import PlanWizardSheet from '../components/PlanWizardSheet'
+import AnimateRise from '../components/AnimateRise'
+import {
+  MACRO_PRESETS, PACE_OPTIONS,
+  macroPresetForPlan, paceForPlan,
+} from '../lib/planPresets'
+// ACTIVITY_FACTORS already imported above from '../lib/calorieFormulas'.
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -238,23 +245,29 @@ function TodayIntakeCard({ entries, dailyTarget, macroTargets, onLogFood }) {
 
 // ── Pending state ─────────────────────────────────────────────────────────────
 
-function PendingView({ isSelfCoached }) {
-  // Web is frozen per the May 12 2026 lock — the plan-setup wizard lives
-  // only on mobile. Self-coached users on web see a notice pointing them
-  // to the mobile app. Admin-coached users see the original "Your plan is
-  // on its way" copy unchanged.
-  if (isSelfCoached) {
+function PendingView({ onSetupPlan }) {
+  // Two modes (May 23 2026 — web port from mobile):
+  //   - Admin-coached (no onSetupPlan): unchanged "Your plan is on its way" copy.
+  //   - Self-coached  (onSetupPlan provided): swap to "Set up your plan" + CTA
+  //     that opens the PlanWizardSheet.
+  if (onSetupPlan) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 space-y-4 text-center">
+      <div className="flex flex-col items-center justify-center py-16 space-y-4 text-center">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/20">
-          <Clock className="h-8 w-8 text-amber-400" />
+          <Flame className="h-8 w-8 text-amber-400" />
         </div>
         <div>
-          <h2 className="text-lg font-semibold">Set up your plan from the mobile app</h2>
+          <h2 className="text-lg font-semibold">Set up your plan</h2>
           <p className="mt-1 text-sm text-muted-foreground max-w-sm">
-            Open MyRX on your phone → Calories → tap "Set up my plan". Your daily targets will appear here once you've finished the wizard.
+            Pick your pace, activity level, and how you eat. Your daily calorie + macro targets are calculated from there.
           </p>
         </div>
+        <button
+          onClick={onSetupPlan}
+          className="rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:opacity-90 transition-opacity"
+        >
+          Set up my plan
+        </button>
       </div>
     )
   }
@@ -288,6 +301,20 @@ export default function Calories() {
   const [stripRefreshKey, setStripRefreshKey] = useState(0)
   const [todayEntries, setTodayEntries] = useState([])     // for TodayIntakeCard
 
+  // ── Plan wizard state (May 23 2026 port from mobile) ─────────────────────
+  const [wizardOpen, setWizardOpen]                 = useState(false)
+  const [wizardStep, setWizardStep]                 = useState('pace')
+  const [wizardSingleScreen, setWizardSingleScreen] = useState(false)
+  const [goalReachedDismissed, setGoalReachedDismissed] = useState(true)
+
+  function openWizard(step = 'pace', single = false) {
+    setWizardStep(step)
+    setWizardSingleScreen(single)
+    setWizardOpen(true)
+  }
+
+  const isSelfCoached = profile?.is_self_coached === true
+
   const TODAY = isoToday()
 
   // Fetch today's food log entries for TodayIntakeCard
@@ -311,6 +338,10 @@ export default function Calories() {
   }
 
   // ── Plan + body data ─────────────────────────────────────────────────────
+  // Refetches when stripRefreshKey bumps (after PlanWizardSheet save, after
+  // goal-reached flip-to-maintenance, after food log insert/delete). That
+  // ensures the freshly-saved plan + macros + per-meal numbers appear
+  // immediately without a page reload.
   useEffect(() => {
     if (!user) return
     supabase
@@ -332,7 +363,8 @@ export default function Calories() {
       .limit(1)
       .maybeSingle()
       .then(({ data }) => { if (data) setLatestBW(data) })
-  }, [user])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, stripRefreshKey])
 
   function setMeals(updater) {
     setMealsState(prev => {
@@ -346,19 +378,78 @@ export default function Calories() {
     })
   }
 
+  // Current weight in kg — sourced from latest bodyweight log if present,
+  // else from profile.current_weight. The wizard + goal-reached banner
+  // need this to derive goal_weight + decide when goal is hit.
+  const currentWeightKg = useMemo(() => {
+    if (latestBW) {
+      return latestBW.unit === 'lb' ? latestBW.weight * 0.453592 : Number(latestBW.weight)
+    }
+    if (profile?.current_weight) {
+      return profile.weight_unit === 'lb'
+        ? profile.current_weight * 0.453592
+        : Number(profile.current_weight)
+    }
+    return null
+  }, [latestBW, profile])
+
   const result = useMemo(() => {
     if (!plan || !profile) return null
-    // Pass latest logged bodyweight so the timeline reflects real progress
-    const currentKgOverride = latestBW
-      ? (latestBW.unit === 'lb' ? latestBW.weight * 0.453592 : Number(latestBW.weight))
-      : null
-    return calcFullPlan(profile, plan, currentKgOverride)
-  }, [plan, profile, latestBW])
+    return calcFullPlan(profile, plan, currentWeightKg)
+  }, [plan, profile, currentWeightKg])
 
   const perMeal = useMemo(() => {
     if (!result || meals == null) return null
     return calcPerMeal(result.macros, result.dailyTarget, meals)
   }, [result, meals])
+
+  // ── Goal-reached banner (May 23 2026 port from mobile) ───────────────────
+  // Shown to self-coached users when latest bodyweight crosses derived
+  // goal_weight_kg. Tap "Switch to maintenance" to flip plan; tap "Keep
+  // going" to dismiss. Per-(user, goal) localStorage flag prevents re-fire.
+  const goalReachedKey = useMemo(() => {
+    if (!user || !plan?.goal_weight_kg) return null
+    return `myrx_goal_reached_${user.id}_${plan.goal_weight_kg}`
+  }, [user, plan?.goal_weight_kg])
+
+  useEffect(() => {
+    if (!goalReachedKey) { setGoalReachedDismissed(true); return }
+    setGoalReachedDismissed(localStorage.getItem(goalReachedKey) === '1')
+  }, [goalReachedKey])
+
+  const goalReached = useMemo(() => {
+    if (!isSelfCoached || !plan || !currentWeightKg) return false
+    if (plan.energy_balance_pct == null || Math.abs(plan.energy_balance_pct) < 0.005) return false
+    const goal  = plan.goal_weight_kg
+    const start = plan.starting_weight_kg
+    if (goal == null || start == null) return false
+    if (goal < start) return currentWeightKg <= goal
+    if (goal > start) return currentWeightKg >= goal
+    return false
+  }, [isSelfCoached, plan, currentWeightKg])
+
+  async function handleSwitchToMaintenance() {
+    if (!user || !plan || !currentWeightKg) return
+    const newGoal = Math.round(currentWeightKg * 10) / 10
+    const { error: err } = await supabase
+      .from('calorie_plans')
+      .update({
+        energy_balance_pct: 0,
+        goal_weight_kg:     newGoal,
+        starting_weight_kg: newGoal,
+        updated_at:         new Date().toISOString(),
+      })
+      .eq('user_id', user.id)
+    if (err) { console.error('[Calories] flip-to-maintenance failed:', err); return }
+    if (goalReachedKey) localStorage.setItem(goalReachedKey, '1')
+    setGoalReachedDismissed(true)
+    setStripRefreshKey(k => k + 1)
+  }
+
+  function handleDismissGoalReached() {
+    if (goalReachedKey) localStorage.setItem(goalReachedKey, '1')
+    setGoalReachedDismissed(true)
+  }
 
   if (loading) {
     return (
@@ -374,7 +465,9 @@ export default function Calories() {
           <p className="mt-0.5 text-sm text-muted-foreground">Your daily calorie and macro targets.</p>
         </div>
         <div className="rounded-xl border border-border bg-card">
-          <PendingView isSelfCoached={profile?.is_self_coached === true} />
+          <PendingView
+            onSetupPlan={isSelfCoached ? () => openWizard('pace', false) : undefined}
+          />
         </div>
       </div>
     )
@@ -423,6 +516,36 @@ export default function Calories() {
         selectedIso={drawerDay}
         refreshKey={stripRefreshKey}
       />
+
+      {/* Goal-reached celebration — self-coached users only.
+          Shown once per (user, goal) until dismissed via localStorage flag. */}
+      {goalReached && !goalReachedDismissed && (
+        <AnimateRise>
+          <div className="flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+            <span className="text-3xl leading-8" aria-hidden>🎉</span>
+            <div className="flex-1 space-y-1">
+              <p className="text-sm font-bold text-emerald-400">You hit your goal weight</p>
+              <p className="text-xs text-muted-foreground leading-snug">
+                Nice work. Switch to maintenance to hold your new weight, or keep going.
+              </p>
+              <div className="flex gap-2 pt-1.5">
+                <button
+                  onClick={handleSwitchToMaintenance}
+                  className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black hover:opacity-90 transition-opacity"
+                >
+                  Switch to maintenance
+                </button>
+                <button
+                  onClick={handleDismissGoalReached}
+                  className="rounded-md border border-emerald-400/30 px-3 py-1.5 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                >
+                  Keep going
+                </button>
+              </div>
+            </div>
+          </div>
+        </AnimateRise>
+      )}
 
       {/* Daily target hero */}
       <div className="animate-rise rounded-2xl border border-border bg-card p-6 text-center space-y-3">
@@ -595,6 +718,47 @@ export default function Calories() {
           />
         </div>
       </div>
+
+      {/* My plan — 3 tappable rows that re-open the wizard at one
+          specific step. Self-coached users only; admin-coached users
+          don't see this block because they can't edit their own plan
+          (admin writes it from the AdminUserPlan tab). */}
+      {isSelfCoached && plan && (
+        <AnimateRise delay={70}>
+          <div className="rounded-2xl border border-border bg-card p-5 space-y-2">
+            <h2 className="text-sm font-semibold mb-2">My plan</h2>
+            {(() => {
+              const paceKey  = paceForPlan(plan.energy_balance_pct ?? null)
+              const paceText = paceKey ? PACE_OPTIONS[paceKey].label : 'Custom'
+              const macroKey = macroPresetForPlan(plan.protein_level ?? null, plan.fat_level ?? null)
+              const macroText = macroKey ? MACRO_PRESETS[macroKey].label : 'Custom'
+              const activityText = plan.activity_factor != null
+                ? (ACTIVITY_FACTORS[plan.activity_factor]?.label ?? '—')
+                : '—'
+              const rows = [
+                { k: 'pace',     label: 'Pace',     value: paceText },
+                { k: 'activity', label: 'Activity', value: activityText },
+                { k: 'macros',   label: 'Macros',   value: macroText },
+              ]
+              return rows.map((row, i) => (
+                <button
+                  key={row.k}
+                  onClick={() => openWizard(row.k, true)}
+                  className={`flex w-full items-center justify-between py-2.5 hover:bg-accent/30 rounded-md px-2 -mx-2 transition-colors ${
+                    i > 0 ? 'border-t border-border/50' : ''
+                  }`}
+                >
+                  <span className="text-sm text-muted-foreground">{row.label}</span>
+                  <span className="flex items-center gap-1">
+                    <span className="text-sm font-semibold text-foreground">{row.value}</span>
+                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+                  </span>
+                </button>
+              ))
+            })()}
+          </div>
+        </AnimateRise>
+      )}
 
       {/* Per-meal breakdown */}
       <div className="animate-rise rounded-2xl border border-border bg-card p-5 space-y-4" style={{ animationDelay: '80ms' }}>
@@ -880,6 +1044,22 @@ export default function Calories() {
           }}
         />
       )}
+
+      {/* Plan wizard — opens from PendingView CTA or from the My-plan chips. */}
+      <PlanWizardSheet
+        isOpen={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        userId={user?.id ?? null}
+        currentWeightKg={currentWeightKg}
+        existingPlan={plan}
+        startStep={wizardStep}
+        singleScreen={wizardSingleScreen}
+        onSaved={() => {
+          // Force a re-fetch of plan + macros so the just-saved values
+          // appear immediately without a page reload.
+          setStripRefreshKey(k => k + 1)
+        }}
+      />
     </div>
   )
 }
