@@ -32,6 +32,13 @@ interface Profile {
   avatar_url: string | null
   role: string | null
   is_superuser: boolean
+  // When true, the user OWNS their calorie plan and gates the in-app
+  // PlanWizardSheet + edit-chip UI (see mobile/src/components/PlanWizardSheet.tsx).
+  // When false, the admin owns the plan via the web admin portal and the
+  // user lands on today's read-only PendingView ("Your plan is on its way").
+  // Default is true (new signups). Admin sets it to false on AdminUserDetail
+  // when taking a client on for coaching. See supabase/migrations/20260523_self_coached_plan.sql.
+  is_self_coached: boolean
   phone: string | null
   // Set by the verify-phone-otp Edge Function on a successful Twilio
   // Verify check. Profile screen reads this to render a ✓ Verified vs

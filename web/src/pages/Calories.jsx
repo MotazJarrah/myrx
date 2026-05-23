@@ -238,7 +238,26 @@ function TodayIntakeCard({ entries, dailyTarget, macroTargets, onLogFood }) {
 
 // ── Pending state ─────────────────────────────────────────────────────────────
 
-function PendingView() {
+function PendingView({ isSelfCoached }) {
+  // Web is frozen per the May 12 2026 lock — the plan-setup wizard lives
+  // only on mobile. Self-coached users on web see a notice pointing them
+  // to the mobile app. Admin-coached users see the original "Your plan is
+  // on its way" copy unchanged.
+  if (isSelfCoached) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 space-y-4 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/20">
+          <Clock className="h-8 w-8 text-amber-400" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold">Set up your plan from the mobile app</h2>
+          <p className="mt-1 text-sm text-muted-foreground max-w-sm">
+            Open MyRX on your phone → Calories → tap "Set up my plan". Your daily targets will appear here once you've finished the wizard.
+          </p>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col items-center justify-center py-20 space-y-4 text-center">
       <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/20">
@@ -355,7 +374,7 @@ export default function Calories() {
           <p className="mt-0.5 text-sm text-muted-foreground">Your daily calorie and macro targets.</p>
         </div>
         <div className="rounded-xl border border-border bg-card">
-          <PendingView />
+          <PendingView isSelfCoached={profile?.is_self_coached === true} />
         </div>
       </div>
     )

@@ -427,12 +427,28 @@ function PortionPicker({
   initialSelectedId?:   string | null
   initialQty?:          string | null
 }) {
-  const [selectedId, setSelectedId] = useState<string>(initialSelectedId ?? 'g')
+  const [selectedId, setSelectedId] = useState<string>(initialSelectedId ?? portions[0]?.id ?? 'g')
   const [qty,        setQty]        = useState<string>(initialQty ?? '')
   const [adding,     setAdding]     = useState(false)
 
   useEffect(() => { if (initialSelectedId) setSelectedId(initialSelectedId) }, [initialSelectedId])
   useEffect(() => { if (initialQty)        setQty(String(initialQty))      }, [initialQty])
+
+  // When the portion list changes (rich worker data lands after the async
+  // fetch resolves), auto-snap the selection to portions[0].id — the
+  // highest-relevance portion (e.g. "1 Medium" for a banana). Skip when
+  // the user has manually picked a chip OR the parent passed an explicit
+  // initial selection (edit mode). Without this the default sticks on
+  // 'grams' from the BASE_PORTIONS first-mount fallback.
+  const userPickedRef = useRef(false)
+  useEffect(() => {
+    if (userPickedRef.current) return
+    if (initialSelectedId)     return
+    if (portions.length === 0) return
+    if (selectedId === portions[0].id) return
+    setSelectedId(portions[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [portions, initialSelectedId])
 
   const selectedPortion = portions.find(p => p.id === selectedId) ?? portions[0]
   const qtyNum  = parseFloat(qty)
@@ -538,7 +554,7 @@ function PortionPicker({
               {portions.map(p => (
                 <Pressable
                   key={p.id}
-                  onPress={() => setSelectedId(p.id)}
+                  onPress={() => { userPickedRef.current = true; setSelectedId(p.id) }}
                   style={[s.unitChip, selectedId === p.id && s.unitChipActive]}
                 >
                   <Text style={[s.unitChipText, selectedId === p.id && s.unitChipTextActive]}>

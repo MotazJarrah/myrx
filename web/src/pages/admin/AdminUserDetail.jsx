@@ -4,7 +4,7 @@ import TickerNumber from '../../components/TickerNumber'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { toKg } from '../../lib/calorieFormulas'
-import { ArrowLeft, User, Check, Info, MessageCircle } from 'lucide-react'
+import { ArrowLeft, User, Check, Info, MessageCircle, UserCog } from 'lucide-react'
 
 import AdminUserProfile   from './tabs/AdminUserProfile'
 import AdminUserActivity  from './tabs/AdminUserActivity'
@@ -183,6 +183,7 @@ export default function AdminUserDetail() {
   const [loading,        setLoading]        = useState(true)
   const [snapshotKey,    setSnapshotKey]    = useState(0)
   const [togglingChat,   setTogglingChat]   = useState(false)
+  const [togglingCoach,  setTogglingCoach]  = useState(false)
   const [activeTab,    setActiveTab]    = useState(() => {
     const params   = new URLSearchParams(window.location.search)
     const urlTab   = params.get('tab')
@@ -292,6 +293,43 @@ export default function AdminUserDetail() {
     setTogglingChat(false)
   }
 
+  // Toggle is_self_coached (May 23 2026).
+  //   true  → client owns their own plan via the mobile wizard.
+  //   false → admin owns the plan via the AdminUserPlan tab.
+  //
+  // Conflict rule (per design Q4): when flipping from self-coached → admin-
+  // coached, the existing calorie_plans row is DELETED so the user lands
+  // back at the "Your plan is on its way" placeholder, giving the admin a
+  // clean slate to author a new plan.
+  //
+  // No prompt before delete — the toggle's label + immediate state flip is
+  // the confirmation gesture. If the admin needs to undo, they flip back
+  // to true and the user re-runs the wizard.
+  async function toggleSelfCoached() {
+    if (togglingCoach) return
+    setTogglingCoach(true)
+    const newVal = !profile.is_self_coached
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_self_coached: newVal })
+      .eq('id', id)
+    if (error) {
+      setTogglingCoach(false)
+      return
+    }
+    // If we're TAKING THIS CLIENT ON (newVal=false), drop their existing
+    // self-set plan so the admin starts from a clean slate.
+    if (newVal === false && existingPlan) {
+      const { error: delErr } = await supabase
+        .from('calorie_plans')
+        .delete()
+        .eq('user_id', id)
+      if (!delErr) setExistingPlan(null)
+    }
+    setProfile(prev => ({ ...prev, is_self_coached: newVal }))
+    setTogglingCoach(false)
+  }
+
   const hasSnapshot = snapshot && (
     snapshot.strengthPR || snapshot.cardioPR || snapshot.mobilityPR ||
     snapshot.calStreak > 0 || snapshot.weighIns > 0 ||
@@ -364,6 +402,26 @@ export default function AdminUserDetail() {
             >
               <MessageCircle className="h-3 w-3" />
               {profile.chat_enabled ? 'Chat on' : 'Chat off'}
+            </button>
+
+            {/* Self-coached toggle (May 23 2026) — when ON the client owns
+                their plan via the mobile wizard; when OFF the admin owns it
+                via the AdminUserPlan tab. Flipping ON → OFF deletes the
+                existing plan (see toggleSelfCoached above for full rule). */}
+            <button
+              onClick={toggleSelfCoached}
+              disabled={togglingCoach}
+              title={profile.is_self_coached
+                ? 'Take this client on for coaching (deletes their self-set plan)'
+                : 'Hand the plan back to the client'}
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                profile.is_self_coached
+                  ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+              } ${togglingCoach ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <UserCog className="h-3 w-3" />
+              {profile.is_self_coached ? 'Self-coached' : 'I coach this client'}
             </button>
           </div>
         </div>

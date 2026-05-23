@@ -43,10 +43,17 @@ export const PROTEIN_LEVELS: Record<number, { label: string; gPerKg: number }> =
   3: { label: 'High',   gPerKg: 2.4 },
 }
 
+// Fat levels: levels 1-3 are the admin panel's original Low/Medium/High
+// scale. Levels 4-5 were added May 23 2026 to support the Keto diet
+// preset in the self-coached wizard (Keto needs ~70% of calories from
+// fat). Admin slider still picks from 1-3; presets reach 4-5 via
+// MACRO_PRESETS in mobile/src/lib/planPresets.ts.
 export const FAT_LEVELS: Record<number, { label: string; pctOfCals: number }> = {
-  1: { label: 'Low',    pctOfCals: 0.10 },
-  2: { label: 'Medium', pctOfCals: 0.20 },
-  3: { label: 'High',   pctOfCals: 0.30 },
+  1: { label: 'Low',       pctOfCals: 0.10 },
+  2: { label: 'Medium',    pctOfCals: 0.20 },
+  3: { label: 'High',      pctOfCals: 0.30 },
+  4: { label: 'Very High', pctOfCals: 0.50 },
+  5: { label: 'Keto',      pctOfCals: 0.70 },
 }
 
 // ── Unit helpers ──────────────────────────────────────────────────────────────

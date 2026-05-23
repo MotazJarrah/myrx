@@ -249,48 +249,103 @@ const BASE_PORTIONS: PortionOption[] = [
   { id: 'cup', label: 'cups',   gramWeight: 240     },
 ]
 
+/**
+ * Strip dimensional parentheticals from a USDA modifier — e.g.
+ * `"medium (7\" to 7-7/8\" long)"` → `"medium"`,
+ * `"extra small (less than 6\" long)"` → `"extra small"`.
+ *
+ * We DO NOT strip parentheticals that carry content (no measurement
+ * keywords), so `"cup (4.86 large eggs)"` survives intact — the
+ * "4.86 large eggs" info actually helps the user.
+ */
+function stripDimensionalParens(s: string): string {
+  if (!s) return s
+  const stripped = s.replace(
+    /\s*\([^)]*(?:["']|inch|cm|mm|long|wide|tall|short|less than|greater than)[^)]*\)/gi,
+    '',
+  ).trim()
+  return stripped.length >= 2 ? stripped : s
+}
+
+/** Title-case every word in a portion label so "1 medium" → "1 Medium". */
+function titleCaseLabel(s: string): string {
+  return s.replace(/(^|[\s,/\-])(\p{L})/gu, (_, sep, c) => sep + c.toUpperCase())
+}
+
 /** Build a human-readable label from a worker portion row. */
 function formatPortionLabel(p: WorkerPortionRow): string {
-  // If USDA provided a free-text portion_description (typical when the
-  // measure_unit_id was "9999"/no-standard-unit), use it as-is — those
-  // descriptions are already human-friendly ("1 medium", "1 leaf, large").
-  if (p.portion_desc && p.portion_desc.trim().length > 0) {
-    let s = p.portion_desc.trim()
-    if (p.modifier && !s.toLowerCase().includes(p.modifier.toLowerCase())) {
-      s += `, ${p.modifier}`
+  const cleanMod  = p.modifier      ? stripDimensionalParens(p.modifier)      : null
+  const cleanDesc = p.portion_desc  ? stripDimensionalParens(p.portion_desc)  : null
+
+  // 1. Free-text portion_description takes precedence when present.
+  if (cleanDesc && cleanDesc.length > 0) {
+    let s = cleanDesc
+    if (cleanMod && !s.toLowerCase().includes(cleanMod.toLowerCase())) {
+      s += `, ${cleanMod}`
     }
-    return s
+    return titleCaseLabel(s)
   }
-  // Otherwise assemble from amount + measure_unit (+ modifier).
-  const amt  = p.amount != null && p.amount !== 1 ? `${p.amount} ` : ''
-  const unit = p.measure_unit ?? ''
-  const mod  = p.modifier ? `, ${p.modifier}` : ''
-  const joined = `${amt}${unit}${mod}`.trim()
-  return joined || 'Serving'
+
+  // 2. Build "{amount} {unit}{, modifier}" or "{amount} {modifier}" if
+  //    measure_unit is null (USDA 9999 sentinel). Always include the
+  //    amount prefix even when it's 1 — "1 Large" reads better than
+  //    just "Large" in a portion picker.
+  const parts: string[] = []
+  if (p.amount != null) parts.push(String(p.amount))
+
+  if (p.measure_unit) {
+    parts.push(p.measure_unit)
+    if (cleanMod) parts.push(`, ${cleanMod}`)
+  } else if (cleanMod) {
+    parts.push(cleanMod)
+  }
+
+  // Join with spaces, then squash any "  ," from the comma-prefixed
+  // modifier so we don't get double spaces.
+  const joined = parts.join(' ').replace(/\s+,/g, ',').trim()
+  return joined ? titleCaseLabel(joined) : 'Serving'
 }
 
 /**
  * Relevance score for ordering portion chips. Lower = more relevant.
- * Combines USDA's seq_num with a few heuristics so the most "natural"
- * portion (1 large, 1 medium, 1 leaf) ranks above regulatory NLEA
- * servings and rare units (tsp, tbsp).
+ *
+ * Strategy: size-descriptor portions (1 medium, 1 large, 1 small) win
+ * over volume measures (1 cup, 1 tbsp) for any food that has both.
+ * This normalises across foods where USDA's seq_num is inconsistent —
+ * for bananas USDA puts cup variants at seq 1-2 (would otherwise win);
+ * for eggs USDA already puts "large" at seq 1.
+ *
+ * Size keywords are checked against a parenthetical-stripped modifier
+ * so `"cup (4.86 large eggs)"` doesn't accidentally match the "large"
+ * size boost.
  */
 function scorePortion(p: WorkerPortionRow): number {
   let score = p.seq_num ?? 1000
 
-  // Single-unit ("1 X") portions are usually the most intuitive choice.
-  // Boost them strongly so they win against multi-unit cup variants.
-  if ((p.amount === null || p.amount === 1) && p.measure_unit) {
-    score -= 50
-  }
+  // Build a normalised string for keyword detection — strip parentheticals
+  // first so "cup (4.86 large eggs)" doesn't trigger the "large" boost.
+  const stripParens = (s: string | null) => (s ?? '').replace(/\s*\([^)]*\)/g, ' ').toLowerCase()
+  const combined = `${stripParens(p.portion_desc)} ${(p.measure_unit ?? '').toLowerCase()} ${stripParens(p.modifier)}`
 
-  const desc = (p.portion_desc ?? '').toLowerCase()
-  const unit = (p.measure_unit ?? '').toLowerCase()
+  // Promotion: size-descriptor portions are the most intuitive.
+  // Order: medium > large > small > extra-large > jumbo > extra-small.
+  // Check compound sizes (extra X) first to avoid double-matching.
+  if      (/\bextra\s+small\b/.test(combined)) score -= 20
+  else if (/\bextra\s+large\b/.test(combined)) score -= 40
+  else if (/\bmedium\b/.test(combined))        score -= 100
+  else if (/\blarge\b/.test(combined))         score -= 80
+  else if (/\bsmall\b/.test(combined))         score -= 60
+  else if (/\bjumbo\b/.test(combined))         score -= 30
 
+  // Single-unit ("1 X") portions edge out multi-unit ones.
+  if (p.amount === null || p.amount === 1) score -= 5
+
+  // Demotion: volume / weight units are less intuitive than size descriptors.
+  if (/\bcup\b/.test(combined))                          score += 30
+  if (/\btbsp\b|\btablespoon\b/.test(combined))          score += 60
+  if (/\btsp\b|\bteaspoon\b/.test(combined))             score += 80
   // NLEA serving = USDA's regulatory serving; rarely what the user wants.
-  if (desc.includes('nlea') || unit.includes('nlea')) score += 200
-  // tsp/tbsp are rare in food logging unless explicitly searched for.
-  if (/^(tsp|teaspoon|tbsp|tablespoon)$/i.test(unit)) score += 100
+  if (/\bnlea\b/.test(combined))                         score += 200
 
   return score
 }

@@ -413,6 +413,46 @@ export default function AdminUserPlan({ profile, existingPlan: initPlan, userId,
 
   const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
 
+  // Self-coached branch (May 23 2026) — when the client owns their own plan
+  // via the mobile wizard, the admin can SEE the plan but cannot edit it
+  // from here. To take over, flip the "Self-coached" toggle on the parent
+  // AdminUserDetail page; that deletes the plan and flips this tab back to
+  // the editable form.
+  if (profile?.is_self_coached) {
+    return (
+      <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5 space-y-3">
+        <div className="flex items-start gap-3">
+          <Info className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold text-blue-400">This client manages their own plan</h2>
+            <p className="text-xs text-muted-foreground">
+              They set up their plan from the mobile app and edit it themselves. To take over and write a plan for them, scroll up and tap the <span className="font-semibold text-foreground">Self-coached</span> toggle next to the chat toggle — that clears their plan and gives you a clean slate.
+            </p>
+          </div>
+        </div>
+        {existingPlan ? (
+          <div className="mt-2 rounded-lg border border-border bg-card p-3 space-y-2">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Their current plan (read-only)</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+              <span className="text-muted-foreground">Activity level</span>
+              <span className="text-foreground">{ACTIVITY_FACTORS[existingPlan.activity_factor]?.label ?? '—'}</span>
+              <span className="text-muted-foreground">Energy balance</span>
+              <span className="text-foreground">{existingPlan.energy_balance_pct != null ? `${Math.round(existingPlan.energy_balance_pct * 100)}%` : '—'}</span>
+              <span className="text-muted-foreground">Protein</span>
+              <span className="text-foreground">{PROTEIN_LEVELS[existingPlan.protein_level]?.label ?? '—'}</span>
+              <span className="text-muted-foreground">Fat</span>
+              <span className="text-foreground">{FAT_LEVELS[existingPlan.fat_level]?.label ?? '—'}</span>
+              <span className="text-muted-foreground">Goal weight</span>
+              <span className="text-foreground">{existingPlan.goal_weight_kg != null ? `${existingPlan.goal_weight_kg} kg` : '—'}</span>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground italic">No plan set up yet — they haven't completed the wizard.</p>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 

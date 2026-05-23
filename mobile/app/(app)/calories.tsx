@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
 import { Link } from 'expo-router'
 import {
@@ -35,6 +36,8 @@ import {
 import CalorieStrip from '../../src/components/CalorieStrip'
 import FoodLogDrawer from '../../src/components/FoodLogDrawer'
 import type { MealSlot } from '../../src/components/FoodLogDrawer'
+import PlanWizardSheet from '../../src/components/PlanWizardSheet'
+import { MACRO_PRESETS, PACE_OPTIONS, macroPresetForPlan, paceForPlan } from '../../src/lib/planPresets'
 import TickerNumber from '../../src/components/TickerNumber'
 import AnimateRise from '../../src/components/AnimateRise'
 import Skeleton from '../../src/components/Skeleton'
@@ -262,8 +265,35 @@ function MacroLegend({ color, label }: { color: string; label: string }) {
 }
 
 // ── PendingView ──────────────────────────────────────────────────────────────
+//
+// Two modes (May 23 2026):
+//   - Admin-coached (`onSetupPlan` not provided): unchanged copy + no CTA.
+//     The user is waiting for their coach to author a plan.
+//   - Self-coached (`onSetupPlan` provided): swap copy to "Set your own
+//     goal" and add a primary CTA that opens the PlanWizardSheet.
+//
+// Same card chrome for both — the empty-state shape is consistent; only
+// the messaging + CTA changes based on who owns the plan.
 
-function PendingView() {
+function PendingView({ onSetupPlan }: { onSetupPlan?: () => void }) {
+  if (onSetupPlan) {
+    return (
+      <View style={s.pendingWrap}>
+        <View style={s.pendingIcon}>
+          <Flame size={32} color={palette.amber[400]} />
+        </View>
+        <View style={{ alignItems: 'center', gap: 4 }}>
+          <Text style={s.pendingTitle}>Set up your plan</Text>
+          <Text style={s.pendingMsg}>
+            Pick your pace, activity level, and how you eat. Your daily calorie + macro targets are calculated from there.
+          </Text>
+        </View>
+        <Pressable style={s.pendingCTA} onPress={onSetupPlan}>
+          <Text style={s.pendingCTAText}>Set up my plan</Text>
+        </Pressable>
+      </View>
+    )
+  }
   return (
     <View style={s.pendingWrap}>
       <View style={s.pendingIcon}>
@@ -291,6 +321,97 @@ export default function Calories() {
 
   const [drawerDay, setDrawerDay]             = useState<string | null>(null)
   const [stripRefreshKey, setStripRefreshKey] = useState(0)
+
+  // Plan wizard state. `wizardStep` controls deep-link into a specific
+  // screen (used by the edit chips); `wizardSingleScreen` makes the
+  // wizard show only that one screen and Save instead of Next. When
+  // null, the wizard is closed.
+  const [wizardOpen, setWizardOpen]                 = useState(false)
+  const [wizardStep, setWizardStep]                 = useState<'pace' | 'activity' | 'macros'>('pace')
+  const [wizardSingleScreen, setWizardSingleScreen] = useState(false)
+
+  function openWizard(step: 'pace' | 'activity' | 'macros' = 'pace', single = false) {
+    setWizardStep(step)
+    setWizardSingleScreen(single)
+    setWizardOpen(true)
+  }
+
+  // Derived: is this user self-coached?
+  const isSelfCoached = profile?.is_self_coached === true
+
+  // Current weight in kg — sourced from latest bodyweight log if present,
+  // else from profile.current_weight (which is stored in profile.weight_unit).
+  // The wizard needs this to derive goal_weight + starting_weight.
+  const currentWeightKg = useMemo<number | null>(() => {
+    if (latestBW) {
+      return latestBW.unit === 'lb' ? latestBW.weight * 0.453592 : Number(latestBW.weight)
+    }
+    if (profile?.current_weight) {
+      return profile.weight_unit === 'lb'
+        ? profile.current_weight * 0.453592
+        : Number(profile.current_weight)
+    }
+    return null
+  }, [latestBW, profile])
+
+  // ── Goal-reached banner ─────────────────────────────────────────────────
+  // Shown to self-coached users when their latest bodyweight crosses the
+  // plan's derived goal_weight_kg. Tap "Switch to maintenance" to flip
+  // energy_balance_pct → 0 and goal_weight_kg → current. Tap dismiss to
+  // hide forever (AsyncStorage flag per user+goal so a re-edit of the
+  // plan back to losing/gaining re-arms the banner cleanly).
+  const [goalReachedDismissed, setGoalReachedDismissed] = useState(true)
+  const goalReachedKey = useMemo(() => {
+    if (!user || !plan?.goal_weight_kg) return null
+    return `myrx_goal_reached_${user.id}_${plan.goal_weight_kg}`
+  }, [user, plan?.goal_weight_kg])
+
+  useEffect(() => {
+    if (!goalReachedKey) { setGoalReachedDismissed(true); return }
+    AsyncStorage.getItem(goalReachedKey).then(v => {
+      setGoalReachedDismissed(v === '1')
+    })
+  }, [goalReachedKey])
+
+  const goalReached = useMemo(() => {
+    if (!isSelfCoached || !plan || !currentWeightKg) return false
+    if (plan.energy_balance_pct == null || Math.abs(plan.energy_balance_pct) < 0.005) return false
+    const goal = plan.goal_weight_kg
+    const start = plan.starting_weight_kg
+    if (goal == null || start == null) return false
+    // Loss: current <= goal. Gain: current >= goal. Direction inferred
+    // from start vs goal, NOT from energy_balance_pct, so a re-edit that
+    // changed direction is handled correctly.
+    if (goal < start) return currentWeightKg <= goal
+    if (goal > start) return currentWeightKg >= goal
+    return false
+  }, [isSelfCoached, plan, currentWeightKg])
+
+  async function handleSwitchToMaintenance() {
+    if (!user || !plan || !currentWeightKg) return
+    const newGoal = Math.round(currentWeightKg * 10) / 10
+    const { error } = await supabase
+      .from('calorie_plans')
+      .update({
+        energy_balance_pct: 0,
+        goal_weight_kg:     newGoal,
+        starting_weight_kg: newGoal,
+        updated_at:         new Date().toISOString(),
+      })
+      .eq('user_id', user.id)
+    if (error) {
+      console.error('[Calories] flip-to-maintenance failed:', error)
+      return
+    }
+    if (goalReachedKey) await AsyncStorage.setItem(goalReachedKey, '1')
+    setGoalReachedDismissed(true)
+    setStripRefreshKey(k => k + 1)
+  }
+
+  async function handleDismissGoalReached() {
+    if (goalReachedKey) await AsyncStorage.setItem(goalReachedKey, '1')
+    setGoalReachedDismissed(true)
+  }
   const [todayEntries, setTodayEntries]       = useState<CalorieFoodEntry[]>([])
   const [logsMap, setLogsMap]                 = useState<Record<string, { calories: number }>>({})
 
@@ -425,7 +546,27 @@ export default function Calories() {
             />
             {!plan && (
               <View style={[s.cardLg, { padding: 0 }]}>
-                <PendingView />
+                <PendingView
+                  onSetupPlan={
+                    // Self-coached users get the CTA. Admin-coached users
+                    // get the unchanged "Your plan is on its way" view
+                    // because their coach (the admin) authors the plan
+                    // from the admin portal.
+                    isSelfCoached
+                      ? () => {
+                          if (!currentWeightKg) {
+                            // The wizard needs a current weight to derive
+                            // goal_weight + starting_weight. If the user
+                            // hasn't logged bodyweight yet, route them
+                            // to the Bodyweight tab.
+                            // TODO: replace with a friendlier inline prompt
+                            //       once the bodyweight onboarding lands.
+                          }
+                          openWizard('pace', false)
+                        }
+                      : undefined
+                  }
+                />
               </View>
             )}
           </>
@@ -458,6 +599,31 @@ export default function Calories() {
 
         {result && plan && (
           <>
+            {/* Goal-reached celebration — self-coached users only,
+                shown once per (user, goal). Tap "Switch" to flip the
+                plan to maintenance; tap X to dismiss without flipping. */}
+            {goalReached && !goalReachedDismissed && (
+              <AnimateRise>
+                <View style={s.goalReachedCard}>
+                  <Text style={s.goalReachedEmoji}>🎉</Text>
+                  <View style={{ flex: 1, gap: 6 }}>
+                    <Text style={s.goalReachedTitle}>You hit your goal weight</Text>
+                    <Text style={s.goalReachedMsg}>
+                      Nice work. Switch to maintenance to hold your new weight, or keep going.
+                    </Text>
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                      <Pressable style={s.goalReachedCTA} onPress={handleSwitchToMaintenance}>
+                        <Text style={s.goalReachedCTAText}>Switch to maintenance</Text>
+                      </Pressable>
+                      <Pressable style={s.goalReachedDismiss} onPress={handleDismissGoalReached}>
+                        <Text style={s.goalReachedDismissText}>Keep going</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </AnimateRise>
+            )}
+
             <AnimateRise>
               <View style={s.heroCard}>
                 <View style={s.heroLabel}>
@@ -574,6 +740,52 @@ export default function Calories() {
               </View>
             </AnimateRise>
 
+            {/* My plan choices — 3 tappable rows that re-open the wizard
+                pointed at one specific step. Self-coached users only;
+                admin-coached users don't see this block because they can't
+                edit their own plan (admin writes it from the web portal). */}
+            {isSelfCoached && plan && (
+              <AnimateRise delay={70}>
+                <View style={s.cardLg}>
+                  <Text style={[s.cardHeading, { marginBottom: 10 }]}>My plan</Text>
+                  {(() => {
+                    const paceKey  = paceForPlan(plan.energy_balance_pct ?? null)
+                    const paceText = paceKey ? PACE_OPTIONS[paceKey].label : 'Custom'
+                    const macroKey = macroPresetForPlan(plan.protein_level ?? null, plan.fat_level ?? null)
+                    const macroText = macroKey ? MACRO_PRESETS[macroKey].label : 'Custom'
+                    const activityText = plan.activity_factor != null
+                      ? (ACTIVITY_FACTORS[plan.activity_factor]?.label ?? '—')
+                      : '—'
+                    const rows: Array<{ k: 'pace' | 'activity' | 'macros'; label: string; value: string }> = [
+                      { k: 'pace',     label: 'Pace',     value: paceText },
+                      { k: 'activity', label: 'Activity', value: activityText },
+                      { k: 'macros',   label: 'Macros',   value: macroText },
+                    ]
+                    return (
+                      <View style={{ gap: 0 }}>
+                        {rows.map((row, i) => (
+                          <Pressable
+                            key={row.k}
+                            onPress={() => openWizard(row.k, true)}
+                            style={[
+                              s.planChipRow,
+                              i > 0 && { borderTopWidth: 1, borderTopColor: alpha(colors.border, 0.50) },
+                            ]}
+                          >
+                            <Text style={s.planChipLabel}>{row.label}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <Text style={s.planChipValue}>{row.value}</Text>
+                              <ChevronRight size={14} color={alpha(colors.mutedForeground, 0.60)} />
+                            </View>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )
+                  })()}
+                </View>
+              </AnimateRise>
+            )}
+
             <AnimateRise delay={80}>
               <View style={s.cardLg}>
                 <View style={s.perMealHeader}>
@@ -670,6 +882,22 @@ export default function Calories() {
           // Refresh AuthContext so the Settings tab picks up the new
           // layout immediately — no app reload needed.
           await refreshProfile()
+        }}
+      />
+
+      <PlanWizardSheet
+        isOpen={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        userId={user?.id ?? null}
+        currentWeightKg={currentWeightKg}
+        existingPlan={plan}
+        startStep={wizardStep}
+        singleScreen={wizardSingleScreen}
+        onSaved={() => {
+          // Bump stripRefreshKey to re-run the page-level Promise.all
+          // load (line ~358) — picks up the new plan rows + recomputes
+          // the daily target hero / macros / per-meal / etc.
+          setStripRefreshKey(k => k + 1)
         }}
       />
     </ScrollView>
@@ -1154,6 +1382,47 @@ const s = StyleSheet.create({
   },
   pendingTitle: { fontSize: 18, fontWeight: '600', color: colors.foreground },
   pendingMsg:   { fontSize: 14, color: colors.mutedForeground, textAlign: 'center', maxWidth: 280, lineHeight: 19 },
+  // Self-coached CTA inside the empty-state PendingView.
+  pendingCTA: {
+    marginTop: 12,
+    paddingHorizontal: 18, paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+  },
+  pendingCTAText: { fontSize: 14, fontWeight: '700', color: colors.primaryForeground },
+
+  // My plan chips — 3 tappable rows (pace / activity / macros) shown to
+  // self-coached users that re-open the PlanWizardSheet at one specific step.
+  planChipRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 12,
+  },
+  planChipLabel: { fontSize: 13, color: colors.mutedForeground },
+  planChipValue: { fontSize: 14, fontWeight: '600', color: colors.foreground },
+
+  // Goal-reached celebration banner — self-coached users only.
+  goalReachedCard: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    padding: 14, marginBottom: 12,
+    borderRadius: 12,
+    backgroundColor: alpha(palette.emerald[500], 0.10),
+    borderWidth: 1, borderColor: alpha(palette.emerald[500], 0.30),
+  },
+  goalReachedEmoji: { fontSize: 28, lineHeight: 32 },
+  goalReachedTitle: { fontSize: 15, fontWeight: '700', color: palette.emerald[400] },
+  goalReachedMsg:   { fontSize: 13, color: colors.mutedForeground, lineHeight: 18 },
+  goalReachedCTA: {
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: palette.emerald[500],
+  },
+  goalReachedCTAText: { fontSize: 12, fontWeight: '700', color: '#000' },
+  goalReachedDismiss: {
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1, borderColor: alpha(palette.emerald[400], 0.30),
+  },
+  goalReachedDismissText: { fontSize: 12, fontWeight: '600', color: palette.emerald[400] },
 
   // Timeline
   timelineHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
