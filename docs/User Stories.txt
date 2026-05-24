@@ -10,3 +10,6 @@
 - add light switch to settings
 - stairmill says per rep, should be interval, check other too
 - add info on what items to scan and what are allowed to scan when an item thats not in the db is scanned
+- create sleep page, plan in claude.md already
+- create hydration page
+- gender consent for none male selections

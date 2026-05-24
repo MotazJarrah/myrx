@@ -59,3 +59,15 @@ opennutrition_foods.tsv
 # Bulk-import intermediate artifacts
 scripts/bulk_import/myrx_backup.json
 scripts/bulk_import/data/
+
+# Body composition silhouette source (Adobe Stock — licensed asset,
+# do NOT commit). Extraction tooling lives at branding/extract_bodycomp.py
+# and outputs to mobile/assets/bodycomp/. The Adobe Stock source PNG +
+# debug preview composites should never enter the repo.
+branding/bfp.jpg
+branding/bodycomp_preview.png
+
+# Versioned copy of the wizard-strings XLSX written when Excel has the
+# canonical file open. Canonical docs/plan_wizard_strings.xlsx is the
+# tracked truth; timestamped variants are throwaway.
+docs/plan_wizard_strings_*.xlsx
