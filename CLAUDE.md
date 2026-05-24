@@ -1933,6 +1933,151 @@ Promote in order of decision energy: training prescription comes first (strength
 
 ---
 
+### Three-tier role hierarchy (LOCKED, May 24 2026 — in-discussion, partial)
+
+The role model is shifting from today's two-tier (admin → end user) to a three-tier system (platform owner → coach → client). Decisions locked so far:
+
+1. **Platform owner is a super-coach.** The platform owner (Motaz) keeps the existing admin portal AND has full visibility on every coach, every coach's clients, and every unlinked end user. The platform owner can personally coach clients without needing a second account — clients can be linked directly to the platform owner just like they can to any other coach. The "Clients" view will consolidate to a single page with sub-views / filters (with-coach / without-coach / by-coach) so the platform owner always sees everything from one place. No two-hat toggle needed.
+
+2. **Coach onboarding is fully open self-signup with a free trial period.** Coaches sign up via their own public flow (separate from client signup), are active immediately, and get a free trial period (length TBD — common SaaS pattern is 14 or 30 days). After the trial they convert to paid subscription. No manual approval gate from the platform owner — quality control will come post-hoc through reviews, refunds, and the ability to suspend bad actors.
+   - **Their clients are free** as long as the coach's subscription is active. Clients are linked to the coach's account so billing follows the coach, not the client. If a coach lapses, their clients fall back to either being unlinked (B2C tier) or to a grace period — TBD.
+
+3. **Open self-signup means we need fast review/suspension tooling on the platform-owner side.** Bad coaches will exist; the platform owner needs to see flags (complaints from clients, payment disputes, terms-of-service violations) and suspend coach accounts quickly. This is part of the coach-portal management work.
+
+4. **Client-to-coach linking is coach-initiated invitation only for v1.** Coach has an "Invite client" button in their portal — enters the client's email or phone (+ optional note), the system generates a signed invite link (carrying the coach's id, expiring in 7-14 days), and the link is delivered via email or SMS. If the link recipient is a new user, the existing signup journey runs and auto-links them to the coach on completion. If the recipient is an existing MyRX user, the link opens an in-app prompt: "Coach [Name] wants to add you to their roster — accept?" Accept sets the client's `coach_id` profile column. Decline drops the invite. Client-initiated discovery (browsing a coach directory) is OUT of v1 scope — it adds significant work (public coach profiles, search, ratings, request inbox, moderation) and isn't needed until the platform has a critical mass of coaches. Coach-side acquisition is the proven path for B2B2C coaching SaaS (Trainerize, TrueCoach, MyPTHub all started this way).
+   - Data model: one new column on `profiles` (`coach_id uuid REFERENCES profiles(id) NULL`) plus an `invites` table tracking pending invites with revocation / history.
+
+5. **Existing clients migrate to unlinked.** Every client currently in the system is implicitly "linked to Motaz the admin" because that's the only role above end-user. In the new world, those clients get migrated to **unlinked** (B2C tier — `coach_id = NULL`). They stay on the app as B2C users; Motaz no longer has the implicit coaching relationship via the admin role. If Motaz wants to keep coaching specific existing clients, he uses the same invite flow as any other coach (he just happens to also be the platform owner). This keeps the post-launch state clean — no client is accidentally "in someone's roster" because of a historical schema decision.
+
+6. **Both sides can unlink unilaterally; data is always retained.** The coach-client link can be broken from either direction at any time. Specifically:
+   - **Client unlinks coach** → app forces the client through a "pick a plan" flow before they can keep using the app. Choices: free tier (limited features) or paid tier (full features without a coach). They can't just go silent; ending the coach relationship is also ending the comp'd access they had under the coach's subscription, so they must consciously pick what comes next.
+   - **Coach unlinks (kicks) client** → coach loses view of that client immediately. Client gets the "pick a plan" flow on their NEXT login (we don't interrupt a mid-session client; let them finish whatever they're doing, then prompt at the natural session boundary).
+   - **Coach's subscription lapses (stops paying)** → coach loses access to all their clients' data immediately. Each affected client sees a polite message at the top of their app: "Your coach's subscription isn't currently active, so they can't view your data right now. Pick a plan to keep all features, or switch to the free tier to continue with what's available." This is the same plan-picker shown for the other unlink paths, just with a different framing message.
+   - **Client data is ALWAYS retained no matter what.** Downgrading from coached → free, lapsing from paid → free, coach kicks client, client leaves coach — none of these delete data. Features get gated based on the active tier, but the underlying logs / weights / chat history / wearable samples / food logs are preserved. If the client ever upgrades back (joins a new coach, pays for the paid tier), all their historical data is right there waiting and they continue where they left off.
+   - **No cooling-off period** — client can unlink and immediately accept a new coach's invite. We trust the user.
+   - **Reporting tool is deferred to v2** — no "Report this coach" button at launch. Add later if abuse patterns emerge.
+
+7. **Coach portal lives at `/coach/*` — separate URL space from `/admin/*`.** Sharing routes would be cleaner in theory but the user explicitly wants a clear "this is mine" mental model for coaches. Two side effects of this decision: (a) we need to fork some shared chrome (top bar, side nav) into a coach version, and (b) auth-gate routing has to redirect coaches landing on `/admin/*` and admins landing on `/coach/*` to their own home.
+
+8. **Coach portal scope — what coaches can / cannot access:**
+   - **Coach CAN see** — their roster (clients linked to them only), each of their client's profile / training / body / calories tabs, chat with their clients, the progress dashboard scoped to their roster, the nutrition-compliance grid scoped to their roster, the activity feed scoped to their roster, their own coach profile / subscription / Invite Client surface, plus the new coach-specific pages we're building (see Q6 thread)
+   - **Coach CANNOT see** — Suggestions (admin-only — these route to the platform owner for product feedback), the Movement Library (read-only platform-wide list — the platform owner is the sole editor), the Food Library (same: platform owner edits, coach has zero access not even read), other coaches' rosters, platform-wide billing, the coach directory, refund queue, abuse-report queue, support escalations.
+
+9. **Coach onboarding happens DURING signup, not after.** The coach signup journey itself is the onboarding wizard — profile setup, subscription terms acceptance, first invite tutorial all happen in the signup flow before they land on their first dashboard view. No separate "first-run wizard" after signup. The flow has to be tight enough that they don't drop off — split into clear steps with progress dots, same pattern as the existing client signup journey.
+
+10. **Both the coach pages AND the admin pages need a rethink as part of this update — NOT deferred to v2.** The current admin portal was built for "Motaz personally manages a small client roster". It doesn't have everything a coach needs to oversee a roster of 30+ clients on the next-step thesis, and doesn't have everything a platform owner managing a multi-coach marketplace needs. Both surfaces get net-new pages designed during this update.
+
+11. **Coach is a NEXT-STEP OVERSEER, NOT a workout programmer.** Critical philosophical lock. MyRX's algorithm picks the client's next weight, next pace, next macro target. The coach's job is to oversee: see the holistic picture for each client, validate that the algorithm's prescriptions are appropriate, adjust the underlying parameters that drive them (calorie pace, weight goal, macro preset, fat-level, BFP, etc.), and communicate. The coach does NOT build training plans from scratch, design workout calendars, or upload exercise demo videos. That whole class of feature (Trainerize / TrueCoach / MyPTHub style workout programming) is **explicitly out of scope for v1 AND v2** — it's not what MyRX is. Coaches who want to write custom workouts can use another tool; coaches who want to OVERSEE clients on a next-step coaching algorithm use MyRX.
+
+12. **Coach portal v1 pages — the locked set.**
+    - **Carries over from existing admin portal (scoped to roster)**: Roster, Client detail (profile + efforts + body + calories tabs), Progress dashboard (weight goals), Nutrition compliance grid, Activity feed, Messages (chat with their clients), Intake Plan editor.
+    - **New surfaces aligned with the next-step thesis**:
+      - **Per-client snapshot** — one screen showing every domain's current next-step state for a single client (strength next targets across top movements, current cardio zone + next session, today's calorie target + 7-day adherence, weight gap to goal + ETA, today's resting/avg HR, nearest ROM goal). Coach's "how's Sarah doing right now?" view. Replaces clicking through 6 tabs to assemble the same picture mentally.
+      - **Coach private notes per client** — date-stamped journal only the coach sees. Surfaces on the client detail page. Coach-only, never visible to client.
+      - **Parameter templates** (NOT workout templates) — reusable PARAMETER bundles: "Aggressive cut template" = Lose Hard + High-Protein + 25 % deficit cap. "Lean bulk template" = Gain Steady + Balanced macros. "Marathon prep template" = high cardio TDEE multiplier + Performance macros. Coach picks a template, applies to a client, the calorie plan parameter screen prefills for review/save.
+      - **Suggested adjustments queue** — system-generated prompts the coach reviews in the morning: "Sarah hit her weight goal — switch to maintenance?" "Mike's been below his calorie target 6 of 7 days — adjust target down?" "Lisa hasn't logged strength in 2 weeks — message her?" Read down the list, take action or dismiss.
+      - **Onboarding intake form** — lightweight 5-10 question form a client fills when they accept a coach's invite. Current goal, training experience, schedule (days/week), injuries, equipment access. Coach reads this in the client detail. Not a full PARQ.
+      - **Roster health overview ("morning briefing")** — daily-opened dashboard with aggregate stats across the roster: how many need attention, how many new check-ins to review, how many unread messages, this week's PRs across the roster.
+      - **Coach profile (visible to client)** — bio, photo, specialties. Shown during invite accept + in chat header.
+      - **Subscription** — coach's own billing status, trial countdown, plan tier, payment method, cancel.
+      - **Invite Client** — form to send invites + history (pending / accepted / declined / expired).
+
+13. **Coach portal v1 — explicit NOs.** Listed so future asks for these features can be answered with "out of scope per Q6 lock": no training plan builder, no cardio session calendar, no custom exercise videos, no meal plan builder, no direct in-app payments from coach to client, no group programs, no custom coach branding override of MyRX brand, no scheduling / appointment system.
+
+14. **Admin (platform-owner) portal v1 pages — the locked set.**
+    - **Carries over from existing admin portal (with marketplace scope)**: Admin overview / dashboard (expand stats to include total coaches, total clients, unlinked B2C count, weekly MRR, churn), Movement Library (admin-only edit, coaches + clients see read-only), Food Library (admin-only edit, coaches don't see at all, clients see only what the system serves them), Suggestions (flat feed of all client suggestions across all clients — already exists today).
+    - **New surfaces a platform owner needs**:
+      - **Coaches list** — every coach on the platform with photo, name, status (active / trialing / suspended / lapsed), join date, roster size, subscription tier, MRR contribution, last-active. Filter / sort. Click to coach detail.
+      - **Coach detail** — drill into one coach: profile, roster (their clients), subscription history, support history, billing events, audit log of significant actions. Admin-only controls: suspend, refund a billing event, message the coach, override subscription state.
+      - **Clients list (consolidated, marketplace-wide)** — every client across the platform with photo, name, status, with-coach badge / unlinked badge, last-active, calorie tier, weight goal status. Filter chips: *with-coach*, *unlinked*, *by-coach (specific coach)*, *free tier*, *paid tier*. Single page implements what was earlier discussed as "consolidate client pages under a single Clients page with sub pages".
+      - **Billing dashboard** — every coach subscription event: signups, trial conversions, churn, refunds, MRR / ARR trends, failed payments. Per-coach billing history. Payment-processor webhook log.
+      - **Refund queue** — manual review queue. Each entry shows context, history, approve/decline/credit buttons. Audit-logged.
+      - **Abuse / moderation queue** — surface stubbed at launch (so it's not net-new when v2 reporting tool lands). Lists flagged coaches / clients with severity, source, action history.
+      - **Support inbox** — manual support tickets from coaches or clients. Web ticket form + email forward into queue. Status, assigned-to, threaded reply, related coach/client.
+      - **Platform health page** — live ops view: error rate, API uptime, Supabase / Cloudflare status, recent deploys.
+      - **Coach analytics deep-dive** — beyond top-line MRR: retention curves, cohort analysis, trial-to-paid conversion rate, average roster size by tenure, top-performing coaches by client outcomes, churn-risk indicators.
+      - **Marketing tools** — referral programs (coach-referred-coach incentives), promo codes for coaches (e.g., extend trial, % off first 3 months), launch campaign tracking (where coaches found us — utm-style attribution), email blast tooling for the coach base.
+
+15. **Admin portal v1 — explicit NO.** Documentation / policy editor (markdown editor + version history for legal docs in-app) deferred to v2. At launch volumes, editing legal docs in the codebase + re-deploy is acceptable. Build a real editor once docs change frequently or non-engineers (legal team) edit them.
+
+16. **Client-app changes when coached vs unlinked — locked set.**
+    - **Chat scope**: when client has a coach, chat targets THAT coach (coach photo + first name in header). When client is unlinked, the chat icon is HIDDEN entirely — chat is reserved for coach-client. Unlinked clients use Suggestions to reach the platform.
+    - **Coach branding visible to client**: chat header shows coach photo + name. Client dashboard shows a small "Coached by [Coach Name]" chip with coach photo near their own profile photo. Tapping the chip opens the coach profile card (bio, specialties, photo, "Unlink from coach" button).
+    - **Onboarding intake form**: when a client accepts a coach's invite, they immediately get a PARQ + onboarding form. **Required to sign / complete — non-negotiable, no skip path.** Until completed, the client cannot use the coached experience. PARQ = Physical Activity Readiness Questionnaire (standard pre-exercise screening; covers cardiovascular conditions, medications, injuries). Onboarding form layers on: current goal, training experience, schedule availability, equipment access, food preferences. Both are signed (timestamp + agreement record) and stored against the client's profile so the coach can read them in the client detail view and so we have a compliance record for liability purposes.
+    - **"Pick a plan" flow** (fires on client-unlinks-coach / coach-unlinks-client / coach-subscription-lapses): two visible buttons (free tier / paid tier). "Find a new coach" button reserved for v2 (no coach directory in v1). Lapse messaging is sympathetic: "Your coach's subscription isn't currently active right now. Pick what's next for you." Tier specifics still under review (see Q9 thread).
+    - **Suggestions affordance**: both coached AND self-coached clients see the amber Lightbulb (Suggestions) button. Suggestions ALWAYS go to admin (platform owner), never to the coach. Coach has no visibility into suggestions. Chat is the coach-client channel; suggestions are the platform-owner channel.
+    - **Coached chip on dashboard**: small chip near client's own profile photo showing "Coached by [Coach Name]" + coach photo. Quick way to re-find the coach without digging through Settings.
+    - **Calorie page view differs based on coached vs self-coached — and ONLY the calorie page**:
+       - At signup, if a `coach_id` is assigned (via invite-link), the client starts as **coached** → coached calorie page view (plan parameters editable by coach, read-only for client + appropriate guidance copy).
+       - At signup with no `coach_id`, the client starts as **self-coached** → self-coached calorie page view (plan parameters fully editable by client, the existing wizard / chips / goal flow).
+       - All other domains (strength, cardio, mobility, bodyweight, heart, history) render IDENTICALLY whether the client is coached or self-coached. The algorithm picks next-step the same way for both; only the calorie-page lock changes.
+       - This consolidates and supersedes the prior `is_self_coached` boolean — the truth source becomes `coach_id IS NULL` (self-coached) vs `coach_id IS NOT NULL` (coached). Migration step in implementation phase.
+
+17. **Account resurrection — credential-history requirement (LOCKED, May 24 2026).** Critical data-architecture decision. When a user deletes their account and later re-signs up with the same email or phone, we MUST be able to find their previous data and offer to restore it. A user should never lose their progression history because they deleted and re-created.
+
+    - **Mechanism**: a `credential_history` table that records every (user_id, email, phone, recorded_at, event_type) tuple over the user's lifecycle. Event types include `signup`, `email_change`, `phone_change`, `deletion`, `resurrection`. The table is append-only — credentials are recorded as they're used / changed, never overwritten.
+    - **At signup**: before creating a new profile, check `credential_history` for any prior `user_id` matching the incoming email OR phone. If found, surface a "We found previous data linked to this email — restore it?" prompt to the user. On accept, the new auth user is linked to the OLD profile id (not a new one), and all historical efforts / bodyweight / calories / wearable data / etc. is immediately accessible. On decline, a fresh profile is created and the credential_history row records `signup` as a new lineage.
+    - **At account deletion**: rather than hard-deleting the profile row + all its dependent data, we mark `profiles.deleted_at = now()` and record a `deletion` event in `credential_history`. The auth.users record IS deleted (so the user can't sign in with the old credentials and so we honor right-to-deletion requirements legally), but the underlying data remains keyed to the stable profile id. The user's PII (email, phone, full_name) on the profile row can be tombstoned to a hash to satisfy GDPR / CCPA right-to-erasure if requested; the activity logs themselves stay anonymized but recoverable.
+    - **Schema design implications**: the `profiles.id` becomes a STABLE long-term identifier independent of auth.users.id. A new column `profiles.auth_user_id` references auth.users for the current sign-in mapping. On resurrection, only `auth_user_id` changes — all foreign keys on logs, efforts, bodyweight, etc. continue to reference the original `profiles.id`.
+    - **Privacy + legal considerations**: this is COMPATIBLE with GDPR / CCPA when properly scoped — we honor erasure requests by hashing the PII + dropping the credential_history's email/phone columns for that user. The pseudonymous activity data can stay for legitimate-interest purposes (anonymized fitness research, aggregate platform analytics). Specifics will need a privacy-lawyer review before launch but the architecture supports it.
+
+18. **Billing model — locked.**
+    - **Coaches pay; their clients NEVER pay.** A client linked to an active coach has full feature access for free. The coach's subscription IS the client's access.
+    - **Coach subscriptions are recurring monthly / annual**, paid via Stripe Checkout on the website (never inside the mobile app — no Apple/Google involvement). Annual = 10 months at monthly rate (2 months free).
+    - **Public users (unlinked) pay one-time per tier.** Upgrading is a single payment that grants lifetime access at that tier. No recurring billing for B2C clients. Three tiers: Free / SemiRX / FullRX. Once they buy SemiRX or FullRX, they own it forever.
+    - **Free trial for coaches: 14 days.** Coach signs up via web, enters payment info, gets 14 days of full functionality at the tier they selected. Auto-converts to paid on day 15 unless they cancel. After conversion, follow Stripe's default Smart Retries (4 retry attempts over ~3 weeks) for failed payments. Lapse / soft-grace / hard-grace timeline per Q4 lock.
+    - **Payment processor for direct billing: Stripe.** Coach subscriptions + B2C web-purchased one-time tiers both run on Stripe. Square is NOT the path forward — Stripe's subscription + dunning + tax + webhook ecosystem is meaningfully better for SaaS, and the cost is equivalent (~2.9 % + $0.30 / transaction).
+    - **B2C in-app purchases use Apple IAP / Google Play Billing.** Mandatory per Apple Guideline 3.1.1 and Google Play Billing policy — any in-app feature unlock MUST use the platform processor. One-time non-consumable purchases work the same as subscriptions for this rule. **Apply for Apple App Store Small Business Program** at launch so revenue under $1M/year drops Apple's cut from 30 % to 15 %. Google Play has an analogous tier.
+    - **Acquisition-channel-aware hybrid for B2C** (LOCKED — pattern 3 from Q9 discussion). In-app upgrade button uses IAP (Apple/Google take 15 %). Same upgrade is available on website via Stripe (we keep ~97 %). **Same price on both surfaces** — no in-app promotion of the cheaper web path, no compliance risk with Apple. Marketing (email, social ads, blog, organic search) pushes users to the website where they can convert via Stripe. Most early volume goes through IAP (App Store discoverability); blended cut comes down as the marketing engine matures and more conversions happen on web. Expected blended Apple cut after year 1: ~8-12 % of B2C revenue.
+
+19. **Coach tier prices — locked.**
+    | Tier | Client cap | Monthly | Annual (2 months free) |
+    |---|---|---|---|
+    | Coach Starter | 10 | $19 / mo | $190 / yr |
+    | Coach Pro | 25 | $39 / mo | $390 / yr |
+    | Coach Unlimited | 50 + (truly unlimited) | $99 / mo | $990 / yr |
+
+20. **Public (B2C) tier prices — locked.** All one-time payments, lifetime access at that tier once purchased.
+    | Tier | Pages unlocked | One-time price |
+    |---|---|---|
+    | Free | Strength + Cardio + Mobility | $0 |
+    | SemiRX | Free + Bodyweight + Calories | $39 (one-time) |
+    | FullRX | SemiRX + Heart + Hydration + Sleep | $59 (one-time) |
+
+    Notes:
+    - Free is genuinely usable (not a trial) — drives adoption and exposes upgrade prompts.
+    - SemiRX adds the two most-asked-for features (body composition tracking + calorie/macro coaching).
+    - FullRX adds the wellness layer (HR / hydration / sleep) — appeals to power users / wearable owners.
+    - Hydration and Sleep are NEW pages to build as part of FullRX (Sleep already has a design spec — see Sleep page section above; Hydration is net-new design + build).
+    - Ads: discussion deferred to a separate phase. Free tier currently has no ads listed in this lock.
+
+Open items still to discuss / track outside this thread:
+- Notifications system — flagged as the **NEXT major phase AFTER the coach platform work lands.** Out of scope for THIS update, called out here so it doesn't slip later. Will cover: push notifications + in-app notification center for coach invites, coach messages, plan adjustments, milestone celebrations, check-in reminders, billing events, Suggestions replies, etc. Will need its own full design pass.
+- Ad strategy (whether to include in Free tier, network choice, placement, opt-out) — deferred to a separate phase per user lock.
+- Coach analytics deep-dive details (which specific metrics, dashboards) — surface is locked for v1 but the actual metrics to display need a design pass during implementation.
+- Marketing tools details (referral program incentive structure, promo code system, attribution tracking) — surface is locked for v1, details TBD during implementation.
+
+---
+
+### Launch-required documentation (TBD — track until written)
+
+Before the App Store / Play Store launch and before the first paying coach, we need a written set of legal and policy documents. None of these exist yet; tracking here so they don't slip:
+
+1. **Privacy Policy** — mandatory for App Store, Play Store, and most ad-tech / analytics integrations. Must cover what data we collect (auth, health/fitness logs, wearable HR samples, food logs, photos), how it's used, retention, deletion rights, third-party sharing (Supabase, Cloudflare, Twilio, Samsung Health, eventually Apple Health / Strava / Garmin / Whoop / Polar / Fitbit). GDPR + CCPA compliance.
+2. **Terms of Service** — mandatory. Defines the user relationship for clients, coaches, and platform owner. Includes: account responsibilities, acceptable use, intellectual property, dispute resolution, governing law, account-termination rights.
+3. **Coach Agreement** (separate from end-user ToS) — the B2B side. Defines the coach-platform relationship: subscription terms, fee schedule, cancellation, what data coaches can access about clients, code of conduct, suspension/termination grounds, indemnity if a client is harmed by coach advice.
+4. **Refund Policy** — promised here for when the time comes. Covers: free trial cancellation (no charge), mid-subscription cancellation (pro-rated? credit?), client-driven complaints leading to coach-side refund, App Store / Play Store interaction (Apple and Google have their own refund handling for in-app purchases). Will need separate handling for B2C app-store subscriptions vs B2B direct-billed coach subscriptions.
+5. **Health & Medical Disclaimer** — critical given the fitness/health domain. Must state MyRX is not medical advice, users should consult a physician before starting exercise programs, coaches are not medical professionals (or have a separate flag for "licensed RD / PT / etc."), and the app is not for treating medical conditions.
+6. **Subscription auto-renewal disclosure** — required by Apple App Store guideline 3.1.2 and Google Play subscription policies. Specific wording around trial-to-paid transition, billing cycle, cancellation steps, price changes.
+7. **Acceptable Use Policy** — defines what end users and coaches CAN'T do (harassment, spam, illegal activity, impersonation, fake data). Gives platform owner grounds to suspend accounts without breach-of-contract risk.
+8. **Coach Code of Conduct** — bundled into the Coach Agreement or separate. Covers professional standards (don't share client data, don't make medical claims, respond to clients within reasonable time, etc.).
+9. **Data Processing Agreement** (DPA) — only if MyRX has EU users (GDPR Art. 28) or California users at scale (CCPA service-provider terms). For coaches who handle EU client data, the DPA defines our role as processor / subprocessor.
+10. **Cookie Policy** — web-side only. Required for EU visitors under ePrivacy Directive. Web is frozen but if it goes back to active development, this needs to land.
+
+Practical approach when the time comes: most of these can start as Termly / Iubenda generated templates, then refined with a fitness-industry-aware lawyer. Don't ship the first paying coach without 1, 2, 3, 4, 5, 6, and 7 at minimum. The rest can land in waves.
+
+---
+
 ## What This Is
 A React + Vite SPA (web, frozen) + React Native / Expo app (mobile, active) — a fitness coaching platform per the mission above. Clients track strength, cardio, mobility, bodyweight, and calories. Admins (coaches) manage clients, review progress, and communicate via chat/suggestions.
 
