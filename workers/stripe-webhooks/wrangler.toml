@@ -1,0 +1,41 @@
+name = "myrx-stripe-webhooks"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+account_id = "d42e96189bfa3cacb2aaab8231eb0097"
+
+# Production route: catch /stripe-webhooks/* on myrxfit.com BEFORE Cloudflare
+# Pages. Stripe sends POST requests here with subscription lifecycle events
+# (created, updated, deleted, invoice.paid, payment_failed, checkout.session
+# completed for B2C one-time purchases).
+[[routes]]
+pattern   = "myrxfit.com/stripe-webhooks/*"
+zone_name = "myrxfit.com"
+
+[vars]
+# Supabase project URL (public — same as web client embeds).
+SUPABASE_URL = "https://xtxzfhoxyyrlxslgzvty.supabase.co"
+
+# Stripe mode toggle — switches which secret set the worker uses.
+# Coach Platform v1 launches in TEST mode; flip to "live" at launch
+# day per CLAUDE.md launch checklist item 12.
+STRIPE_MODE = "test"
+
+# Stripe Price ID lookup_keys → these are the SAME across test and live
+# (we use the same lookup_key in both Stripe modes), so wiring code
+# refers to lookup_keys rather than raw price IDs. The actual price_...
+# IDs are fetched at runtime via the Stripe API lookup_keys query.
+# (Reference only — the worker discovers these on demand.)
+
+# ── Secrets to configure via `wrangler secret put <NAME>` (NEVER commit) ──
+#
+#   STRIPE_SECRET_KEY_TEST           sk_test_...         (Test-mode Stripe API key)
+#   STRIPE_WEBHOOK_SECRET_TEST       whsec_...           (Webhook endpoint signing secret, test)
+#   STRIPE_SECRET_KEY_LIVE           sk_live_...         (Live-mode, set at launch only)
+#   STRIPE_WEBHOOK_SECRET_LIVE       whsec_...           (Live webhook signing secret, set at launch)
+#   SUPABASE_SERVICE_ROLE_KEY        eyJ...              (Service-role JWT — bypasses RLS for DB writes)
+#
+# Set via:
+#   wrangler secret put STRIPE_SECRET_KEY_TEST
+#   wrangler secret put STRIPE_WEBHOOK_SECRET_TEST
+#   wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   (paste value when prompted, never store on disk)
