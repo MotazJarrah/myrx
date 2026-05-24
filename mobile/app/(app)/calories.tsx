@@ -23,7 +23,7 @@ import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
 import { Link } from 'expo-router'
 import {
   Flame, Clock, TrendingDown, TrendingUp, Utensils,
-  X, Plus, UtensilsCrossed, ChevronRight,
+  X, Plus, UtensilsCrossed, ChevronRight, Pencil,
 } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
@@ -327,10 +327,16 @@ export default function Calories() {
   // wizard show only that one screen and Save instead of Next. When
   // null, the wizard is closed.
   const [wizardOpen, setWizardOpen]                 = useState(false)
-  const [wizardStep, setWizardStep]                 = useState<'pace' | 'activity' | 'macros'>('pace')
+  // Default = 'activity' since the May 24 2026 wizard reorder. Activity
+  // step picks the multiplier that drives TDEE, which the Pace step uses
+  // to compute per-user weight outcomes. Old default was 'pace' which
+  // now opens on what's actually step 2 — wrong. Inline edit chips
+  // override this with their own step ('pace' | 'activity' | 'macros')
+  // because they open in single-screen mode where order doesn't matter.
+  const [wizardStep, setWizardStep]                 = useState<'pace' | 'activity' | 'macros'>('activity')
   const [wizardSingleScreen, setWizardSingleScreen] = useState(false)
 
-  function openWizard(step: 'pace' | 'activity' | 'macros' = 'pace', single = false) {
+  function openWizard(step: 'pace' | 'activity' | 'macros' = 'activity', single = false) {
     setWizardStep(step)
     setWizardSingleScreen(single)
     setWizardOpen(true)
@@ -338,6 +344,13 @@ export default function Calories() {
 
   // Derived: is this user self-coached?
   const isSelfCoached = profile?.is_self_coached === true
+  // Admins set their own intake plan from the admin Intake Plan tab
+  // (web only — admin portal is web-exclusive). On mobile, an admin who
+  // somehow lands on this page never sees inline edit UI either — they're
+  // pointed back to the web admin panel. Mirror of web Calories.jsx
+  // (May 23 2026 lock).
+  const isAdmin         = profile?.is_superuser === true
+  const canEditPlanHere = isSelfCoached && !isAdmin
 
   // Current weight in kg — sourced from latest bodyweight log if present,
   // else from profile.current_weight (which is stored in profile.weight_unit).
@@ -374,7 +387,9 @@ export default function Calories() {
   }, [goalReachedKey])
 
   const goalReached = useMemo(() => {
-    if (!isSelfCoached || !plan || !currentWeightKg) return false
+    // Admin goal-reached is handled from the admin Intake Plan tab on web.
+    // Suppress the inline detection here (May 23 2026 mirror).
+    if (!canEditPlanHere || !plan || !currentWeightKg) return false
     if (plan.energy_balance_pct == null || Math.abs(plan.energy_balance_pct) < 0.005) return false
     const goal = plan.goal_weight_kg
     const start = plan.starting_weight_kg
@@ -385,7 +400,7 @@ export default function Calories() {
     if (goal < start) return currentWeightKg <= goal
     if (goal > start) return currentWeightKg >= goal
     return false
-  }, [isSelfCoached, plan, currentWeightKg])
+  }, [canEditPlanHere, plan, currentWeightKg])
 
   async function handleSwitchToMaintenance() {
     if (!user || !plan || !currentWeightKg) return
@@ -396,6 +411,12 @@ export default function Calories() {
         energy_balance_pct: 0,
         goal_weight_kg:     newGoal,
         starting_weight_kg: newGoal,
+        // Reset goal_reached so the next phase tracks fresh progress
+        // toward maintenance. Without this, plan.goal_reached stays
+        // true and the progress bar is forced to 100% forever (the
+        // CurrentWeightGoal `progress` calc short-circuits on this
+        // flag). May 24 2026 fix.
+        goal_reached:       false,
         updated_at:         new Date().toISOString(),
       })
       .eq('user_id', user.id)
@@ -408,9 +429,39 @@ export default function Calories() {
     setStripRefreshKey(k => k + 1)
   }
 
+  /**
+   * "Keep going" handler (May 24 2026 — second rewrite). Earlier
+   * iterations either dismissed-only (left goal_reached=true forever
+   * forcing 100%) or rebaselined start=current with goal unchanged
+   * (looked weird because the stat row still showed the OLD goal as
+   * a stale leftover). Final semantics:
+   *
+   *   • goal_weight_kg ← null   (clears the target — there's no
+   *     active phase right now)
+   *   • goal_reached   ← false  (clears the celebration trigger)
+   *   • starting_weight_kg stays as historical record
+   *
+   * The card detects null goal and switches to a minimal "Plan
+   * complete — set a new one" state with one Update plan CTA. No
+   * phase start / current / goal stat row (no plan to compare
+   * against), no plan summary chips. Daily calorie target above
+   * still computes via calcMacros's currentWeight fallback.
+   */
   async function handleDismissGoalReached() {
+    if (user && plan) {
+      const { error } = await supabase
+        .from('calorie_plans')
+        .update({
+          goal_weight_kg: null,
+          goal_reached:   false,
+          updated_at:     new Date().toISOString(),
+        })
+        .eq('user_id', user.id)
+      if (error) console.error('[Calories] keep-going clear-goal failed:', error)
+    }
     if (goalReachedKey) await AsyncStorage.setItem(goalReachedKey, '1')
     setGoalReachedDismissed(true)
+    setStripRefreshKey(k => k + 1)
   }
   const [todayEntries, setTodayEntries]       = useState<CalorieFoodEntry[]>([])
   const [logsMap, setLogsMap]                 = useState<Record<string, { calories: number }>>({})
@@ -548,11 +599,12 @@ export default function Calories() {
               <View style={[s.cardLg, { padding: 0 }]}>
                 <PendingView
                   onSetupPlan={
-                    // Self-coached users get the CTA. Admin-coached users
-                    // get the unchanged "Your plan is on its way" view
-                    // because their coach (the admin) authors the plan
-                    // from the admin portal.
-                    isSelfCoached
+                    // Self-coached non-admin users get the CTA. Admin-
+                    // coached clients fall through to "Your plan is on its
+                    // way" (coach writes it). Admins themselves also fall
+                    // through here on mobile — they set their plan from
+                    // the web admin Intake Plan tab. May 23 2026 lock.
+                    canEditPlanHere
                       ? () => {
                           if (!currentWeightKg) {
                             // The wizard needs a current weight to derive
@@ -562,7 +614,7 @@ export default function Calories() {
                             // TODO: replace with a friendlier inline prompt
                             //       once the bodyweight onboarding lands.
                           }
-                          openWizard('pace', false)
+                          openWizard('activity', false)
                         }
                       : undefined
                   }
@@ -599,30 +651,12 @@ export default function Calories() {
 
         {result && plan && (
           <>
-            {/* Goal-reached celebration — self-coached users only,
-                shown once per (user, goal). Tap "Switch" to flip the
-                plan to maintenance; tap X to dismiss without flipping. */}
-            {goalReached && !goalReachedDismissed && (
-              <AnimateRise>
-                <View style={s.goalReachedCard}>
-                  <Text style={s.goalReachedEmoji}>🎉</Text>
-                  <View style={{ flex: 1, gap: 6 }}>
-                    <Text style={s.goalReachedTitle}>You hit your goal weight</Text>
-                    <Text style={s.goalReachedMsg}>
-                      Nice work. Switch to maintenance to hold your new weight, or keep going.
-                    </Text>
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-                      <Pressable style={s.goalReachedCTA} onPress={handleSwitchToMaintenance}>
-                        <Text style={s.goalReachedCTAText}>Switch to maintenance</Text>
-                      </Pressable>
-                      <Pressable style={s.goalReachedDismiss} onPress={handleDismissGoalReached}>
-                        <Text style={s.goalReachedDismissText}>Keep going</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              </AnimateRise>
-            )}
+            {/* The standalone goal-reached celebration block lived here
+                until May 24 2026. It's now embedded INSIDE the Current
+                weight goal card — when goalReached is true, the plan
+                summary chips at the bottom are replaced by the same
+                "🎉 You hit your goal weight" content + 3 action
+                buttons. Single block instead of two stacked blocks. */}
 
             <AnimateRise>
               <View style={s.heroCard}>
@@ -740,51 +774,12 @@ export default function Calories() {
               </View>
             </AnimateRise>
 
-            {/* My plan choices — 3 tappable rows that re-open the wizard
-                pointed at one specific step. Self-coached users only;
-                admin-coached users don't see this block because they can't
-                edit their own plan (admin writes it from the web portal). */}
-            {isSelfCoached && plan && (
-              <AnimateRise delay={70}>
-                <View style={s.cardLg}>
-                  <Text style={[s.cardHeading, { marginBottom: 10 }]}>My plan</Text>
-                  {(() => {
-                    const paceKey  = paceForPlan(plan.energy_balance_pct ?? null)
-                    const paceText = paceKey ? PACE_OPTIONS[paceKey].label : 'Custom'
-                    const macroKey = macroPresetForPlan(plan.protein_level ?? null, plan.fat_level ?? null)
-                    const macroText = macroKey ? MACRO_PRESETS[macroKey].label : 'Custom'
-                    const activityText = plan.activity_factor != null
-                      ? (ACTIVITY_FACTORS[plan.activity_factor]?.label ?? '—')
-                      : '—'
-                    const rows: Array<{ k: 'pace' | 'activity' | 'macros'; label: string; value: string }> = [
-                      { k: 'pace',     label: 'Pace',     value: paceText },
-                      { k: 'activity', label: 'Activity', value: activityText },
-                      { k: 'macros',   label: 'Macros',   value: macroText },
-                    ]
-                    return (
-                      <View style={{ gap: 0 }}>
-                        {rows.map((row, i) => (
-                          <Pressable
-                            key={row.k}
-                            onPress={() => openWizard(row.k, true)}
-                            style={[
-                              s.planChipRow,
-                              i > 0 && { borderTopWidth: 1, borderTopColor: alpha(colors.border, 0.50) },
-                            ]}
-                          >
-                            <Text style={s.planChipLabel}>{row.label}</Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                              <Text style={s.planChipValue}>{row.value}</Text>
-                              <ChevronRight size={14} color={alpha(colors.mutedForeground, 0.60)} />
-                            </View>
-                          </Pressable>
-                        ))}
-                      </View>
-                    )
-                  })()}
-                </View>
-              </AnimateRise>
-            )}
+            {/* The standalone "My plan" card was merged into the
+                CurrentWeightGoal card on May 24 2026 — the plan summary
+                + edit affordance now live inside the same block as the
+                progress bar (pencil icon top-right opens the wizard,
+                pace/activity/macros chips at the bottom show + deep-link
+                into specific steps). See CurrentWeightGoal below. */}
 
             <AnimateRise delay={80}>
               <View style={s.cardLg}>
@@ -858,14 +853,39 @@ export default function Calories() {
               onLogFood={() => setDrawerDay(TODAY)}
             />
 
-            {result.timeline && <TimelineCard result={result} profile={profile} TrendIcon={TrendIcon} trendHue={trendHue} />}
-
-            {/* Use `!= null` instead of `&&` because goalWeightKg is `number | null`
-               — if a user ever has a goal of 0, the bare-number truthy check would
-               return 0, which RN renders as the bare text "0". `!= null` is safe. */}
-            {result.goalWeightKg != null && plan ? (
-              <CurrentWeightGoal result={result} plan={plan} profile={profile} latestBW={latestBW} />
+            {/* Card order (May 24 2026): CurrentWeightGoal FIRST,
+                TimelineCard SECOND. The goal card always renders when
+                a plan exists — it decides its own internal state:
+                  • active goal (normal stat row + progress + chips)
+                  • goal reached (stat row + celebration)
+                  • goal cleared / not set (minimal "set a new plan"
+                    state — fires after Keep going clears goal_weight_kg)
+                We DON'T gate at the parent level on goalWeightKg
+                anymore — if the plan exists in any state, the card
+                shows the appropriate UI. */}
+            {plan ? (
+              <CurrentWeightGoal
+                result={result}
+                plan={plan}
+                profile={profile}
+                latestBW={latestBW}
+                canEditPlanHere={canEditPlanHere}
+                openWizard={openWizard}
+                goalReached={goalReached && !goalReachedDismissed}
+                onSwitchToMaintenance={handleSwitchToMaintenance}
+                onDismissGoalReached={handleDismissGoalReached}
+              />
             ) : null}
+
+            {/* TimelineCard hides when the user already hit their
+                goal — showing a timeline for a goal they've reached
+                is just noise. The CurrentWeightGoal card now carries
+                the "what's next" prompt (Update plan / Switch to
+                maintenance / Keep going) inside its own body when
+                goal is reached. */}
+            {result.timeline && !goalReached && (
+              <TimelineCard result={result} plan={plan} profile={profile} TrendIcon={TrendIcon} trendHue={trendHue} />
+            )}
           </>
         )}
       </View>
@@ -890,6 +910,26 @@ export default function Calories() {
         onClose={() => setWizardOpen(false)}
         userId={user?.id ?? null}
         currentWeightKg={currentWeightKg}
+        // Profile fields needed for the PaceScreen's per-user TDEE math
+        // (BMR × activityFactor → energy_balance_pct × timeline →
+        // predicted lb delta for each pace option). Without these the
+        // wizard falls back to a relative-% display instead of concrete
+        // pound numbers.
+        heightCm={profile?.current_height
+          ? (profile.height_unit === 'imperial' ? profile.current_height * 2.54 : profile.current_height)
+          : null}
+        age={calcAge(profile?.birthdate)}
+        gender={profile?.gender ?? null}
+        // body_fat_band feeds the realism matrix + lean/fat split + Tier 3
+        // amber warnings on the Pace step. When null the wizard auto-
+        // prepends a BodyComp picker step so the user picks once.
+        bodyFatBand={(profile as any)?.body_fat_band ?? null}
+        // weight_unit drives EVERY weight + protein display in the
+        // wizard (PaceScreen badges, MacrosScreen protein g/kg vs g/lb,
+        // RealityCheckScreen outcome card). Math layer stays in
+        // canonical kg + g/kg; only display converts. Defaults to 'lb'
+        // when profile hasn't loaded the field yet.
+        weightUnit={(profile?.weight_unit === 'kg' ? 'kg' : 'lb')}
         existingPlan={plan}
         startStep={wizardStep}
         singleScreen={wizardSingleScreen}
@@ -1000,9 +1040,10 @@ function ActivePillPanel({
 // ── Timeline card ────────────────────────────────────────────────────────────
 
 function TimelineCard({
-  result, profile, TrendIcon, trendHue,
+  result, plan, profile, TrendIcon, trendHue,
 }: {
   result:    FullPlanResult
+  plan:      CaloriePlan
   profile:   any
   TrendIcon: typeof TrendingUp
   trendHue:  string
@@ -1010,6 +1051,59 @@ function TimelineCard({
   const tl = result.timeline
   if (!tl) return null
   const pUnit = profile?.weight_unit || 'lb'
+
+  // Self-coached alignment (May 24 2026 fix): when the user IS self-
+  // coached AND their plan matches a known pace preset, use the
+  // pace's locked `timeline_months` as the AUTHORITATIVE timeline
+  // instead of the calcTimeline thermodynamic range. The wizard's
+  // outcome screen displays the same number — so "the plan said
+  // 2 months" agrees with "the timeline card said 2 months".
+  //
+  // Critically gated on profile.is_self_coached === true. Admin-
+  // coached clients never went through the wizard — their plan was
+  // set by an admin via the web panel with potentially arbitrary
+  // energy_balance_pct values. Some of those values may COINCIDE
+  // with a preset's pct (e.g. admin picks -0.15 which happens to
+  // match Lose Steady), but that doesn't mean the client committed
+  // to a 1-month timeline — they were just given a plan. For those
+  // clients calcTimeline's thermodynamic range stays authoritative,
+  // since it reflects what the admin actually set + how long that
+  // adjustment realistically takes.
+  const isSelfCoached = profile?.is_self_coached === true
+  const paceKey       = isSelfCoached ? paceForPlan(plan.energy_balance_pct ?? null) : null
+  const lockedMonths  = paceKey ? PACE_OPTIONS[paceKey].timeline_months : null
+  // Single-number display when locked; range otherwise. Maintain pace
+  // (timeline_months === 0) skips the override since there's no
+  // commitment timeline for maintenance.
+  const useLockedTimeline = lockedMonths != null && lockedMonths > 0
+
+  // Shared timeline number renderer used by both recomp and standard
+  // modes. Picks single-number ("~2 months") when self-coached and the
+  // pace is locked, falls back to range ("~2–4 months") otherwise.
+  // Type-narrowed parameter so TS knows monthsBest/Realistic exist —
+  // mismatch mode never calls this (it has no months data).
+  function renderTimelineNum(
+    timeline: { monthsBest: number; monthsRealistic: number },
+    numColor?: string,
+  ) {
+    let label: string
+    let unit: string
+    if (useLockedTimeline) {
+      label = `${lockedMonths}`
+      unit  = lockedMonths === 1 ? 'month' : 'months'
+    } else {
+      const b = timeline.monthsBest, r = timeline.monthsRealistic
+      label = b === r ? `${b}` : `${b}–${r}`
+      unit  = (b === 1 && r === 1) ? 'month' : 'months'
+    }
+    return (
+      <View style={s.timelineNumRow}>
+        <Text style={s.timelineApprox}>approx.</Text>
+        <Text style={[s.timelineNum, numColor ? { color: numColor } : null]}>~{label}</Text>
+        <Text style={s.timelineUnit}>{unit}</Text>
+      </View>
+    )
+  }
 
   return (
     <AnimateRise delay={120}>
@@ -1020,20 +1114,18 @@ function TimelineCard({
               <TrendIcon size={16} color={palette.purple[400]} />
               <Text style={s.cardHeading}>Body recomposition</Text>
             </View>
-            {(() => {
-              const b = tl.monthsBest, r = tl.monthsRealistic
-              const label = b === r ? `${b}` : `${b}–${r}`
-              const unit  = (b === 1 && r === 1) ? 'month' : 'months'
-              return (
-                <View style={s.timelineNumRow}>
-                  <Text style={s.timelineApprox}>approx.</Text>
-                  <Text style={[s.timelineNum, { color: palette.purple[400] }]}>~{label}</Text>
-                  <Text style={s.timelineUnit}>{unit}</Text>
-                </View>
-              )
-            })()}
+            {renderTimelineNum(tl, palette.purple[400])}
+            {/* Message rewritten May 24 2026: previous copy said "your
+                calorie target is balanced" which collided with the
+                literal "Balanced" macro preset name — confusing for
+                users on High-Protein / Keto / Performance who saw the
+                text and thought it was misreading their pick. The
+                recomp DETECTION in calcTimeline only checks small
+                weight diff + mild energy adjustment; it doesn't filter
+                on macro preset. So the copy is now macro-agnostic and
+                describes only what actually triggers the mode. */}
             <Text style={s.timelineMsg}>
-              Your goal is a small change and your calorie target is balanced — this is recomposition territory.
+              Your goal is a small change and your calorie adjustment is gentle — this is recomposition territory.
               With consistent training and adequate protein, you can lose fat and build muscle at the same time.
             </Text>
             <Text style={s.timelineFootnote}>
@@ -1056,18 +1148,7 @@ function TimelineCard({
               <TrendIcon size={16} color={trendHue} />
               <Text style={s.cardHeading}>Estimated timeline</Text>
             </View>
-            {(() => {
-              const b = tl.monthsBest, r = tl.monthsRealistic
-              const label = b === r ? `${b}` : `${b}–${r}`
-              const unit  = (b === 1 && r === 1) ? 'month' : 'months'
-              return (
-                <View style={s.timelineNumRow}>
-                  <Text style={s.timelineApprox}>approx.</Text>
-                  <Text style={s.timelineNum}>~{label}</Text>
-                  <Text style={s.timelineUnit}>{unit}</Text>
-                </View>
-              )
-            })()}
+            {renderTimelineNum(tl)}
             <Text style={s.timelineMsg}>
               to {tl.isLoss ? 'lose' : 'gain'}{' '}
               <Text style={s.timelineMsgEmph}>{fromKg(tl.weightDiffKg, pUnit).toFixed(1)} {pUnit}</Text>
@@ -1084,7 +1165,9 @@ function TimelineCard({
               ) : null}
             </Text>
             <Text style={s.timelineFootnote}>
-              Best-case assumes full daily adherence. Realistic estimate accounts for rest days and variation.
+              {tl.isLoss
+                ? 'Best-case assumes full daily adherence. Realistic estimate accounts for cheat meals and rest days.'
+                : 'Best-case assumes full daily adherence. Realistic estimate accounts for low-appetite days and missed meals.'}
             </Text>
           </>
         )}
@@ -1108,25 +1191,53 @@ const GOAL_MESSAGES = {
 }
 
 function pickMsg(arr: string[]): string { return arr[Math.floor(Math.random() * arr.length)] }
-function getGoalMessage(p: number): string {
-  if (p >= 1.0)  return pickMsg(GOAL_MESSAGES.done)
-  if (p >= 0.90) return pickMsg(GOAL_MESSAGES.final)
-  if (p >= 0.75) return pickMsg(GOAL_MESSAGES.nearEnd)
-  if (p >= 0.60) return pickMsg(GOAL_MESSAGES.dialled)
-  if (p >= 0.45) return pickMsg(GOAL_MESSAGES.halfway)
-  if (p >= 0.25) return pickMsg(GOAL_MESSAGES.committed)
-  if (p >= 0.10) return pickMsg(GOAL_MESSAGES.building)
-  if (p > 0)     return pickMsg(GOAL_MESSAGES.early)
-  return pickMsg(GOAL_MESSAGES.zero)
+
+/**
+ * Bucket the user's progress 0..1 into one of the GOAL_MESSAGES keys.
+ * Pure function (no randomness) — picking a message from the bucket
+ * is a separate step done inside a useMemo keyed on bucket, so the
+ * displayed message stays stable across re-renders (May 24 2026 bug
+ * fix: the previous getGoalMessage() called pickMsg directly on every
+ * render, which re-rolled the visible message every time the
+ * AuthContext heartbeat / wizard-open / any state change re-rendered
+ * the tree).
+ */
+function goalBucket(p: number): keyof typeof GOAL_MESSAGES {
+  if (p >= 1.0)  return 'done'
+  if (p >= 0.90) return 'final'
+  if (p >= 0.75) return 'nearEnd'
+  if (p >= 0.60) return 'dialled'
+  if (p >= 0.45) return 'halfway'
+  if (p >= 0.25) return 'committed'
+  if (p >= 0.10) return 'building'
+  if (p > 0)     return 'early'
+  return 'zero'
 }
 
 function CurrentWeightGoal({
-  result, plan, profile, latestBW,
+  result, plan, profile, latestBW, canEditPlanHere, openWizard,
+  goalReached, onSwitchToMaintenance, onDismissGoalReached,
 }: {
-  result:   FullPlanResult
-  plan:     CaloriePlan
-  profile:  any
-  latestBW: BWRow | null
+  result:           FullPlanResult
+  plan:             CaloriePlan
+  profile:          any
+  latestBW:         BWRow | null
+  /** True for self-coached non-admin users — they see the pencil + plan
+      summary chips. Admin-coached clients and admins themselves see
+      the card without the edit affordance. */
+  canEditPlanHere:  boolean
+  /** Wizard opener (passed down from parent so individual chips can
+      deep-link to the right step). Pencil icon opens at the first
+      step in full-wizard mode; chip taps open in single-screen mode. */
+  openWizard:       (step?: 'pace' | 'activity' | 'macros', single?: boolean) => void
+  /** True when the user just hit their goal AND hasn't dismissed the
+      celebration yet. When true, the bottom of the card swaps the
+      plan summary chips for the celebration block (🎉 message + 3
+      action buttons). Drives behaviour the standalone goal-reached
+      banner used to handle before the May 24 2026 merge. */
+  goalReached:           boolean
+  onSwitchToMaintenance: () => void
+  onDismissGoalReached:  () => void
 }) {
   const pUnit     = profile?.weight_unit || 'lb'
   const startKg   = plan.starting_weight_kg != null ? Number(plan.starting_weight_kg) : null
@@ -1135,15 +1246,208 @@ function CurrentWeightGoal({
     : null
   const goalKg = result.goalWeightKg
 
+  // Plan summary derivation — same lookups the standalone "My plan" card
+  // used (now merged into this card per May 24 2026 UX rule). When the
+  // plan was admin-tuned outside the preset grid, paceForPlan/
+  // macroPresetForPlan return null and the chip falls back to "Custom".
+  const paceKey       = paceForPlan(plan.energy_balance_pct ?? null)
+  const paceText      = paceKey ? PACE_OPTIONS[paceKey].label : 'Custom'
+  const macroKey      = macroPresetForPlan(plan.protein_level ?? null, plan.fat_level ?? null)
+  // Replace the hyphen in "High-Protein" with a space so RN can wrap
+  // cleanly at a word boundary inside the narrow chip. Without this,
+  // RN falls back to character-level wrapping and we get "High-Protei"
+  // + "n" on tight phone widths. Pure display normalization — the
+  // stored MACRO_PRESETS[*].label keeps the hyphen for canonical use
+  // everywhere else.
+  const macroText     = macroKey
+    ? MACRO_PRESETS[macroKey].label.replace('-', ' ')
+    : 'Custom'
+  const activityText  = plan.activity_factor != null
+    ? (ACTIVITY_FACTORS[plan.activity_factor]?.label ?? '—')
+    : '—'
+
+  // Common card header — title on the left, pencil edit on the right
+  // when the user can self-edit. Used by both the no-phase-start
+  // fallback render below and the main render further down. Defined
+  // inline so we don't have to thread props through a separate helper.
+  const headerRow = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+      <Text style={s.cardHeading}>Current weight goal</Text>
+      {canEditPlanHere && (
+        <Pressable
+          onPress={() => openWizard('activity', false)}
+          hitSlop={8}
+          style={s.goalEditBtn}
+          accessibilityLabel="Edit plan"
+        >
+          <Pencil size={14} color={colors.mutedForeground} />
+        </Pressable>
+      )}
+    </View>
+  )
+
+  // Plan summary row — shown at the bottom of the card so the weight
+  // numbers + progress bar stay the focal point and the plan summary
+  // reads as quiet context. Each chip is tappable for self-coached
+  // users to deep-link into that specific wizard step. The 3 chips
+  // are intentionally minimal — no body fat band (which lives in
+  // Settings → Body stats) and no carb cap (Keto users see it in
+  // the macros chip's "Keto" label).
+  // Two-word labels (e.g. "Lose steady", "Moderately Active", "High
+  // Protein") force a newline at the first space so all three chips
+  // render on TWO lines, matching the visual rhythm of the wrapped
+  // ones — May 24 2026 per user feedback. Single-word labels
+  // ("Balanced", "Keto", "Performance", "Sedentary") stay on one line
+  // and center vertically within the same fixed-height value area, so
+  // the chips still look uniformly tall.
+  const splitTwoWord = (s: string): string => {
+    const i = s.indexOf(' ')
+    return i > 0 ? `${s.slice(0, i)}\n${s.slice(i + 1)}` : s
+  }
+  // Bottom section has TWO mutually-exclusive modes (May 24 2026):
+  //   • goalReached → celebration block (replaces the chips with 🎉
+  //     + Update plan / Switch to maintenance / Keep going buttons)
+  //   • otherwise   → plan summary chips
+  // Both gated on canEditPlanHere (admin-coached users see neither —
+  // the goal celebration for them lives in the admin Intake Plan tab).
+  const planSummaryRow = canEditPlanHere ? (
+    goalReached ? (
+      <View style={s.planSummaryWrap}>
+        <View style={s.planSummaryDivider} />
+        <View style={s.goalReachedInlineRow}>
+          <Text style={s.goalReachedEmoji}>🎉</Text>
+          <View style={{ flex: 1, gap: 6 }}>
+            <Text style={s.goalReachedTitle}>You hit your goal weight</Text>
+            <Text style={s.goalReachedMsg}>
+              Nice work. Update your plan to pick a new pace, switch to maintenance, or keep going on your current plan.
+            </Text>
+            <View style={s.goalReachedActions}>
+              <Pressable style={s.goalReachedCTA} onPress={() => openWizard('activity', false)}>
+                <Text style={s.goalReachedCTAText}>Update plan</Text>
+              </Pressable>
+              <Pressable style={s.goalReachedDismiss} onPress={onSwitchToMaintenance}>
+                <Text style={s.goalReachedDismissText}>Switch to maintenance</Text>
+              </Pressable>
+              <Pressable style={s.goalReachedDismiss} onPress={onDismissGoalReached}>
+                <Text style={s.goalReachedDismissText}>Keep going</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </View>
+    ) : (
+      <View style={s.planSummaryWrap}>
+        <View style={s.planSummaryDivider} />
+        <View style={s.planSummaryRow}>
+          {[
+            { k: 'activity' as const, label: 'Activity', value: splitTwoWord(activityText) },
+            { k: 'pace'     as const, label: 'Pace',     value: splitTwoWord(paceText) },
+            { k: 'macros'   as const, label: 'Macros',   value: splitTwoWord(macroText) },
+          ].map(chip => (
+            <Pressable
+              key={chip.k}
+              onPress={() => openWizard(chip.k, true)}
+              style={s.planSummaryChip}
+            >
+              <Text style={s.planSummaryChipLabel}>{chip.label}</Text>
+              <View style={s.planSummaryChipValueWrap}>
+                <Text style={s.planSummaryChipValue} numberOfLines={2}>{chip.value}</Text>
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    )
+  ) : null
+
+  // No-active-goal fallback. Triggered when:
+  //   • goal_weight_kg is null (self-coached just tapped Keep going
+  //     → plan is in "set a new target" limbo)
+  //   • OR starting_weight_kg is missing (admin hasn't seeded the
+  //     phase yet for an admin-coached client)
+  //   • OR start ≈ goal (degenerate plan)
+  // Two distinct UI branches inside this fallback:
+  //   • canEditPlanHere → minimal "Plan complete — set a new one"
+  //     state with a single Update plan button. Drops the stat row
+  //     entirely (no plan to compare against). No chips. Pencil
+  //     hides too since the Update plan button does the same job.
+  //   • admin-coached    → "Your coach hasn't locked in" message
+  //     (unchanged from pre-May-24-2026 behavior).
+  // Maintenance state — user picked the Maintain pace (or hit Switch
+  // to maintenance). Here `start ≈ goal ≈ current` AND
+  // energy_balance_pct === 0. The standard stat row / progress bar
+  // doesn't apply (nothing to progress toward — they're holding).
+  // Show a dedicated UI: current weight + "On maintenance" message
+  // + Update plan CTA. Self-coached only — admin-coached clients
+  // fall through to the next branch which has its own messaging.
+  const isMaintenancePhase =
+    canEditPlanHere &&
+    plan.energy_balance_pct != null &&
+    Math.abs(plan.energy_balance_pct) < 0.005 &&
+    !!startKg && !!goalKg &&
+    Math.abs(startKg - goalKg) < 0.1
+  if (isMaintenancePhase) {
+    return (
+      <AnimateRise delay={160}>
+        <View style={s.cardLg}>
+          {headerRow}
+          <View style={s.maintenanceWrap}>
+            <View style={s.maintenanceStatRow}>
+              <Text style={s.goalSmallLabel}>HOLDING AT</Text>
+              <Text style={s.maintenanceWeight}>
+                {fromKg(currentKg ?? startKg, pUnit).toFixed(1)}<Text style={s.goalSmallUnit}> {pUnit}</Text>
+              </Text>
+            </View>
+            <Text style={s.maintenanceMsg}>
+              You're on maintenance — same calories in as out. Your daily target keeps you steady at this weight.
+            </Text>
+            {planSummaryRow}
+          </View>
+        </View>
+      </AnimateRise>
+    )
+  }
+
+  // No-active-goal fallback. Triggered when:
+  //   • goal_weight_kg is null (self-coached just tapped Keep going
+  //     → plan is in "set a new target" limbo)
+  //   • OR starting_weight_kg is missing (admin hasn't seeded the
+  //     phase yet for an admin-coached client)
+  //   • OR start ≈ goal (degenerate plan that isn't maintenance —
+  //     maintenance is caught above)
+  // Two distinct UI branches inside this fallback:
+  //   • canEditPlanHere → PendingView-style empty state (amber Flame
+  //     icon + title + helper + lime CTA) — same chrome as the
+  //     first-time "Set up your plan" surface so the user sees a
+  //     familiar, inviting prompt instead of a dull text block.
+  //   • admin-coached   → text-only "Your coach hasn't locked in"
+  //     message (unchanged).
   if (!startKg || !goalKg || Math.abs(startKg - goalKg) < 0.1) {
     return (
       <AnimateRise delay={160}>
         <View style={s.cardLg}>
-          <Text style={[s.cardHeading, { marginBottom: 8 }]}>Current weight goal</Text>
-          <Text style={s.timelineMsg}>
-            Your coach hasn't locked in a phase starting weight yet. Once they do, your progress toward{' '}
-            <Text style={s.timelineMsgEmph}>{fromKg(goalKg ?? 0, pUnit).toFixed(1)} {pUnit}</Text> will appear here.
-          </Text>
+          <Text style={s.cardHeading}>Current weight goal</Text>
+          {canEditPlanHere ? (
+            <View style={s.noGoalEmpty}>
+              <View style={s.pendingIcon}>
+                <Flame size={32} color={palette.amber[400]} />
+              </View>
+              <View style={{ alignItems: 'center', gap: 4 }}>
+                <Text style={s.pendingTitle}>Set a new plan</Text>
+                <Text style={s.pendingMsg}>
+                  You wrapped your last phase. Pick your next pace, activity level, and how you eat to start your next target.
+                </Text>
+              </View>
+              <Pressable style={s.pendingCTA} onPress={() => openWizard('activity', false)}>
+                <Text style={s.pendingCTAText}>Set up my plan</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={s.timelineMsg}>
+              Your coach hasn't locked in a phase starting weight yet. Once they do, your progress toward{' '}
+              <Text style={s.timelineMsgEmph}>{fromKg(goalKg ?? 0, pUnit).toFixed(1)} {pUnit}</Text> will appear here.
+            </Text>
+          )}
         </View>
       </AnimateRise>
     )
@@ -1164,10 +1468,21 @@ function CurrentWeightGoal({
   const barColor = `hsl(${hue}, 70%, 48%)`
   const pctColor = `hsl(${hue}, 70%, 55%)`
 
+  // Stabilize the motivational message — picks ONCE per bucket so the
+  // visible text doesn't change on every re-render. Bucket is derived
+  // from progress and only changes when the user crosses a milestone
+  // (10%, 25%, 45%, 60%, 75%, 90%, 100%). Without this useMemo, the
+  // AuthContext heartbeat (every 60s) + any state change (wizard open,
+  // weigh-in, etc.) would re-roll pickMsg's random pick and the
+  // visible message would shuffle constantly. See the May 24 2026
+  // bug fix note on goalBucket() above.
+  const bucket  = goalBucket(progress)
+  const goalMsg = useMemo(() => pickMsg(GOAL_MESSAGES[bucket]), [bucket])
+
   return (
     <AnimateRise delay={160}>
       <View style={s.cardLg}>
-        <Text style={s.cardHeading}>Current weight goal</Text>
+        {headerRow}
 
         <View style={s.goalRow}>
           <View>
@@ -1202,8 +1517,10 @@ function CurrentWeightGoal({
             <Text style={[s.goalPctNum, { color: pctColor }]}>{Math.round(progress * 100)}</Text>
             <Text style={s.goalPctLabel}>%</Text>
           </View>
-          <Text style={s.goalMsgText}>{getGoalMessage(progress)}</Text>
+          <Text style={s.goalMsgText}>{goalMsg}</Text>
         </View>
+
+        {planSummaryRow}
       </View>
     </AnimateRise>
   )
@@ -1391,14 +1708,76 @@ const s = StyleSheet.create({
   },
   pendingCTAText: { fontSize: 14, fontWeight: '700', color: colors.primaryForeground },
 
-  // My plan chips — 3 tappable rows (pace / activity / macros) shown to
-  // self-coached users that re-open the PlanWizardSheet at one specific step.
-  planChipRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 12,
+  // Pencil edit affordance — top right of the Current weight goal card.
+  // Only renders for self-coached non-admin users (canEditPlanHere).
+  goalEditBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: alpha(colors.muted, 0.40),
+    borderWidth: 1, borderColor: alpha(colors.border, 0.60),
   },
-  planChipLabel: { fontSize: 13, color: colors.mutedForeground },
-  planChipValue: { fontSize: 14, fontWeight: '600', color: colors.foreground },
+  // Plan summary row — sits at the bottom of the Current weight goal
+  // card (May 24 2026 merge per UX rule). Three small tappable chips
+  // show Activity / Pace / Macros and deep-link into the wizard. The
+  // divider above gives it visual separation from the % progress
+  // message without forcing a new card.
+  planSummaryWrap: {
+    gap: 10,
+  },
+  planSummaryDivider: {
+    height: 1,
+    backgroundColor: alpha(colors.border, 0.40),
+  },
+  planSummaryRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  planSummaryChip: {
+    flex: 1,
+    paddingVertical: 8,
+    // Tightened from 10 → 6 (May 24 2026) so longer single-word
+    // labels like "Performance" (11 chars) fit on one line without
+    // RN falling back to character-level wrapping.
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: alpha(colors.border, 0.60),
+    backgroundColor: alpha(colors.muted, 0.20),
+    alignItems: 'center',
+    gap: 2,
+  },
+  planSummaryChipLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    color: colors.mutedForeground,
+    textTransform: 'uppercase',
+  },
+  // Value wrap reserves a fixed 2-line area (32 px = lineHeight 16 × 2)
+  // so all three chips render at the same height regardless of whether
+  // the label is 1-word (centers single-line within the area) or
+  // 2-word (fills both lines via the \n inserted by splitTwoWord).
+  // May 24 2026 per user feedback — chips were previously
+  // visually inconsistent because "Lose steady" sat on one line while
+  // its neighbors wrapped to two.
+  planSummaryChipValueWrap: {
+    // 2 × lineHeight 15 = 30. Reserves space for the 2-line variants
+    // (Lose\nsteady, Moderately\nActive, High\nProtein) so 1-word
+    // labels (Performance, Keto, Balanced, Sedentary) stay vertically
+    // centered within the same chip height.
+    minHeight: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  planSummaryChipValue: {
+    // Dropped from 12 → 11 (May 24 2026) for breathing room around
+    // 11-char single-word labels (Performance) at narrow chip widths.
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.foreground,
+    textAlign: 'center',
+    lineHeight: 15,
+  },
 
   // Goal-reached celebration banner — self-coached users only.
   goalReachedCard: {
@@ -1423,6 +1802,56 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: alpha(palette.emerald[400], 0.30),
   },
   goalReachedDismissText: { fontSize: 12, fontWeight: '600', color: palette.emerald[400] },
+  // "No active plan" state — shown inside the Current weight goal
+  // card when goal_weight_kg is null (self-coached after Keep going).
+  // Mirrors PendingView's centered icon + title + msg + lime CTA so
+  // the empty state reads as inviting / familiar, not dull. Lighter
+  // vertical padding than PendingView (40 vs 80) since this lives
+  // INSIDE a card while PendingView is a full-page surface.
+  noGoalEmpty: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    gap: 16,
+  },
+  // Maintenance state — minimal info block when user is holding
+  // steady. Shows current weight + a one-line context message. Plan
+  // chips below give them quick access to switch back to a loss/gain
+  // pace via the wizard.
+  maintenanceWrap: {
+    gap: 16,
+  },
+  maintenanceStatRow: {
+    gap: 4,
+  },
+  maintenanceWeight: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: colors.foreground,
+    fontFamily: fonts.mono[700],
+    fontVariant: ['tabular-nums'],
+  },
+  maintenanceMsg: {
+    fontSize: 13,
+    color: colors.mutedForeground,
+    lineHeight: 18,
+  },
+  // Inline celebration row added May 24 2026 — used when the goal-
+  // reached celebration is embedded INSIDE the Current weight goal
+  // card (in place of the plan summary chips). Same content as the
+  // old standalone goalReachedCard but no card chrome of its own —
+  // the surrounding card provides the chrome.
+  goalReachedInlineRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingTop: 4,
+  },
+  goalReachedActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+    flexWrap: 'wrap',
+  },
 
   // Timeline
   timelineHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },

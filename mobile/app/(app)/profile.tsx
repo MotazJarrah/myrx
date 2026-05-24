@@ -40,6 +40,8 @@ import { OTPInput } from '../../src/components/OTPInput'
 import { supabase } from '../../src/lib/supabase'
 import { NumericInput } from '../../src/components/NumericInput'
 import AnimateRise from '../../src/components/AnimateRise'
+import BodyCompPicker from '../../src/components/BodyCompPicker'
+import { type BodyFatBand } from '../../src/lib/planPresets'
 import { Select } from '../../src/components/Select'
 import { COUNTRIES, matchCountryFromPhone, type Country } from '../../src/lib/countries'
 import { ImageCropper } from '../../src/components/ImageCropper'
@@ -47,6 +49,14 @@ import { AsYouType, type CountryCode } from 'libphonenumber-js'
 import {
   DEFAULT_SLOTS, EXTRA_PRESETS, ANCHOR_IDS, type MealSlot,
 } from '../../src/components/FoodLogDrawer'
+// SMS auto-fill (Android only). Lazy-required so iOS / a stale dev-client
+// APK without the native module compiled in still boot — the require will
+// just throw and we'll silently fall back to manual entry.
+let _SMSUserConsent: any = null
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  _SMSUserConsent = require('react-native-sms-user-consent').default
+} catch { /* not installed / APK not rebuilt yet — manual entry only */ }
 import { getEnterToSend, setEnterToSend as persistEnterToSend } from '../../src/lib/chatPrefs'
 import { isLockEnabled, setLockEnabled } from '../../src/lib/lockState'
 import { openLegalDoc } from '../../src/lib/openLegalDoc'
@@ -303,6 +313,66 @@ function AccountTab({ profile, user }: { profile: any; user: any }) {
     return () => clearTimeout(t)
   }, [phoneCooldown])
 
+  // ── Android SMS User Consent auto-fill ──────────────────────────────────
+  //
+  // When the OTP step is mounted on Android, register a listener via the
+  // SMS User Consent API. Behavior:
+  //   1. Listener starts → silent until an SMS arrives.
+  //   2. SMS arrives → Android shows a one-tap system dialog:
+  //      "Allow MyRX to access this verification SMS?"
+  //   3. User taps Allow → we get the full SMS body → extract the 6-digit
+  //      OTP via regex → populate phoneOtp + auto-call verify-phone-otp.
+  //   4. User dismisses dialog → listener resolves with empty / throws →
+  //      we silently fall back to manual entry. No error shown.
+  //
+  // iOS doesn't need this — `textContentType="oneTimeCode"` on the hidden
+  // input inside OTPInput already surfaces the SMS code as a keyboard
+  // suggestion chip; Apple deliberately blocks pure-zero-tap.
+  //
+  // To upgrade to true zero-tap on Android (no dialog at all), we'd need
+  // the SMS Retriever API which requires the SMS body to be prefixed with
+  // `<#>` + suffixed with the app's 11-char signing hash. That's a Twilio
+  // Verify custom-template change (same template that would also enable
+  // the parked Web OTP API path — see CLAUDE.md). Until that template is
+  // approved, this User Consent path is the best mobile autofill we get.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    if (editingPhone === false) return
+    if (phoneStep !== 'otp') return
+    if (!_SMSUserConsent) return  // library not bundled — skip
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const result = await _SMSUserConsent.listenOTP()
+        if (cancelled) return
+        const sms: string = result?.receivedOtpMessage || ''
+        if (!sms) return
+        // Twilio Verify default SMS body looks like:
+        //   "Your MyRX verification code is: 123456"
+        // Pick the longest digit run between 4 and 8 chars — handles 4/6/8
+        // digit codes if Twilio's settings change later.
+        const match = sms.match(/\b(\d{4,8})\b/)
+        if (!match) return
+        const code = match[1]
+        setPhoneOtp(code)
+        // Pass the extracted code directly so we don't race React's state
+        // update against the verify call. submitVerifyPhoneOtp accepts an
+        // optional override for exactly this reason.
+        void submitVerifyPhoneOtp(code)
+      } catch {
+        // Library threw, OS denied, or user cancelled — silent fallback
+        // to manual entry. No UX impact since OTPInput is still focused.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      try { _SMSUserConsent?.removeOTPListener?.() } catch { /* no-op */ }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingPhone, phoneStep])
+
   // ── Avatar picker ──────────────────────────────────────────────────────────
   // Previously used expo-image-picker's `allowsEditing: true` which on
   // Android renders a tiny barely-visible thumbnail with the crop
@@ -504,8 +574,13 @@ function AccountTab({ profile, user }: { profile: any; user: any }) {
       setPhoneSubmitting(false)
     }
   }
-  async function submitVerifyPhoneOtp() {
-    if (!/^\d{4,8}$/.test(phoneOtp)) {
+  async function submitVerifyPhoneOtp(codeOverride?: string) {
+    // codeOverride lets the SMS-User-Consent auto-fill submit the code in
+    // the same render cycle it was extracted from the SMS, without waiting
+    // for setPhoneOtp() to flush through state. Falls back to phoneOtp
+    // (manual entry) when not provided.
+    const code = codeOverride ?? phoneOtp
+    if (!/^\d{4,8}$/.test(code)) {
       setPhoneMessage('Enter the 6-digit code.')
       // Don't flip the OTP-error visual for a "you haven't typed
       // enough yet" hint — that's a soft validation, not a wrong-
@@ -520,7 +595,7 @@ function AccountTab({ profile, user }: { profile: any; user: any }) {
     setPhoneOtpError(false)
     try {
       const { error: err } = await supabase.functions.invoke('verify-phone-otp', {
-        body: { phone: e164, code: phoneOtp },
+        body: { phone: e164, code },
       })
       if (err) {
         const msg = String(err.message || '')
@@ -885,7 +960,7 @@ function AccountTab({ profile, user }: { profile: any; user: any }) {
                   {phoneMessage ? <Text style={s.editPanelMessage}>{phoneMessage}</Text> : null}
                   <View style={s.editPanelBtnRow}>
                     <Pressable
-                      onPress={submitVerifyPhoneOtp}
+                      onPress={() => submitVerifyPhoneOtp()}
                       disabled={phoneSubmitting || phoneOtp.length < 6}
                       style={[s.smallBtnPrimary, (phoneSubmitting || phoneOtp.length < 6) ? s.smallBtnDisabled : null]}
                     >
@@ -1046,6 +1121,15 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
   const [heightFt, setHeightFt] = useState<string>(initHeight.ft)
   const [heightIn, setHeightIn] = useState<string>(initHeight.inches)
   const [heightCm, setHeightCm] = useState<string>(initHeight.cm)
+
+  // Body composition — May 24 2026, the third Body stats field
+  // alongside weight + height. Stored on profiles.body_fat_band, picked
+  // via the same BodyCompPicker component used in the wizard's first
+  // step so the UX is consistent across both surfaces. Local state
+  // batches with the rest of the page-level Save.
+  const [bodyFatBand, setBodyFatBand] = useState<BodyFatBand | null>(
+    ((profile as any)?.body_fat_band as BodyFatBand | null) ?? null,
+  )
 
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
@@ -1230,6 +1314,12 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
         .update({
           meal_slots_default:  mealSlots,
           swim_unit:           swimUnit,
+          // body_fat_band added May 24 2026 — third Body stats field
+          // alongside weight + height. Same column used by the wizard's
+          // first step. Realtime subscription on profiles will push the
+          // change back into AuthContext so the Calories wizard picks
+          // it up on next open without a manual refresh.
+          body_fat_band:       bodyFatBand,
           ...(isAdmin ? {} : {
             share_online_status: shareOnline,
             share_last_seen:     shareLastSeen,
@@ -1250,9 +1340,19 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
   return (
     <View style={s.formGap}>
 
-      {/* Preferred units */}
+      {/* Preferred units — column-aligned imperial vs metric. The
+          column headers (added May 24 2026) sit once above the first
+          row and remain accurate because every unit field below uses
+          the SAME card order: imperial on the left, metric on the
+          right. If you add another unit row (e.g. temperature),
+          keep that order or move the header inside the field group. */}
       <AnimateRise style={s.card}>
         <Text style={s.cardLabel}>Preferred units</Text>
+
+        <View style={s.unitGridHeaders}>
+          <Text style={s.unitGridHeaderText}>Imperial</Text>
+          <Text style={s.unitGridHeaderText}>Metric</Text>
+        </View>
 
         <View style={s.field}>
           <Text style={s.label}>Weight</Text>
@@ -1282,12 +1382,14 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
             international pools are 25m / 50m, US recreational pools are
             25 yards. Most users only swim one, so the preference lives
             on its own row rather than coupling to the outdoor distance
-            toggle. */}
+            toggle. Order was [m, yd] before May 24 2026; flipped to
+            [yd, m] so this row matches the imperial-left / metric-right
+            order of the rows above (and the new column headers). */}
         <View style={s.field}>
           <Text style={s.label}>Swim distance</Text>
           <View style={s.unitGrid}>
-            <UnitCard selected={swimUnit === 'm'}  onPress={() => setSwimUnit('m')}  label="m"  sub="Meters" />
             <UnitCard selected={swimUnit === 'yd'} onPress={() => setSwimUnit('yd')} label="yd" sub="Yards" />
+            <UnitCard selected={swimUnit === 'm'}  onPress={() => setSwimUnit('m')}  label="m"  sub="Meters" />
           </View>
         </View>
       </AnimateRise>
@@ -1361,6 +1463,25 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
               </View>
             </View>
           )}
+        </View>
+
+        {/* Body composition — May 24 2026, the third Body stats field.
+            Renders the same BodyCompPicker the wizard uses on its
+            first step. Picks persist via the page-level Save (see
+            handleSave's .update path further below).
+            Gender drives which silhouette set the picker shows; null
+            / non-binary all see the female set per the locked
+            "male / else=female" rule. */}
+        <View style={s.field}>
+          <Text style={s.label}>Body composition</Text>
+          <BodyCompPicker
+            value={bodyFatBand}
+            onChange={setBodyFatBand}
+            gender={profile?.gender ?? null}
+            // We're already in Profile → Preferences → Body stats —
+            // no need for the "you can change this from…" footnote.
+            showFootnote={false}
+          />
         </View>
       </AnimateRise>
 
@@ -3148,6 +3269,25 @@ const s = StyleSheet.create({
 
   // UnitCard — `rounded-xl border py-3 px-4`
   unitGrid: { flexDirection: 'row', gap: 8 },
+  // Column headers for the Preferred units card (added May 24 2026).
+  // Mirrors the unitGrid's `gap: 8` + `flex: 1` per child so the
+  // labels align with the centre of each card column below. Padding
+  // matches `unitCard.paddingHorizontal` so the text starts at the
+  // same x-coordinate as the card label.
+  unitGridHeaders: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 4,
+  },
+  unitGridHeaderText: {
+    flex: 1,
+    paddingHorizontal: 16,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    color: colors.mutedForeground,
+    textTransform: 'uppercase',
+  },
   unitCard: {
     flex: 1,
     paddingVertical: 12, paddingHorizontal: 16,

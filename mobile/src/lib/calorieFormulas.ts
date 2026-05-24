@@ -45,9 +45,15 @@ export const PROTEIN_LEVELS: Record<number, { label: string; gPerKg: number }> =
 
 // Fat levels: levels 1-3 are the admin panel's original Low/Medium/High
 // scale. Levels 4-5 were added May 23 2026 to support the Keto diet
-// preset in the self-coached wizard (Keto needs ~70% of calories from
-// fat). Admin slider still picks from 1-3; presets reach 4-5 via
-// MACRO_PRESETS in mobile/src/lib/planPresets.ts.
+// preset in the self-coached wizard. Admin slider still picks from 1-3;
+// presets reach 4-5 via MACRO_PRESETS in mobile/src/lib/planPresets.ts.
+//
+// May 24 2026 — fat_level is IGNORED for any plan with carb_cap_g set.
+// On capped plans, fat is the RESIDUAL (TDEE - protein - capped_carbs),
+// not a fixed % of TDEE. This is what makes Keto math hold across all
+// TDEEs: carbs lock at 30g/day, protein scales with bodyweight, fat
+// absorbs whatever's left. The nominal Keto fat_level (70%) stays for
+// backward compat / display fallback when the cap isn't honored.
 export const FAT_LEVELS: Record<number, { label: string; pctOfCals: number }> = {
   1: { label: 'Low',       pctOfCals: 0.10 },
   2: { label: 'Medium',    pctOfCals: 0.20 },
@@ -74,8 +80,26 @@ export function calcAge(birthdate: string | null | undefined): number | null {
 
 // ── Core formulas ─────────────────────────────────────────────────────────────
 
-/** Mifflin-St Jeor BMR */
-export function calcBMR(weightKg: number, heightCm: number, age: number, gender: string): number {
+/** Mifflin-St Jeor BMR.
+ *
+ * gender factor (from Mifflin-St Jeor 1990):
+ *   male  → +5
+ *   else  → -161 (female factor)
+ *
+ * Uniform "male / else=female" rule applied across every gender-driven
+ * calc in the system (BMR, resting-HR bands, Air Bike + StairMill
+ * cold-start baselines). Decided May 23 2026: the female factor is the
+ * more conservative default for any non-male value (non-binary, prefer-
+ * not-to-say, null, undefined), produces a sane lower-bound calorie
+ * target, and avoids picking a midpoint that matches neither real
+ * physiology. Mirrors web/src/lib/calorieFormulas.js (same fix).
+ */
+export function calcBMR(
+  weightKg: number,
+  heightCm: number,
+  age: number,
+  gender: string | null | undefined,
+): number {
   const gFactor = gender === 'male' ? 5 : -161
   return (weightKg * 9.99) + (heightCm * 6.25) - (age * 4.92) + gFactor
 }
@@ -98,23 +122,51 @@ export interface MacroBreakdown {
 
 /**
  * Macro split in grams + calories + %.
- * Protein based on GOAL weight; fats as % of total; carbs = remainder.
+ *
+ * Two paths:
+ *   1. Default (carbCapG == null) — protein computed from g/kg × goal
+ *      weight, fat is a fixed % of TDEE, carbs are the residual.
+ *      Original model; appropriate for Balanced / High-Protein /
+ *      Performance presets and admin-coached plans.
+ *
+ *   2. Carb-capped (carbCapG > 0) — protein computed normally, carbs
+ *      LOCKED at the cap (e.g. 30g/day for Keto), fat absorbs the
+ *      residual. Used for ketogenic plans where the defining feature
+ *      is the carb floor, not a fixed fat %. Without the cap, Keto
+ *      math broke at high TDEEs (carbs crept above 50g/day, out of
+ *      ketosis). With the cap, the user stays at ~30g carbs/day
+ *      regardless of bodyweight × activity level — medically correct.
+ *
+ * fat_level is IGNORED when carbCapG is set (fat is residual). Pass
+ * the preset's fat_level through anyway so older plans still
+ * deserialize cleanly.
  */
 export function calcMacros(
   dailyTargetCals: number,
   goalWeightKg: number,
   proteinLevelKey: number,
   fatLevelKey: number,
+  carbCapG: number | null = null,
 ): MacroBreakdown {
   const proteinG    = PROTEIN_LEVELS[proteinLevelKey].gPerKg * goalWeightKg
   const proteinCals = proteinG * 4
 
-  const fatPct  = FAT_LEVELS[fatLevelKey].pctOfCals
-  const fatCals = dailyTargetCals * fatPct
-  const fatG    = fatCals / 9
+  let fatCals: number
+  let carbCals: number
 
-  const carbCals = Math.max(0, dailyTargetCals - proteinCals - fatCals)
-  const carbG    = carbCals / 4
+  if (carbCapG != null && carbCapG > 0) {
+    // Carb-capped path (Keto et al.): carbs at cap, fat = residual.
+    carbCals = carbCapG * 4
+    fatCals  = Math.max(0, dailyTargetCals - proteinCals - carbCals)
+  } else {
+    // Default path: fat at fixed %, carbs = residual.
+    const fatPct = FAT_LEVELS[fatLevelKey].pctOfCals
+    fatCals  = dailyTargetCals * fatPct
+    carbCals = Math.max(0, dailyTargetCals - proteinCals - fatCals)
+  }
+
+  const fatG  = fatCals / 9
+  const carbG = carbCals / 4
 
   const safe = (n: number) => Math.max(0, Math.round(n))
   return {
@@ -229,6 +281,9 @@ export interface CaloriePlan {
   energy_balance_pct?:  number | null
   protein_level:        number
   fat_level:            number
+  /** Optional carb floor in g/day. When set, calcMacros uses the
+      carb-capped path (carbs=cap, fat=residual). Used by Keto preset. */
+  carb_cap_g?:          number | null
   goal_weight_kg?:      number | null
   starting_weight_kg?:  number | null
   correction_factor:    number
@@ -279,7 +334,7 @@ export function calcFullPlan(
 
   // Fall back to current weight for protein calc when goal isn't set yet
   const effectiveGoalKg = plan.goal_weight_kg || weightKg
-  const macros = calcMacros(dailyTarget, effectiveGoalKg, plan.protein_level, plan.fat_level)
+  const macros = calcMacros(dailyTarget, effectiveGoalKg, plan.protein_level, plan.fat_level, plan.carb_cap_g ?? null)
 
   // Timeline uses live bodyweight (override) if available, else profile weight.
   const timelineWeightKg = currentWeightKgOverride ?? weightKg

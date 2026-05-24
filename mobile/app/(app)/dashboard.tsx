@@ -11,11 +11,13 @@
  *      ├─ Header: "Recent activity" + "View all →"
  *      └─ 5 merged rows (efforts + ROM + bodyweight + calories), DeleteAction on each
  *
- * Helpers (formatGreeting, computeWeekStreak, computeMonthlyPRs, formatHeight, etc.)
+ * Helpers (formatGreeting, computeMonthlyPRs, computeFoodLogStreak,
+ * computeWeeklyWeightDiff, parseCardioBest, formatHeight, etc.)
  * are direct ports of the web functions — same inputs, same outputs.
  */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
+import { useFocusEffect } from 'expo-router'
 import {
   View, Text, Pressable, StyleSheet,
 } from 'react-native'
@@ -76,10 +78,9 @@ function formatDate(ts: string): string {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function formatMemberSince(ts: string | null | undefined): string {
-  if (!ts) return '—'
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
-}
+// formatMemberSince was removed May 24 2026 — the "since X" footer
+// chip was dropped from the dashboard per user feedback (replaced by
+// food log streak + lowest HR + weekly weight diff chips).
 
 function formatHeight(height: number | null | undefined, unit: string | null | undefined): string | null {
   if (!height) return null
@@ -93,45 +94,67 @@ function formatHeight(height: number | null | undefined, unit: string | null | u
 }
 
 // ── Streak helpers ────────────────────────────────────────────────────────────
-
-function getWeekKey(dateStr: string): string {
-  const d = new Date(dateStr)
-  const day = d.getDay() === 0 ? 7 : d.getDay()  // Mon=1 … Sun=7
-  d.setDate(d.getDate() - (day - 1))
-  d.setHours(0, 0, 0, 0)
-  return d.toISOString().split('T')[0]
-}
-
-function computeWeekStreak(dates: string[]): number {
-  if (!dates || dates.length === 0) return 0
-  const weekSet = new Set(dates.map(d => getWeekKey(d)))
-  const now = new Date()
-  const thisWeek = getWeekKey(now.toISOString())
-  const check = new Date(now)
-  if (!weekSet.has(thisWeek)) check.setDate(check.getDate() - 7)
-  let streak = 0
-  while (true) {
-    const key = getWeekKey(check.toISOString())
-    if (weekSet.has(key)) { streak++; check.setDate(check.getDate() - 7) }
-    else break
-  }
-  return streak
-}
+//
+// `getWeekKey` + `computeWeekStreak` were removed May 24 2026 with the
+// weekly training streak chip. If a week-based stat is reintroduced
+// later, the helpers used to live here.
 
 function parseEffort1RM(value: string | null | undefined): number | null {
   const m = value?.match(/Est\. 1RM (\d+(?:\.\d+)?)/)
   return m ? parseFloat(m[1]) : null
 }
 
-function computeMonthlyPRs(allStrengthEfforts: any[], allRomRecords: any[]): number {
-  const now = new Date()
-  const y = now.getFullYear(), mo = now.getMonth()
-  const isThisMonth = (ds: string) => {
-    const d = new Date(ds)
-    return d.getFullYear() === y && d.getMonth() === mo
+/**
+ * Parse a cardio effort's stored value into a comparable number, plus
+ * a direction flag so the caller knows whether lower or higher = better.
+ * Cardio storage is heterogeneous (pace, speed, rate, time, distance)
+ * so we sniff the format:
+ *   • "m:ss/km", "m:ss/mi", "m:ss/500m", "m:ss/100m" → pace, lower better
+ *   • everything else with a number → assume higher better (speed,
+ *     floors/min, cal/min, distance, calories, etc.)
+ * Returns null when no number can be extracted.
+ *
+ * IMPORTANT: the pace-format check uses `\b` after the unit alternation
+ * to prevent false positives like "/min" matching "/mi". Without the
+ * word boundary, "4.0 floors/min" (StairMill) and "12.0 cal/min" (Air
+ * Bike) would be misclassified as pace and then fail the m:ss extract,
+ * silently dropping those efforts from the cardio PR count. Bug fixed
+ * May 24 2026 after the test account's StairMill PR went uncounted.
+ */
+function parseCardioBest(value: string | null | undefined): { val: number; lowerBetter: boolean } | null {
+  if (!value) return null
+  const isPace = /\/(km|mi|500m|100m)\b/.test(value)
+  if (isPace) {
+    const m = value.match(/(\d+):(\d+)/)
+    if (!m) return null
+    return { val: parseInt(m[1], 10) * 60 + parseInt(m[2], 10), lowerBetter: true }
   }
-  let count = 0
+  const m = value.match(/(\d+(?:\.\d+)?)/)
+  return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
+}
 
+/** Reusable "current calendar month" check. Captures year + month at
+ *  call time so multiple PR helpers running in the same render produce
+ *  consistent buckets. */
+function isThisMonth(ds: string): boolean {
+  const d = new Date(ds)
+  const now = new Date()
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+}
+
+/**
+ * Count strength PRs hit this calendar month.
+ *
+ * For each exercise (group key = label.split(' · ')[0]), find the
+ * highest-ever Est. 1RM. If that highest was logged this calendar
+ * month → +1 PR for that exercise. Sums across all exercises.
+ *
+ * Split from the old combined computeMonthlyPRs() on May 24 2026 so
+ * the dashboard can surface strength and cardio PRs as separate chips
+ * (blue + amber respectively).
+ */
+function computeStrengthPRsThisMonth(allStrengthEfforts: any[]): number {
+  let count = 0
   const byEx: Record<string, { rm: number; date: string }[]> = {}
   allStrengthEfforts.forEach(e => {
     const rm = parseEffort1RM(e.value)
@@ -145,18 +168,96 @@ function computeMonthlyPRs(allStrengthEfforts: any[], allRomRecords: any[]): num
     const best = arr.reduce((b, e) => e.rm > b.rm ? e : b, arr[0])
     if (isThisMonth(best.date)) count++
   })
+  return count
+}
 
-  const byMov: Record<string, { deg: number; date: string }[]> = {}
-  allRomRecords.forEach(r => {
-    if (!byMov[r.movement_key]) byMov[r.movement_key] = []
-    byMov[r.movement_key].push({ deg: r.degrees, date: r.created_at })
+/**
+ * Count cardio PRs hit this calendar month.
+ *
+ * For each activity (group key = label.split(' · ')[0]), find the
+ * best-ever value. "Best" direction depends on the metric — pace-
+ * style values (m:ss/km, /mi, /500m, /100m) are LOWER-is-better;
+ * everything else (km/h, floors/min, cal/min, distance) is HIGHER-is-
+ * better. parseCardioBest() returns the flag per effort.
+ *
+ * +1 PR per activity where the best ever was hit this month. Sums.
+ */
+function computeCardioPRsThisMonth(allCardioEfforts: any[]): number {
+  let count = 0
+  const byAct: Record<string, { val: number; date: string; lowerBetter: boolean }[]> = {}
+  allCardioEfforts.forEach(e => {
+    const parsed = parseCardioBest(e.value)
+    if (!parsed) return
+    const act = e.label?.split(' · ')[0]
+    if (!act) return
+    if (!byAct[act]) byAct[act] = []
+    byAct[act].push({ val: parsed.val, date: e.created_at, lowerBetter: parsed.lowerBetter })
   })
-  Object.values(byMov).forEach(arr => {
-    const best = arr.reduce((b, e) => e.deg > b.deg ? e : b, arr[0])
+  Object.values(byAct).forEach(arr => {
+    const best = arr.reduce((b, e) => {
+      if (e.lowerBetter) return e.val < b.val ? e : b
+      return e.val > b.val ? e : b
+    }, arr[0])
     if (isThisMonth(best.date)) count++
   })
-
   return count
+}
+
+// Mobility (ROM) PR detection was part of the old combined
+// computeMonthlyPRs but isn't surfaced on the dashboard since
+// May 24 2026 — the user chose to display only strength + cardio
+// chips. If we re-add a mobility PR chip later, the pattern is the
+// same: group rom_records by movement_key, find highest degrees per
+// group, +1 if hit this month.
+
+/**
+ * Count consecutive days the user has logged food, walking backward
+ * from today (or yesterday if today has no logs yet). Returns 0 when
+ * the streak is broken or no logs exist. Used by the dashboard food
+ * streak chip — caller decides cosmetic cap (e.g. show "14+" once
+ * past 14).
+ */
+function computeFoodLogStreak(logDates: string[]): number {
+  if (!logDates || logDates.length === 0) return 0
+  const dateSet = new Set(logDates)
+  const todayKey = new Date().toISOString().slice(0, 10)
+  const check = new Date()
+  // Allow today to be missing — start counting from yesterday if so —
+  // so the streak doesn't reset to 0 the moment the user opens the app
+  // before logging their first meal of the day.
+  if (!dateSet.has(todayKey)) check.setDate(check.getDate() - 1)
+  let streak = 0
+  while (true) {
+    const key = check.toISOString().slice(0, 10)
+    if (dateSet.has(key)) { streak++; check.setDate(check.getDate() - 1) }
+    else break
+  }
+  return streak
+}
+
+/**
+ * Compute the user's weight change over the past week. Compares the
+ * latest log within the last 7 days against the latest log between
+ * 8–14 days ago. Returns null when there aren't enough data points
+ * to compute a meaningful diff.
+ *
+ * Returns the delta in CANONICAL kg; caller converts to display unit.
+ */
+function computeWeeklyWeightDiff(bwLogs: { weight: number; unit: string; created_at: string }[]): { deltaKg: number } | null {
+  if (!bwLogs || bwLogs.length < 2) return null
+  const now = Date.now()
+  const sevenDaysAgo    = now -  7 * 86400000
+  const fourteenDaysAgo = now - 14 * 86400000
+  // bwLogs is sorted DESC by created_at (newest first).
+  const recent = bwLogs.find(l => new Date(l.created_at).getTime() >= sevenDaysAgo)
+  if (!recent) return null
+  const previous = bwLogs.find(l => {
+    const t = new Date(l.created_at).getTime()
+    return t < sevenDaysAgo && t >= fourteenDaysAgo
+  })
+  if (!previous) return null
+  const toKg = (w: number, u: string) => u === 'lb' ? w * 0.453592 : w
+  return { deltaKg: toKg(recent.weight, recent.unit) - toKg(previous.weight, previous.unit) }
 }
 
 // ── ROM metadata ──────────────────────────────────────────────────────────────
@@ -321,19 +422,65 @@ export default function Dashboard() {
   const [recentROM, setRecentROM]           = useState<any[]>(cached?.rom       ?? [])
   const [recentBW, setRecentBW]             = useState<any[]>(cached?.bw        ?? [])
   const [recentCalories, setRecentCalories] = useState<any[]>(cached?.calories  ?? [])
-  const [trainingStreak, setTrainingStreak] = useState<number | null>(cached?.streak ?? null)
-  const [monthlyPRs, setMonthlyPRs]         = useState<number | null>(cached?.prs    ?? null)
+  // Strength + cardio PRs as separate chips (May 24 2026 split). Each
+  // counts "this calendar month" personal records in its own modality —
+  // strength = highest Est. 1RM per exercise, cardio = best per
+  // activity (direction-aware). Mobility PRs were dropped from the
+  // dashboard at the same time; the helper logic is preserved in the
+  // PR helpers section above if we re-introduce a mobility chip later.
+  const [strengthPRs, setStrengthPRs]       = useState<number | null>(cached?.strengthPrs ?? null)
+  const [cardioPRs, setCardioPRs]           = useState<number | null>(cached?.cardioPrs   ?? null)
+  // Stats footer chips added May 24 2026 — replaces the old training
+  // streak + member-since chips with three more actionable signals:
+  // food log discipline, recovery (lowest ambient HR), and weekly
+  // weight movement.
+  const [foodStreak, setFoodStreak]         = useState<number | null>(cached?.foodStreak ?? null)
+  const [lowestHR7d, setLowestHR7d]         = useState<number | null>(cached?.lowestHR   ?? null)
+  const [weeklyWeightKg, setWeeklyWeightKg] = useState<number | null>(cached?.weeklyKg   ?? null)
 
-  useEffect(() => {
+  // Re-fetch every time the dashboard tab gains focus (May 24 2026
+  // bug fix). The previous `useEffect([user])` only ran on initial
+  // mount, so newly logged efforts from other tabs never refreshed
+  // the PR / streak / HR / weight chips — the user would log a
+  // StairMill PR from the Cardio tab, come back to Dashboard, and
+  // see the old count. Expo Router keeps tabs mounted so useEffect
+  // doesn't re-fire on focus. useFocusEffect IS the right primitive.
+  //
+  // dataCache still provides instant paint from a prior session —
+  // the fresh fetch overwrites it once Supabase responds.
+  const fetchDashboard = useCallback(() => {
     if (!user) return
+    // Pre-compute the windowed ISO timestamps once so each query gets
+    // a stable, consistent boundary even if the user keeps the
+    // dashboard open across midnight.
+    const now             = Date.now()
+    const sevenDaysAgoISO    = new Date(now -  7 * 86400000).toISOString()
+    const fourteenDaysAgoISO = new Date(now - 14 * 86400000).toISOString()
+    const fourteenDaysAgoDay = fourteenDaysAgoISO.slice(0, 10)  // YYYY-MM-DD for food_logs.log_date
+
     Promise.all([
+      // Recent activity feed — capped at 5 of each, sorted desc.
       supabase.from('efforts').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
       supabase.from('rom_records').select('id, movement_key, degrees, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
       supabase.from('bodyweight').select('id, weight, unit, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
       supabase.from('calorie_logs').select('id, log_date, calories').eq('user_id', user.id).order('log_date', { ascending: false }).limit(5),
+      // PR computation — all-time efforts + all-time ROM. Splits into
+      // strength / cardio / mobility downstream via .type filtering
+      // (plus rom_records being its own table).
       supabase.from('efforts').select('created_at, label, value, type').eq('user_id', user.id),
       supabase.from('rom_records').select('movement_key, degrees, created_at').eq('user_id', user.id),
-    ]).then(([efRes, romRes, bwRes, calRes, allEffRes, allRomRes]) => {
+      // Food log streak — 14-day window of distinct log_dates is plenty
+      // for the streak walker (caller counts consecutive days backward).
+      supabase.from('food_logs').select('log_date').eq('user_id', user.id).gte('log_date', fourteenDaysAgoDay),
+      // Lowest ambient HR — last 7 days, workout_id IS NULL (matches
+      // the Heart page's resting-HR filter so the chip mirrors what
+      // they see there).
+      supabase.from('hr_samples').select('bpm').eq('user_id', user.id).is('workout_id', null).gte('measured_at', sevenDaysAgoISO),
+      // Weekly weight diff — 14-day window of bodyweight logs so
+      // computeWeeklyWeightDiff can find both a "last week" and "this
+      // week" anchor point.
+      supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', user.id).gte('created_at', fourteenDaysAgoISO).order('created_at', { ascending: false }),
+    ]).then(([efRes, romRes, bwRes, calRes, allEffRes, allRomRes, foodLogRes, hrRes, bwWindowRes]) => {
       const efforts  = efRes.data  ?? []
       const rom      = romRes.data ?? []
       const bw       = bwRes.data  ?? []
@@ -341,19 +488,51 @@ export default function Dashboard() {
       const allEff   = allEffRes.data ?? []
       const allRom   = allRomRes.data ?? []
 
-      const streak = computeWeekStreak(allEff.map((e: any) => e.created_at))
-      const prs    = computeMonthlyPRs(allEff.filter((e: any) => e.type === 'strength'), allRom)
+      // PRs split per modality. allRom is still fetched (and kept in
+      // the Promise.all) so the recent activity feed can render ROM
+      // entries, but it's no longer wired into a PR count chip.
+      const strengthPrsCount = computeStrengthPRsThisMonth(allEff.filter((e: any) => e.type === 'strength'))
+      const cardioPrsCount   = computeCardioPRsThisMonth(allEff.filter((e: any) => e.type === 'cardio'))
+      void allRom  // intentionally unused for PR counting — see note above
+
+      // Food log streak — distinct log_dates from the 14-day window.
+      const foodDates    = Array.from(new Set((foodLogRes.data ?? []).map((r: any) => r.log_date as string)))
+      const foodStreakV  = computeFoodLogStreak(foodDates)
+
+      // Lowest ambient HR — min over the 7-day sample window.
+      const hrSamples    = (hrRes.data ?? []) as { bpm: number }[]
+      const lowestHRv    = hrSamples.length > 0 ? Math.min(...hrSamples.map(s => s.bpm)) : null
+
+      // Weekly weight diff — kg, signed (negative = lost weight).
+      const bwWindow     = (bwWindowRes.data ?? []) as { weight: number; unit: string; created_at: string }[]
+      const weeklyDiff   = computeWeeklyWeightDiff(bwWindow)
+      const weeklyKgVal  = weeklyDiff ? weeklyDiff.deltaKg : null
 
       setRecentEfforts(efforts)
       setRecentROM(rom)
       setRecentBW(bw)
       setRecentCalories(calories)
-      setTrainingStreak(streak)
-      setMonthlyPRs(prs)
+      setStrengthPRs(strengthPrsCount)
+      setCardioPRs(cardioPrsCount)
+      setFoodStreak(foodStreakV)
+      setLowestHR7d(lowestHRv)
+      setWeeklyWeightKg(weeklyKgVal)
 
-      if (cacheKey) dataCache.set(cacheKey, { efforts, rom, bw, calories, streak, prs })
+      if (cacheKey) dataCache.set(cacheKey, {
+        efforts, rom, bw, calories,
+        strengthPrs: strengthPrsCount,
+        cardioPrs:   cardioPrsCount,
+        foodStreak:  foodStreakV,
+        lowestHR:    lowestHRv,
+        weeklyKg:    weeklyKgVal,
+      })
     })
-  }, [user])
+  }, [user, cacheKey])
+
+  // Fire on focus — every time the user navigates TO the dashboard tab,
+  // including the initial mount. The returned function (none here) would
+  // run on blur if we wanted to cancel an in-flight request.
+  useFocusEffect(fetchDashboard)
 
   // DeleteAction's tap-confirm (tap trash → red check → tap again) IS the
   // confirm step — no native Alert prompt needed. Web behaves the same way.
@@ -383,7 +562,6 @@ export default function Dashboard() {
   // ── Profile-derived display values ─────────────────────────────────────────
   const age           = calcAge(profile?.birthdate)
   const gender        = formatGender(profile?.gender)
-  const memberSince   = formatMemberSince(user?.created_at)
   const avatarUrl     = profile?.avatar_url || null
   const displayWeight = profile?.current_weight
     ? `${profile.current_weight} ${profile.weight_unit || 'lb'}`
@@ -454,32 +632,106 @@ export default function Dashboard() {
           </View>
         </View>
 
-        {/* Stats footer — border-top */}
+        {/* Stats footer — border-top.
+            Locked May 24 2026: replaced the older weekly-training-streak
+            + member-since chips with a 4-chip set that pulls from the
+            three real data sources (efforts/ROM, food_logs, hr_samples,
+            bodyweight). Every chip is gated on `value != null` so first-
+            time users with no data don't see empty/placeholder chips —
+            only the metrics that have data show up. */}
         <View style={d.statsRow}>
-          {trainingStreak != null && (
+          {/* 🏆 Strength PRs — blue (strength domain theme).
+              Counts: for each exercise, +1 PR if highest Est. 1RM ever
+              was hit this calendar month. */}
+          {strengthPRs != null && (
             <View style={[d.statChip, d.statChipBlue]}>
-              <Text style={d.statChipEmoji}>🗓️</Text>
-              <View style={d.statChipNum}>
-                <TickerNumber value={trainingStreak} fontSize={11} color={palette.blue[400]} fontWeight="700" />
-              </View>
-              <Text style={[d.statChipText, { color: palette.blue[400] }]}> wk streak</Text>
-            </View>
-          )}
-          {monthlyPRs != null && (
-            <View style={[d.statChip, d.statChipAmber]}>
               <Text style={d.statChipEmoji}>🏆</Text>
               <View style={d.statChipNum}>
-                <TickerNumber value={monthlyPRs} fontSize={11} color={palette.amber[400]} fontWeight="700" />
+                <TickerNumber value={strengthPRs} fontSize={11} color={palette.blue[400]} fontWeight="700" />
               </View>
-              <Text style={[d.statChipText, { color: palette.amber[400] }]}>
-                {' '}PR{monthlyPRs !== 1 ? 's' : ''} this month
+              <Text style={[d.statChipText, { color: palette.blue[400] }]}>
+                {' '}strength PR{strengthPRs !== 1 ? 's' : ''} this month
               </Text>
             </View>
           )}
-          <View style={[d.statChip, d.statChipMuted]}>
-            <Text style={d.statChipEmoji}>📅</Text>
-            <Text style={[d.statChipText, { color: colors.mutedForeground }]}> since {memberSince}</Text>
-          </View>
+
+          {/* 🏆 Cardio PRs — amber (cardio domain theme).
+              Counts: for each cardio activity, +1 PR if best-ever value
+              was hit this calendar month. Direction (lower vs higher
+              better) is per-metric — see parseCardioBest(). */}
+          {cardioPRs != null && (
+            <View style={[d.statChip, d.statChipAmber]}>
+              <Text style={d.statChipEmoji}>🏆</Text>
+              <View style={d.statChipNum}>
+                <TickerNumber value={cardioPRs} fontSize={11} color={palette.amber[400]} fontWeight="700" />
+              </View>
+              <Text style={[d.statChipText, { color: palette.amber[400] }]}>
+                {' '}cardio PR{cardioPRs !== 1 ? 's' : ''} this month
+              </Text>
+            </View>
+          )}
+
+          {/* 🍴 Food log streak — consecutive days, walked backward
+              from today (or yesterday if no log yet today). Renders
+              only when streak > 0 so a user who's never logged food
+              doesn't see a "0 day" chip. */}
+          {foodStreak != null && foodStreak > 0 && (
+            <View style={[d.statChip, d.statChipRed]}>
+              <Text style={d.statChipEmoji}>🍴</Text>
+              <View style={d.statChipNum}>
+                <TickerNumber value={foodStreak} fontSize={11} color={palette.red[400]} fontWeight="700" />
+              </View>
+              <Text style={[d.statChipText, { color: palette.red[400] }]}>
+                {' '}day{foodStreak !== 1 ? 's' : ''} logged in last 14 days
+              </Text>
+            </View>
+          )}
+
+          {/* ❤️ Lowest ambient HR over last 7 days — matches the
+              Heart page's resting-HR filter (workout_id IS NULL).
+              Emerald color mirrors the Heart page's resting-HR band. */}
+          {lowestHR7d != null && (
+            <View style={[d.statChip, d.statChipEmerald]}>
+              <Text style={d.statChipEmoji}>❤️</Text>
+              <View style={d.statChipNum}>
+                <TickerNumber value={lowestHR7d} fontSize={11} color={palette.emerald[400]} fontWeight="700" />
+              </View>
+              <Text style={[d.statChipText, { color: palette.emerald[400] }]}>
+                {' '}bpm low in last 7 days
+              </Text>
+            </View>
+          )}
+
+          {/* ⚖️ Weight change over the last week — diff between
+              latest log in last 7 days and latest log between 8–14
+              days ago. Slate-colored regardless of direction; the sign
+              tells the user which way it moved (+ = gained, − = lost).
+              We don't try to color-by-goal because the chip's correct
+              interpretation depends on whether they're cutting,
+              bulking, or maintaining. The sign carries the meaning. */}
+          {weeklyWeightKg != null && (() => {
+            const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
+            const inUnit = pUnit === 'kg' ? weeklyWeightKg : weeklyWeightKg / 0.453592
+            const rounded = Math.round(inUnit * 10) / 10
+            const sign = rounded > 0.05 ? '+' : rounded < -0.05 ? '−' : ''
+            const abs = Math.abs(rounded).toFixed(1)
+            return (
+              <View style={[d.statChip, d.statChipSlate]}>
+                <Text style={d.statChipEmoji}>⚖️</Text>
+                <View style={d.statChipNum}>
+                  <TickerNumber
+                    value={`${sign}${abs}`}
+                    fontSize={11}
+                    color={colors.foreground}
+                    fontWeight="700"
+                  />
+                </View>
+                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>
+                  {` ${pUnit} in last 7 days`}
+                </Text>
+              </View>
+            )
+          })()}
         </View>
         </AnimateRise>
 
@@ -617,9 +869,17 @@ const d = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 2,
     borderRadius: 9999, borderWidth: 1,
   },
-  statChipBlue:  { borderColor: withAlpha(palette.blue[500],  0.30), backgroundColor: withAlpha(palette.blue[500],  0.10) },
-  statChipAmber: { borderColor: withAlpha(palette.amber[500], 0.30), backgroundColor: withAlpha(palette.amber[500], 0.10) },
-  statChipMuted: { borderColor: colors.border, backgroundColor: alpha(colors.muted, 0.30) },
+  statChipBlue:    { borderColor: withAlpha(palette.blue[500],    0.30), backgroundColor: withAlpha(palette.blue[500],    0.10) },
+  statChipAmber:   { borderColor: withAlpha(palette.amber[500],   0.30), backgroundColor: withAlpha(palette.amber[500],   0.10) },
+  // Added May 24 2026 for the new chip set.
+  // statChipRed     — food log streak. Matches the Calories page's red accent.
+  // statChipEmerald — lowest HR. Matches the Heart page's resting-HR band color.
+  // statChipSlate   — weekly weight diff. Direction-agnostic; sign in the
+  //                   value tells the user which way the scale moved.
+  statChipRed:     { borderColor: withAlpha(palette.red[500],     0.30), backgroundColor: withAlpha(palette.red[500],     0.10) },
+  statChipEmerald: { borderColor: withAlpha(palette.emerald[500], 0.30), backgroundColor: withAlpha(palette.emerald[500], 0.10) },
+  statChipSlate:   { borderColor: colors.border, backgroundColor: alpha(colors.muted, 0.30) },
+  statChipMuted:   { borderColor: colors.border, backgroundColor: alpha(colors.muted, 0.30) },
   statChipEmoji: { fontSize: 11, marginRight: 4 },
   statChipNum:   { marginRight: 0 },
   statChipText:  { fontSize: 11, fontWeight: '500' },
