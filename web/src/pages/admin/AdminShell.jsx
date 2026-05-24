@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import {
   Users, LogOut, X, Menu, ShieldCheck,
   LayoutDashboard, TrendingUp, Utensils, Activity,
-  User, MessageCircle, Dumbbell, BookOpen,
+  MessageCircle, Dumbbell, BookOpen, Settings,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
@@ -74,7 +74,11 @@ function NavLinks({ onClick, unreadMessages, goalsReached }) {
   )
 }
 
-export default function AdminShell({ children, onSwitchToClientView }) {
+export default function AdminShell({ children }) {
+  // Note: previously accepted an `onSwitchToClientView` prop that rendered
+  // a "Client View" button in the sidebar footer. Removed May 23 2026 —
+  // admins now manage their account/settings here in the admin shell;
+  // the duplicate "be the client" view added confusion without value.
   const { user, profile, signOut } = useAuth()
   const [drawerOpen,      setDrawerOpen]      = useState(false)
   const [unreadMessages,  setUnreadMessages]  = useState(0)
@@ -139,9 +143,14 @@ export default function AdminShell({ children, onSwitchToClientView }) {
   function SidebarFooter() {
     return (
       <div className="border-t border-border p-3 space-y-1">
-        {/* Admin's own profile — clickable link */}
+        {/* Admin's own profile — clickable link to Account page. The gear
+            icon on the right makes it visually clear this row is
+            interactive (otherwise it reads as static "you are signed in
+            as X" decoration). Tapping anywhere on the row opens
+            /admin/profile, which renders the same Account page the end
+            users see. */}
         <Link href="/admin/profile">
-          <a className="flex items-center gap-2.5 rounded-md px-3 py-2 hover:bg-accent transition-colors cursor-pointer">
+          <a className="group flex items-center gap-2.5 rounded-md px-3 py-2 hover:bg-accent transition-colors cursor-pointer">
             <div className="shrink-0">
               {avatarUrl
                 ? <img src={avatarUrl} alt={displayName} className="h-8 w-8 rounded-full object-cover" />
@@ -150,20 +159,11 @@ export default function AdminShell({ children, onSwitchToClientView }) {
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-semibold">{displayName}</p>
-              <p className="text-[11px] text-muted-foreground">Super User</p>
+              <p className="text-[11px] text-muted-foreground">Account &amp; settings</p>
             </div>
+            <Settings className="h-4 w-4 shrink-0 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
           </a>
         </Link>
-
-        {/* Client View */}
-        {onSwitchToClientView && (
-          <button
-            onClick={onSwitchToClientView}
-            className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            <User className="h-4 w-4" /> Client View
-          </button>
-        )}
 
         <button
           onClick={signOut}
@@ -224,22 +224,18 @@ export default function AdminShell({ children, onSwitchToClientView }) {
             </div>
             <div className="border-t border-border p-3 space-y-1">
               <Link href="/admin/profile" onClick={() => setDrawerOpen(false)}>
-                <a className="flex items-center gap-2.5 px-3 py-2 rounded-md hover:bg-accent transition-colors cursor-pointer">
+                <a className="group flex items-center gap-2.5 px-3 py-2 rounded-md hover:bg-accent transition-colors cursor-pointer">
                   {avatarUrl
                     ? <img src={avatarUrl} alt={displayName} className="h-7 w-7 rounded-full object-cover" />
                     : <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/15 text-xs font-semibold text-primary">{initial}</div>
                   }
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold truncate">{displayName}</p>
-                    <p className="text-[11px] text-muted-foreground">Super User</p>
+                    <p className="text-[11px] text-muted-foreground">Account &amp; settings</p>
                   </div>
+                  <Settings className="h-4 w-4 shrink-0 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
                 </a>
               </Link>
-              {onSwitchToClientView && (
-                <button onClick={onSwitchToClientView} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-                  <User className="h-4 w-4" /> Client View
-                </button>
-              )}
               <button onClick={signOut} className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
                 <LogOut className="h-4 w-4" /> Sign out
               </button>

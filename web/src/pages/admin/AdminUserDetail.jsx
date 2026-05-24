@@ -412,8 +412,8 @@ export default function AdminUserDetail() {
               onClick={toggleSelfCoached}
               disabled={togglingCoach}
               title={profile.is_self_coached
-                ? 'Take this client on for coaching (deletes their self-set plan)'
-                : 'Hand the plan back to the client'}
+                ? 'Switch to admin-coached (you take over the plan; deletes their self-set plan)'
+                : 'Switch to self-coached (client manages their own plan from the app)'}
               className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
                 profile.is_self_coached
                   ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
@@ -421,7 +421,7 @@ export default function AdminUserDetail() {
               } ${togglingCoach ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
             >
               <UserCog className="h-3 w-3" />
-              {profile.is_self_coached ? 'Self-coached' : 'I coach this client'}
+              {profile.is_self_coached ? 'Self-coached' : 'Admin-coached'}
             </button>
           </div>
         </div>

@@ -58,41 +58,44 @@ export const DEFAULT_MACRO_PRESET = 'balanced'
 
 // ── Pace options ──────────────────────────────────────────────────────────────
 
+// Pace ladder (May 24 2026 lock — see mobile/src/lib/planPresets.ts for
+// the canonical comment). Timeline FIXED per pace. Goal weight COMPUTED
+// PER-USER from TDEE via predictLbDeltaForPace (no static goal_delta_pct).
 export const PACE_OPTIONS = {
   lose_aggressive: {
     key:                'lose_aggressive',
-    label:              'Lose aggressively',
-    tagline:            '~2 lb/week — hard to sustain',
-    energy_balance_pct: -0.30,
-    goal_delta_pct:     -0.15,
+    label:              'Lose hard',
+    tagline:            'Push the upper end of sustainable',
+    energy_balance_pct: -0.25,
+    timeline_months:     2,
   },
   lose_moderate: {
     key:                'lose_moderate',
-    label:              'Lose moderately',
-    tagline:            '~1–1.5 lb/week — the typical pace',
-    energy_balance_pct: -0.20,
-    goal_delta_pct:     -0.10,
+    label:              'Lose steady',
+    tagline:            'A relaxed, easily maintained pace',
+    energy_balance_pct: -0.15,
+    timeline_months:     1,
   },
   maintain: {
     key:                'maintain',
     label:              'Maintain weight',
     tagline:            'Hold steady at your current weight',
     energy_balance_pct:  0,
-    goal_delta_pct:      0,
+    timeline_months:     0,
   },
   gain_gradual: {
     key:                'gain_gradual',
-    label:              'Gain gradually',
-    tagline:            'Small surplus — lean gain',
+    label:              'Gain steady',
+    tagline:            'Small surplus for lean gain',
     energy_balance_pct:  0.10,
-    goal_delta_pct:      0.05,
+    timeline_months:     1,
   },
   gain_aggressive: {
     key:                'gain_aggressive',
-    label:              'Gain aggressively',
-    tagline:            'Bigger surplus — more fat with the muscle',
-    energy_balance_pct:  0.20,
-    goal_delta_pct:      0.10,
+    label:              'Gain hard',
+    tagline:            'Bigger surplus — most add some fat with the muscle',
+    energy_balance_pct:  0.15,
+    timeline_months:     2,
   },
 }
 
@@ -110,18 +113,34 @@ export { ACTIVITY_FACTORS }
 
 export const SELF_COACHED_CORRECTION_FACTOR = 0.75
 
-// ── Derivation helper ─────────────────────────────────────────────────────────
+// ── Derivation helpers ────────────────────────────────────────────────────────
+
+/** Standard thermodynamic conversion: ~3500 kcal = 1 lb of body weight. */
+export const CALORIES_PER_LB = 3500
 
 /**
- * Compute the derived goal_weight_kg for a self-coached user given their
- * current weight (kg) and chosen pace. Maintenance → goal = current.
- * Other paces → goal = current × (1 + goal_delta_pct).
+ * Predict the lb of body weight a user will lose/gain following this pace
+ * for the pace's locked timeline, given their TDEE. Negative = loss.
+ * Used by PaceScreen for the outcome badge and by deriveGoalWeightKg
+ * for the persisted goal so both flow through the same math.
  */
-export function deriveGoalWeightKg(currentKg, paceKey) {
-  const pace  = PACE_OPTIONS[paceKey]
-  const delta = pace?.goal_delta_pct ?? 0
-  const raw   = currentKg * (1 + delta)
-  return Math.round(raw * 10) / 10
+export function predictLbDeltaForPace(paceKey, tdee) {
+  const pace = PACE_OPTIONS[paceKey]
+  if (!pace || pace.timeline_months === 0) return 0
+  const dailyCalDelta = tdee * pace.energy_balance_pct
+  const totalCalDelta = dailyCalDelta * pace.timeline_months * 30
+  return totalCalDelta / CALORIES_PER_LB
+}
+
+/**
+ * Compute the derived goal_weight_kg for a self-coached user. Uses the
+ * SAME calorie-math derivation as predictLbDeltaForPace so the persisted
+ * goal matches the badge the user committed to. Mirrors mobile.
+ */
+export function deriveGoalWeightKg(currentKg, paceKey, tdee) {
+  const lbDelta = predictLbDeltaForPace(paceKey, tdee)
+  const kgDelta = lbDelta * 0.453592
+  return Math.round((currentKg + kgDelta) * 10) / 10
 }
 
 /**

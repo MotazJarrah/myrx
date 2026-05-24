@@ -58,7 +58,20 @@ export function calcAge(birthdate) {
 
 // ── Core formulas ─────────────────────────────────────────────────────────────
 
-/** Mifflin-St Jeor BMR */
+/** Mifflin-St Jeor BMR.
+ *
+ * gender factor (from Mifflin-St Jeor 1990):
+ *   male  → +5
+ *   else  → -161 (female factor)
+ *
+ * Uniform "male / else=female" rule applied across every gender-driven
+ * calc in the system (BMR, resting-HR bands, Air Bike + StairMill
+ * cold-start baselines). Decided May 23 2026: the female factor is the
+ * more conservative default for any non-male value (non-binary, prefer-
+ * not-to-say, null, undefined), produces a sane lower-bound calorie
+ * target, and avoids picking a midpoint that matches neither real
+ * physiology. Mirrors mobile's mobile/src/lib/calorieFormulas.ts.
+ */
 export function calcBMR(weightKg, heightCm, age, gender) {
   const gFactor = gender === 'male' ? 5 : -161
   return (weightKg * 9.99) + (heightCm * 6.25) - (age * 4.92) + gFactor

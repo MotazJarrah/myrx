@@ -195,3 +195,13 @@
 }
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* Hide the browser-native calendar picker glyph on date inputs that supply
+   their own icon. The Account page wraps <input type="date"> in a flex row
+   with a custom Calendar icon + onClick that calls showPicker() — Chrome's
+   built-in glyph on top of that reads as a duplicate. Scoped to inputs
+   inside our specific wrapper so we don't strip it from inputs that DO
+   rely on it. */
+.no-native-date-icon::-webkit-calendar-picker-indicator { display: none; }
+.no-native-date-icon::-webkit-inner-spin-button         { display: none; }
+.no-native-date-icon::-webkit-clear-button              { display: none; }

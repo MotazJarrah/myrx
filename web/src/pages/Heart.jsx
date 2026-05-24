@@ -146,14 +146,11 @@ function ageBucket(age) {
 
 function bandsForUser(age, gender) {
   const bucket = ageBucket(age)
-  const m = MALE_TABLE[bucket]
-  const f = FEMALE_TABLE[bucket]
-  let t
-  if (gender === 'male')        t = m
-  else if (gender === 'female') t = f
-  else {
-    t = [0,1,2,3,4,5].map(i => Math.round((m[i] + f[i]) / 2))
-  }
+  // Uniform "male / else=female" rule across every gender-driven calc in
+  // the system (see web/src/lib/calorieFormulas.js calcBMR for the
+  // canonical comment). Non-binary / prefer-not-to-say / null → female
+  // bands. Decided May 23 2026 to replace the earlier averaging compromise.
+  const t = gender === 'male' ? MALE_TABLE[bucket] : FEMALE_TABLE[bucket]
   return [
     { key: 'athlete',   label: 'Athlete',      color: palette.emerald[500], upperBpm: t[0] },
     { key: 'excellent', label: 'Excellent',    color: palette.emerald[400], upperBpm: t[1] },

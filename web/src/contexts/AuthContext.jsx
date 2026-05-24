@@ -93,6 +93,30 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [fetchProfile])
 
+  // ── Realtime profile sync ────────────────────────────────────────────────
+  // Subscribe to UPDATEs on the user's own profiles row. When admin flips
+  // a field server-side (Self-coached / Admin-coached toggle, chat_enabled,
+  // any other admin-controlled column), the change reaches the open tab
+  // within a couple hundred milliseconds — no cold-reload, no tab swap,
+  // no pull-to-refresh required.
+  //
+  // Silent refetch: fetchProfile toggles profileLoading=true briefly, but
+  // ProtectedLayout gates on `loading || (profileLoading && !profile)` so
+  // subsequent refetches keep the UI mounted (no skeleton flash). Mirrors
+  // mobile's AuthContext (mobile/src/contexts/AuthContext.tsx).
+  useEffect(() => {
+    if (!user?.id) return
+    const channel = supabase
+      .channel(`profile-self-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        () => { fetchProfile(user.id) },
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [user?.id, fetchProfile])
+
   const signUp = ({ email, password }) =>
     supabase.auth.signUp({ email, password })
 

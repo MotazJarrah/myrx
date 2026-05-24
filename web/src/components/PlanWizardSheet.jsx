@@ -23,37 +23,38 @@
  * supabase/migrations/20260523_self_coached_plan.sql).
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { X, ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import {
   MACRO_PRESETS, MACRO_PRESET_ORDER, DEFAULT_MACRO_PRESET,
-  PACE_OPTIONS,   PACE_OPTION_ORDER,   DEFAULT_PACE,
+  PACE_OPTIONS,   PACE_OPTION_ORDER,
   ACTIVITY_OPTION_ORDER, ACTIVITY_FACTORS,
   SELF_COACHED_CORRECTION_FACTOR,
-  deriveGoalWeightKg, macroPresetForPlan, paceForPlan,
+  deriveGoalWeightKg, predictLbDeltaForPace,
+  macroPresetForPlan, paceForPlan,
 } from '../lib/planPresets'
-import { FAT_LEVELS, PROTEIN_LEVELS } from '../lib/calorieFormulas'
+import { FAT_LEVELS, PROTEIN_LEVELS, calcBMR } from '../lib/calorieFormulas'
 
-const STEP_ORDER = ['pace', 'activity', 'macros']
+// Activity FIRST (May 24 2026) so Pace screen can compute per-user
+// weight outcomes from TDEE. Old order was pace → activity → macros.
+const STEP_ORDER = ['activity', 'pace', 'macros']
 
 export default function PlanWizardSheet({
-  isOpen, onClose, userId, currentWeightKg, existingPlan,
-  startStep = 'pace',
+  isOpen, onClose, userId, currentWeightKg, heightCm, age, gender, existingPlan,
+  startStep = 'activity',
   singleScreen = false,
   onSaved,
 }) {
   const [step, setStep]     = useState(startStep)
-  const [pace, setPace]     = useState(
-    paceForPlan(existingPlan?.energy_balance_pct ?? null) ?? DEFAULT_PACE,
-  )
+  // First-time setup → nothing pre-selected (Next stays disabled until
+  // the user picks). Re-opens for edit → seed from existing plan.
+  const [pace, setPace]     = useState(paceForPlan(existingPlan?.energy_balance_pct ?? null))
   const [activity, setActivity] = useState(existingPlan?.activity_factor ?? 0)
-  const [macro, setMacro]   = useState(
-    macroPresetForPlan(
-      existingPlan?.protein_level ?? null,
-      existingPlan?.fat_level     ?? null,
-    ) ?? DEFAULT_MACRO_PRESET,
-  )
+  const [macro, setMacro]   = useState(macroPresetForPlan(
+    existingPlan?.protein_level ?? null,
+    existingPlan?.fat_level     ?? null,
+  ))
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState(null)
 
@@ -61,14 +62,26 @@ export default function PlanWizardSheet({
   useEffect(() => {
     if (!isOpen) return
     setStep(startStep)
-    setPace(paceForPlan(existingPlan?.energy_balance_pct ?? null) ?? DEFAULT_PACE)
+    setPace(paceForPlan(existingPlan?.energy_balance_pct ?? null))
     setActivity(existingPlan?.activity_factor ?? 0)
     setMacro(macroPresetForPlan(
       existingPlan?.protein_level ?? null,
       existingPlan?.fat_level     ?? null,
-    ) ?? DEFAULT_MACRO_PRESET)
+    ))
     setError(null)
   }, [isOpen, startStep, existingPlan])
+
+  // TDEE — live per-user. PaceScreen uses it to compute per-row weight
+  // outcomes ("≈ -11 lb in 2 months"). Null until activity is picked OR
+  // profile fields are missing. Mirrors mobile.
+  const tdee = useMemo(() => {
+    if (!currentWeightKg || !heightCm || age == null) return null
+    const bmr = calcBMR(currentWeightKg, heightCm, age, gender)
+    if (activity > 0 && ACTIVITY_FACTORS[activity]) {
+      return bmr * ACTIVITY_FACTORS[activity].value
+    }
+    return null
+  }, [currentWeightKg, heightCm, age, gender, activity])
 
   const stepIdx   = STEP_ORDER.indexOf(step)
   const isFirst   = stepIdx === 0
@@ -104,7 +117,11 @@ export default function PlanWizardSheet({
     try {
       const paceOpt    = PACE_OPTIONS[pace]
       const macroOpt   = MACRO_PRESETS[macro]
-      const goalWeight = deriveGoalWeightKg(currentWeightKg, pace)
+      // Generic 2000-cal fallback when profile fields are missing —
+      // matches mobile so persisted goal_weight_kg agrees with what
+      // PaceScreen showed in that case.
+      const tdeeForSave = tdee ?? 2000
+      const goalWeight  = deriveGoalWeightKg(currentWeightKg, pace, tdeeForSave)
 
       const payload = {
         user_id:             userId,
@@ -197,7 +214,7 @@ export default function PlanWizardSheet({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4 min-h-0">
-          {step === 'pace'     && <PaceScreen     value={pace}     onChange={setPace} />}
+          {step === 'pace'     && <PaceScreen     value={pace}     onChange={setPace} currentWeightKg={currentWeightKg} tdee={tdee} />}
           {step === 'activity' && <ActivityScreen value={activity} onChange={setActivity} />}
           {step === 'macros'   && <MacrosScreen   value={macro}    onChange={setMacro} />}
         </div>
@@ -236,12 +253,52 @@ export default function PlanWizardSheet({
 
 // ── Per-screen renderers ─────────────────────────────────────────────────────
 
-function PaceScreen({ value, onChange }) {
+function PaceScreen({ value, onChange, currentWeightKg, tdee }) {
+  // Two-badge layout (May 24 2026 lock) — concrete outcome ("≈ -11 lb
+  // in 2 months") + daily cal change ("-25%"). Mirrors mobile's
+  // PaceScreen exactly. Outcome COMPUTED from this user's TDEE via
+  // predictLbDeltaForPace (BMR × activity × pace × timeline ÷ 3500).
+  // Two different users at the same pace see different predicted
+  // outcomes because their TDEE differs — honest per-user math.
   return (
     <div className="space-y-2">
       {PACE_OPTION_ORDER.map(key => {
         const opt    = PACE_OPTIONS[key]
         const active = key === value
+        const calPct = Math.round(opt.energy_balance_pct * 100)
+
+        const direction =
+          opt.energy_balance_pct < 0 ? 'lose'
+          : opt.energy_balance_pct > 0 ? 'gain'
+          : 'maintain'
+        const badgeBg =
+          direction === 'lose' ? 'bg-red-400/15 text-red-400'
+          : direction === 'gain' ? 'bg-emerald-400/15 text-emerald-400'
+          : 'bg-slate-400/15 text-slate-400'
+        const badgeBgFaint =
+          direction === 'lose' ? 'bg-red-400/10 text-red-400'
+          : direction === 'gain' ? 'bg-emerald-400/10 text-emerald-400'
+          : 'bg-slate-400/10 text-slate-400'
+
+        let outcomeText
+        if (opt.timeline_months === 0) {
+          outcomeText = currentWeightKg
+            ? `Stay at ${Math.round(currentWeightKg / 0.453592)} lb`
+            : 'Stay at current weight'
+        } else if (tdee == null) {
+          // Pre-activity fallback — show direction-only hint.
+          const pctApprox = Math.round(opt.energy_balance_pct * 100 / 4)
+          const sign      = pctApprox > 0 ? '+' : ''
+          const months    = opt.timeline_months === 1 ? '1 month' : `${opt.timeline_months} months`
+          outcomeText     = `${sign}${pctApprox}% in ${months}`
+        } else {
+          const lbDelta = predictLbDeltaForPace(key, tdee)
+          const rounded = Math.round(lbDelta * 2) / 2
+          const sign    = rounded > 0 ? '+' : ''
+          const months  = opt.timeline_months === 1 ? '1 month' : `${opt.timeline_months} months`
+          outcomeText   = `${sign}${rounded} lb in ${months}`
+        }
+
         return (
           <button
             key={key}
@@ -257,6 +314,16 @@ function PaceScreen({ value, onChange }) {
                 {opt.label}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">{opt.tagline}</p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold ${badgeBg}`}>
+                  {outcomeText}
+                </span>
+                {calPct !== 0 && (
+                  <span className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-semibold ${badgeBgFaint}`}>
+                    {calPct > 0 ? `+${calPct}` : calPct}% daily cals
+                  </span>
+                )}
+              </div>
             </div>
             {active && <Check className="h-4 w-4 text-primary shrink-0" />}
           </button>

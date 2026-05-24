@@ -1,17 +1,24 @@
 /**
  * Admin's own profile page
  * Route: /admin/profile
- * Tabs: My Profile (edit) | Intake Plan (assign)
+ * Tabs: My Profile (Account only) | Intake Plan (own coaching plan)
  *
- * After every save, refreshProfile() is called so the AuthContext cache
- * stays in sync — ensuring the client view (EditProfile) and intake plan
- * calculations always use up-to-date weight/height/metrics.
+ * The "My Profile" tab reuses the SAME ProfileTab component the end-users
+ * see on /profile, so the admin's own Account page is byte-for-byte
+ * identical to what a client sees on theirs. This was an explicit user
+ * requirement (May 23 2026): "make perfect parity 1:1 to the setting's
+ * account... only". Scope is limited to Account — no Preferences /
+ * Security / About surfaces. Both surfaces read/write the same Supabase
+ * columns via useAuth() — change once, see it everywhere.
+ *
+ * The Intake Plan tab is admin-only (end-users get their plan via
+ * Calories page wizard) so it lives only on this page.
  */
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../lib/supabase'
-import AdminUserProfile from './tabs/AdminUserProfile'
-import AdminUserPlan    from './tabs/AdminUserPlan'
+import { ProfileTab } from '../EditProfile'
+import AdminUserPlan from './tabs/AdminUserPlan'
 
 function getGreeting() {
   const h = new Date().getHours()
@@ -26,35 +33,30 @@ const TABS = [
 ]
 
 export default function AdminProfile() {
-  const { user, refreshProfile } = useAuth()
-  const [profile,      setProfile]      = useState(null)
+  const { user, profile: ctxProfile } = useAuth()
   const [existingPlan, setExistingPlan] = useState(null)
-  const [loading,      setLoading]      = useState(true)
+  const [planLoading,  setPlanLoading]  = useState(true)
   const [activeTab,    setActiveTab]    = useState('profile')
 
   useEffect(() => {
     if (!user?.id) return
     async function load() {
-      setLoading(true)
-      const [profileRes, planRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('calorie_plans').select('*').eq('user_id', user.id).maybeSingle(),
-      ])
-      setProfile(profileRes.data ? { ...profileRes.data, email: user.email } : null)
+      setPlanLoading(true)
+      const planRes = await supabase
+        .from('calorie_plans').select('*').eq('user_id', user.id).maybeSingle()
       setExistingPlan(planRes.data ?? null)
-      setLoading(false)
+      setPlanLoading(false)
     }
     load()
   }, [user?.id])
 
-  // Called after any profile save — updates local state AND refreshes AuthContext
-  // so the client view (EditProfile + calorie plan) sees the new metrics immediately
-  async function handleProfileSaved(updated) {
-    setProfile(prev => ({ ...prev, ...updated }))
-    await refreshProfile()
-  }
+  // Merge the auth-context profile (live, refreshed by ProfileTab/SettingsTab
+  // saves) with the user.email so AdminUserPlan can read it. The end-user
+  // ProfileTab/SettingsTab pull their profile directly from useAuth() so they
+  // automatically pick up any updates.
+  const profile = ctxProfile ? { ...ctxProfile, email: user?.email } : null
 
-  if (loading) {
+  if (!profile) {
     return <div className="py-20 text-center text-sm text-muted-foreground">Loading…</div>
   }
 
@@ -69,7 +71,7 @@ export default function AdminProfile() {
         </h1>
       </div>
 
-      {/* Tab bar */}
+      {/* Top-level tab bar: My Profile | Intake Plan */}
       <div className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1">
         {TABS.map(t => (
           <button
@@ -86,24 +88,30 @@ export default function AdminProfile() {
         ))}
       </div>
 
-      {/* Profile tab */}
-      {activeTab === 'profile' && profile && (
-        <AdminUserProfile
-          profile={profile}
-          userId={user.id}
-          onProfileSaved={handleProfileSaved}
-        />
+      {/* My Profile tab — Account only. Reuses the end-user ProfileTab
+          (from EditProfile.jsx) so it's byte-for-byte identical to what
+          a client sees on /profile. Preferences / Security / About were
+          intentionally NOT mirrored — scope is Account only per the
+          May 23 2026 lock. */}
+      {activeTab === 'profile' && (
+        <div className="max-w-lg mx-auto">
+          <ProfileTab profile={profile} user={user} />
+        </div>
       )}
 
-      {/* Intake Plan tab */}
+      {/* Intake Plan tab — admin-only feature, kept as-is */}
       {activeTab === 'plan' && (
-        <AdminUserPlan
-          profile={profile}
-          existingPlan={existingPlan}
-          userId={user.id}
-          adminUserId={user.id}
-          onPlanSaved={updated => setExistingPlan(updated)}
-        />
+        planLoading ? (
+          <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
+        ) : (
+          <AdminUserPlan
+            profile={profile}
+            existingPlan={existingPlan}
+            userId={user.id}
+            adminUserId={user.id}
+            onPlanSaved={updated => setExistingPlan(updated)}
+          />
+        )
       )}
 
     </div>

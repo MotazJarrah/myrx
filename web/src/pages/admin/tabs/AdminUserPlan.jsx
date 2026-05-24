@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useScrollDrift } from '../../../lib/useScrollDrift'
 import {
   calcFullPlan, calcPerMeal,
   ACTIVITY_FACTORS, PROTEIN_LEVELS, FAT_LEVELS,
@@ -259,6 +260,13 @@ const FAT_OPTIONS      = Object.entries(FAT_LEVELS).map(([k, v])      => ({ valu
 export default function AdminUserPlan({ profile, existingPlan: initPlan, userId, adminUserId, onPlanSaved }) {
   const [existingPlan, setExistingPlan] = useState(initPlan)
 
+  // Live preview pane gets a subtle inertial drift on scroll — sticky
+  // pins it, but the drift hook adds a transient translateY that lerps
+  // back to 0 each frame, so the panel reads as "catching up" instead
+  // of snapping. See web/src/lib/useScrollDrift.js for mechanics.
+  const previewRef = useRef(null)
+  useScrollDrift(previewRef, { factor: 0.15, maxLag: 50 })
+
   // ── Plan fields ──────────────────────────────────────────────────────────────
   const [activityFactor,   setActivityFactor]   = useState(() => initPlan?.activity_factor ?? 2)
   const [energyPct,        setEnergyPct]         = useState(() => initPlan?.energy_balance_pct != null ? Math.round(initPlan.energy_balance_pct * 100) : -20)
@@ -418,7 +426,17 @@ export default function AdminUserPlan({ profile, existingPlan: initPlan, userId,
   // from here. To take over, flip the "Self-coached" toggle on the parent
   // AdminUserDetail page; that deletes the plan and flips this tab back to
   // the editable form.
-  if (profile?.is_self_coached) {
+  //
+  // Exception (May 23 2026): when the admin is looking at THEIR OWN profile
+  // (userId === adminUserId), bypass this self-coached lock — the admin is
+  // the one editing their own plan from this page (the user's stated rule:
+  // "the admin account will always set their own intake plan, never from the
+  // client side, always from the admin page side"). Without this bypass, an
+  // admin whose own profile is flagged is_self_coached gets the same read-
+  // only "client manages their own plan" view as if they were viewing a
+  // self-coached client — and has no way to edit their own plan at all.
+  const viewingSelf = userId === adminUserId
+  if (profile?.is_self_coached && !viewingSelf) {
     return (
       <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5 space-y-3">
         <div className="flex items-start gap-3">
@@ -708,8 +726,20 @@ export default function AdminUserPlan({ profile, existingPlan: initPlan, userId,
         </button>
       </form>
 
-      {/* ── Live preview ── */}
-      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+      {/* ── Live preview ──
+          On desktop (lg+), pinned to the top of the viewport via
+          position: sticky so the calculated calories/macros stay visible
+          while the user scrolls through the long form on the left.
+          top-4 keeps a 16px gap from the page edge. self-start tells the
+          grid to NOT stretch this column to the form's height (otherwise
+          sticky is a no-op — the column itself is already the full
+          height and there's nothing to slide). max-h + overflow-auto
+          gives the preview its own scroll if it ever overflows the
+          viewport on very small laptop screens. */}
+      <div
+        ref={previewRef}
+        className="rounded-xl border border-border bg-card p-5 space-y-4 lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto will-change-transform"
+      >
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">Live preview</h2>
           <span className="text-xs text-muted-foreground">

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useLocation } from 'wouter'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import {
@@ -245,11 +246,35 @@ function TodayIntakeCard({ entries, dailyTarget, macroTargets, onLogFood }) {
 
 // ── Pending state ─────────────────────────────────────────────────────────────
 
-function PendingView({ onSetupPlan }) {
-  // Two modes (May 23 2026 — web port from mobile):
-  //   - Admin-coached (no onSetupPlan): unchanged "Your plan is on its way" copy.
-  //   - Self-coached  (onSetupPlan provided): swap to "Set up your plan" + CTA
-  //     that opens the PlanWizardSheet.
+function PendingView({ onSetupPlan, onOpenAdminPlan }) {
+  // Three modes (May 23 2026):
+  //   - Admin user (onOpenAdminPlan):  "Set your plan from /admin/profile"
+  //     + CTA that navigates to the admin Intake Plan tab. Admins always
+  //     edit their plan from the admin side — never inline here.
+  //   - Self-coached  (onSetupPlan provided): swap to "Set up your plan" +
+  //     CTA that opens the PlanWizardSheet.
+  //   - Admin-coached client (neither): "Your plan is on its way" copy.
+  if (onOpenAdminPlan) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 space-y-4 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 border border-primary/20">
+          <Flame className="h-8 w-8 text-primary" />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold">Set your intake plan</h2>
+          <p className="mt-1 text-sm text-muted-foreground max-w-sm">
+            Your own plan is managed from the admin side. Open the Intake Plan tab on your admin profile to set it up.
+          </p>
+        </div>
+        <button
+          onClick={onOpenAdminPlan}
+          className="rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:opacity-90 transition-opacity"
+        >
+          Open admin plan editor
+        </button>
+      </div>
+    )
+  }
   if (onSetupPlan) {
     return (
       <div className="flex flex-col items-center justify-center py-16 space-y-4 text-center">
@@ -290,6 +315,7 @@ function PendingView({ onSetupPlan }) {
 
 export default function Calories() {
   const { user, profile } = useAuth()
+  const [, navigate] = useLocation()
   const [plan, setPlan]         = useState(null)
   const [loading, setLoading]   = useState(true)
   const [meals, setMealsState]  = useState(null)
@@ -314,6 +340,14 @@ export default function Calories() {
   }
 
   const isSelfCoached = profile?.is_self_coached === true
+  // Admins set their own intake plan from the admin Intake Plan tab,
+  // NEVER inline on the client-side Calories page (locked May 23 2026).
+  // Even if they're flagged self-coached, the wizard / edit chips /
+  // goal-reached auto-flip are all suppressed here for them. The Calories
+  // page becomes a read-only tracking surface for the admin's own logged
+  // intake; their plan settings live exclusively on /admin/profile.
+  const isAdmin          = profile?.is_superuser === true
+  const canEditPlanHere  = isSelfCoached && !isAdmin
 
   const TODAY = isoToday()
 
@@ -418,7 +452,9 @@ export default function Calories() {
   }, [goalReachedKey])
 
   const goalReached = useMemo(() => {
-    if (!isSelfCoached || !plan || !currentWeightKg) return false
+    // Admin's own goal-reached flow is handled on the admin Intake Plan
+    // tab — skip the inline detection here. Mirrors mobile (May 23 2026).
+    if (!canEditPlanHere || !plan || !currentWeightKg) return false
     if (plan.energy_balance_pct == null || Math.abs(plan.energy_balance_pct) < 0.005) return false
     const goal  = plan.goal_weight_kg
     const start = plan.starting_weight_kg
@@ -426,7 +462,7 @@ export default function Calories() {
     if (goal < start) return currentWeightKg <= goal
     if (goal > start) return currentWeightKg >= goal
     return false
-  }, [isSelfCoached, plan, currentWeightKg])
+  }, [canEditPlanHere, plan, currentWeightKg])
 
   async function handleSwitchToMaintenance() {
     if (!user || !plan || !currentWeightKg) return
@@ -466,7 +502,8 @@ export default function Calories() {
         </div>
         <div className="rounded-xl border border-border bg-card">
           <PendingView
-            onSetupPlan={isSelfCoached ? () => openWizard('pace', false) : undefined}
+            onSetupPlan={canEditPlanHere ? () => openWizard('pace', false) : undefined}
+            onOpenAdminPlan={isAdmin ? () => navigate('/admin/profile') : undefined}
           />
         </div>
       </div>
@@ -526,12 +563,22 @@ export default function Calories() {
             <div className="flex-1 space-y-1">
               <p className="text-sm font-bold text-emerald-400">You hit your goal weight</p>
               <p className="text-xs text-muted-foreground leading-snug">
-                Nice work. Switch to maintenance to hold your new weight, or keep going.
+                Nice work. Update your plan to pick a new pace, switch to maintenance, or keep going on your current plan.
               </p>
-              <div className="flex gap-2 pt-1.5">
+              {/* Three actions (May 24 2026): Update plan reopens the
+                  wizard so the user picks a fresh pace + goal; Switch to
+                  maintenance flips energy_balance to 0 instantly; Keep
+                  going dismisses the banner without changing anything. */}
+              <div className="flex gap-2 pt-1.5 flex-wrap">
+                <button
+                  onClick={() => openWizard('pace', false)}
+                  className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black hover:opacity-90 transition-opacity"
+                >
+                  Update plan
+                </button>
                 <button
                   onClick={handleSwitchToMaintenance}
-                  className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black hover:opacity-90 transition-opacity"
+                  className="rounded-md border border-emerald-400/30 px-3 py-1.5 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10 transition-colors"
                 >
                   Switch to maintenance
                 </button>
@@ -720,10 +767,12 @@ export default function Calories() {
       </div>
 
       {/* My plan — 3 tappable rows that re-open the wizard at one
-          specific step. Self-coached users only; admin-coached users
-          don't see this block because they can't edit their own plan
-          (admin writes it from the AdminUserPlan tab). */}
-      {isSelfCoached && plan && (
+          specific step. Self-coached non-admin users only:
+          - admin-coached clients can't edit their own plan
+            (their coach writes it from AdminUserPlan)
+          - admins themselves edit their plan from the admin Intake
+            Plan tab, never inline here (May 23 2026 lock) */}
+      {canEditPlanHere && plan && (
         <AnimateRise delay={70}>
           <div className="rounded-2xl border border-border bg-card p-5 space-y-2">
             <h2 className="text-sm font-semibold mb-2">My plan</h2>
@@ -1051,6 +1100,14 @@ export default function Calories() {
         onClose={() => setWizardOpen(false)}
         userId={user?.id ?? null}
         currentWeightKg={currentWeightKg}
+        // Profile fields for PaceScreen's per-user TDEE math (see
+        // PlanWizardSheet.jsx for the rationale). Without these the
+        // pace badges fall back to a relative-% display.
+        heightCm={profile?.current_height
+          ? (profile?.height_unit === 'imperial' ? profile.current_height * 2.54 : profile.current_height)
+          : null}
+        age={calcAge(profile?.birthdate)}
+        gender={profile?.gender ?? null}
         existingPlan={plan}
         startStep={wizardStep}
         singleScreen={wizardSingleScreen}
