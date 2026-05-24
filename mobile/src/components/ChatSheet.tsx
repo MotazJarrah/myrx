@@ -708,6 +708,13 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
           * keyboard's suggestion strip).
           */}
         <Animated.View
+          // layout={LinearTransition.duration(220)} eases any sheet-
+          // height change (content swap, keyboard open/close, etc.)
+          // instead of snapping. Matches the swipe-dismiss timing so
+          // open / close / resize feel like one animation system.
+          // Same pattern shared across PlanWizardSheet, FoodLogDrawer,
+          // SuggestionSheet — every bottom sheet in the app.
+          layout={LinearTransition.duration(220)}
           style={[
             kbHeight > 0
               ? [

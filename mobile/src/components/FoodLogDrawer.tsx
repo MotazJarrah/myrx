@@ -26,6 +26,7 @@ import { useKeyboardHeight } from '../hooks/useKeyboardHeight'
 import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, withSequence,
   withDelay, withRepeat, cancelAnimation, runOnJS,
+  LinearTransition,
 } from 'react-native-reanimated'
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -1240,6 +1241,12 @@ export default function FoodLogDrawer({
           ChatSheet / SuggestionSheet. */}
       <View style={s.backdrop}>
         <Animated.View
+          // layout={LinearTransition.duration(220)} eases sheet-height
+          // deltas (search results growing, portion picker swap,
+          // keyboard open/close) instead of snapping. Shared timing
+          // with the swipe-dismiss + every other bottom sheet in the
+          // app.
+          layout={LinearTransition.duration(220)}
           style={[
             kbHeight > 0
               ? [

@@ -68,34 +68,16 @@ function ageBucket(age: number): AgeBucket {
   return '65+'
 }
 
-/** Returns the seven bands for this user, in best→worst order. */
+/** Returns the seven bands for this user, in best→worst order.
+ *
+ * Uniform "male / else=female" rule across every gender-driven calc in
+ * the system (see mobile/src/lib/calorieFormulas.ts calcBMR for the
+ * canonical comment). Non-binary / prefer-not-to-say / null → female
+ * bands. Decided May 23 2026 to replace the earlier averaging compromise.
+ */
 export function bandsForUser(age: number, gender: string | null | undefined): RestingBand[] {
   const bucket = ageBucket(age)
-  const m = MALE_TABLE[bucket]
-  const f = FEMALE_TABLE[bucket]
-  let t: readonly [number, number, number, number, number, number]
-  if (gender === 'male') {
-    t = m
-  } else if (gender === 'female') {
-    t = f
-  } else {
-    // Third gender option / unspecified / null — average the male and
-    // female thresholds. Population resting-HR studies have only
-    // collected male/female norms at scale, so there is no published
-    // table for non-binary users. Averaging the two is the neutral
-    // compromise commonly used by progressive health apps (Whoop etc.):
-    // each band's cutoff sits midway between male and female, so the
-    // user gets a meaningful classification without being implicitly
-    // gendered as either.
-    t = [
-      Math.round((m[0] + f[0]) / 2),
-      Math.round((m[1] + f[1]) / 2),
-      Math.round((m[2] + f[2]) / 2),
-      Math.round((m[3] + f[3]) / 2),
-      Math.round((m[4] + f[4]) / 2),
-      Math.round((m[5] + f[5]) / 2),
-    ]
-  }
+  const t = gender === 'male' ? MALE_TABLE[bucket] : FEMALE_TABLE[bucket]
   return [
     { key: 'athlete',   label: 'Athlete',      short: 'Ath',  color: palette.emerald[500], upperBpm: t[0] },
     { key: 'excellent', label: 'Excellent',    short: 'Exc',  color: palette.emerald[400], upperBpm: t[1] },

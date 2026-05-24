@@ -228,6 +228,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe()
   }, [fetchProfile])
 
+  // ── Realtime profile sync ────────────────────────────────────────────────
+  // Subscribe to UPDATEs on the user's own profiles row. When the admin
+  // flips a field server-side (e.g. is_self_coached via AdminUserDetail's
+  // Self-coached/Admin-coached toggle, or chat_enabled, or any other
+  // admin-controlled column), the change reaches the mobile app within
+  // a couple hundred milliseconds — no need for the user to cold-restart
+  // the app, swap screens, or pull-to-refresh.
+  //
+  // Silent refetch: fetchProfile toggles profileLoading=true briefly, but
+  // the route layouts gate on `profileLoading && !profile` so subsequent
+  // refetches keep the UI mounted (no skeleton flash, no form-state wipe).
+  // Web's AuthContext has the equivalent subscription (see web/src/
+  // contexts/AuthContext.jsx).
+  useEffect(() => {
+    if (!user?.id) return
+    const channel = supabase
+      .channel(`profile-self-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        () => { fetchProfile(user.id) },
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [user?.id, fetchProfile])
+
   // After a successful password sign-in, stash the password in two
   // places so biometric Just Works:
   //

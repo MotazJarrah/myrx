@@ -349,6 +349,11 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
           header. Matches ChatSheet behaviour. */}
       <View style={s.backdrop}>
         <Animated.View
+          // layout={LinearTransition.duration(220)} eases sheet-height
+          // deltas (content swap, keyboard open/close, suggestion-list
+          // growth) instead of snapping. Shared timing with the swipe-
+          // dismiss + every other bottom sheet in the app.
+          layout={LinearTransition.duration(220)}
           style={[
             kbHeight > 0
               ? [

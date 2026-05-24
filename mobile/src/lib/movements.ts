@@ -305,14 +305,16 @@ export function isAirBikeActivity(activity: string | null | undefined): boolean 
  * The Assault Bike's cal meter uses a fixed formula (~3.6 cal per
  * watt-hour), so faster output → more cals/min.
  *
- *   • male   → 18 cal/min — typical intermediate male output
- *   • female → 13 cal/min — typical intermediate female output
- *   • other / unset → 15 cal/min — averaged
+ *   • male  → 18 cal/min — typical intermediate male output
+ *   • else  → 13 cal/min — female value (used for female, non-binary,
+ *                          prefer-not-to-say, null). Uniform "male /
+ *                          else=female" rule across every gender-driven
+ *                          calc in the system; see calorieFormulas.ts
+ *                          calcBMR for the canonical comment. Decided
+ *                          May 23 2026 to replace the earlier averaging.
  */
 export function genderBaselineCalsPerMin(gender: string | null | undefined): number {
-  if (gender === 'male') return 18
-  if (gender === 'female') return 13
-  return 15
+  return gender === 'male' ? 18 : 13
 }
 
 /**
@@ -444,18 +446,21 @@ export function isStairMillActivity(activity: string | null | undefined): boolea
  * this baseline. Gender-scaled to roughly match average commercial-
  * Step-Mill output at intermediate effort:
  *
- *   • male   → 12 floors/min (typical intermediate male output)
- *   • female →  9 floors/min (typical intermediate female output)
- *   • other / unset → 10 floors/min (averaged)
+ *   • male  → 12 floors/min (typical intermediate male output)
+ *   • else  →  9 floors/min — female value (used for female, non-binary,
+ *                              prefer-not-to-say, null). Uniform "male /
+ *                              else=female" rule across every gender-
+ *                              driven calc in the system; see calorie
+ *                              Formulas.ts calcBMR for the canonical
+ *                              comment. Decided May 23 2026 to replace
+ *                              the earlier averaging.
  *
  * Numbers derived from typical Stairmaster Gauntlet level 8-10 sustained
  * output at moderate-vigorous effort. They're a reasonable starting point
  * — users converge to their own rate after their first logged effort.
  */
 export function genderBaselineFloorsPerMin(gender: string | null | undefined): number {
-  if (gender === 'male') return 12
-  if (gender === 'female') return 9
-  return 10
+  return gender === 'male' ? 12 : 9
 }
 
 /**
