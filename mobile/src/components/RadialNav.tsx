@@ -54,7 +54,7 @@
  */
 
 import React, { useRef } from 'react'
-import { View, Text, StyleSheet, Dimensions } from 'react-native'
+import { View, StyleSheet, Dimensions } from 'react-native'
 import { router, usePathname } from 'expo-router'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, {
@@ -68,7 +68,7 @@ import {
   Heart, History as HistoryIcon,
 } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
-import { colors, fonts } from '../theme'
+import { colors } from '../theme'
 
 const AnimatedLine = Animated.createAnimatedComponent(Line)
 
@@ -81,7 +81,6 @@ const COLOR_LIME  = colors.primary
 // as a soft "dark window" only where it covers card content. Less
 // harsh than pure black against the existing dark theme.
 const COLOR_DOME  = colors.background
-const COLOR_LABEL = '#ffffff'
 
 // ── Layout constants ────────────────────────────────────────────────
 const SCREEN_WIDTH       = Dimensions.get('window').width
@@ -94,15 +93,12 @@ const CENTER_GLYPH_SIZE  = 32
 const INNER_RING_RADIUS  = 80
 const OUTER_RING_RADIUS  = 165
 const ICON_HIT_RADIUS    = 40
-const HOLD_MS            = 100
+const HOLD_MS            = 60
 const OPEN_DURATION_MS   = 220
 const CLOSE_DURATION_MS  = 160
-const HOVER_DURATION_MS  = 120
+const HOVER_DURATION_MS  = 100
 const SVG_HEIGHT         = OUTER_RING_RADIUS + 30
-const SPOKE_MAX_OPACITY  = 0.30
-const LABEL_FONT_SIZE    = 10
-const LABEL_GAP          = 4   // gap between icon edge and label
-const LABEL_HEIGHT       = 14  // rendered text height @ 10px font (with line-height)
+const SPOKE_MAX_OPACITY  = 0.10
 
 // Spoke shrink — terminate at icon's near edge
 const INNER_SPOKE_SHRINK = 1 - ICON_RADIUS / INNER_RING_RADIUS
@@ -117,17 +113,17 @@ const OUTER_SPOKE_SHRINK = 1 - ICON_RADIUS / OUTER_RING_RADIUS
 const _TOPMOST_ANGLE_RAD          = (70 * Math.PI) / 180
 const _TOPMOST_ORBIT_X            = OUTER_RING_RADIUS * Math.cos(_TOPMOST_ANGLE_RAD)
 const _TOPMOST_ORBIT_Y            = OUTER_RING_RADIUS * Math.sin(_TOPMOST_ANGLE_RAD)
-// Topmost label TOP edge = orbit centre + icon radius + label gap +
-// label height (label sits ABOVE the icon now, May 24 2026 pass 7).
-const _TOPMOST_LABEL_TOP_Y        = _TOPMOST_ORBIT_Y + ICON_RADIUS + LABEL_GAP + LABEL_HEIGHT
+// Topmost icon TOP edge from page bottom (labels removed May 24
+// 2026 pass 8 — no label clearance needed in this calc anymore).
+const _TOPMOST_ICON_TOP_Y         = _TOPMOST_ORBIT_Y + ICON_RADIUS
 const _TOPMOST_DIST_FROM_PAGE_BTM = Math.sqrt(
   _TOPMOST_ORBIT_X * _TOPMOST_ORBIT_X +
-  (CENTER_BTN_RADIUS + _TOPMOST_LABEL_TOP_Y) * (CENTER_BTN_RADIUS + _TOPMOST_LABEL_TOP_Y),
+  (CENTER_BTN_RADIUS + _TOPMOST_ICON_TOP_Y) * (CENTER_BTN_RADIUS + _TOPMOST_ICON_TOP_Y),
 )
-const DOME_OPEN_PADDING = 28   // breathing room between label/icon edge and dome edge
+const DOME_OPEN_PADDING = 28   // breathing room between icon edge and dome edge
 const DOME_MAX_RADIUS   = Math.ceil(
   _TOPMOST_DIST_FROM_PAGE_BTM + DOME_OPEN_PADDING,
-)  // ≈ 260
+)  // ≈ 246
 // IDLE radii — the idle moon is an ELLIPSE (wider than tall) rather
 // than a circle, so it stretches horizontally under the main button
 // like a soft pedestal. The bloom morphs both axes to 1 (full circle)
@@ -246,8 +242,16 @@ function RadialIcon({
       opacity: p,
     }
   })
-  // Bg + border are STATIC (white ring + black bg, never change).
-  // Only the glyph colour cross-fades white → lime on hover.
+  // On hover: BORDER + GLYPH turn lime. Bg stays dark (COLOR_DOME)
+  // throughout — the "circle" the user means is the ring/border,
+  // not the filled disc behind it.
+  const ringStyle = useAnimatedStyle(() => ({
+    borderColor: interpolateColor(
+      hoverProgress.value,
+      [0, 1],
+      [COLOR_WHITE, COLOR_LIME],
+    ),
+  }))
   const whiteGlyphStyle = useAnimatedStyle(() => ({
     opacity: 1 - hoverProgress.value,
   }))
@@ -257,17 +261,14 @@ function RadialIcon({
 
   return (
     <Animated.View style={[s.iconWrapper, wrapperStyle]} pointerEvents="none">
-      <View style={s.iconCircle}>
+      <Animated.View style={[s.iconCircle, ringStyle]}>
         <Animated.View style={[s.iconGlyphAbs, whiteGlyphStyle]}>
           <item.Icon size={ICON_GLYPH_SIZE} color={COLOR_WHITE} strokeWidth={2} />
         </Animated.View>
         <Animated.View style={[s.iconGlyphAbs, limeGlyphStyle]}>
           <item.Icon size={ICON_GLYPH_SIZE} color={COLOR_LIME} strokeWidth={2} />
         </Animated.View>
-      </View>
-      <View style={s.iconLabel}>
-        <Text style={s.iconLabelText} numberOfLines={1}>{item.label}</Text>
-      </View>
+      </Animated.View>
     </Animated.View>
   )
 }
@@ -376,6 +377,14 @@ export default function RadialNav() {
     const href = slotHrefsRef.current[idx]
     if (href) navigateToHref(href)
   }
+  // Tap-to-Dashboard variant with a Soft haptic — fires the haptic
+  // ONLY when navigation will actually occur (skipped when already
+  // on Dashboard). Used by the quick-tap branch in onEnd.
+  function navigateToDashboardWithHaptic() {
+    if (stripRouteGroups(DASHBOARD_HREF) === activePathRef.current) return
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {})
+    router.replace(DASHBOARD_HREF as any)
+  }
 
   // Fire a selection haptic whenever the hovered orbit icon changes
   // to a new (non-empty) target. Watching the SharedValue from the UI
@@ -431,7 +440,7 @@ export default function RadialNav() {
       if (wasOpen && idx >= 0) {
         runOnJS(navigateToSlot)(idx)
       } else if (!wasOpen && duration < HOLD_MS) {
-        runOnJS(navigateToHref)(DASHBOARD_HREF)
+        runOnJS(navigateToDashboardWithHaptic)()
       }
       openProgress.value = withTiming(0, { duration: CLOSE_DURATION_MS })
       hoveredIdx.value   = -1
@@ -577,7 +586,7 @@ const s = StyleSheet.create({
     height: 2 * DOME_MAX_RADIUS,
     borderRadius: DOME_MAX_RADIUS,
     backgroundColor: COLOR_DOME,
-    opacity: 0.9,
+    opacity: 0.95,
   },
   // Spoke layer — bottom: 0 anchors SVG cy at button centre.
   spokeLayer: {
@@ -644,22 +653,5 @@ const s = StyleSheet.create({
     backgroundColor: COLOR_DOME,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  // Label ABOVE the orbit icon (May 24 2026 pass 7) — centred on
-  // the icon's column. Using `bottom: ICON_DIAM + LABEL_GAP` anchors
-  // the label's bottom edge LABEL_GAP above the icon's top edge.
-  iconLabel: {
-    position: 'absolute',
-    bottom: ICON_DIAM + LABEL_GAP,
-    // Wider than icon so longer words (Bodyweight) don't clip.
-    width: 90,
-    left: (ICON_DIAM - 90) / 2,
-    alignItems: 'center',
-  },
-  iconLabelText: {
-    fontSize: LABEL_FONT_SIZE,
-    color: COLOR_LABEL,
-    fontFamily: fonts.sans[500],
-    textAlign: 'center',
   },
 })

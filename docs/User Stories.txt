@@ -10,3 +10,5 @@
 - create hydration page
 - gender consent for none male selections
 - recent activity shifts the page but not the position of the nav bar
+- reporting tool
+- 
