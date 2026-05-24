@@ -27,6 +27,7 @@ import { supabase } from '../../src/lib/supabase'
 import ChatSheet from '../../src/components/ChatSheet'
 import SuggestionSheet from '../../src/components/SuggestionSheet'
 import { BiometricLockGate } from '../../src/components/BiometricLockGate'
+import RadialNav from '../../src/components/RadialNav'
 import { colors, alpha, palette } from '../../src/theme'
 import { isProfileComplete } from '../../src/lib/profile'
 import { shellScrollRef } from '../../src/lib/shellScroll'
@@ -256,7 +257,13 @@ export default function AppShellLayout() {
             </ChartTooltipProvider>
           </ScrollView>
 
-          <BottomNav activePath={pathname} />
+          {/* RadialNav replaces the horizontal scrolling BottomNav
+              (May 24 2026). Press-and-hold the center button to bloom
+              a half-circle starburst of the other 7 nav pages; slide
+              to highlight; release on icon to navigate or in empty
+              space to cancel. See mobile/src/components/RadialNav.tsx
+              for the gesture + animation contract. */}
+          <RadialNav />
         </View>
 
         {/* Sheets — mount once at the shell so they persist across page navigations */}
@@ -320,7 +327,11 @@ const s = StyleSheet.create({
 
   // Scroll container — matches web's `pt-14 pb-24 p-4 max-w-6xl`
   scroll:        { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 32 },
+  // paddingBottom = 80 so the last visible content row can scroll
+  // past the floating nav's half-moon dome (idle dome top sits 60px
+  // above page bottom; +20 breathing room). Without this, items
+  // near the bottom-centre get covered by the dome's footprint.
+  scrollContent: { padding: 16, paddingBottom: 80 },
 
   // Bottom nav — matches web's `border-t bg-background/95 overflow-x-auto`
   bottomNav: {

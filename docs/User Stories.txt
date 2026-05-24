@@ -1,15 +1,12 @@
-- calries page needs to be able to switch between admin controlled or user controlled
-- weight goal needs toggle to switch if no goal is needed
 - notifications system
 - reflect logo and all over changes to homepage
 - we need a loading animation using our logo somehow
 - add formulas to about
 - change time input to be m and km, no need to have any more than 
-- settings page view is wrong again
-- fix feild sizing of cardio inputs
 - add light switch to settings
 - stairmill says per rep, should be interval, check other too
 - add info on what items to scan and what are allowed to scan when an item thats not in the db is scanned
 - create sleep page, plan in claude.md already
 - create hydration page
 - gender consent for none male selections
+- recent activity shifts the page but not the position of the nav bar
