@@ -36,6 +36,14 @@ const PrivacyPolicy      = lazy(() => import('./pages/legal/PrivacyPolicy'))
 const CookiePolicy       = lazy(() => import('./pages/legal/CookiePolicy'))
 const AcceptableUsePolicy = lazy(() => import('./pages/legal/AcceptableUsePolicy'))
 
+// Coach Platform v1 — Phase 2 (May 24 2026)
+// Public coach signup + Stripe Checkout flow at /coach/*. Separate URL
+// space from /admin/* per CLAUDE.md Lock 7. Portal is gated server-side
+// by is_coach=true (or is_superuser=true for platform owner).
+const CoachSignup  = lazy(() => import('./pages/coach/Signup'))
+const CoachWelcome = lazy(() => import('./pages/coach/Welcome'))
+const CoachPortal  = lazy(() => import('./pages/coach/Portal'))
+
 const AdminShell          = lazy(() => import('./pages/admin/AdminShell'))
 const AdminOverview       = lazy(() => import('./pages/admin/AdminOverview'))
 const AdminDashboard      = lazy(() => import('./pages/admin/AdminDashboard'))
@@ -196,6 +204,14 @@ function AppRoutes() {
         <Route path="/auth/confirm" component={AuthConfirm} />
         <Route path="/auth/recovery" component={AuthConfirm} />
         <Route path="/auth" component={Auth} />
+
+        {/* Coach Platform v1 — Phase 2 (May 24 2026).
+            Public signup at /coach/signup → Stripe Checkout → /coach/welcome.
+            Portal at /coach/portal gates on is_coach=true server-side. */}
+        <Route path="/coach/signup"  component={CoachSignup} />
+        <Route path="/coach/welcome" component={CoachWelcome} />
+        <Route path="/coach/portal"  component={CoachPortal} />
+        <Route path="/coach"         component={() => <Redirect to="/coach/signup" />} />
 
         {/* Legal docs — public, unauthenticated. Must sit BEFORE the
             ProtectedLayout catch-all so they don't get swallowed by
