@@ -2078,6 +2078,105 @@ Practical approach when the time comes: most of these can start as Termly / Iube
 
 ---
 
+### Launch-day checklist (LIVE-MODE GO checklist)
+
+The single source of truth for what needs to be done when we flip from "ready to ship" to "actually live, taking real money, real customers signing up." Every item below has a clear DONE state — check off, move on. Organized by category, sequenced so dependencies resolve cleanly.
+
+**Pre-launch hardening (T-1 to T-7 days):**
+
+1. **All Phase 1-8 work merged to `main` and deployed to production.** No outstanding branch work. CI green. Cloudflare Pages serving the latest web build, Expo OTA / store binaries built and ready.
+2. **Full end-to-end smoke test in TEST mode.** Coach signs up via test Stripe, gets test invite link, invites a test client, client accepts, plans flow, chat works, calorie page locks correctly when coached, unlinks correctly. Repeat for B2C: download app, sign up, upgrade to SemiRX via test IAP, verify tier unlock. Document any bugs found, fix before continuing.
+3. **Legal docs LIVE on the website** (per Launch-required documentation section above). At MINIMUM 1, 2, 3, 4, 5, 6, 7 must be live before any real money moves. URLs: `myrxfit.com/privacy`, `myrxfit.com/terms`, `myrxfit.com/coach-agreement`, `myrxfit.com/refund-policy`, `myrxfit.com/health-disclaimer`, `myrxfit.com/aup`.
+4. **Privacy Policy URL submitted** in App Store Connect (App Information → Privacy Policy URL) and Google Play Console (Store presence → Main store listing → Privacy Policy). Mandatory for store approval.
+5. **Database backup verification.** Supabase point-in-time-recovery is on (Pro plan default). Manual test: restore a dropped table to a staging instance to confirm restore actually works. Don't find out it's broken during a real incident.
+6. **Cloudflare DNS audit.** All MX, A, CNAME, TXT records for myrxfit.com verified. Email forwarding active. SSL cert valid + auto-renewal confirmed.
+
+**Stripe live-mode switch:**
+
+7. **Activate Stripe live mode** (Dashboard → toggle off Test mode → must have completed all activation steps: business verification, bank account verified, terms accepted). Verify "Live" badge is visible on dashboard header.
+8. **Generate live API keys** (Developers → API Keys in LIVE mode). Get `pk_live_...` and `sk_live_...`.
+9. **Store live keys as secrets ONLY** — never in git, never in `.env.local` shared, never in chat. Set via:
+   - Cloudflare Workers: `wrangler secret put STRIPE_SECRET_KEY_LIVE` (per worker that touches Stripe)
+   - Cloudflare Pages: Pages → Settings → Environment variables → Production → add `VITE_STRIPE_PUBLISHABLE_KEY_LIVE`
+   - Supabase Edge Functions: Dashboard → Edge Functions → Secrets → add both
+10. **Re-create the 5 products + 8 prices in LIVE mode.** Test-mode IDs DON'T carry over. Use the same `lookup_key` values (e.g., `coach_starter_monthly`) so the code that references prices by lookup_key still works without code changes. Persist the new live `prod_...` and `price_...` IDs to secrets.
+11. **Register the Stripe webhook endpoint** in LIVE mode pointing to your deployed webhook worker URL (e.g., `https://stripe-webhooks.myrxfit.workers.dev/stripe/live`). Grab the `whsec_...` signing secret, store as `STRIPE_WEBHOOK_SECRET_LIVE` worker secret.
+12. **Toggle `STRIPE_MODE` env var to `live`** in production. Code paths that read `STRIPE_MODE` (web + workers + edge functions) now use the live key set.
+13. **Stripe sanity transaction** — sign up a real coach account yourself (use a real card, $19 charge), complete the flow end-to-end, verify the webhook fires + the subscription row lands in Supabase + the dashboard reflects it. Refund the charge to yourself afterwards (no real money lost).
+
+**Apple App Store:**
+
+14. **Apple Developer Program enrollment** complete and current ($99/yr).
+15. **App Store Connect IAP products created** in production (not just sandbox):
+    - `semirx_unlock` (non-consumable, $39 USD)
+    - `fullrx_unlock` (non-consumable, $59 USD)
+    Status: "Ready to Submit". Localize for at least English. Pricing applied to all relevant territories.
+16. **Apple App Store Small Business Program** application submitted and APPROVED (drops Apple cut from 30 % to 15 % when annual revenue is under $1M). Approval is automatic if you qualify — apply early, takes a day or two.
+17. **App Store metadata complete**: app name "MyRX", subtitle, description, keywords, screenshots (6.7-inch iPhone + 13-inch iPad), app preview videos (optional but helps conversion), age rating questionnaire complete, support URL, marketing URL, privacy policy URL.
+18. **App Review Information** filled in App Store Connect: demo account credentials so Apple reviewers can test paid features (create a comp'd `fullrx` user just for review), contact info, reviewer notes ("MyRX is a fitness coaching platform. Use the demo account at the link below to test all paid features. Coaches sign up at myrxfit.com/coach/signup — not in-app").
+19. **iOS binary uploaded** via Xcode / Transporter, processed successfully, attached to the version awaiting review.
+20. **Submit for App Store review.** Typical Apple review = 1-3 days for routine apps. Be ready for at least one rejection round — address feedback, resubmit.
+
+**Google Play Store:**
+
+21. **Google Play Developer Account** active ($25 one-time).
+22. **Google Play Console IAP products created**:
+    - `semirx_unlock` ($39 USD)
+    - `fullrx_unlock` ($59 USD)
+    Status: "Active". Match Apple's product IDs so the mobile code uses one constant set.
+23. **Production track release configured** in Play Console (Production → Create new release). APK / AAB uploaded, signed with the production keystore.
+24. **Production keystore SHA-256 fingerprint added** to `web/public/.well-known/assetlinks.json` (Android App Links — required for magic-link sign-in deeplinks to work on the production install). Deploy web after updating this file.
+25. **Store listing complete**: title, short description, full description, screenshots (phone + tablet), feature graphic (1024 x 500), app icon, content rating questionnaire, target audience + content, data safety form (matches Privacy Policy disclosures).
+26. **Submit for Google Play review.** Typical Google review = 1-7 days. Initial submissions get extra scrutiny.
+
+**Backend / infrastructure:**
+
+27. **Production Supabase project verified** — RLS policies covered by tests, backups on, migrations all applied, no orphan dev tables.
+28. **All edge functions deployed** with live-mode secrets configured (send-phone-otp / verify-phone-otp / coach-signup / stripe-webhook / etc.).
+29. **All Cloudflare Workers deployed** with live secrets (food-search / oauth / webhooks / etc.).
+30. **Cloudflare Pages production deploy verified** — myrxfit.com serves the latest build, asset hashes match local `web/dist/`, no console errors on page load.
+31. **Twilio Verify production** — moved out of sandbox (paid account, no verified-callers-only restriction). Test SMS to a brand-new phone number that's never used the app before. Confirm OTP arrives within 30 seconds.
+32. **Domain monitoring set up** — uptime check on `myrxfit.com` + `api.myrxfit.com` (if applicable) via Uptime Kuma / BetterStack / Pingdom. Alert to your email + phone if downtime > 2 min.
+
+**Monitoring + alerting:**
+
+33. **Stripe webhook delivery monitoring** — dashboard → Webhooks → endpoint → metrics. Verify delivery rate > 99 %. Set up email alert for failed deliveries.
+34. **Supabase logs review** — confirm no spam errors in the production logs. Set up alerts for `error` log level (Pro plan).
+35. **Sentry / Bugsnag / similar error tracker** wired into web + mobile. Threshold alerts on new error types so you find regressions before users tell you.
+36. **Customer support inbox monitored** — `support@myrxfit.com` (or whichever address you set) checked daily, ideally with auto-acknowledge email reply. Backup forwarding to your personal phone for urgent issues.
+
+**Existing-user migration (per CLAUDE.md Lock 5):**
+
+37. **Verify all existing clients are `coach_id = NULL`** in production. Run `SELECT count(*) FROM profiles WHERE coach_id IS NOT NULL;` — should be 0 unless you manually linked someone via testing. Existing test users move to unlinked B2C tier per Lock 5.
+38. **Send notification email to existing users** (optional but kind) explaining the change: "MyRX has added coaches to the platform. Your account is unchanged — you're now using MyRX in self-coached mode. If you'd like to be coached by someone, ask them to invite you via their coach account."
+
+**First-coach onboarding (you eat your own dog food):**
+
+39. **You (Motaz) sign up as a coach yourself** via the live coach signup flow at `myrxfit.com/coach/signup`. Use a real card, complete payment, verify the trial→active transition works.
+40. **Invite 2-3 real clients** (friends, family, beta testers) via the live invite flow. Have them complete the PARQ + onboarding form. Verify their data appears in your coach roster, chat works, intake plan editor works.
+41. **Monitor for 48 hours** post-launch — watch for crashes, billing issues, signup friction. Be ready to hotfix.
+
+**Marketing + announcement:**
+
+42. **Landing page / marketing site** live at `myrxfit.com` — clear coach value prop, clear B2C value prop, pricing table, sign-up CTAs to both `/coach/signup` and the app store.
+43. **Social media accounts ready** — at minimum a single channel (Instagram / X / TikTok — whichever you'll actually post on) with the brand assets in place + 2-3 launch-day posts queued.
+44. **Launch email** drafted to any pre-launch email list. Subject line tested. Send via Mailchimp / Buttondown / ConvertKit (Stripe doesn't send marketing email).
+45. **Coach outreach list** — 10-20 individual coaches you'll personally email at launch with a personal pitch. The first paying coaches usually come from your direct outreach, not organic discovery.
+
+**Rollback plan (have this ready BEFORE you launch):**
+
+46. **Documented rollback procedure** — if a critical bug shows up in the first 24 hours, how do you revert? Cloudflare Pages: redeploy previous successful build via dashboard. App store: pull the binary from sale (Apple) / halt rollout (Google). Stripe: pause webhook endpoint, freeze new subscription creation via edge function feature flag.
+47. **Feature flag for new signups** — a single env var (`SIGNUPS_ENABLED=true|false`) that the coach signup edge function checks. If something breaks, set it to false to stop new signups while leaving existing users unaffected. Avoids needing a full rollback.
+48. **Communication template ready** for outage incidents — pre-drafted Twitter / status page post + email to active users. Don't write under pressure.
+
+**Day-of (launch day proper):**
+
+49. **Final smoke test** of the live signup flow ~1 hour before announcement.
+50. **Announce.** Push your launch email, social posts, coach outreach emails. Don't do this until items 1-48 are checked.
+51. **Watch the metrics live** for the first 2-4 hours — Stripe dashboard (new subscriptions), Supabase dashboard (signup row counts), error tracker. Be available to hotfix.
+
+---
+
 ## What This Is
 A React + Vite SPA (web, frozen) + React Native / Expo app (mobile, active) — a fitness coaching platform per the mission above. Clients track strength, cardio, mobility, bodyweight, and calories. Admins (coaches) manage clients, review progress, and communicate via chat/suggestions.
 
