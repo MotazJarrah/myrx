@@ -304,6 +304,71 @@ export default function PrivacyPolicy() {
         the "Delete Account" option in Settings (where available).
       </p>
 
+      <h3>7.1 Account deletion + data retention</h3>
+      <p>
+        Deletion of your MyRX account follows a structured lifecycle designed
+        to protect you against accidental loss while honoring your right to
+        erasure.
+      </p>
+      <p>
+        <strong>30-day grace period.</strong> When you (or an admin acting on
+        your behalf) schedule deletion of your account, your account enters a
+        30-day grace period. During this window, you can sign in and click
+        "Reactivate my account" on the gate page to cancel the deletion. The
+        reactivation is fully recoverable; nothing is lost during grace, and
+        your data, settings, history, and connected integrations remain
+        intact.
+      </p>
+      <p>
+        <strong>Anonymization at day 30 (or sooner if you request immediate
+        deletion).</strong> After 30 days — or immediately, if you or an
+        admin chooses to anonymize without waiting out the grace period —
+        your profile data (name, phone number, date of birth, gender, avatar
+        image) is permanently scrubbed and replaced with the placeholder
+        "Deleted User." Your authentication credentials (email, password
+        hash) are scrubbed and banned from re-registration. Your training
+        data — efforts, bodyweight history, calorie and food logs, ROM
+        records, calorie plan, wearable-synced data — is permanently
+        deleted. Anonymization is irreversible.
+      </p>
+      <p>
+        <strong>Retained for legal compliance (10-year hold).</strong> A
+        narrow set of records is retained for ten years after anonymization
+        to satisfy GDPR Article 17(3) (the right-to-erasure carve-out for
+        legal and financial recordkeeping), United States tax retention
+        requirements, and fraud / safety investigation needs. The retained
+        records are:
+      </p>
+      <ul>
+        <li>
+          The <strong>deleted_account_archive</strong> snapshot — a single
+          row capturing your original email address, phone number, name,
+          date of birth, gender, Stripe customer id (if any), and account
+          role at the moment of anonymization.
+        </li>
+        <li>
+          Your <strong>chat history</strong> with any coach or client (for
+          coaches) you exchanged messages with.
+        </li>
+        <li>
+          Your <strong>billing events</strong> — subscription payments,
+          refunds, invoices, and dispute records.
+        </li>
+      </ul>
+      <p>
+        The retained chat messages are accessible only to MyRX administrators
+        via an audit-logged Export Conversation tool. Every export writes a
+        row to an admin access log capturing who exported, when, the stated
+        reason, and how many messages were included. The retained billing
+        records are accessible only to administrators via an audit-logged
+        Export Billing tool with the same access-log pattern.
+      </p>
+      <p>
+        You may revoke your access to platform features at any time by
+        scheduling deletion. Once anonymization completes, it cannot be
+        undone — there is no path to restore an anonymized account.
+      </p>
+
       <h2>8. Your rights</h2>
 
       <h3>8.1 General rights (all users)</h3>

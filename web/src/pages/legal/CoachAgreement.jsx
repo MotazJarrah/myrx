@@ -280,6 +280,46 @@ export default function CoachAgreement() {
         will not delete a Client's data because you have terminated.
       </p>
 
+      <h3>9.4 Account termination — coach data handling</h3>
+      <p>
+        You may self-delete your coach account at any time via Settings →
+        Danger zone → Delete account. The same 30-day grace period that
+        applies to athlete accounts applies to coach accounts: during the
+        grace window you can sign in and reactivate; nothing is lost.
+        See our <a href="/privacy">Privacy Policy</a> for the full lifecycle.
+      </p>
+      <p>
+        <strong>Effect on your roster on anonymization.</strong> When your
+        coach account anonymizes — at the end of the grace period or
+        immediately on request — every Client in your roster is
+        automatically unlinked from your account. Their coach_id is cleared
+        and they become self-managed athletes. They retain full access to
+        all of their own training data, body data, food logs, and history;
+        nothing belonging to a Client is deleted as a consequence of your
+        deletion.
+      </p>
+      <p>
+        <strong>Subscription handling.</strong> Your Stripe subscription is
+        paused for the duration of the 30-day grace period. If anonymization
+        completes, the subscription is cancelled. Pro-rated refunds (if any)
+        are governed by our <a href="/refund-policy">Refund Policy</a>.
+      </p>
+      <p>
+        <strong>Chat history retention.</strong> Chat history between you and
+        each of your Clients is retained for ten years after anonymization
+        for legal compliance, and is accessible only to MyRX administrators
+        via the audit-logged Export Conversation tool described in the
+        Privacy Policy. Your former Clients do not lose access to their own
+        side of the conversation, but the thread now shows your side as
+        "Deleted User."
+      </p>
+      <p>
+        <strong>Billing records retention.</strong> Subscription payments,
+        refunds, and dispute records are retained for ten years per United
+        States tax retention requirements, and accessible only to
+        administrators via an audit-logged Export Billing tool.
+      </p>
+
       <h2>10. Intellectual property</h2>
 
       <h3>10.1 Your content</h3>

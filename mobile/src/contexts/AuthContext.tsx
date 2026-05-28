@@ -305,6 +305,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const shouldRefetchProfile =
         event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'PASSWORD_RECOVERY'
 
+      // Log account:signed_in activity event on a real fresh sign-in
+      // (NOT on TOKEN_REFRESHED / INITIAL_SESSION — those fire on every
+      // cold launch and foreground transition). Event-type matches the
+      // existing AdminUserDetail describe() case 'account:signed_in'
+      // (account: prefix is the convention for lifecycle events).
+      // Best-effort — failure doesn't block sign-in. See CLAUDE.md
+      // activity_events schema. Locked May 28 2026.
+      if (event === 'SIGNED_IN') {
+        supabase.from('activity_events').insert({
+          user_id:    u.id,
+          event_type: 'account:signed_in',
+          source:     'client',
+          event_data: { platform: 'mobile' },
+        }).then(() => {}, () => {})
+      }
+
       // Idempotent setUser — skip the state update entirely when the user
       // id is unchanged. Stops TOKEN_REFRESHED from triggering re-renders.
       setUser(prev => (prev?.id === u.id ? prev : u))
@@ -438,6 +454,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await supabase.from('profiles')
           .update({ last_seen_at: new Date(Date.now() - 10 * 60_000).toISOString() })
           .eq('id', currentUser.id)
+        // Log auth:signout activity event BEFORE we tear down the
+        // session (the RLS policy on activity_events requires
+        // auth.uid() to match). Best-effort — if the insert fails the
+        // signOut still proceeds. Used by the admin audit trail to
+        // see when each user last signed out. See CLAUDE.md
+        // "Account-deletion lifecycle + retention contract" for the
+        // activity_events schema. Locked May 28 2026.
+        await supabase.from('activity_events').insert({
+          user_id:    currentUser.id,
+          event_type: 'account:signed_out',
+          source:     'client',
+          event_data: { platform: 'mobile' },
+        }).then(() => {}, () => {})
       }
     } catch { /* best-effort — never block sign-out on this */ }
     await supabase.auth.signOut()

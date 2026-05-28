@@ -157,6 +157,95 @@ export function openPrintableTranscript({
   win.onload = () => setTimeout(() => { try { win.print() } catch { /* swallow */ } }, 100)
 }
 
+// ── Activity feed export ───────────────────────────────────────────────────
+//
+// Caller provides: clientName, clientEmail, events[]. Each event row
+// from get_activity_feed RPC carries: { id, user_id, event_type,
+// event_data, source, caused_by, occurred_at }.
+//
+// Renders a flat table with one row per event in the same order the
+// caller passes them (typically most-recent-first to match the on-screen
+// feed). The Details column is the JSON-stringified event_data, shown
+// in a monospace font for readability.
+export function openPrintableActivityFeed({
+  clientName, clientEmail, events,
+}) {
+  const win = window.open('', '_blank')
+  if (!win) return
+
+  const exportedAt = formatTimestamp(new Date().toISOString())
+
+  const bodyRows = (events || []).map(e => {
+    const ts      = formatTimestamp(e.occurred_at)
+    const type    = esc(e.event_type)
+    const source  = esc(e.source ?? '')
+    const details = esc(JSON.stringify(e.event_data ?? {}))
+    return `
+      <tr>
+        <td class="ts">${esc(ts)}</td>
+        <td class="type">${type}</td>
+        <td class="source">${source}</td>
+        <td class="details">${details}</td>
+      </tr>
+    `
+  }).join('')
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>MyRX Activity Feed — ${esc(clientName)}</title>
+  <style>
+    ${BASE_CSS}
+    body { max-width: 960px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; table-layout: fixed; }
+    thead th { text-align: left; padding: 8px 10px; background: #f4f4f4; border-bottom: 1px solid #ddd; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #555; }
+    tbody td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: top; word-wrap: break-word; }
+    tbody td.ts { white-space: nowrap; font-variant-numeric: tabular-nums; color: #555; font-size: 11px; width: 160px; }
+    tbody td.type { font-weight: 600; color: #222; width: 200px; }
+    tbody td.source { color: #666; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; width: 90px; }
+    tbody td.details { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 10px; color: #444; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>MyRX &mdash; Activity Feed</h1>
+    <dl>
+      <dt>Client</dt><dd>${esc(clientName)} &lt;${esc(clientEmail || '—')}&gt;</dd>
+      <dt>Exported by</dt><dd>You (administrator)</dd>
+      <dt>Exported on</dt><dd>${esc(exportedAt)}</dd>
+      <dt>Event count</dt><dd>${(events || []).length}</dd>
+    </dl>
+    <p class="legal">
+      This activity feed export was generated from MyRX's per-user audit log for the stated
+      client above. Every meaningful event for this account is recorded with a timestamp,
+      event type, source surface, and structured event data. The export event itself is
+      recorded in MyRX's audit log alongside the administrator's identity and timestamp.
+    </p>
+  </div>
+  ${(events || []).length === 0
+    ? '<div class="empty">No activity events were found for this client.</div>'
+    : `<table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Event type</th>
+            <th>Source</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>`}
+  <div class="footer">End of export &mdash; MyRX activity feed</div>
+</body>
+</html>`
+
+  win.document.open()
+  win.document.write(html)
+  win.document.close()
+  win.onload = () => setTimeout(() => { try { win.print() } catch { /* swallow */ } }, 100)
+}
+
 // ── Billing export ─────────────────────────────────────────────────────────
 //
 // Caller provides: customerName, customerEmail, stripeCustomerId,

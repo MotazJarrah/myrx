@@ -316,6 +316,70 @@ function AccountTab({ profile, user }: { profile: any; user: any }) {
     return () => clearTimeout(t)
   }, [phoneCooldown])
 
+  // ── Self-service delete account state ────────────────────────────────────
+  // Tapping "Delete account" opens a confirmation modal that requires the
+  // user to type "DELETE" (case-insensitive). Confirming calls the
+  // schedule_account_deletion RPC with p_user_id=null (defaults to
+  // auth.uid()), which sets profiles.scheduled_for_deletion_at = now() + 30
+  // days. The mobile (app)/_layout.tsx ReactivationGate watches that column
+  // and takes over the whole app shell on the next refreshProfile — the
+  // user lands on the reactivate / sign-out screen automatically without
+  // any manual navigation here.
+  //
+  // Mirrors the web admin's doScheduleDeletion in AdminUserDetail.jsx and
+  // the coach self-service path scaffolded in CoachProfile.jsx. Voice +
+  // copy follows the "minimum factual" rule used on ReactivationGate.tsx —
+  // no reactivation pitch up-front, just the date + link to Privacy.
+  const [deleteOpen,        setDeleteOpen]        = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deleting,          setDeleting]          = useState(false)
+  const [deleteError,       setDeleteError]       = useState('')
+
+  // ETA the deletion will be applied — purely a display value computed at
+  // render time. The server's RPC sets the authoritative timestamp; we just
+  // need a friendly date for the modal copy.
+  const deletionEtaDate = useMemo(() => {
+    const d = new Date(Date.now() + 30 * 86_400_000)
+    return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  }, [])
+
+  function openDeleteModal() {
+    setDeleteConfirmText('')
+    setDeleteError('')
+    setDeleteOpen(true)
+  }
+  function closeDeleteModal() {
+    if (deleting) return
+    setDeleteOpen(false)
+    setDeleteConfirmText('')
+    setDeleteError('')
+  }
+  async function submitDeleteAccount() {
+    if (deleting) return
+    if (deleteConfirmText.trim().toUpperCase() !== 'DELETE') {
+      setDeleteError('Type DELETE to confirm.')
+      return
+    }
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      const { error: rpcErr } = await supabase.rpc('schedule_account_deletion', { p_user_id: null })
+      if (rpcErr) throw rpcErr
+      // Refreshing the profile flips scheduled_for_deletion_at into
+      // AuthContext — (app)/_layout.tsx's ReactivationGate then short-
+      // circuits the route tree on the next render, so we don't need to
+      // navigate manually. Close the modal first so the gate's slide-in
+      // doesn't fight a fading-out modal.
+      setDeleteOpen(false)
+      setDeleteConfirmText('')
+      await refreshProfile()
+    } catch (err: any) {
+      setDeleteError(err?.message || 'Could not schedule the deletion. Try again.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   // ── Android SMS User Consent auto-fill ──────────────────────────────────
   //
   // When the OTP step is mounted on Android, register a listener via the
@@ -1083,6 +1147,104 @@ function AccountTab({ profile, user }: { profile: any; user: any }) {
           <Text style={s.saveBtnText}>Save profile</Text>
         )}
       </Pressable>
+
+      {/* Delete account — destructive self-service action. Sits at the
+          bottom of the Account tab as the final entry. Tapping opens a
+          confirmation modal that requires typing "DELETE" (case-insensitive)
+          before the schedule_account_deletion RPC fires. Mirrors the admin
+          "Schedule deletion" flow but scoped to self. */}
+      <View style={s.deleteRow}>
+        <Pressable
+          onPress={openDeleteModal}
+          style={({ pressed }) => [s.deleteBtn, pressed && s.deleteBtnPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+        >
+          <Trash2 size={16} color={colors.destructive} />
+          <Text style={s.deleteBtnText}>Delete account</Text>
+        </Pressable>
+      </View>
+
+      {/* Delete-account confirmation modal */}
+      <Modal
+        visible={deleteOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteModal}
+      >
+        <View style={s.modalBackdrop}>
+          <View style={s.modalBody}>
+            <View style={s.modalIconRow}>
+              <Trash2 size={20} color={colors.destructive} />
+              <Text style={s.modalTitle}>Delete your MyRX account</Text>
+            </View>
+
+            {/* Body — minimum factual disclosure. Stays on the deletion
+                date + the legal pointer; no reactivation pitch, no
+                marketing-y "we're sorry to see you go". The
+                ReactivationGate (which takes over after this commits)
+                handles the reactivate-or-sign-out branching. */}
+            <Text style={s.modalSub}>
+              Your account will be deleted on <Text style={s.deleteDateText}>{deletionEtaDate}</Text>.
+            </Text>
+            <Text style={s.modalSub}>
+              Until then, sign in to reactivate. After that, your profile and training data are permanently wiped.
+            </Text>
+            <Pressable
+              onPress={() => openLegalDoc('https://myrxfit.com/privacy')}
+              hitSlop={6}
+            >
+              <Text style={s.deletePrivacyLink}>Privacy Policy</Text>
+            </Pressable>
+
+            {/* Type-to-confirm field — non-trivial action gate. Matches
+                the explicit-permission rule for destructive operations.
+                Per CLAUDE.md "no placeholder text ever", we use a label
+                above the input instead of an in-field placeholder. */}
+            <View style={s.deleteConfirmField}>
+              <Text style={s.deleteConfirmLabel}>Type DELETE to confirm</Text>
+              <TextInput
+                value={deleteConfirmText}
+                onChangeText={setDeleteConfirmText}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                editable={!deleting}
+                style={s.deleteConfirmInput}
+              />
+            </View>
+
+            {deleteError ? (
+              <View style={s.errorBanner}>
+                <AlertCircle size={16} color={colors.destructive} />
+                <Text style={s.errorText}>{deleteError}</Text>
+              </View>
+            ) : null}
+
+            <View style={s.modalBtnRow}>
+              <Pressable
+                onPress={closeDeleteModal}
+                disabled={deleting}
+                style={[s.modalBtn, s.modalBtnCancel, deleting ? { opacity: 0.6 } : null]}
+              >
+                <Text style={s.modalBtnCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={submitDeleteAccount}
+                disabled={deleting || deleteConfirmText.trim().toUpperCase() !== 'DELETE'}
+                style={[
+                  s.modalBtn,
+                  s.modalBtnDestructive,
+                  (deleting || deleteConfirmText.trim().toUpperCase() !== 'DELETE') ? { opacity: 0.6 } : null,
+                ]}
+              >
+                {deleting
+                  ? <ActivityIndicator size="small" color={colors.destructiveForeground} />
+                  : <Text style={s.modalBtnDestructiveText}>Schedule deletion</Text>}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   )
 }
@@ -3580,4 +3742,68 @@ const s = StyleSheet.create({
   modalBtnCancelText: { color: colors.foreground, fontSize: 14, fontWeight: '500' },
   modalBtnConfirm:    { backgroundColor: colors.primary },
   modalBtnConfirmText:{ color: colors.primaryForeground, fontSize: 14, fontWeight: '600' },
+
+  // ── Self-service Delete account (button + modal extras) ─────────────────
+  // The button sits at the very bottom of the Account tab as a destructive
+  // outlined action — same visual weight as the "Remove photo" affordance
+  // on the avatar row (red border + red text + Trash2 icon) so the user
+  // recognizes the severity without it being a primary CTA.
+  deleteRow: {
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  deleteBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1, borderColor: alpha(colors.destructive, 0.30),
+    backgroundColor: alpha(colors.destructive, 0.05),
+  },
+  deleteBtnPressed: {
+    backgroundColor: alpha(colors.destructive, 0.10),
+  },
+  deleteBtnText: { color: colors.destructive, fontSize: 14, fontWeight: '600' },
+
+  // Modal extras — date emphasis, Privacy link, type-to-confirm field,
+  // and the destructive (red) confirm button. Re-uses modalBackdrop /
+  // modalBody / modalIconRow / modalTitle / modalSub / modalBtnRow /
+  // modalBtn / modalBtnCancel from the biometric-modal block above.
+  deleteDateText: {
+    color: colors.foreground,
+    fontWeight: '700',
+  },
+  deletePrivacyLink: {
+    color: colors.mutedForeground,
+    fontSize: 13,
+    textDecorationLine: 'underline',
+    alignSelf: 'flex-start',
+  },
+  deleteConfirmField: {
+    gap: 6,
+    marginTop: 4,
+  },
+  deleteConfirmLabel: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  deleteConfirmInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 10,
+    color: colors.foreground,
+    fontSize: 14,
+    backgroundColor: alpha(colors.card, 0.40),
+  },
+  modalBtnDestructive: {
+    backgroundColor: colors.destructive,
+  },
+  modalBtnDestructiveText: {
+    color: colors.destructiveForeground,
+    fontSize: 14,
+    fontWeight: '600',
+  },
 })

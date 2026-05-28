@@ -254,6 +254,45 @@ export default function DataProcessingAgreement() {
         the <a href="/refund-policy">Refund Policy</a>).
       </p>
 
+      <h3>6.4 Sub-processor + audit trail for deletion lifecycle</h3>
+      <p>
+        All deletion lifecycle operations on a MyRX account — scheduling a
+        deletion, reactivating during the grace period, and anonymizing — are
+        written to a tamper-evident <strong>activity_events</strong> audit
+        log with full caller attribution. Each event records who initiated
+        the action (Data Subject themselves, coach acting on a Client, or
+        MyRX administrator), when the action occurred, and the surface from
+        which it was triggered (web, mobile, or the system cron that runs
+        the 30-day grace-period sweep).
+      </p>
+      <p>
+        Anonymization writes a final <strong>"account:deleted"</strong>
+        gravestone event capturing: whether the deletion was self-initiated,
+        the caller id, the count of athletes orphaned (if the anonymized
+        account was a coach), and the count of chat messages marked read as
+        part of the cleanup. This gravestone is the canonical proof-of-
+        anonymization record.
+      </p>
+      <p>
+        Administrator access to the retained chat history (via the Export
+        Conversation tool) and to retained billing records (via the Export
+        Billing tool) requires the administrator to enter a reason of at
+        least five characters before the export can proceed. The reason,
+        the administrator's identity, the timestamp, and the scope of the
+        export are stored in the <strong>messages_admin_access_log</strong>
+        and <strong>billing_admin_access_log</strong> tables respectively.
+        Both logs are append-only; entries cannot be modified or deleted by
+        administrators.
+      </p>
+      <p>
+        A Data Subject may request a copy of their own deletion audit trail
+        — including the activity_events history, the anonymization
+        gravestone, and any admin access events involving their retained
+        records — by sending a written request to{' '}
+        <a href="mailto:privacy@myrxfit.com">privacy@myrxfit.com</a>. MyRX
+        will respond within the statutory window described in Section 5.
+      </p>
+
       <h2>7. International transfers</h2>
       <p>
         MyRX is established in the United States. To the extent we transfer

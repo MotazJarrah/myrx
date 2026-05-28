@@ -2468,6 +2468,26 @@ YES, the original email is freed for reuse the moment `anonymize_account_now()` 
 
 This matches industry standard (Google, Apple, Meta all allow email reuse after account deletion).
 
+### Stripe subscription pause / resume / cancel — intent layer (LOCKED May 28 2026)
+
+The deletion lifecycle is wired to coach Stripe subscriptions through three "pending intent" timestamp columns on `coach_subscriptions`:
+
+| Column | Set by | Cleared by | Phase 2 Stripe call |
+|---|---|---|---|
+| `pause_pending_at` | `schedule_account_deletion()` on coach accounts | orchestrator on success | `stripe.subscriptions.update(id, { pause_collection: { behavior: 'mark_uncollectible' } })` |
+| `resume_pending_at` | `cancel_scheduled_deletion()` on coach accounts that had a pause pending or were already `paused` | orchestrator on success | `stripe.subscriptions.update(id, { pause_collection: '' })` |
+| `cancel_pending_at` | `anonymize_account_now()` on coach accounts with an active sub | orchestrator on success | `stripe.subscriptions.cancel(id)` |
+
+`coach_subscriptions.status` CHECK was widened to allow two new states: `paused` (Phase 2 destination after a successful pause API call) and `pending_cancel` (Phase 1 immediately flips the status here inside `anonymize_account_now` so admin UI / billing surfaces stop showing the sub as active before the Stripe cancel API lands).
+
+**Phase 1 (SHIPPED — this migration):** the three RPCs MARK INTENT — set the pending timestamp, optionally update `status`, and write a `billing:subscription_orchestrator_pending` row to `activity_events` so the front-end / future orchestrator can react. **No Stripe API calls happen.** Every pre-existing lifecycle side effect (PII scrub, athlete unlink, auth.users ban, gravestone activity_events) is preserved verbatim.
+
+**Phase 2 (DEFERRED — follow-up task):** build a `stripe-subscription-orchestrator` edge function (or admin action, or cron) that picks up rows where any `*_pending_at` column is set, calls the matching Stripe API, then clears the pending column on success and logs to `billing_events` (`type='subscription.paused' | 'subscription.resumed' | 'subscription.cancelled_lifecycle'`).
+
+**Why deferred:** every Phase 2 call has real financial consequences (charging or not charging a customer). Marking intent first gives admin a review checkpoint AND lets us iterate the orchestrator independently of the deletion-lifecycle RPCs. The Phase 1 status flip to `pending_cancel` already protects the UI from showing an anonymized coach as actively billable, so the gap window is cosmetic — Stripe will still try to charge until Phase 2 ships, but admin / users see correct UI immediately.
+
+Migration: `supabase/migrations/20260528_stripe_subscription_lifecycle_intent.sql` (applied May 28 2026 via `stripe_subscription_lifecycle_intent`).
+
 ### Activity Feed surfaces billing automatically
 
 The trigger `billing_events_to_activity_events_trg` on `billing_events` mirrors every insert into `activity_events` with `event_type = 'billing:' || type`. So every invoice payment, refund, subscription change, and dispute shows up in the per-user Activity Feed tab without the UI needing to read two tables. `event_data` carries `amount_cents`, `currency`, `status`, `description`, and the relevant Stripe IDs for deep-link to Stripe Dashboard.

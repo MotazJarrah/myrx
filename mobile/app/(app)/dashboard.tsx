@@ -36,6 +36,7 @@ import DeleteAction from '../../src/components/DeleteAction'
 import TickerNumber from '../../src/components/TickerNumber'
 import AnimateRise from '../../src/components/AnimateRise'
 import InviteBanner from '../../src/components/InviteBanner'
+import CoachLostBanner from '../../src/components/CoachLostBanner'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── Helpers (1:1 with Dashboard.jsx) ─────────────────────────────────────────
@@ -646,6 +647,14 @@ export default function Dashboard() {
           in AuthContext.fetchPendingInvites). See CLAUDE.md "Patient
           invite detection" lock for the architecture. */}
       <InviteBanner />
+
+      {/* Coach-lost banner — fires when admin or cron anonymizes the
+          athlete's coach (coach_id flips to null + is_self_coached
+          flips to true via anonymize_account_now's UNLINK step). Shows
+          ONCE; user dismisses → coach_lost_banner_dismissed_at flag
+          stops it forever. See mobile/src/components/CoachLostBanner.tsx
+          for the eligibility logic. */}
+      <CoachLostBanner />
 
       {/* ── Profile card ─────────────────────────────────────────────── */}
       {/* The card is wrapped in a positioning View so the edit pencil can

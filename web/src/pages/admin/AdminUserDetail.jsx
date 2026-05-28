@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
-import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, UserCog, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign } from 'lucide-react'
+import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, UserCog, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign, Download, FileDown } from 'lucide-react'
 
 import AdminUserProfile   from './tabs/AdminUserProfile'
 import AdminUserActivity  from './tabs/AdminUserActivity'
@@ -13,6 +13,7 @@ import AdminUserBody      from './tabs/AdminUserBody'
 import AdminUserCalories  from './tabs/AdminUserCalories'
 import ClientSettingsDrawer from '../../components/ClientSettingsDrawer'
 import BillingView from '../../components/BillingView'
+import { openPrintableActivityFeed } from '../../lib/printableExport'
 
 // Format height stored in client's unit into admin's preferred display unit
 function formatHeightForAdmin(storedH, clientUnit, adminUnit) {
@@ -218,7 +219,7 @@ const TABS = [
 // admin / coach / self access rules — this component just calls the RPC.
 //
 // xlsx + pdf export buttons are queued for the next iteration (task #226).
-function ActivityFeed({ userId }) {
+function ActivityFeed({ userId, clientName, clientEmail }) {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -376,16 +377,76 @@ function ActivityFeed({ userId }) {
     grouped[key].push(e)
   }
 
+  // ── Export handlers ────────────────────────────────────────────────────
+  // CSV download: build the CSV in memory, trigger a temp <a> click. Excel
+  // opens CSV natively so this satisfies the "xlsx" requirement without
+  // pulling in a heavy dependency. PDF: open the printable HTML in a new
+  // window via the shared printableExport helper — admin uses the browser's
+  // Save-as-PDF print dialog.
+  function safeFilenamePart(s) {
+    return String(s ?? 'client').replace(/[^a-z0-9-_]+/gi, '-').replace(/^-+|-+$/g, '') || 'client'
+  }
+
+  function handleExportCsv() {
+    const rows = [
+      ['When', 'Event type', 'Source', 'Details'].join(','),
+      ...events.map(e => [
+        new Date(e.occurred_at).toISOString(),
+        e.event_type,
+        e.source ?? '',
+        JSON.stringify(e.event_data ?? {}),
+      ].map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+    ].join('\n')
+
+    const blob = new Blob([rows], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const today = new Date().toISOString().split('T')[0]
+    const a = document.createElement('a')
+    a.href     = url
+    a.download = `activity-feed-${safeFilenamePart(clientName)}-${today}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  function handleExportPdf() {
+    openPrintableActivityFeed({
+      clientName:  clientName  || 'Client',
+      clientEmail: clientEmail || '',
+      events,
+    })
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold">Activity Feed</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Every meaningful event for this account, most recent first. Showing {events.length} event{events.length === 1 ? '' : 's'}.
           </p>
         </div>
-        {/* xlsx + pdf export buttons land in the next iteration */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={events.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
+          </button>
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            disabled={events.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <FileDown className="h-3.5 w-3.5" />
+            Export PDF
+          </button>
+        </div>
       </div>
 
       <div className="space-y-3">
@@ -1164,7 +1225,11 @@ export default function AdminUserDetail() {
           cancelled/deleted), chat exports, and (Phase 2) auth events.
           xlsx/pdf export buttons land in the next iteration. */}
       {activeTab === 'timeline' && (
-        <ActivityFeed userId={id} />
+        <ActivityFeed
+          userId={id}
+          clientName={profile?.full_name}
+          clientEmail={profile?.email}
+        />
       )}
 
       {/* Settings drawer — opens via the gear icon in the profile

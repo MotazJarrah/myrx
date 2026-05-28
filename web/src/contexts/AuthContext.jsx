@@ -69,6 +69,20 @@ export function AuthProvider({ children }) {
       const sessionUser = session?.user ?? null
       if (!sessionUser) return
 
+      // Log auth:signin activity event on a real fresh sign-in (NOT on
+      // TOKEN_REFRESHED / INITIAL_SESSION — those fire on every tab
+      // focus). Best-effort — failure doesn't block sign-in. See CLAUDE.md
+      // activity_events schema. Locked May 28 2026. Mirrors mobile's
+      // AuthContext.tsx (same event_type + source='client').
+      if (event === 'SIGNED_IN') {
+        supabase.from('activity_events').insert({
+          user_id:    sessionUser.id,
+          event_type: 'account:signed_in',
+          source:     'client',
+          event_data: { platform: 'web' },
+        }).then(() => {}, () => {})
+      }
+
       // Only events that imply the profile or auth user actually changed
       // trigger a re-fetch. Token rotation is a no-op for our state.
       const shouldRefetchProfile =
@@ -272,6 +286,16 @@ export function AuthProvider({ children }) {
           .from('profiles')
           .update({ last_seen_at: new Date(Date.now() - 10 * 60_000).toISOString() })
           .eq('id', currentUser.id)
+        // Log auth:signout activity event BEFORE we tear down the
+        // session (RLS requires auth.uid() to match user_id). Best-
+        // effort — failure doesn't block sign-out. Mirrors mobile's
+        // AuthContext.tsx. Locked May 28 2026.
+        await supabase.from('activity_events').insert({
+          user_id:    currentUser.id,
+          event_type: 'account:signed_out',
+          source:     'client',
+          event_data: { platform: 'web' },
+        }).then(() => {}, () => {})
       }
     } catch { /* best-effort — never block sign-out on this */ }
     await supabase.auth.signOut()
