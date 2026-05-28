@@ -3569,7 +3569,7 @@ The user explicitly asked for vendor unification ("i hate that we have so many c
 
 ## Secrets hygiene (MANDATORY)
 
-This repo has been bitten twice by secrets leaking via committed files — once with a Cloudflare API token, once with a USDA FoodData Central API key (the USDA one was auto-detected by GitHub and disabled by USDA IT on 2026-05-06). Both leaks happened because a credential ended up in a tracked file. The defences below close that vector at three independent stages, and **all three must stay enabled**.
+This repo has been bitten twice by secrets leaking via committed files — once with a Cloudflare API token, once with a USDA FoodData Central API key (the USDA one was auto-detected by GitHub and disabled by USDA IT on 2026-05-06). Both leaks happened because a credential ended up in a tracked file. A third near-miss on 2026-05-27 — a Stripe TEST secret key (`sk_test_...`) pasted into `COACH_PLATFORM_TEST_READY.md` for setup convenience — was caught by GitHub Push Protection (Layer 3) before reaching the public repo, then scrubbed from git history via `git filter-repo --path COACH_PLATFORM_TEST_READY.md --invert-paths --force`. That incident is the textbook example of why all three defence layers must stay enabled and why even test-tier credentials get the same treatment as production. The pre-commit hook was extended after the incident to catch `sk_test_`, `rk_live_/test_`, `whsec_`, and `SG.xxx.xxx` patterns.
 
 ### Where secrets live
 
