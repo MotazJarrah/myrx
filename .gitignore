@@ -71,3 +71,6 @@ branding/bodycomp_preview.png
 # canonical file open. Canonical docs/plan_wizard_strings.xlsx is the
 # tracked truth; timestamped variants are throwaway.
 docs/plan_wizard_strings_*.xlsx
+
+# Excel/Word lock files (~$filename.xlsx) — created automatically while open, deleted on close.
+~$*
