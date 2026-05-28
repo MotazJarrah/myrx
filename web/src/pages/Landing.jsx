@@ -1,6 +1,6 @@
 import { Link } from 'wouter'
 import { useTheme } from '../contexts/ThemeContext'
-import { Dumbbell, Activity, Weight, Flame, Sun, Moon, ArrowRight, Zap, LineChart, Lock } from 'lucide-react'
+import { Dumbbell, Activity, Weight, Flame, ArrowRight, Zap, LineChart, Lock } from 'lucide-react'
 
 function Logo() {
   const { theme } = useTheme()
@@ -20,8 +20,6 @@ const features = [
 ]
 
 export default function Landing() {
-  const { theme, toggle } = useTheme()
-
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
       {/* Ambient grid */}
@@ -39,14 +37,19 @@ export default function Landing() {
 
       <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10">
         <Logo />
-        <nav className="flex items-center gap-2">
-          <button
-            onClick={toggle}
-            aria-label="Toggle theme"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        <nav className="flex items-center gap-1 sm:gap-2">
+          <Link
+            href="/for-coaches"
+            className="hidden sm:inline-flex rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           >
-            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </button>
+            For Coaches
+          </Link>
+          <Link
+            href="/pricing"
+            className="hidden sm:inline-flex rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            Pricing
+          </Link>
           <Link
             href="/auth?mode=signin"
             className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
@@ -190,8 +193,27 @@ export default function Landing() {
         </section>
       </main>
 
-      <footer className="relative z-10 border-t border-border px-6 py-8 text-center text-xs text-muted-foreground">
-        <p>MyRX · Performance Lab · Built for athletes, not beginners.</p>
+      {/* Legal links — keep in sync with ForCoaches.jsx, CoachPricing.jsx,
+          Pricing.jsx, and LegalLayout.jsx FOOTER_LINKS. Adding them on
+          the public landing page closes a discoverability gap (a curious
+          visitor or store reviewer can find the docs without signing up
+          or visiting the marketing pricing page first). Same ordering
+          rule as the rest: Privacy, Terms, then the rest alphabetical-ish
+          grouped by audience (consumer-first → coach-only → reference). */}
+      <footer className="relative z-10 border-t border-border px-6 py-8 text-xs text-muted-foreground">
+        <div className="mx-auto max-w-6xl space-y-4">
+          <p className="text-center">MyRX · Performance Lab · Built for athletes, not beginners.</p>
+          <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
+            <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
+            <Link href="/refund-policy" className="hover:text-foreground transition-colors">Refund Policy</Link>
+            <Link href="/health-disclaimer" className="hover:text-foreground transition-colors">Health Disclaimer</Link>
+            <Link href="/acceptable-use" className="hover:text-foreground transition-colors">Acceptable Use</Link>
+            <Link href="/cookies" className="hover:text-foreground transition-colors">Cookies</Link>
+            <Link href="/for-coaches" className="hover:text-foreground transition-colors">For coaches</Link>
+          </nav>
+          <p className="text-center text-[10px] text-muted-foreground/60">© {new Date().getFullYear()} MyRX. All rights reserved.</p>
+        </div>
       </footer>
     </div>
   )

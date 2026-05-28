@@ -35,13 +35,16 @@ import {
   ArrowRight, ChevronLeft, Sparkles, Sun, Moon, Eye, EyeOff,
   Dumbbell, HeartPulse, Bell, Fingerprint, AlertCircle, Camera, User as UserIcon,
   Minus, Plus, Loader as Loader2, Check, CheckCircle2, Calendar,
+  Mars, Venus, Transgender, HelpCircle, X as XIcon,
 } from 'lucide-react-native'
 import { AsYouType, type CountryCode } from 'libphonenumber-js'
 import { Select } from '../../src/components/Select'
 import { COUNTRIES, matchCountryFromPhone, type Country } from '../../src/lib/countries'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import * as Notifications from 'expo-notifications'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
+import { friendlyAuthMessage } from '../../src/lib/authErrors'
 import { OTPInput } from '../../src/components/OTPInput'
 import { PasswordInput } from '../../src/components/PasswordInput'
 import Slider from '../../src/components/Slider'
@@ -98,10 +101,14 @@ function SignupBackdrop() {
 }
 
 // ── Static catalogs ──────────────────────────────────────────────────
+// 4-option identity grid (locked May 25 2026). Replaces the older
+// 3-option list (Male / Female / Other). Pattern is shared exactly
+// with the web end-user signup AND the coach signup sandbox.
 const SEX = [
-  { id: 'male',   label: 'Male' },
-  { id: 'female', label: 'Female' },
-  { id: 'other',  label: 'Other / prefer not to say' },
+  { id: 'male',       label: 'Male',                Icon: Mars },
+  { id: 'female',     label: 'Female',              Icon: Venus },
+  { id: 'non-binary', label: 'Non-binary',          Icon: Transgender },
+  { id: 'prefer-not', label: 'Prefer not to say',   Icon: HelpCircle },
 ] as const
 
 interface Lift { id: string; name: string; desc: string; defaultLb: number }
@@ -264,6 +271,13 @@ interface JourneyData {
   lastName:  string
   phone: string
   biometricEnabled: boolean
+  // Coach-invite token. Set when the signup journey was launched
+  // from /(auth)/accept-invite?token=xxx with the user signed OUT.
+  // The accept-invite page routes here with ?invite=<token>; we
+  // stamp it into the journey state so it survives cold launches
+  // (AsyncStorage), then fire accept_coach_invite at WelcomeEnd
+  // after the user finishes signup. Null = self-serve signup.
+  invite: string | null
 }
 const defaultData: JourneyData = {
   units: null, modality: null, liftId: null, distanceId: null,
@@ -277,6 +291,7 @@ const defaultData: JourneyData = {
   sex: null, dob: '', heightCm: 178, weightKg: 77.1,
   email: '', password: '', firstName: '', lastName: '',
   phone: '', biometricEnabled: false,
+  invite: null,
 }
 // FRESH and RESUME orders are now defined in src/lib/signupResume.ts so
 // the same array is shared with the web build. The local buildOrder
@@ -660,8 +675,15 @@ function UnitsScreen({ data, patch, next, mode }: ScreenProps) {
       const wantWeightUnit = u === 'imperial' ? 'lb' : 'kg'
       if (profile?.weight_unit !== wantWeightUnit) {
         try {
+          // auth_user_id satisfies the profiles_active_must_have_auth
+          // CHECK (PG evaluates it on the proposed-INSERT row BEFORE the
+          // ON CONFLICT branch fires). Including it makes the fallback
+          // INSERT path pass while being a no-op for the normal UPDATE
+          // branch. Same fix as web verify-phone-otp + init-profile-
+          // checkpoint + every other upsert in this file.
           await supabase.from('profiles').upsert({
             id: user.id,
+            auth_user_id: user.id,
             weight_unit:   wantWeightUnit,
             height_unit:   u === 'imperial' ? 'imperial' : 'metric',
             distance_unit: u === 'imperial' ? 'mi' : 'km',
@@ -1142,7 +1164,7 @@ function SexScreen({ data, patch, next, mode }: ScreenProps) {
     if (mode === 'resume' && user && profile?.gender !== id) {
       try {
         await supabase.from('profiles').upsert(
-          { id: user.id, gender: id },
+          { id: user.id, auth_user_id: user.id, gender: id },
           { onConflict: 'id' },
         )
         await refreshProfile()
@@ -1152,18 +1174,37 @@ function SexScreen({ data, patch, next, mode }: ScreenProps) {
   }
   return (
     <View>
-      <Heading eyebrow="A few quick details" title="Sex"
+      <Heading eyebrow="A few quick details" title="How do you identify?"
         subtitle="Used for calorie / TDEE math. Never shown publicly." />
-      <View style={{ marginTop: 32, gap: 10 }}>
-        {SEX.map((opt, i) => (
-          <SelectCard
-            key={opt.id}
-            active={data.sex === opt.id}
-            onPress={() => pick(opt.id)}
-            label={opt.label}
-            delay={60 + i * 40}
-          />
-        ))}
+      {/* 2×2 icon grid — mirrors the web pattern exactly so coach signup
+          (web), end-user signup (web), and end-user signup (mobile) share
+          the same surface. Each option has a lucide icon centered above
+          its label; the whole tile is the press target. */}
+      <View style={s.sexGrid}>
+        {SEX.map((opt) => {
+          const active = data.sex === opt.id
+          const Icon = opt.Icon
+          return (
+            <Pressable
+              key={opt.id}
+              onPress={() => pick(opt.id)}
+              style={[s.sexTile, active && s.sexTileActive]}
+            >
+              <Icon size={28} color={active ? colors.primary : colors.mutedForeground} />
+              <Text style={[s.sexLabel, active && s.sexLabelActive]}>{opt.label}</Text>
+            </Pressable>
+          )
+        })}
+      </View>
+      {/* Health calc disclaimer — explains the male / else=female calc
+          convention. Locked May 25 2026. Same copy lives in the web
+          end-user signup + coach signup sandbox. Long-form lives in
+          Settings → About → How we compute your numbers + Terms of
+          Service + Privacy Policy. */}
+      <View style={s.healthDisclaimer}>
+        <Text style={s.healthDisclaimerText}>
+          Disclaimer: BMR and calorie formulas only have validated baselines for Male and Female. Picking anything other than Male uses the Female baseline — the more conservative, safer estimate. By continuing, you understand and accept this calculation approach.
+        </Text>
       </View>
     </View>
   )
@@ -1181,7 +1222,7 @@ function DOBScreen({ data, patch, next, mode }: ScreenProps) {
       setBusy(true)
       try {
         await supabase.from('profiles').upsert(
-          { id: user.id, birthdate: data.dob },
+          { id: user.id, auth_user_id: user.id, birthdate: data.dob },
           { onConflict: 'id' },
         )
         await refreshProfile()
@@ -1259,6 +1300,7 @@ function HeightScreen({ data, patch, next, mode }: ScreenProps) {
         try {
           await supabase.from('profiles').upsert({
             id: user.id,
+            auth_user_id:   user.id,
             current_height: heightInUnit,
             height_unit:    heightUnit,
           }, { onConflict: 'id' })
@@ -1339,6 +1381,7 @@ function WeightScreen({ data, patch, next, mode }: ScreenProps) {
         try {
           await supabase.from('profiles').upsert({
             id: user.id,
+            auth_user_id:   user.id,
             current_weight: weightInUnit,
             weight_unit:    weightUnit,
           }, { onConflict: 'id' })
@@ -1523,7 +1566,7 @@ function EmailScreen({ data, patch, next, goTo, mode, setPendingResendCooldown }
           if (isRateLimitError(err)) {
             setPendingResendCooldown(parseRateLimitCooldown(err))
           } else {
-            setError(err.message || 'Could not send the verification code.')
+            setError(friendlyAuthMessage(err, 'Could not send the verification code.'))
             return
           }
         } else {
@@ -1554,8 +1597,6 @@ function EmailScreen({ data, patch, next, goTo, mode, setPendingResendCooldown }
           editable={!existingAccount}
           onChangeText={(v) => patch({ email: v })}
           onBlur={() => setTouched(true)}
-          placeholder="you@example.com"
-          placeholderTextColor={alpha(colors.mutedForeground, 0.7)}
           style={s.input}
         />
         {touched && !valid && <Text style={s.fieldError}>Enter a valid email.</Text>}
@@ -1613,7 +1654,7 @@ function PasswordScreenInner({ data, patch, next, rehydrate, setPendingResendCoo
   // Consent: this is also where the user must agree to ToS + Privacy
   // Policy. Continue is disabled until the checkbox is ticked, so the
   // contract is in place before any account is created.
-  const { signUp } = useAuth()
+  const { user, signUp } = useAuth()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [agreed, setAgreed] = useState(false)
@@ -1633,6 +1674,29 @@ function PasswordScreenInner({ data, patch, next, rehydrate, setPendingResendCoo
 
   async function handleContinue() {
     setError('')
+    // Skip-if-verified short-circuit (mirrors web coach signup).
+    //
+    // When the user back-navigates from a post-OTP screen (e.g. tapped
+    // Back from Name to revisit the password), the email above this
+    // step is already verified. Re-calling signUp here would:
+    //   • Send another OTP email (wastes rate-limit budget, and the
+    //     user already has the verified session — they don't need it),
+    //   • OR get user_already_exists back and bounce them to sign-in
+    //     via goSignIn — surprising path for a user who didn't change
+    //     anything.
+    //
+    // If we're signed in AND the typed email matches the signed-in
+    // user's confirmed email, just advance. The wrapper's next() will
+    // already skip the email-otp screen (shouldSkipOnNav handles that
+    // via user.email_confirmed_at), so this jumps straight to Name.
+    if (
+      user
+      && user.email_confirmed_at
+      && (data.email || '').trim().toLowerCase() === (user.email || '').trim().toLowerCase()
+    ) {
+      next()
+      return
+    }
     setSubmitting(true)
     try {
       const { data: result, error: err } = await signUp(data.email.trim(), data.password)
@@ -1645,7 +1709,7 @@ function PasswordScreenInner({ data, patch, next, rehydrate, setPendingResendCoo
           goSignIn()
           return
         }
-        setError(err.message || 'Something went wrong. Try again.')
+        setError(friendlyAuthMessage(err, 'Something went wrong. Try again.'))
         return
       }
       const u = (result as any)?.user
@@ -1719,7 +1783,7 @@ function PasswordScreenInner({ data, patch, next, rehydrate, setPendingResendCoo
       setPendingResendCooldown(60)
       next()
     } catch (e: any) {
-      setError(e?.message || 'Something went wrong. Try again.')
+      setError(friendlyAuthMessage(e, 'Something went wrong. Try again.'))
     } finally {
       setSubmitting(false)
     }
@@ -1736,7 +1800,6 @@ function PasswordScreenInner({ data, patch, next, rehydrate, setPendingResendCoo
         <PasswordInput
           value={data.password}
           onChangeText={(v) => patch({ password: v })}
-          placeholder="••••••••"
           autoFocus
         />
         <PasswordStrengthMeter password={data.password} />
@@ -1773,14 +1836,22 @@ function PasswordScreenInner({ data, patch, next, rehydrate, setPendingResendCoo
           >
             Terms of Service
           </Text>
-          {' '}and{' '}
+          ,{' '}
           <Text
             onPress={() => openLegalDoc('https://myrxfit.com/privacy')}
             style={{ color: colors.foreground, textDecorationLine: 'underline' }}
           >
             Privacy Policy
           </Text>
-          .
+          , and{' '}
+          <Text
+            onPress={() => openLegalDoc('https://myrxfit.com/health-disclaimer')}
+            style={{ color: colors.foreground, textDecorationLine: 'underline' }}
+          >
+            Health & Medical Disclaimer
+          </Text>
+          {' '}— which together incorporate our Refund Policy, Cookie
+          Policy, and Acceptable Use Policy by reference.
         </Text>
       </Pressable>
 
@@ -1917,9 +1988,13 @@ function OTPScreenInner({
     try {
       const { error: err } = await verifyOtp(otpTarget, value, otpType)
       if (err) {
-        setError(/expired|invalid/i.test(err.message)
+        // Switched from regex on err.message to err.code lookup so the
+        // friendly Supabase-error mapping (see src/lib/authErrors.ts)
+        // doesn't hide the OTP-expired special case. verifyOtp in the
+        // AuthContext already runs errors through mapAuthError.
+        setError(err.code === 'otp_expired'
           ? 'That code is invalid or has expired.'
-          : (err.message || 'Could not verify the code.'))
+          : friendlyAuthMessage(err, 'Could not verify the code.'))
         setCode(''); inflightRef.current = false; advancedRef.current = false; return
       }
       // Body data was already persisted at the password checkpoint
@@ -1933,7 +2008,7 @@ function OTPScreenInner({
       setVerified(true)
       setTimeout(() => next(), 600)
     } catch (e: any) {
-      setError(e?.message || 'Something went wrong.')
+      setError(friendlyAuthMessage(e, 'Something went wrong.'))
       inflightRef.current = false
       advancedRef.current = false
     } finally { setSubmitting(false) }
@@ -1950,7 +2025,7 @@ function OTPScreenInner({
         setResendCooldown(parseRateLimitCooldown(err))
         return
       }
-      setError(err.message || 'Could not resend the code.')
+      setError(friendlyAuthMessage(err, 'Could not resend the code.'))
       return
     }
     setResendCooldown(60)
@@ -2023,6 +2098,7 @@ async function persistJourneyDataInitial(data: JourneyData) {
 
   const profilePromise = supabase.from('profiles').upsert({
     id: user.id,
+    auth_user_id: user.id,
     birthdate: data.dob || null,
     gender: data.sex,
     current_weight: weightInUnit,
@@ -2057,7 +2133,7 @@ function NameScreen({ data, patch, next, bumpCheckpoint }: ScreenProps) {
       // browsing back through screens they've already completed.
       if ((profile?.full_name || '') !== fullName) {
         const { error: err } = await supabase.from('profiles')
-          .upsert({ id: user.id, full_name: fullName }, { onConflict: 'id' })
+          .upsert({ id: user.id, auth_user_id: user.id, full_name: fullName }, { onConflict: 'id' })
         if (err) throw err
         await refreshProfile()
       }
@@ -2073,14 +2149,14 @@ function NameScreen({ data, patch, next, bumpCheckpoint }: ScreenProps) {
         <View style={{ flex: 1 }}>
           <Text style={s.fieldLabelTiny}>First</Text>
           <TextInput autoFocus autoComplete="given-name" value={data.firstName}
-            onChangeText={(v) => patch({ firstName: v })} placeholder="Alex"
-            placeholderTextColor={colors.mutedForeground} style={[s.input, { marginTop: 6 }]} />
+            onChangeText={(v) => patch({ firstName: v })}
+            style={[s.input, { marginTop: 6 }]} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={s.fieldLabelTiny}>Last</Text>
           <TextInput autoComplete="family-name" value={data.lastName}
-            onChangeText={(v) => patch({ lastName: v })} placeholder="Morgan"
-            placeholderTextColor={colors.mutedForeground} style={[s.input, { marginTop: 6 }]} />
+            onChangeText={(v) => patch({ lastName: v })}
+            style={[s.input, { marginTop: 6 }]} />
         </View>
       </View>
       {error && <ErrorBox msg={error} />}
@@ -2167,6 +2243,7 @@ function PhoneScreenInner({ data, patch, next, goTo, mode }: ScreenProps) {
       if (!isUnchanged) {
         const { error: profErr } = await supabase.from('profiles').upsert({
           id: user.id,
+          auth_user_id: user.id,
           phone: e164,
           phone_verified_at: null,
         }, { onConflict: 'id' })
@@ -2255,8 +2332,6 @@ function PhoneScreenInner({ data, patch, next, goTo, mode }: ScreenProps) {
             autoFocus keyboardType="phone-pad" autoComplete="tel"
             value={phoneLocal}
             onChangeText={setLocalAndPropagate}
-            placeholder="555 123 4567"
-            placeholderTextColor={alpha(colors.mutedForeground, 0.7)}
             style={s.phoneInput}
           />
         </View>
@@ -2417,7 +2492,7 @@ function PhotoScreen({ next, bumpCheckpoint }: ScreenProps) {
       if (picked) {
         const url = await uploadAvatar(picked, 'image/jpeg')
         const { error: profErr } = await supabase.from('profiles')
-          .upsert({ id: user.id, avatar_url: url }, { onConflict: 'id' })
+          .upsert({ id: user.id, auth_user_id: user.id, avatar_url: url }, { onConflict: 'id' })
         if (profErr) throw profErr
         await refreshProfile()
       }
@@ -2568,7 +2643,6 @@ function BiometricScreenInner({ data, next, bumpCheckpoint }: ScreenProps) {
             <PasswordInput
               value={typedPassword}
               onChangeText={setTypedPassword}
-              placeholder="••••••••"
             />
             <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
               We need it once to enroll fingerprint sign-in. It stays encrypted on your device.
@@ -2607,34 +2681,20 @@ function NotificationsScreen({ next, bumpCheckpoint }: ScreenProps) {
     if (busy) return
     setBusy(true)
     // Bump the checkpoint to 'notifications' BEFORE we touch the
-    // expo-notifications module or trigger the OS prompt. Two
-    // failure modes this defends against:
-    //   1. The dynamic import below loads the native module for
-    //      the first time, which on Android can sometimes cause
-    //      the dev client to reload (re-registering native
-    //      handlers). If that happens mid-flight, the journey is
-    //      already marked done at this step — so on the next
-    //      launch + sign-in, deriveResumeStep returns 'welcome-end'
-    //      and the user lands one screen further, not pinned here.
-    //   2. The OS prompt is dismissed but the app process gets
-    //      killed in the background (low-memory device). Same
-    //      recovery — checkpoint is forward, journey resumes at
-    //      welcome-end.
+    // permission flow. If anything below kills the process (OS prompt
+    // backgrounds the app on low-memory devices, etc.), the journey
+    // resumes at welcome-end on next launch instead of pinning here.
     try { await bumpCheckpoint('notifications') } catch { /* best-effort */ }
     try {
-      // Dynamic import so this file loads cleanly even when the dev
-      // client doesn't yet have the expo-notifications native module
-      // (newly added — requires `npx expo prebuild --clean && expo
-      // run:android`). A static `import * as Notifications` at the
-      // top crashes module evaluation with "Cannot find native
-      // module 'ExpoPushTokenManager'", which breaks the whole
-      // sign-up route.
-      const Notifications = await import('expo-notifications')
-      // Skip the prompt entirely if the user already granted (e.g.
-      // a previous attempt reloaded mid-prompt and they accepted
-      // the OS sheet before the JS bundle re-loaded). Same for
-      // the !canAskAgain case — the OS won't show a prompt, so
-      // calling requestPermissionsAsync is a no-op.
+      // STATIC IMPORT (was dynamic until May 27 2026). The dynamic
+      // `await import('expo-notifications')` triggered a Metro bundle
+      // reload on Android the FIRST time it ran (native-module
+      // hot-attach), which wiped React state mid-signup and bounced
+      // the user back to the welcome screen instead of advancing.
+      // expo-notifications is now properly declared in app.json
+      // plugins, so the static import at the top of this file
+      // resolves the native module at app startup — no reload, no
+      // bounce. See CLAUDE.md Browser/React scars for the lesson.
       const current = await Notifications.getPermissionsAsync()
       if (current.status !== 'granted' && current.canAskAgain) {
         await Notifications.requestPermissionsAsync({
@@ -2703,6 +2763,7 @@ function WelcomeEndScreen({ data }: ScreenProps) {
         await supabase.from('profiles').upsert(
           {
             id: user.id,
+            auth_user_id: user.id,
             onboarded_at: new Date().toISOString(),
             signup_checkpoint: 'welcome-end',
           },
@@ -2711,6 +2772,37 @@ function WelcomeEndScreen({ data }: ScreenProps) {
       }
       await refreshProfile()
     } catch { /* best-effort — user can retry from dashboard if it's missing */ }
+    // Coach-invite acceptance — fires only when the journey was launched
+    // from /(auth)/accept-invite?token=xxx (signed-out invitee tapping
+    // "Accept & Create Account"). At this point the new account exists
+    // and is authed, so accept_coach_invite can run against it. We pass
+    // p_confirm_swap=false because brand-new accounts can't possibly
+    // have an existing coach — the swap-confirmation branch is a
+    // non-issue here. Errors are logged but never block dashboard entry:
+    // if the link expired between signup-start and signup-end, or the
+    // RPC has a transient hiccup, the user still lands on the dashboard
+    // and can re-tap the invite link from their email later.
+    let inviteAccepted = false
+    if (data.invite) {
+      try {
+        const { data: acceptData, error: acceptErr } = await supabase.rpc(
+          'accept_coach_invite',
+          { p_token: data.invite, p_confirm_swap: false },
+        )
+        if (acceptErr) {
+          console.error('[sign-up] accept_coach_invite error', acceptErr)
+        } else {
+          const r = (acceptData as { result?: string } | null)?.result
+          if (r === 'success' || r === 'success_swap') {
+            inviteAccepted = true
+          } else {
+            console.warn('[sign-up] accept_coach_invite non-success result', r)
+          }
+        }
+      } catch (err) {
+        console.error('[sign-up] accept_coach_invite unexpected', err)
+      }
+    }
     await clearStored()
     // Clear the transient pending-password cache. By this point either
     // BiometricScreen.enroll has already promoted it to BIO_PASSWORD_KEY
@@ -2718,7 +2810,11 @@ function WelcomeEndScreen({ data }: ScreenProps) {
     // we don't need a plaintext password sitting in SecureStore
     // longer than the journey itself.
     try { await SecureStore.deleteItemAsync('myrx.bio.pending') } catch { /* best-effort */ }
-    router.replace('/(app)/dashboard' as any)
+    router.replace(
+      inviteAccepted
+        ? '/(app)/dashboard?invite_accepted=1' as any
+        : '/(app)/dashboard' as any,
+    )
   }
 
   return (
@@ -2797,7 +2893,7 @@ export default function SignUpJourney() {
   // Switching modes mid-render is fine: order changes, currentKey
   // recomputes, the new screen's `mode` prop reflects the change.
   const { user, profile, loading: authLoading, profileLoading, refreshProfile } = useAuth()
-  const params = useLocalSearchParams<{ fromConfirm?: string; fromSignIn?: string; verifyEmail?: string }>()
+  const params = useLocalSearchParams<{ fromConfirm?: string; fromSignIn?: string; verifyEmail?: string; invite?: string }>()
   const fromConfirm = params.fromConfirm === '1'
   const fromSignIn  = params.fromSignIn === '1'
   // Email-unconfirmed handoff from sign-in: user typed correct
@@ -2807,6 +2903,13 @@ export default function SignUpJourney() {
   // with `data.email` pre-filled so they can verify and continue.
   const verifyEmail = typeof params.verifyEmail === 'string' && params.verifyEmail.length > 0
     ? params.verifyEmail
+    : null
+  // Coach-invite token forwarded by /(auth)/accept-invite when a
+  // signed-out invitee taps "Accept & Create Account". We stamp it
+  // into JourneyData so it survives cold launches; WelcomeEndScreen
+  // fires accept_coach_invite right before navigating to dashboard.
+  const inviteToken = typeof params.invite === 'string' && params.invite.length > 0
+    ? params.invite
     : null
   const [hydrated, setHydrated] = useState(false)
   const [mode, setMode] = useState<JourneyMode>('fresh')
@@ -2903,6 +3006,31 @@ export default function SignUpJourney() {
       return
     }
 
+    // Resume-mode fallback (added May 27 2026): user is signed in,
+    // email is confirmed, and signup_checkpoint says they're
+    // mid-journey — but no URL hint (fromSignIn / fromConfirm /
+    // verifyEmail) is present. This happens when:
+    //   • Metro bundle reload mid-journey wipes React state but the
+    //     Supabase session survives (cached in AsyncStorage). The
+    //     query string with ?fromSignIn=1 is gone, so the original
+    //     resume branch above doesn't fire, and we'd otherwise
+    //     bounce to step 0 (welcome) — losing the user's place.
+    //   • Cold launch of the app while signed in and partly-onboarded
+    //     for whatever reason (rare in production but happens in
+    //     dev). Same behavior — pick up where they were.
+    // Without this branch the FRESH default below clears their data,
+    // sets step=0, and they see welcome → completely confused.
+    if (user && user.email_confirmed_at && profile?.signup_checkpoint) {
+      const resumeOrder = buildResumeOrder()
+      const resumeStep = deriveResumeStep({ user, profile, order: resumeOrder })
+      setMode('resume')
+      setStep(resumeStep)
+      setMinStep(0)
+      setData(seedDataFromProfile(profile, user.email))
+      setHydrated(true)
+      return
+    }
+
     // Default (FRESH): every "Start your journey" tap walks the
     // demo from welcome. Storage is wiped so the previous session's
     // partial demo state doesn't leak into this one.
@@ -2941,6 +3069,19 @@ export default function SignUpJourney() {
     setMinStep(0)
     setData(seedDataFromProfile(profile, user.email))
   }, [rehydrateRequested, authLoading, profileLoading, profile, user])
+
+  // Stamp `?invite=<token>` from the URL into journey state once the
+  // journey is hydrated. Runs only when the param is present AND the
+  // current state doesn't already have a token (avoids overwriting a
+  // stored token on a back-nav that drops the URL query). The token
+  // then rides along through cold launches via AsyncStorage and is
+  // consumed at WelcomeEnd via accept_coach_invite.
+  useEffect(() => {
+    if (!hydrated) return
+    if (!inviteToken) return
+    if (data.invite === inviteToken) return
+    setData((d) => ({ ...d, invite: inviteToken }))
+  }, [hydrated, inviteToken, data.invite])
 
   const order = useMemo(() => buildOrder(data, mode), [data.modality, mode])
   const currentKey = order[step]
@@ -3055,7 +3196,7 @@ export default function SignUpJourney() {
     checkpointRef.current = key
     try {
       await supabase.from('profiles').upsert(
-        { id: user.id, signup_checkpoint: key },
+        { id: user.id, auth_user_id: user.id, signup_checkpoint: key },
         { onConflict: 'id' },
       )
     } catch { /* best-effort */ }
@@ -3137,6 +3278,23 @@ export default function SignUpJourney() {
             </Pressable>
           ) : <View style={{ width: 36 }} />}
           <View style={{ flex: 1 }} />
+          {/* Exit X — always visible (every screen including welcome and
+              welcome-end). Routes back to /(auth)/welcome so the user is
+              never trapped in the funnel. The back chevron on the left
+              walks one step backward; the X is the universal exit.
+              Suppressed only on the resume-entry step (minStep > 0 + at
+              minStep) so an authed user can't bail out of finishing
+              required profile fields. */}
+          {!(minStep > 0 && step === minStep) && (
+            <Pressable
+              onPress={exit}
+              hitSlop={8}
+              style={s.exitBtn}
+              accessibilityLabel="Exit signup"
+            >
+              <XIcon size={18} color={colors.mutedForeground} />
+            </Pressable>
+          )}
         </View>
 
         {/* Progress */}
@@ -3183,6 +3341,7 @@ const s = StyleSheet.create({
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
   header: { height: 56, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   backBtn: { height: 36, width: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  exitBtn: { height: 36, width: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   // Big two-line welcome headline ("Show us one set." / "We'll show you what's next.")
   welcomeHeadline: { fontSize: 28, fontFamily: fonts.sans[600], color: colors.foreground, letterSpacing: -0.7, lineHeight: 34 },
 
@@ -3600,6 +3759,39 @@ const s = StyleSheet.create({
   },
   numberedTitle: { fontSize: 14, fontFamily: fonts.sans[600], color: colors.foreground },
   numberedBody:  { fontSize: 12, color: colors.mutedForeground, lineHeight: 18, marginTop: 4 },
+
+  // Sex screen 2×2 icon grid — mirrors web Signup + coach signup.
+  // Tile: rounded-2xl card with icon + label centered, 2-column grid,
+  // active state flips border + text to primary (lime).
+  sexGrid: {
+    marginTop: 32, flexDirection: 'row', flexWrap: 'wrap', gap: 12,
+  },
+  sexTile: {
+    flexBasis: '47%', flexGrow: 1, alignItems: 'center', gap: 8,
+    paddingVertical: 20, paddingHorizontal: 16, borderRadius: 16,
+    borderWidth: 2, borderColor: colors.border, backgroundColor: colors.card,
+  },
+  sexTileActive: {
+    borderColor: colors.primary, backgroundColor: alpha(colors.primary, 0.1),
+  },
+  sexLabel: {
+    fontSize: 14, fontFamily: fonts.sans[500],
+    color: colors.foreground, textAlign: 'center',
+  },
+  sexLabelActive: {
+    color: colors.primary, fontFamily: fonts.sans[600],
+  },
+  // Health calc disclaimer — small italic note in a lime-bordered chip
+  healthDisclaimer: {
+    marginTop: 20, borderRadius: 12, borderWidth: 1,
+    borderColor: alpha(colors.primary, 0.3),
+    backgroundColor: alpha(colors.primary, 0.05),
+    paddingHorizontal: 16, paddingVertical: 12,
+  },
+  healthDisclaimerText: {
+    fontSize: 11, fontFamily: fonts.sans[400], fontStyle: 'italic',
+    color: colors.mutedForeground, lineHeight: 16,
+  },
 
   // DOB picker card
   dobCard: {

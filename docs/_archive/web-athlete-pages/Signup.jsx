@@ -29,6 +29,7 @@ import {
   CheckCircle2, Eye, EyeOff,
   Dumbbell, HeartPulse, Bell, Fingerprint, AlertCircle,
   Minus, Plus, Loader2, Camera, User as UserIcon,
+  Mars, Venus, Transgender, HelpCircle, X as XIcon,
 } from 'lucide-react'
 import PhoneInput from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
@@ -36,6 +37,7 @@ import Cropper from 'react-easy-crop'
 import { useTheme } from '../contexts/ThemeContext'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import { friendlyAuthMessage } from '../lib/authErrors'
 import TickerNumber from '../components/TickerNumber'
 // We pull the SAME math the production strength + cardio detail pages
 // use so the onboarding demo's projections feel byte-identical to what
@@ -51,10 +53,15 @@ import { deriveResumeStep, buildFreshOrder, buildResumeOrder } from '../lib/sign
 import { isProfileComplete } from '../lib/profile'
 
 // ── Static catalogs ──────────────────────────────────────────────────
+// 4-option identity grid (locked May 25 2026). Replaces the older
+// 3-option list (Male / Female / Other). Pattern is shared exactly with
+// the coach signup sandbox, the mobile end-user signup, and any future
+// surface that asks for sex/gender — visual + values + ordering.
 const SEX = [
-  { id: 'male',   label: 'Male' },
-  { id: 'female', label: 'Female' },
-  { id: 'other',  label: 'Other / prefer not to say' },
+  { id: 'male',       label: 'Male',                Icon: Mars },
+  { id: 'female',     label: 'Female',              Icon: Venus },
+  { id: 'non-binary', label: 'Non-binary',          Icon: Transgender },
+  { id: 'prefer-not', label: 'Prefer not to say',   Icon: HelpCircle },
 ]
 
 const LIFTS = [
@@ -296,10 +303,16 @@ function Stepper({ label, unit, value, min, max, step, onChange, format }) {
           <Minus className="h-5 w-5" />
         </button>
         <div className="flex-1 text-center select-none">
-          <div className="text-5xl font-bold tabular-nums text-foreground leading-none">
+          {/* Matches mobile sign-up Stepper's stepperValue: 44px,
+              JetBrainsMono Bold-equivalent, tabular-nums, tight
+              letter-spacing. font-mono on web maps to Geist Mono. */}
+          <div
+            className="font-mono font-bold tabular-nums text-foreground leading-none"
+            style={{ fontSize: '44px', letterSpacing: '-1.2px' }}
+          >
             {display}
           </div>
-          {unit && <div className="mt-1 text-xs uppercase tracking-wider text-muted-foreground">{unit}</div>}
+          {unit && <div className="mt-1 text-[11px] uppercase tracking-[1px] text-muted-foreground font-medium">{unit}</div>}
         </div>
         <button
           {...handleHold(1)}
@@ -375,6 +388,15 @@ const defaultData = {
 
   // Act VI
   biometricEnabled: false,
+
+  // Coach invite token — captured from the URL (?invite=<token>) when
+  // the user arrives via a coach invite link. Persisted in
+  // sessionStorage alongside the rest of the journey state so the
+  // invite survives reloads / app-switches mid-signup. Applied at the
+  // very end of the journey in WelcomeEndScreen.openDashboard() by
+  // calling the accept_coach_invite RPC. Stays null for organic
+  // signups (no coach involved).
+  invite: null,
 }
 
 // Internal alias: the rest of the math uses 'lb'/'kg' but the user-
@@ -550,6 +572,15 @@ export default function Signup() {
   const verifyEmail = typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search).get('verifyEmail') || null
     : null
+  // Coach invite handoff: a token in the URL (?invite=<token>) means
+  // the user clicked a coach invite link. We capture it once at
+  // hydration and write it into data.invite so it persists through
+  // sessionStorage along with the rest of the journey. The token gets
+  // redeemed via accept_coach_invite RPC at the very end of the
+  // journey in WelcomeEndScreen.openDashboard().
+  const inviteToken = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('invite') || null
+    : null
   const [hydrated, setHydrated] = useState(false)
   const [mode, setMode] = useState('fresh')
   const [step, setStep] = useState(0)
@@ -652,6 +683,23 @@ export default function Signup() {
     setHydrated(true)
   }, [authLoading, profileLoading, profile, user, hydrated, navigate, fromConfirm, fromSignIn, verifyEmail])
 
+  // Coach invite capture — once hydration has settled with whatever
+  // state we restored from sessionStorage, layer the URL's ?invite=
+  // token on top. This handles three cases cleanly:
+  //   1. Fresh visit with ?invite — token lands in data, gets
+  //      persisted from the email step onward.
+  //   2. Reload mid-journey with ?invite still in the URL — token
+  //      is reapplied (idempotent: same token in = same token out).
+  //   3. Reload mid-journey without ?invite — sessionStorage's
+  //      restored value wins, so the invite isn't lost on a
+  //      reload that strips the query string.
+  useEffect(() => {
+    if (!hydrated) return
+    if (!inviteToken) return
+    if (data.invite === inviteToken) return
+    setData((d) => ({ ...d, invite: inviteToken }))
+  }, [hydrated, inviteToken, data.invite])
+
   // Rehydrate effect — picked up after the password screen flags
   // rehydrateRequested. Reads live user + profile, switches into
   // resume mode at the right step.
@@ -691,6 +739,12 @@ export default function Signup() {
         // on the rare resume path where storage survived but the auth
         // session didn't (deriveResumeStep handles that case by
         // sending them back to the email/password step).
+        //
+        // Note: data.invite (coach invite token) is intentionally
+        // preserved across the spread — it's safe to persist (the
+        // token survives reloads so the invite still applies after
+        // the user reloads mid-signup) and necessary so the RPC at
+        // openDashboard() can redeem it.
         const safeData = { ...data, password: '' }
         window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ step, data: safeData }))
       } else {
@@ -779,7 +833,7 @@ export default function Signup() {
     checkpointRef.current = key
     try {
       await supabase.from('profiles').upsert(
-        { id: user.id, signup_checkpoint: key },
+        { id: user.id, auth_user_id: user.id, signup_checkpoint: key },
         { onConflict: 'id' },
       )
     } catch { /* best-effort */ }
@@ -817,13 +871,28 @@ export default function Signup() {
             <Link href="/"><Logo theme={theme} /></Link>
           )}
         </div>
-        <button
-          onClick={toggle}
-          aria-label="Toggle theme"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={toggle}
+            aria-label="Toggle theme"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+          {/* Exit X — always visible, top-right. Routes back to the
+              landing page so the user is never trapped in the funnel.
+              The Logo link in the left slot already routes to / on
+              non-welcome screens, but it's not discoverable as an
+              "exit" affordance; an explicit X is the universal exit
+              pattern users expect. */}
+          <button
+            onClick={() => navigate('/')}
+            aria-label="Exit signup"
+            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <XIcon className="h-4 w-4" />
+          </button>
+        </div>
       </header>
 
       {/* Progress (dots + line + bold %) sits in its own row below the
@@ -976,8 +1045,12 @@ function UnitsScreen({ data, patch, next, mode }) {
       const wantWeightUnit = u === 'imperial' ? 'lb' : 'kg'
       if (profile?.weight_unit !== wantWeightUnit) {
         try {
+          // auth_user_id satisfies profiles_active_must_have_auth CHECK
+          // — PG evaluates it on the proposed-INSERT row BEFORE the ON
+          // CONFLICT branch fires. No-op for the normal UPDATE branch.
           await supabase.from('profiles').upsert({
             id: user.id,
+            auth_user_id:  user.id,
             weight_unit:   wantWeightUnit,
             height_unit:   u === 'imperial' ? 'imperial' : 'metric',
             distance_unit: u === 'imperial' ? 'mi' : 'km',
@@ -1548,7 +1621,7 @@ function SexScreen({ data, patch, next, mode }) {
     if (mode === 'resume' && user && profile?.gender !== id) {
       try {
         await supabase.from('profiles').upsert(
-          { id: user.id, gender: id },
+          { id: user.id, auth_user_id: user.id, gender: id },
           { onConflict: 'id' },
         )
         await refreshProfile()
@@ -1560,19 +1633,36 @@ function SexScreen({ data, patch, next, mode }) {
     <>
       <Heading
         eyebrow="A few quick details"
-        title="Sex"
+        title="How do you identify?"
         subtitle="Used for calorie / TDEE math. Never shown publicly."
       />
-      <div className="mt-8 space-y-2.5">
-        {SEX.map((s, i) => (
-          <SelectCard
-            key={s.id}
-            active={data.sex === s.id}
-            onClick={() => pick(s.id)}
-            label={s.label}
-            delay={60 + i * 40}
-          />
-        ))}
+      <div className="mt-8 grid grid-cols-2 gap-3">
+        {SEX.map((s) => {
+          const active = data.sex === s.id
+          const Icon = s.Icon
+          return (
+            <button key={s.id} type="button" onClick={() => pick(s.id)}
+              className={`flex flex-col items-center gap-2 rounded-2xl border-2 px-4 py-5 text-center transition-all ${
+                active
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-card text-foreground hover:border-primary/40'
+              }`}
+            >
+              <Icon className={`h-7 w-7 ${active ? 'text-primary' : 'text-muted-foreground'}`} />
+              <p className="text-sm font-medium">{s.label}</p>
+            </button>
+          )
+        })}
+      </div>
+      {/* Health calc disclaimer — explains the male / else=female calc
+          convention. Locked May 25 2026. Same copy lives in the coach
+          signup sandbox + mobile end-user signup, and the long-form
+          version lives in Settings → About → How we compute your
+          numbers + Terms of Service + Privacy Policy. */}
+      <div className="mt-5 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+        <p className="text-[11px] italic text-muted-foreground leading-relaxed">
+          Disclaimer: BMR and calorie formulas only have validated baselines for Male and Female. Picking anything other than Male uses the Female baseline — the more conservative, safer estimate. By continuing, you understand and accept this calculation approach.
+        </p>
       </div>
     </>
   )
@@ -1586,7 +1676,7 @@ function DOBScreen({ data, patch, next, mode }) {
       setBusy(true)
       try {
         await supabase.from('profiles').upsert(
-          { id: user.id, birthdate: data.dob },
+          { id: user.id, auth_user_id: user.id, birthdate: data.dob },
           { onConflict: 'id' },
         )
         await refreshProfile()
@@ -1603,13 +1693,25 @@ function DOBScreen({ data, patch, next, mode }) {
         subtitle="Age sharpens calorie estimates."
       />
       <div className="mt-8 rounded-2xl border border-border bg-card/80 p-6 backdrop-blur">
+        {/* onClick fires showPicker() so a click anywhere in the input
+            opens the calendar — Chrome's default only triggers the
+            picker on the small calendar glyph at the right edge, which
+            users routinely miss. showPicker is Chrome 99+ / Firefox 101+
+            / Safari 16+; wrapped in try/catch for older browsers and
+            cross-origin iframe cases that throw. */}
         <input
           type="date"
           value={data.dob}
           onChange={(e) => patch({ dob: e.target.value })}
+          onClick={(e) => {
+            if (e.currentTarget.showPicker) {
+              try { e.currentTarget.showPicker() } catch { /* fall through */ }
+            }
+          }}
           max={new Date().toISOString().slice(0, 10)}
           min="1920-01-01"
           className={inputCls}
+          style={{ colorScheme: 'dark' }}
         />
       </div>
       <PrimaryButton onClick={handleContinue} disabled={!data.dob || busy}>Continue</PrimaryButton>
@@ -1641,6 +1743,7 @@ function HeightScreen({ data, patch, next, mode }) {
         try {
           await supabase.from('profiles').upsert({
             id: user.id,
+            auth_user_id:   user.id,
             current_height: heightInUnit,
             height_unit:    heightUnit,
           }, { onConflict: 'id' })
@@ -1711,6 +1814,7 @@ function WeightScreen({ data, patch, next, mode }) {
         try {
           await supabase.from('profiles').upsert({
             id: user.id,
+            auth_user_id:   user.id,
             current_weight: weightInUnit,
             weight_unit:    weightUnit,
           }, { onConflict: 'id' })
@@ -1881,7 +1985,7 @@ function EmailScreen({ data, patch, next, goTo, navigate, mode, setPendingResend
           if (isRateLimitError(err)) {
             setPendingResendCooldown(parseRateLimitCooldown(err))
           } else {
-            setError(err.message || 'Could not send the verification code.')
+            setError(friendlyAuthMessage(err, 'Could not send the verification code.'))
             return
           }
         } else {
@@ -1912,7 +2016,6 @@ function EmailScreen({ data, patch, next, goTo, navigate, mode, setPendingResend
           value={data.email}
           onChange={(e) => patch({ email: e.target.value })}
           onBlur={() => setTouched(true)}
-          placeholder="you@example.com"
           className={inputCls + ' disabled:opacity-60'}
         />
         {touched && !valid && <p className="mt-2 text-xs text-destructive">Enter a valid email.</p>}
@@ -2007,7 +2110,7 @@ function PasswordScreen({ data, patch, next, navigate, setPendingResendCooldown 
           goSignIn()
           return
         }
-        setError(err.message || 'Something went wrong. Try again.')
+        setError(friendlyAuthMessage(err, 'Something went wrong. Try again.'))
         return
       }
       if (result?.user && (!result.user.identities || result.user.identities.length === 0)) {
@@ -2068,7 +2171,7 @@ function PasswordScreen({ data, patch, next, navigate, setPendingResendCooldown 
       setPendingResendCooldown(60)
       next()
     } catch (e) {
-      setError(e?.message || 'Something went wrong. Try again.')
+      setError(friendlyAuthMessage(e, 'Something went wrong. Try again.'))
     } finally {
       setSubmitting(false)
     }
@@ -2090,7 +2193,6 @@ function PasswordScreen({ data, patch, next, navigate, setPendingResendCooldown 
             disabled={existingAccount}
             value={data.password}
             onChange={(e) => patch({ password: e.target.value })}
-            placeholder="••••••••"
             className={inputCls + ' pr-12 disabled:opacity-60'}
           />
           <button
@@ -2211,6 +2313,7 @@ async function persistJourneyData(data, user) {
   // UPSERT inserts on first run, updates on subsequent ones.
   const profilePromise = supabase.from('profiles').upsert({
     id:             user.id,
+    auth_user_id:   user.id,
     birthdate:      data.dob || null,
     gender:         data.sex,
     current_weight: weightInUnit,
@@ -2364,9 +2467,12 @@ function OTPScreen({
         type:  otpType,
       })
       if (err) {
-        setError(/expired|invalid/i.test(err.message)
+        // Switched from regex on err.message to err.code lookup so the
+        // friendly Supabase-error mapping (see lib/authErrors.js) doesn't
+        // hide the OTP-expired special case.
+        setError(err.code === 'otp_expired'
           ? 'That code is invalid or has expired. Try again or resend.'
-          : (err.message || 'Could not verify the code.'))
+          : friendlyAuthMessage(err, 'Could not verify the code.'))
         setCode('')
         inflightRef.current = false
         advancedRef.current = false
@@ -2383,7 +2489,7 @@ function OTPScreen({
       setTimeout(() => next(), 600)
       // Don't reset the ref on success — we're navigating away.
     } catch (e) {
-      setError(e?.message || 'Something went wrong verifying the code.')
+      setError(friendlyAuthMessage(e, 'Something went wrong verifying the code.'))
       inflightRef.current = false
       advancedRef.current = false
     } finally {
@@ -2412,13 +2518,13 @@ function OTPScreen({
         if (isRateLimitError(err)) {
           setResendCooldown(parseRateLimitCooldown(err))
         } else {
-          setError(err.message || 'Could not resend the code.')
+          setError(friendlyAuthMessage(err, 'Could not resend the code.'))
         }
       } else {
         setResendCooldown(60)
       }
     } catch (e) {
-      setError(e?.message || 'Could not resend the code.')
+      setError(friendlyAuthMessage(e, 'Could not resend the code.'))
     }
   }
 
@@ -2533,7 +2639,7 @@ function NameScreen({ data, patch, next, bumpCheckpoint }) {
       if ((profile?.full_name || '') !== fullName) {
         const { error: err } = await supabase
           .from('profiles')
-          .upsert({ id: user.id, full_name: fullName }, { onConflict: 'id' })
+          .upsert({ id: user.id, auth_user_id: user.id, full_name: fullName }, { onConflict: 'id' })
         if (err) throw err
         await refreshProfile()
       }
@@ -2561,7 +2667,6 @@ function NameScreen({ data, patch, next, bumpCheckpoint }) {
             autoFocus
             value={data.firstName}
             onChange={(e) => patch({ firstName: e.target.value })}
-            placeholder="Alex"
             className={smallInput + ' mt-1.5'}
           />
         </div>
@@ -2572,7 +2677,6 @@ function NameScreen({ data, patch, next, bumpCheckpoint }) {
             autoComplete="family-name"
             value={data.lastName}
             onChange={(e) => patch({ lastName: e.target.value })}
-            placeholder="Morgan"
             className={smallInput + ' mt-1.5'}
           />
         </div>
@@ -2636,6 +2740,7 @@ function PhoneScreen({ data, patch, next, goTo }) {
           .from('profiles')
           .upsert({
             id: user.id,
+            auth_user_id: user.id,
             phone: data.phone,
             phone_verified_at: null,
           }, { onConflict: 'id' })
@@ -2714,7 +2819,7 @@ function PhoneScreen({ data, patch, next, goTo }) {
           countryCallingCodeEditable={false}
           value={data.phone}
           onChange={(v) => patch({ phone: v || '' })}
-          placeholder="Enter phone number"
+          placeholder=""
         />
       </div>
       {error && (
@@ -3087,7 +3192,7 @@ function PhotoScreen({ next, bumpCheckpoint }) {
       const avatarUrl = `${urlData.publicUrl}?t=${Date.now()}`
       const { error: profileErr } = await supabase
         .from('profiles')
-        .upsert({ id: user.id, avatar_url: avatarUrl }, { onConflict: 'id' })
+        .upsert({ id: user.id, auth_user_id: user.id, avatar_url: avatarUrl }, { onConflict: 'id' })
       if (profileErr) throw profileErr
       await refreshProfile()
       try { await bumpCheckpoint('photo') } catch { /* best-effort */ }
@@ -3319,6 +3424,7 @@ function WelcomeEndScreen({ data, navigate, clearStorage }) {
         await supabase.from('profiles').upsert(
           {
             id: user.id,
+            auth_user_id: user.id,
             onboarded_at: new Date().toISOString(),
             signup_checkpoint: 'welcome-end',
           },
@@ -3327,8 +3433,36 @@ function WelcomeEndScreen({ data, navigate, clearStorage }) {
       }
       await refreshProfile()
     } catch { /* best-effort — user can retry from dashboard if it's missing */ }
+
+    // Coach invite token — if this signup came in via an invite link,
+    // link the new account to the coach now. RPC handles all the edge
+    // cases (mismatch / expired / etc). If RPC fails, log and continue —
+    // don't block dashboard entry; user can be re-linked by the coach.
+    let inviteAccepted = false
+    if (data.invite) {
+      try {
+        const { data: rpcResult, error: rpcErr } = await supabase
+          .rpc('accept_coach_invite', { p_token: data.invite, p_confirm_swap: false })
+        if (rpcErr) {
+          console.warn('[Signup] accept_coach_invite failed:', rpcErr.message)
+        } else if (rpcResult?.result === 'success' || rpcResult?.result === 'success_swap') {
+          console.log('[Signup] linked to coach via invite:', rpcResult)
+          inviteAccepted = true
+        } else {
+          // 'expired', 'invalid', 'email_mismatch', etc. — log but don't block
+          console.warn('[Signup] coach invite not applied:', rpcResult)
+        }
+      } catch (e) {
+        console.warn('[Signup] accept_coach_invite threw:', e?.message)
+      }
+    }
+
     clearStorage?.()
-    navigate?.('/dashboard')
+    // Pass an invite_accepted flag to dashboard via hash so it can
+    // show a welcome banner. Hash is stripped naturally by router and
+    // doesn't pollute history.
+    const dashHash = inviteAccepted ? '#invite_accepted' : ''
+    navigate?.('/dashboard' + dashHash)
   }
 
   return (

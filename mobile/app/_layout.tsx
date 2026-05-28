@@ -59,6 +59,7 @@ import { AuthProvider } from '../src/contexts/AuthContext'
 import { hydrateCache } from '../src/lib/cache'
 import { colors } from '../src/theme'
 import ShellSkeleton from '../src/components/ShellSkeleton'
+import InviteDeepLinkHost from '../src/components/InviteDeepLinkHost'
 
 export default function RootLayout() {
   const [cacheReady, setCacheReady] = useState(false)
@@ -113,6 +114,13 @@ export default function RootLayout() {
               <Stack.Screen name="(auth)" />
               <Stack.Screen name="(app)" />
             </Stack>
+            {/* Global deep-link handler for coach invite URLs
+                (myrx://accept-invite?token=... + Android App Link to
+                https://myrxfit.com/coach/accept-invite?token=...). Pops
+                AcceptInviteModal when a deep link arrives + the user is
+                signed in. See InviteDeepLinkHost.tsx for the full
+                handler semantics. */}
+            <InviteDeepLinkHost />
           </AuthProvider>
         </View>
       </SafeAreaProvider>

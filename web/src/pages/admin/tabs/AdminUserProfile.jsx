@@ -1,7 +1,31 @@
+/**
+ * AdminUserProfile — admin-editing-client surface, rendered inside
+ * ClientSettingsDrawer (opened via the ⚙ Settings button on the admin
+ * client detail page's profile card).
+ *
+ * Reorganized May 26 2026 from a 2-tab (Edit profile / Edit settings)
+ * layout into a 3-tab layout that mirrors mobile profile.tsx:
+ *
+ *   • Account     — name / email / phone / DOB / gender / weight / height
+ *                   (the personal-details fields)
+ *   • Preferences — weight / height / distance / swim units (the unit prefs)
+ *   • Security    — admin support actions (Send password reset, Send
+ *                   email-change link, Disable biometric on all devices,
+ *                   Sign out everywhere). Some are stubbed pending the
+ *                   edge functions to back them.
+ *
+ * About tab is intentionally NOT included — admin doesn't need to see
+ * the client's legal-doc cross-links. Theme toggle is per-browser
+ * (not per-client) so it's NOT moved into Preferences either.
+ *
+ * Save path: direct table updates against profiles, gated by the
+ * admin's is_superuser RLS bypass (`is_admin()` policy). No RPC needed
+ * for the field saves — they go through the standard
+ * `from('profiles').update().eq('id', userId)` pattern.
+ */
 import { useState } from 'react'
 import { supabase } from '../../../lib/supabase'
-import { Check, Loader2, AlertCircle, Mail, Lock, Sun, Moon } from 'lucide-react'
-import { useTheme } from '../../../contexts/ThemeContext'
+import { Check, Loader2, AlertCircle, Mail, Lock, ShieldOff, LogOut, Info } from 'lucide-react'
 
 const GENDER_OPTIONS = [
   { value: 'male',               label: 'Male' },
@@ -13,7 +37,6 @@ const GENDER_OPTIONS = [
 const inputCls  = 'w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
 const selectCls = inputCls + ' cursor-pointer'
 
-// Capitalise first letter of each word as user types
 function autoCapitalize(str) {
   return str.replace(/\b\w/g, c => c.toUpperCase())
 }
@@ -33,7 +56,7 @@ function SubTabBtn({ active, onClick, children }) {
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
+      className={`flex-1 rounded-lg px-4 py-1.5 text-xs font-semibold transition-colors ${
         active
           ? 'bg-primary text-primary-foreground shadow-sm'
           : 'text-muted-foreground hover:text-foreground hover:bg-accent'
@@ -43,8 +66,6 @@ function SubTabBtn({ active, onClick, children }) {
     </button>
   )
 }
-
-// ── Unit card (mirrors end-user design) ───────────────────────────────────────
 
 function UnitCard({ selected, onClick, label, sub }) {
   return (
@@ -63,9 +84,6 @@ function UnitCard({ selected, onClick, label, sub }) {
   )
 }
 
-// ── Edit Profile sub-tab ──────────────────────────────────────────────────────
-
-// Convert stored height → display values (mirrors EditProfile.jsx)
 function heightToDisplay(storedHeight, heightUnit) {
   if (storedHeight == null || storedHeight === '') return { ft: '', inPart: '', cm: '' }
   if (heightUnit === 'imperial') {
@@ -75,7 +93,13 @@ function heightToDisplay(storedHeight, heightUnit) {
   return { ft: '', inPart: '', cm: String(storedHeight) }
 }
 
-function EditProfileForm({ profile, userId, onSaved }) {
+// ── Account tab ────────────────────────────────────────────────────────────
+// Personal details (name / email / phone / dob / gender / weight / height).
+// Email is read-only — to change it, the admin uses the Security tab's
+// "Send email change link" button which fires a reset-password flow with
+// a custom redirect to /auth?mode=update-email.
+
+function AccountTab({ profile, userId, onSaved }) {
   const [fullName,  setFullName]  = useState(autoCapitalize(profile?.full_name || ''))
   const [gender,    setGender]    = useState(profile?.gender    || '')
   const [birthdate, setBirthdate] = useState(profile?.birthdate || '')
@@ -95,11 +119,6 @@ function EditProfileForm({ profile, userId, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [saved,  setSaved]  = useState(false)
   const [error,  setError]  = useState('')
-
-  const [emailSent,    setEmailSent]    = useState(false)
-  const [emailSending, setEmailSending] = useState(false)
-  const [pwSent,       setPwSent]       = useState(false)
-  const [pwSending,    setPwSending]    = useState(false)
 
   function getStoredHeight() {
     if (heightUnit === 'imperial') {
@@ -129,7 +148,7 @@ function EditProfileForm({ profile, userId, onSaved }) {
       const { error: err } = await supabase.from('profiles').update(updates).eq('id', userId)
       if (err) throw err
 
-      // Auto weigh-in if weight meaningfully changed
+      // Auto weigh-in if weight meaningfully changed (>0.05 kg)
       if (newWeight && newWeight > 0) {
         const newKg = weightUnit === 'kg' ? newWeight : newWeight * 0.453592
         const oldKg = profile?.current_weight != null
@@ -152,26 +171,6 @@ function EditProfileForm({ profile, userId, onSaved }) {
     }
   }
 
-  async function sendPasswordReset() {
-    if (!profile?.email) return
-    setPwSending(true)
-    await supabase.auth.resetPasswordForEmail(profile.email)
-    setPwSending(false)
-    setPwSent(true)
-    setTimeout(() => setPwSent(false), 4000)
-  }
-
-  async function sendEmailChange() {
-    if (!profile?.email) return
-    setEmailSending(true)
-    await supabase.auth.resetPasswordForEmail(profile.email, {
-      redirectTo: `${window.location.origin}/auth?mode=update-email`,
-    })
-    setEmailSending(false)
-    setEmailSent(true)
-    setTimeout(() => setEmailSent(false), 4000)
-  }
-
   return (
     <form onSubmit={handleSave} className="space-y-5">
       <Field label="Full name">
@@ -184,28 +183,8 @@ function EditProfileForm({ profile, userId, onSaved }) {
         />
       </Field>
 
-      <Field label="Email">
+      <Field label="Email" hint="To change, use the Security tab's Send email-change link button.">
         <input type="email" value={profile?.email || ''} disabled className={inputCls + ' opacity-50 cursor-not-allowed'} />
-        <div className="flex gap-2 mt-2">
-          <button
-            type="button"
-            onClick={sendEmailChange}
-            disabled={emailSending || emailSent}
-            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
-          >
-            {emailSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : emailSent ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Mail className="h-3.5 w-3.5" />}
-            {emailSent ? 'Sent' : 'Reset email'}
-          </button>
-          <button
-            type="button"
-            onClick={sendPasswordReset}
-            disabled={pwSending || pwSent}
-            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:opacity-50"
-          >
-            {pwSending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : pwSent ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Lock className="h-3.5 w-3.5" />}
-            {pwSent ? 'Sent' : 'Reset password'}
-          </button>
-        </div>
       </Field>
 
       <Field label="Gender">
@@ -244,41 +223,17 @@ function EditProfileForm({ profile, userId, onSaved }) {
         {heightUnit === 'imperial' ? (
           <div className="grid grid-cols-2 gap-2">
             <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="0"
-                max="8"
-                value={heightFt}
-                onChange={e => setHeightFt(e.target.value)}
-                placeholder="5"
-                className={inputCls}
-              />
+              <input type="number" min="0" max="8" value={heightFt} onChange={e => setHeightFt(e.target.value)} placeholder="5" className={inputCls} />
               <span className="shrink-0 text-sm text-muted-foreground">ft</span>
             </div>
             <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="0"
-                max="11"
-                value={heightIn}
-                onChange={e => setHeightIn(e.target.value)}
-                placeholder="10"
-                className={inputCls}
-              />
+              <input type="number" min="0" max="11" value={heightIn} onChange={e => setHeightIn(e.target.value)} placeholder="10" className={inputCls} />
               <span className="shrink-0 text-sm text-muted-foreground">in</span>
             </div>
           </div>
         ) : (
           <div className="flex gap-2">
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              value={heightCm}
-              onChange={e => setHeightCm(e.target.value)}
-              placeholder="175"
-              className={inputCls}
-            />
+            <input type="number" step="0.1" min="0" value={heightCm} onChange={e => setHeightCm(e.target.value)} placeholder="175" className={inputCls} />
             <span className="shrink-0 rounded-md border border-border bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground">cm</span>
           </div>
         )}
@@ -294,42 +249,23 @@ function EditProfileForm({ profile, userId, onSaved }) {
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50">
         {saved   ? <><Check   className="h-4 w-4" /> Saved</>
         : saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
-        : 'Save profile'}
+        : 'Save'}
       </button>
     </form>
   )
 }
 
-// ── Theme toggle row ──────────────────────────────────────────────────────────
+// ── Preferences tab ────────────────────────────────────────────────────────
+// Unit preferences (weight / height / distance / swim). Mirrors mobile
+// profile.tsx Preferences tab's "Preferred units" card. Body composition,
+// meal layout, chat prefs land in a follow-on iteration.
 
-function ThemeToggleRow() {
-  const { theme, toggle } = useTheme()
-  return (
-    <div className="space-y-2">
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Appearance</p>
-      <button
-        type="button"
-        onClick={toggle}
-        className="flex w-full items-center justify-between rounded-xl border border-border bg-card/40 hover:bg-accent/40 px-4 py-3 transition-colors"
-      >
-        <div>
-          <div className="text-sm font-semibold text-foreground">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</div>
-          <div className="text-xs text-muted-foreground mt-0.5">Click to switch</div>
-        </div>
-        {theme === 'dark' ? <Moon className="h-4 w-4 text-muted-foreground" /> : <Sun className="h-4 w-4 text-muted-foreground" />}
-      </button>
-    </div>
-  )
-}
-
-// ── Edit Settings sub-tab ─────────────────────────────────────────────────────
-
-function EditSettingsForm({ profile, userId, onSaved }) {
+function PreferencesTab({ profile, userId, onSaved }) {
   const [weightUnit,   setWeightUnit]   = useState(profile?.weight_unit   || 'lb')
   const [heightUnit,   setHeightUnit]   = useState(profile?.height_unit   || 'imperial')
   const [distanceUnit, setDistanceUnit] = useState(profile?.distance_unit || 'mi')
+  const [swimUnit,     setSwimUnit]     = useState(profile?.swim_unit     || 'yd')
 
-  // Track converted values so the saved numbers match the new unit
   const [convertedWeight, setConvertedWeight] = useState(profile?.current_weight ?? null)
   const [convertedHeight, setConvertedHeight] = useState(profile?.current_height ?? null)
 
@@ -342,8 +278,8 @@ function EditSettingsForm({ profile, userId, onSaved }) {
       const w = Number(convertedWeight)
       if (!isNaN(w) && w > 0) {
         const converted = newUnit === 'kg'
-          ? Math.round(w * 0.453592 * 10) / 10  // lb → kg
-          : Math.round(w / 0.453592 * 10) / 10  // kg → lb
+          ? Math.round(w * 0.453592 * 10) / 10
+          : Math.round(w / 0.453592 * 10) / 10
         setConvertedWeight(converted)
       }
     }
@@ -355,10 +291,8 @@ function EditSettingsForm({ profile, userId, onSaved }) {
       const h = Number(convertedHeight)
       if (!isNaN(h) && h > 0) {
         if (newUnit === 'metric') {
-          // imperial total inches → cm
           setConvertedHeight(Math.round(h * 2.54))
         } else {
-          // cm → imperial total inches
           setConvertedHeight(Math.round(h / 2.54))
         }
       }
@@ -375,6 +309,7 @@ function EditSettingsForm({ profile, userId, onSaved }) {
         weight_unit:    weightUnit,
         height_unit:    heightUnit,
         distance_unit:  distanceUnit,
+        swim_unit:      swimUnit,
         current_weight: convertedWeight,
         current_height: convertedHeight,
       }
@@ -416,7 +351,13 @@ function EditSettingsForm({ profile, userId, onSaved }) {
         </div>
       </div>
 
-      <ThemeToggleRow />
+      <div className="space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Swim distance</p>
+        <div className="grid grid-cols-2 gap-2">
+          <UnitCard selected={swimUnit === 'yd'} onClick={() => setSwimUnit('yd')} label="yd" sub="Yards" />
+          <UnitCard selected={swimUnit === 'm'}  onClick={() => setSwimUnit('m')}  label="m"  sub="Meters" />
+        </div>
+      </div>
 
       {error && (
         <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -428,38 +369,159 @@ function EditSettingsForm({ profile, userId, onSaved }) {
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50">
         {saved   ? <><Check   className="h-4 w-4" /> Saved</>
         : saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
-        : 'Save settings'}
+        : 'Save'}
       </button>
     </form>
   )
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
+// ── Security tab ───────────────────────────────────────────────────────────
+// Admin support actions for the client account. Reset email / reset
+// password are wired against Supabase Auth (already work). Disable
+// biometric + sign out everywhere need edge-function backends — stubbed
+// for now with disabled buttons + a note explaining what's coming.
 
-export default function AdminUserProfile({ profile, userId, onProfileSaved }) {
-  const [subTab, setSubTab] = useState('edit')
+function SupportActionRow({ icon: Icon, title, description, buttonLabel, onClick, state, disabled, tint = 'border-border' }) {
+  return (
+    <div className={`rounded-xl border ${tint} bg-card/40 p-4`}>
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted/40">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <div className="flex-1 min-w-0 space-y-1">
+          <p className="text-sm font-semibold text-foreground">{title}</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">{description}</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled || state === 'sending' || state === 'sent'}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {state === 'sending' ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</>
+        : state === 'sent'   ? <><Check   className="h-3.5 w-3.5 text-emerald-400" /> Sent</>
+        : buttonLabel}
+      </button>
+    </div>
+  )
+}
+
+function SecurityTab({ profile }) {
+  const [pwState,    setPwState]    = useState('idle')   // idle | sending | sent
+  const [emailState, setEmailState] = useState('idle')
+
+  async function sendPasswordReset() {
+    if (!profile?.email) return
+    setPwState('sending')
+    await supabase.auth.resetPasswordForEmail(profile.email)
+    setPwState('sent')
+    setTimeout(() => setPwState('idle'), 4000)
+  }
+
+  async function sendEmailChange() {
+    if (!profile?.email) return
+    setEmailState('sending')
+    await supabase.auth.resetPasswordForEmail(profile.email, {
+      redirectTo: `${window.location.origin}/auth?mode=update-email`,
+    })
+    setEmailState('sent')
+    setTimeout(() => setEmailState('idle'), 4000)
+  }
 
   return (
-    <div className="space-y-4 max-w-lg">
-      {/* Sub-tab bar */}
-      <div className="flex gap-1 rounded-lg border border-border bg-muted/20 p-0.5 w-fit">
-        <SubTabBtn active={subTab === 'edit'}     onClick={() => setSubTab('edit')}>Edit profile</SubTabBtn>
-        <SubTabBtn active={subTab === 'settings'} onClick={() => setSubTab('settings')}>Edit settings</SubTabBtn>
+    <div className="space-y-3">
+
+      <SupportActionRow
+        icon={Lock}
+        title="Send password reset email"
+        description="Sends a reset link to the client's email. They tap it to set a new password."
+        buttonLabel="Send reset link"
+        onClick={sendPasswordReset}
+        state={pwState}
+        disabled={!profile?.email}
+      />
+
+      <SupportActionRow
+        icon={Mail}
+        title="Send email-change link"
+        description="Sends a one-time link the client uses to change the email address on their account."
+        buttonLabel="Send change link"
+        onClick={sendEmailChange}
+        state={emailState}
+        disabled={!profile?.email}
+      />
+
+      <SupportActionRow
+        icon={ShieldOff}
+        title="Disable biometric on all devices"
+        description="Revokes any saved fingerprint/face credentials on every device the client uses. They'll need to re-enroll from Settings → Security on their phone."
+        buttonLabel="Coming soon"
+        onClick={() => {}}
+        disabled
+      />
+
+      <SupportActionRow
+        icon={LogOut}
+        title="Sign out everywhere"
+        description="Invalidates all active sessions across web and mobile. The client will need to sign in again."
+        buttonLabel="Coming soon"
+        onClick={() => {}}
+        disabled
+      />
+
+      <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 flex items-start gap-2">
+        <Info className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+        <p className="text-[11px] text-muted-foreground leading-relaxed">
+          To deactivate the account entirely (block sign-in while preserving data), use the
+          <span className="font-semibold text-foreground"> Active/Inactive </span>
+          toggle on the profile card. To permanently delete, use the
+          <span className="font-semibold text-destructive"> Delete </span> button.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ── Main export ────────────────────────────────────────────────────────────
+
+const TABS = [
+  { id: 'account',     label: 'Account' },
+  { id: 'preferences', label: 'Preferences' },
+  { id: 'security',    label: 'Security' },
+]
+
+export default function AdminUserProfile({ profile, userId, onProfileSaved }) {
+  const [subTab, setSubTab] = useState('account')
+
+  return (
+    <div className="space-y-4">
+      {/* Tab bar — 3 tabs mirror mobile profile.tsx (excluding About + Connect). */}
+      <div className="flex gap-1 rounded-lg border border-border bg-muted/20 p-0.5">
+        {TABS.map(t => (
+          <SubTabBtn key={t.id} active={subTab === t.id} onClick={() => setSubTab(t.id)}>
+            {t.label}
+          </SubTabBtn>
+        ))}
       </div>
 
       <div className="rounded-xl border border-border bg-card p-5">
-        {subTab === 'edit' ? (
-          <EditProfileForm
+        {subTab === 'account'     && (
+          <AccountTab
             profile={profile}
             userId={userId}
             onSaved={updated => onProfileSaved?.({ ...profile, ...updated })}
           />
-        ) : (
-          <EditSettingsForm
+        )}
+        {subTab === 'preferences' && (
+          <PreferencesTab
             profile={profile}
             userId={userId}
             onSaved={updated => onProfileSaved?.({ ...profile, ...updated })}
           />
+        )}
+        {subTab === 'security' && (
+          <SecurityTab profile={profile} />
         )}
       </div>
     </div>

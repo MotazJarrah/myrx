@@ -7,13 +7,13 @@
 // Routes:
 //   POST /stripe-webhooks/coach-subs
 //     Coach subscription lifecycle (Stripe Checkout for the recurring
-//     coach plans — Starter/Pro/Unlimited × monthly/yearly).
+//     coach plans — Starter/Pro/Elite × monthly/annual).
 //     Handles: customer.subscription.created/updated/deleted,
 //              invoice.paid, invoice.payment_failed
 //     Writes to: coach_subscriptions + profiles (coach_subscription_*)
 //
 //   POST /stripe-webhooks/b2c-purchases
-//     B2C one-time purchases (Stripe Checkout for SemiRX/FullRX from
+//     B2C one-time purchases (Stripe Checkout for CoreRX/FullRX from
 //     the website — in-app IAP goes through Apple/Google, not Stripe).
 //     Handles: checkout.session.completed (mode=payment, not subscription)
 //     Writes to: b2c_purchases
@@ -222,12 +222,12 @@ async function handleB2cPurchaseEvent(event, env) {
   // checkout session's metadata, which the web /coach/upgrade flow MUST set
   // when creating the session.
   const userId = session.metadata?.user_id
-  const tier   = session.metadata?.tier   // 'semirx' or 'fullrx'
+  const tier   = session.metadata?.tier   // 'corerx' or 'fullrx'
   if (!userId || !tier) {
     console.error(`[b2c] Missing metadata on session ${session.id}: user_id=${userId} tier=${tier}`)
     return
   }
-  if (tier !== 'semirx' && tier !== 'fullrx') {
+  if (tier !== 'corerx' && tier !== 'fullrx') {
     console.error(`[b2c] Unknown tier metadata: ${tier}`)
     return
   }

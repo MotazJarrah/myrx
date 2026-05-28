@@ -4,7 +4,7 @@ import { Flame, Plus, Check, AlertCircle, Trash2 } from 'lucide-react'
 import SwipeDelete from '../../../components/SwipeDelete'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { calcFullPlan } from '../../../lib/calorieFormulas'
-import AdminUserPlan from './AdminUserPlan'
+import MacroPlanEditor from '../../../components/MacroPlanEditor'
 
 function fmtDate(iso) {
   const d = new Date(iso + 'T12:00:00')
@@ -334,7 +334,7 @@ export default function AdminUserCalories({ userId, existingPlan, profile, admin
       <div className="flex gap-1 rounded-lg border border-border bg-muted/20 p-0.5 w-fit flex-wrap">
         <SubTabBtn active={subTab === 'foodlog'} onClick={() => setSubTab('foodlog')}>Food Log</SubTabBtn>
         <SubTabBtn active={subTab === 'intake'}  onClick={() => setSubTab('intake')}>Manual Logs</SubTabBtn>
-        <SubTabBtn active={subTab === 'plan'}    onClick={() => setSubTab('plan')}>Intake Plan</SubTabBtn>
+        <SubTabBtn active={subTab === 'plan'}    onClick={() => setSubTab('plan')}>Macro Plan</SubTabBtn>
       </div>
 
       {/* Food Log tab — reads from food_logs */}
@@ -342,14 +342,17 @@ export default function AdminUserCalories({ userId, existingPlan, profile, admin
         <FoodLogTab userId={userId} dailyTarget={dailyTarget} />
       )}
 
-      {/* Intake Plan tab */}
+      {/* Macro Plan tab — May 25 2026: swapped from AdminUserPlan to
+          the unified MacroPlanEditor so the admin-for-client surface
+          matches admin's own / coach's own / coach-for-client (all
+          four planning surfaces now share one component). */}
       {subTab === 'plan' && (
-        <AdminUserPlan
+        <MacroPlanEditor
           profile={profile}
+          user={{ id: userId, email: profile?.email ?? null }}
           existingPlan={existingPlan}
-          userId={userId}
-          adminUserId={adminUserId}
           onPlanSaved={onPlanSaved}
+          savedBy={adminUserId}
         />
       )}
 

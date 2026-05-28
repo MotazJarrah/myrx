@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Cache-bust marker — bumped manually after the May 27 2026 cache-
+   poisoning incident. CSS bundle hash is content-addressed; without
+   a real rule change in source, the hash stays identical across deploys
+   and any browser with a poisoned HTTP cache entry at the old hash URL
+   keeps getting served the bad cached response (Cache-Control:
+   immutable; max-age=31536000). The :root rule below survives Tailwind's
+   minification (comments don't) and changes the bundle content so the
+   filename hash changes. Bump the date when forcing a CSS cache bust. */
+:root { --myrx-build: "2026-05-27T07-32"; }
+
 /* LIGHT MODE */
 :root {
   --background: 40 10% 98%;
@@ -205,3 +215,228 @@
 .no-native-date-icon::-webkit-calendar-picker-indicator { display: none; }
 .no-native-date-icon::-webkit-inner-spin-button         { display: none; }
 .no-native-date-icon::-webkit-clear-button              { display: none; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Macro-plan editor sliders (web/src/components/MacroPlanEditor.jsx)
+
+   Replaces the older opacity-0 overlay pattern with a real visible native
+   range input. The native input owns mouse + touch gestures cleanly —
+   page no longer scrolls when the cursor drifts off the slider's bounding
+   box mid-drag (the bug the user reported on May 25 2026).
+
+   Layout: track + fill divs sit behind the input (pointer-events-none),
+   the input itself contributes only its custom thumb (track set to
+   transparent here so the divs underneath show through). One class per
+   color so the thumb fill can vary.
+   ────────────────────────────────────────────────────────────────────── */
+
+/* Input sits absolutely OVER the visible track div (which is behind it,
+   pointer-events: none) so the input owns all gestures and the thumb
+   floats above the colored fill. WebKit centers the runnable track
+   vertically in the input area; we make the runnable track match the
+   visible track's height (6px) so thumb math is clean. */
+input[type="range"].macro-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+  margin: 0;
+  padding: 0;
+  z-index: 2;
+}
+input[type="range"].macro-slider:focus { outline: none; }
+
+/* WebKit / Blink: runnable track height matches the visible 6px track */
+input[type="range"].macro-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  background: transparent;
+  border: none;
+}
+/* Firefox equivalent */
+input[type="range"].macro-slider::-moz-range-track {
+  height: 6px;
+  background: transparent;
+  border: none;
+}
+
+/* Thumb — visible, white-bordered, color varies per macro.
+   margin-top: -6px centers the 18px thumb on the 6px track
+   (track top + 3px center - 9px thumb half = -6px). */
+input[type="range"].macro-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  margin-top: -6px;
+  cursor: grab;
+  transition: transform 100ms ease;
+}
+input[type="range"].macro-slider:active::-webkit-slider-thumb {
+  cursor: grabbing;
+  transform: scale(1.1);
+}
+/* Firefox auto-centers the thumb on the track — no margin-top needed */
+input[type="range"].macro-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  cursor: grab;
+  transition: transform 100ms ease;
+}
+input[type="range"].macro-slider:active::-moz-range-thumb {
+  cursor: grabbing;
+  transform: scale(1.1);
+}
+
+/* Per-macro thumb fill colours */
+input[type="range"].macro-slider-blue::-webkit-slider-thumb    { background: #60a5fa; }
+input[type="range"].macro-slider-amber::-webkit-slider-thumb   { background: #fbbf24; }
+input[type="range"].macro-slider-emerald::-webkit-slider-thumb { background: #34d399; }
+input[type="range"].macro-slider-blue::-moz-range-thumb        { background: #60a5fa; }
+input[type="range"].macro-slider-amber::-moz-range-thumb       { background: #fbbf24; }
+input[type="range"].macro-slider-emerald::-moz-range-thumb     { background: #34d399; }
+
+/* ───────────────────────────────────────────────────────────────────────
+   signup-slider — used by Stepper on signup Height + Weight screens
+   (web client signup AND coach signup sandbox).
+
+   Mirrors the mobile Slider component's look exactly: 6 px slate track,
+   lime fill on the left of the thumb (driven by --fill-pct CSS variable
+   set inline per-render), 22 px lime thumb with white border + shadow.
+
+   Without this rule the native browser slider takes over — bare grey
+   thumb on a hairline track. WebKit + Firefox both need their thumb
+   pseudo-element styled separately (no shared shorthand).
+   ─────────────────────────────────────────────────────────────────────── */
+input[type="range"].signup-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+}
+input[type="range"].signup-slider:focus { outline: none; }
+
+/* WebKit / Blink — track is drawn as a linear-gradient so the lime fill
+   on the left matches the thumb position exactly (no separate progress
+   element exists in WebKit). */
+input[type="range"].signup-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    hsl(var(--primary)) 0%,
+    hsl(var(--primary)) var(--fill-pct, 0%),
+    hsl(var(--border)) var(--fill-pct, 0%),
+    hsl(var(--border)) 100%
+  );
+}
+input[type="range"].signup-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  margin-top: -8px; /* center 22px thumb on 6px track */
+  cursor: grab;
+  transition: transform 100ms ease;
+}
+input[type="range"].signup-slider:active::-webkit-slider-thumb {
+  cursor: grabbing;
+  transform: scale(1.08);
+}
+
+/* Firefox — has a native progress pseudo-element so we don't need the
+   gradient trick; just colour the track + progress separately. */
+input[type="range"].signup-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: hsl(var(--border));
+  border: none;
+}
+input[type="range"].signup-slider::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: hsl(var(--primary));
+}
+input[type="range"].signup-slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  cursor: grab;
+  transition: transform 100ms ease;
+}
+input[type="range"].signup-slider:active::-moz-range-thumb {
+  cursor: grabbing;
+  transform: scale(1.08);
+}
+
+/* ───────────────────────────────────────────────────────────────────────
+   Coach signup magic-screen animations (May 25 2026)
+   - pulse-lime: tilesthat want to attract the coach's eye, e.g. the 4
+     missing-log days on the food log strip during the magic-diagnosis
+     screen. Soft lime glow that breathes in/out twice per second.
+   - drag-hint: hovering cursor over the immersive slider has a pulsing
+     glow so the user knows it's grabbable.
+   ─────────────────────────────────────────────────────────────────────── */
+@keyframes pulse-lime {
+  0%, 100% {
+    box-shadow: 0 0 0 0 hsl(75 70% 60% / 0.4), 0 0 12px 0 hsl(75 70% 60% / 0.3);
+    background-color: hsl(75 70% 60% / 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 4px hsl(75 70% 60% / 0.0), 0 0 18px 4px hsl(75 70% 60% / 0.6);
+    background-color: hsl(75 70% 60% / 0.30);
+  }
+}
+.animate-pulse-lime {
+  animation: pulse-lime 1.4s ease-in-out infinite;
+}
+
+/* Pulse-red — for empty/missing data tiles that need to call attention
+   to a GAP rather than an opportunity. Used on the food log strip in
+   the magic-diagnosis screen for the 4 days Jake didn't log. */
+@keyframes pulse-red {
+  0%, 100% {
+    box-shadow: 0 0 0 0 hsl(0 70% 60% / 0.4), 0 0 12px 0 hsl(0 70% 60% / 0.3);
+    background-color: hsl(0 70% 60% / 0.15);
+  }
+  50% {
+    box-shadow: 0 0 0 4px hsl(0 70% 60% / 0.0), 0 0 18px 4px hsl(0 70% 60% / 0.6);
+    background-color: hsl(0 70% 60% / 0.30);
+  }
+}
+.animate-pulse-red {
+  animation: pulse-red 1.4s ease-in-out infinite;
+}
+
+/* Caret blink — hard on/off (no fade) matching a real text-editor cursor.
+   Tailwind's animate-pulse uses a smooth opacity fade which reads as an
+   LED pulse rather than a typing cursor. step-end timing snaps instantly
+   at the 50% mark, giving the classic 0.5s on / 0.5s off rhythm used in
+   macOS / Windows / VS Code / iOS text inputs. */
+@keyframes caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.animate-caret-blink {
+  animation: caret-blink 1s step-end infinite;
+}

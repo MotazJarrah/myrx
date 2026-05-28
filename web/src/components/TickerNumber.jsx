@@ -133,7 +133,14 @@ export default function TickerNumber({ value, className = '' }) {
 
   return (
     <span
-      className={`inline-flex items-baseline leading-none ${className}`}
+      // `tabular-nums` is critical: each TickerDigit's slot width = the widest
+      // digit in its 0-9 reel column, so without monospaced digits a "1" sits
+      // in a slot sized for "8" / "0" — leaving visible whitespace to the
+      // right and making "12" render as "1 2". tabular-nums equalises every
+      // digit's advance width within the inherited font (no need to switch to
+      // font-mono), which packs multi-digit values tightly. LOCKED May 26 2026
+      // after a real-data audit caught it on the admin "12 cardio PRs" chip.
+      className={`inline-flex items-baseline leading-none tabular-nums ${className}`}
       aria-label={str}
     >
       {[...str].map((ch, i) => {

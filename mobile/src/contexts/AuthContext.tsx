@@ -4,6 +4,7 @@ import * as SecureStore from 'expo-secure-store'
 import * as LocalAuthentication from 'expo-local-authentication'
 import { supabase } from '../lib/supabase'
 import { recordAuthSuccess, clearAuthState } from '../lib/lockState'
+import { mapAuthError, isBannedError } from '../lib/authErrors'
 import type { User } from '@supabase/supabase-js'
 
 // SecureStore keys for biometric-protected credentials. Stored on the device
@@ -26,12 +27,72 @@ const BIO_PENDING_PASSWORD_KEY = 'myrx.bio.pending'
 // (showing "online" for activity within the last 5 min) stays accurate.
 const HEARTBEAT_INTERVAL_MS = 60_000
 
+// How often we re-check for new pending coach invites while the app is
+// foreground. 1 hour balances "the patient-invite banner appears
+// promptly after the coach sends" against "don't spam the RPC every
+// minute". A foreground-to-background-to-foreground cycle also triggers
+// a refresh via the AppState listener, so most invites land within
+// minutes in practice — this interval is the worst-case bound for a
+// user who never re-focuses the app. See get_pending_invites_for_current_user
+// migration for the underlying RPC.
+const PENDING_INVITES_REFRESH_MS = 60 * 60 * 1000
+
+// Pending coach invite — rows returned by the get_pending_invites_for_current_user
+// RPC. Shape mirrors the SQL function's RETURNS TABLE.
+export interface PendingInvite {
+  invite_id:        string
+  token:            string
+  coach_id:         string
+  coach_full_name:  string | null
+  coach_avatar_url: string | null
+  coach_message:    string | null
+  expires_at:       string
+  created_at:       string
+}
+
+// Response from attach-invite-to-current-user. On success returns the
+// new coach's display info + a flag indicating whether this was a swap
+// from an existing coach (so the UI can show "Swapped from Coach Bob"
+// confirmation). On already_attached, no DB write happened — the user
+// was already on this coach's roster.
+export interface AttachInviteResult {
+  success: boolean
+  // Server error code (see edge fn for the full list: cant_accept_as_coach,
+  // cant_accept_as_admin, account_deactivated, email_mismatch,
+  // invite_not_found, invite_expired, invite_revoked, invite_already_used,
+  // bad_json, missing_token, invalid_token_shape).
+  code?: string
+  error?: string
+  // Success-path fields
+  already_attached?: boolean
+  invite_id?: string
+  coach_id?: string
+  coach_full_name?: string | null
+  coach_avatar_url?: string | null
+  // Swap fields: when the user was already coached by a different coach,
+  // swapped_from_coach_id is the previous coach's id. Null for the
+  // free-athlete-becomes-coached path.
+  swapped_from_coach_id?: string | null
+  was_self_coached?: boolean
+  // Email-mismatch surfaces the invite's invitee email so the UI can
+  // show "this invite was sent to <email>" without a follow-up query.
+  invitee_email?: string
+}
+
 interface Profile {
   id: string
   full_name: string | null
   avatar_url: string | null
   role: string | null
   is_superuser: boolean
+  // Coach role flag — true for users who signed up via /coach/signup
+  // and have an active coach subscription. Gates the Coach Platform
+  // legal-docs section on the About screen (coaches see Coach
+  // Agreement + DPA; athletes don't). Defaults to false in DB
+  // (supabase/migrations/20260524_coach_platform_v1_phase1.sql).
+  // Optional in the type because legacy profiles may not have it
+  // populated until the user re-signs in after the migration.
+  is_coach?: boolean | null
   // When true, the user OWNS their calorie plan and gates the in-app
   // PlanWizardSheet + edit-chip UI (see mobile/src/components/PlanWizardSheet.tsx).
   // When false, the admin owns the plan via the web admin portal and the
@@ -64,6 +125,14 @@ interface Profile {
   // Whether chat with the coach is enabled for this user (admin-controlled
   // — flips the chat icon visibility in the top bar).
   chat_enabled: boolean
+  // Coach attachment — when an athlete accepts a coach invite, this is set
+  // to the coach's user id (which is also their profiles.id). NULL for
+  // self-coached athletes, coaches, and admins. AcceptInviteModal reads
+  // this to branch the confirmation copy between "free athlete becomes
+  // coached" vs "swap from current coach to new coach". Realtime profile
+  // subscription (above) means the value updates in-place after a
+  // successful invite acceptance — banner UI clears, confirmation shows.
+  coach_id: string | null
   // Set by the WelcomeEndScreen "Open my dashboard" tap. The single
   // source of truth for "did this user finish the signup journey?" —
   // isProfileComplete (lib/profile.ts) gates dashboard access on this
@@ -83,6 +152,22 @@ interface AuthContextType {
   profile: Profile | null
   loading: boolean
   profileLoading: boolean
+  // Pending coach invites — list of un-accepted, un-expired, un-revoked
+  // invites addressed to the signed-in user's email. The InviteBanner
+  // on dashboard surfaces these; the AcceptInviteModal walks the user
+  // through confirmation. Empty array when no invites pending.
+  pendingInvites: PendingInvite[]
+  // Force-refresh the pendingInvites list. Called by the banner / modal
+  // after a successful attach so the banner disappears and any stacked
+  // invites stay accurate.
+  refreshPendingInvites: () => Promise<void>
+  // Accept an invite by token. Used by: (1) banner Accept button (passes
+  // token from pendingInvites), (2) Settings "Have an invite code?"
+  // paste-card, (3) custom URL scheme deep-link handler. Calls the
+  // attach-invite-to-current-user edge function; on success refreshes
+  // the profile + pendingInvites + returns the result for the UI to
+  // show confirmation copy.
+  attachInviteToken: (token: string) => Promise<AttachInviteResult>
   signIn: (identifier: string, password: string) => Promise<{ error: any }>
   signUp: (email: string, password: string) => Promise<{ data: any; error: any }>
   signOut: () => Promise<void>
@@ -123,6 +208,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(true)
+  // Pending coach invites for the signed-in user. Hydrated by the
+  // useEffect below on sign-in + hourly + foreground transitions.
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([])
 
   const fetchProfile = useCallback(async (userId: string) => {
     setProfileLoading(true)
@@ -295,7 +383,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // they typed their password.
         recordAuthSuccess()
       }
-      return { error }
+      return { error: mapAuthError(error) }
     }
     const { data: emailData, error: rpcError } = await supabase.rpc('get_email_by_phone', {
       p_phone: identifier.trim(),
@@ -311,7 +399,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await cacheSignInPassword(emailData, password)
       recordAuthSuccess()
     }
-    return { error }
+    return { error: mapAuthError(error) }
   }, [])
 
   const signUp = useCallback(async (email: string, password: string) => {
@@ -320,11 +408,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // can intercept it and open the app directly when the user taps from
     // their phone. On other devices the link falls back to the web app
     // (which then redirects through `/auth?mode=signin` post-confirm).
-    return supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: 'https://myrxfit.com/auth/confirm' },
     })
+    return { data, error: mapAuthError(error) }
   }, [])
 
   const signOut = useCallback(async () => {
@@ -351,7 +440,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     type: 'signup' | 'recovery' | 'email_change',
   ) => {
     const { error } = await supabase.auth.verifyOtp({ email, token, type })
-    return { error }
+    return { error: mapAuthError(error) }
   }, [])
 
   const resendOtp = useCallback(async (
@@ -364,25 +453,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email,
         options: { emailRedirectTo: 'https://myrxfit.com/auth/confirm' },
       })
-      return { error }
+      return { error: mapAuthError(error) }
     }
     // For recovery, "resend" just calls resetPasswordForEmail again.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: 'https://myrxfit.com/auth/recovery',
     })
-    return { error }
+    return { error: mapAuthError(error) }
   }, [])
 
   const requestPasswordReset = useCallback(async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: 'https://myrxfit.com/auth/recovery',
     })
-    return { error }
+    return { error: mapAuthError(error) }
   }, [])
 
   const updatePassword = useCallback(async (newPassword: string) => {
     const { error } = await supabase.auth.updateUser({ password: newPassword })
-    return { error }
+    return { error: mapAuthError(error) }
   }, [])
 
   // ── Biometric sign-in ────────────────────────────────────────────────────
@@ -488,9 +577,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // If credentials are stale (user changed password elsewhere), clear
       // them so the user falls back to password and can re-enable biometric
       // with the new password afterwards.
-      if (error) await disableBiometric()
-      else recordAuthSuccess()  // skip BiometricLockGate re-prompt
-      return { error }
+      //
+      // SUSPENDED-USER EXCEPTION: when the auth user is banned (admin
+      // deactivated them), we KEEP the saved credentials. An admin may
+      // reactivate them later, and we want fingerprint sign-in to resume
+      // working without forcing re-enrollment. The mapped error surfaces
+      // the suspension copy to the user, so they know what's happening.
+      if (error && !isBannedError(error)) await disableBiometric()
+      else if (!error) recordAuthSuccess()  // skip BiometricLockGate re-prompt
+      return { error: mapAuthError(error) }
     } catch (err: any) {
       return { error: { message: err?.message || 'Biometric sign-in failed.' } }
     }
@@ -499,6 +594,134 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshProfile = useCallback(async () => {
     if (user?.id) await fetchProfile(user.id)
   }, [user, fetchProfile])
+
+  // ── Pending coach invites detection ──────────────────────────────────────
+  // Query the get_pending_invites_for_current_user RPC, which returns the
+  // list of un-accepted, un-revoked, un-expired invites whose invitee_email
+  // matches the signed-in user's email. The RPC is SECURITY DEFINER + scoped
+  // to the calling user via auth.uid() — so we can safely call it from any
+  // authenticated session.
+  //
+  // Coaches and admins are excluded UI-side: they'd never be addressed by an
+  // invite (cant_invite_coach / cant_invite_admin block at send-time), so
+  // the RPC returns zero rows for them anyway. We still gate here as
+  // belt-and-suspenders + to skip an unnecessary RPC roundtrip.
+  const fetchPendingInvites = useCallback(async () => {
+    if (!user?.id) { setPendingInvites([]); return }
+    // Skip the query entirely for coach + admin accounts — they can't
+    // be the target of an invite. Also skip when profile hasn't loaded
+    // yet (we'll re-run once it does).
+    if (profile?.is_coach === true || profile?.is_superuser === true) {
+      setPendingInvites([])
+      return
+    }
+    try {
+      const { data, error } = await supabase.rpc('get_pending_invites_for_current_user')
+      if (error) {
+        // Silent failure — banner just won't appear this cycle. Logged
+        // for debugging but doesn't break anything else.
+        console.warn('[pending invites] RPC failed:', error.message)
+        return
+      }
+      setPendingInvites((data ?? []) as PendingInvite[])
+    } catch (err) {
+      console.warn('[pending invites] threw:', (err as Error).message)
+    }
+  }, [user?.id, profile?.is_coach, profile?.is_superuser])
+
+  const refreshPendingInvites = useCallback(async () => {
+    await fetchPendingInvites()
+  }, [fetchPendingInvites])
+
+  // Run on sign-in (when user.id flips from null → uuid OR changes).
+  // Re-run when the profile's role flags change (so the gate above
+  // takes effect correctly post-profile-load).
+  useEffect(() => {
+    if (!user?.id) { setPendingInvites([]); return }
+    fetchPendingInvites()
+  }, [user?.id, profile?.is_coach, profile?.is_superuser, fetchPendingInvites])
+
+  // Hourly foreground re-poll + immediate refresh on background-to-
+  // foreground transitions. This is the "patient invite" mechanism:
+  // a coach can send an invite at 10am; the athlete (already signed in)
+  // returns to the app at 11am; the banner appears within seconds of
+  // refocus. Worst case the hourly interval catches it even without
+  // a refocus.
+  const pendingInvitesTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    if (!user?.id) return
+    if (profile?.is_coach === true || profile?.is_superuser === true) return
+
+    function start() {
+      if (pendingInvitesTimer.current) return
+      pendingInvitesTimer.current = setInterval(fetchPendingInvites, PENDING_INVITES_REFRESH_MS)
+    }
+    function stop() {
+      if (pendingInvitesTimer.current) {
+        clearInterval(pendingInvitesTimer.current)
+        pendingInvitesTimer.current = null
+      }
+    }
+
+    if (AppState.currentState === 'active') start()
+
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active') {
+        // Immediate refresh on refocus + restart the interval.
+        fetchPendingInvites()
+        start()
+      } else {
+        stop()
+      }
+    })
+
+    return () => { stop(); sub.remove() }
+  }, [user?.id, profile?.is_coach, profile?.is_superuser, fetchPendingInvites])
+
+  // ── Attach an invite token to the current user ───────────────────────────
+  // Calls the attach-invite-to-current-user edge function with the JWT in
+  // the Authorization header (supabase-js handles this automatically when
+  // we use functions.invoke). On success, refreshes both the profile (so
+  // the new coach_id is reflected) and the pending invites (so the banner
+  // disappears).
+  //
+  // Returns the full server response unmodified so the caller can show
+  // specific success / error UI (free-athlete-accept, coach-swap, etc.).
+  const attachInviteToken = useCallback(async (token: string): Promise<AttachInviteResult> => {
+    if (!token || !token.trim()) {
+      return { success: false, code: 'missing_token', error: 'Provide an invite code.' }
+    }
+    try {
+      const { data, error } = await supabase.functions.invoke<AttachInviteResult>(
+        'attach-invite-to-current-user',
+        { body: { token: token.trim() } },
+      )
+      if (error) {
+        // The edge function returns a structured JSON body for non-2xx
+        // responses, but functions.invoke surfaces that as `error.context`
+        // with the response. We try to unwrap it; fall back to a generic
+        // message if the shape isn't what we expect.
+        let serverBody: AttachInviteResult | null = null
+        try {
+          // @ts-ignore - context is loosely typed in supabase-js
+          const res = error.context as Response | undefined
+          if (res && typeof res.json === 'function') {
+            serverBody = await res.json()
+          }
+        } catch { /* swallow */ }
+        if (serverBody && typeof serverBody === 'object') return serverBody
+        return { success: false, code: 'attach_failed', error: error.message || 'Could not attach the invite.' }
+      }
+      // Success — refresh profile (new coach_id) + pending invites (banner removal).
+      // Don't await — the caller wants the response promptly; refresh
+      // can race in the background.
+      if (user?.id) fetchProfile(user.id)
+      fetchPendingInvites()
+      return data ?? { success: true }
+    } catch (err: any) {
+      return { success: false, code: 'attach_threw', error: err?.message || 'Network error.' }
+    }
+  }, [user?.id, fetchProfile, fetchPendingInvites])
 
   // ── Presence heartbeat ───────────────────────────────────────────────────
   // While the user is signed in AND the app is foreground, update
@@ -582,6 +805,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{
       user, profile, loading, profileLoading,
+      pendingInvites, refreshPendingInvites, attachInviteToken,
       signIn, signUp, signOut, refreshProfile, uploadAvatar,
       verifyOtp, resendOtp, requestPasswordReset, updatePassword,
       isBiometricAvailable, isBiometricEnabled, isBiometricFullyEnrolled,

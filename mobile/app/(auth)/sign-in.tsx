@@ -32,6 +32,7 @@ import Svg, { Defs, RadialGradient, Stop, Rect, Line, G } from 'react-native-svg
 import * as SecureStore from 'expo-secure-store'
 import { Fingerprint, AlertCircle, ChevronLeft } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
+import { friendlyAuthMessage } from '../../src/lib/authErrors'
 import { PasswordInput } from '../../src/components/PasswordInput'
 import AnimateRise from '../../src/components/AnimateRise'
 import { KeyboardScreen } from '../../src/components/KeyboardScreen'
@@ -216,7 +217,13 @@ export default function SignIn() {
       // path needs a separate signal to know it should jump to OTP
       // with this email pre-filled. fromSignIn assumes auth, which
       // we don't have here.
-      if (/email.*not.*confirmed/i.test(e.message || '')) {
+      //
+      // Branch on `e.code === 'email_not_confirmed'` (stable across
+      // GoTrue versions) rather than regex-matching `e.message` —
+      // the message is now rewritten by mapAuthError to the friendly
+      // "Your email hasn't been verified yet..." copy, which the old
+      // /email.*not.*confirmed/ regex would no longer match.
+      if (e.code === 'email_not_confirmed') {
         const ident = identifier.trim()
         if (/\S+@\S+\.\S+/.test(ident)) {
           try { await resendOtp(ident, 'signup') } catch { /* best-effort */ }
@@ -227,7 +234,10 @@ export default function SignIn() {
           return
         }
       }
-      setError(e.message || 'Could not sign in.')
+      // signIn already runs errors through mapAuthError, but call
+      // friendlyAuthMessage here too for safety (idempotent — re-mapping
+      // an already-mapped error returns the same friendly text).
+      setError(friendlyAuthMessage(e, 'Could not sign in.'))
       return
     }
     // On success: hand off to /sign-up?fromSignIn=1. Sign-up's
@@ -251,7 +261,7 @@ export default function SignIn() {
     setBioBusy(false)
     if (e) {
       if (!opts?.silent) {
-        setError(e.message || 'Fingerprint sign-in failed.')
+        setError(friendlyAuthMessage(e, 'Fingerprint sign-in failed.'))
       }
       return
     }

@@ -49,16 +49,20 @@ export class StripeRest {
 // Map a Stripe price lookup_key (or our metadata) to our internal
 // (tier, interval) tuple used in coach_subscriptions.tier + .interval.
 //
-// Lookup keys created during Phase 2 setup:
-//   coach_starter_monthly   → ('starter', 'month')
-//   coach_starter_yearly    → ('starter', 'year')
-//   coach_pro_monthly       → ('pro', 'month')
-//   coach_pro_yearly        → ('pro', 'year')
-//   coach_unlimited_monthly → ('unlimited', 'month')
-//   coach_unlimited_yearly  → ('unlimited', 'year')
+// Canonical lookup_keys per CLAUDE.md (May 24 2026 lock), renamed May
+// 26 2026 via scripts/rename-stripe-coach-tiers.mjs:
+//   coach_starter_monthly → ('starter', 'month')
+//   coach_starter_annual  → ('starter', 'year')
+//   coach_pro_monthly     → ('pro', 'month')
+//   coach_pro_annual      → ('pro', 'year')
+//   coach_elite_monthly   → ('elite', 'month')
+//   coach_elite_annual    → ('elite', 'year')
+//
+// We map 'annual' → 'year' here because coach_subscriptions.interval
+// stores Stripe's standard recurring values ('month'/'year').
 export function tierFromLookupKey(lookupKey) {
   if (!lookupKey) return null
-  const match = lookupKey.match(/^coach_(starter|pro|unlimited)_(monthly|yearly)$/)
+  const match = lookupKey.match(/^coach_(starter|pro|elite)_(monthly|annual)$/)
   if (!match) return null
   const [, tier, period] = match
   return {

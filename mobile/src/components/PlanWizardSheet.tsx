@@ -39,7 +39,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withTiming, runOnJS,
   LinearTransition,
 } from 'react-native-reanimated'
-import { X, ChevronLeft, ChevronRight, Check } from 'lucide-react-native'
+import { ChevronLeft, ChevronRight, Check } from 'lucide-react-native'
 
 import { supabase } from '../lib/supabase'
 import {
@@ -478,9 +478,11 @@ export default function PlanWizardSheet({
                       <Text style={s.headerSub}>Step {stepIdx + 1} of {stepOrder.length}</Text>
                     )}
                   </View>
-                  <Pressable onPress={onClose} hitSlop={8} style={s.headerBtn}>
-                    <X size={18} color={colors.mutedForeground} />
-                  </Pressable>
+                  {/* Close X removed May 27 2026 — swipe-down on the
+                      drag handle / header area dismisses the sheet
+                      (mirrors every other drawer in the app). The
+                      empty headerBtn keeps the back-arrow centered. */}
+                  <View style={s.headerBtn} />
                 </View>
               </View>
             </GestureDetector>

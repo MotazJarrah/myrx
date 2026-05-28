@@ -1,30 +1,35 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Route, Switch, Redirect, useLocation } from 'wouter'
+import { Route, Switch, Redirect, useLocation, Link } from 'wouter'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ViewModeProvider, useViewMode } from './contexts/ViewModeContext'
 import { ChartTooltipProvider } from './lib/chartTooltipScope'
 import AppShell from './components/Navbar'
-import CompleteProfile from './components/CompleteProfile'
+// CompleteProfile mini-journey deleted May 26 2026 — both /signup
+// and /coach/signup now have their own flow-detection that handles
+// incomplete profiles by routing the user to the first missing
+// data step. ProtectedLayout + CoachProtectedLayout below redirect
+// authed-but-no-profile users to the appropriate signup flow based
+// on user.user_metadata.signup_journey, instead of showing the
+// legacy CompleteProfile recovery form.
 import CookieBanner from './components/CookieBanner'
+import ErrorBoundary from './components/ErrorBoundary'
+import { useIsDesktop } from './hooks/useIsDesktop'
 
 // ── Lazy page imports — each becomes its own JS chunk ─────────────────────────
 // The browser downloads only the chunks the user actually visits.
+//
+// LOCKED May 27 2026 — athletes are mobile-only. The 12 athlete page imports
+// previously here (Dashboard, Strength, StrengthDetail, Cardio, CardioDetail,
+// Mobility, MobilityDetail, Bodyweight, Heart, Calories, History, Signup) were
+// archived to docs/_archive/web-athlete-pages/. EditProfile.jsx stays because
+// AccountSettings.jsx still imports ProfileTab from it for the coach + admin
+// gear-icon settings drawers — that's a shared named export, not the default
+// route component. See CLAUDE.md "Web / Mobile role rule" for the full spec.
 const Landing         = lazy(() => import('./pages/Landing'))
 const Auth            = lazy(() => import('./pages/Auth'))
 const AuthConfirm     = lazy(() => import('./pages/AuthConfirm'))
-const Dashboard       = lazy(() => import('./pages/Dashboard'))
-const Strength        = lazy(() => import('./pages/Strength'))
-const Cardio          = lazy(() => import('./pages/Cardio'))
-const Bodyweight      = lazy(() => import('./pages/Bodyweight'))
-const Heart           = lazy(() => import('./pages/Heart'))
-const Calories        = lazy(() => import('./pages/Calories'))
-const History         = lazy(() => import('./pages/History'))
-const EditProfile     = lazy(() => import('./pages/EditProfile'))
-const StrengthDetail  = lazy(() => import('./pages/StrengthDetail'))
-const CardioDetail    = lazy(() => import('./pages/CardioDetail'))
-const Mobility        = lazy(() => import('./pages/Mobility'))
-const MobilityDetail  = lazy(() => import('./pages/MobilityDetail'))
+const DownloadAppPlaceholder = lazy(() => import('./pages/DownloadAppPlaceholder'))
 
 // Legal pages — public, unauthenticated. Linked from the mobile app's
 // Settings → About tab (openLegalDoc opens these URLs in an in-app
@@ -35,14 +40,40 @@ const TermsOfService     = lazy(() => import('./pages/legal/TermsOfService'))
 const PrivacyPolicy      = lazy(() => import('./pages/legal/PrivacyPolicy'))
 const CookiePolicy       = lazy(() => import('./pages/legal/CookiePolicy'))
 const AcceptableUsePolicy = lazy(() => import('./pages/legal/AcceptableUsePolicy'))
+const HowWeCompute       = lazy(() => import('./pages/legal/HowWeCompute'))
+// Phase 2 (Coach Platform) legal docs — May 26 2026.
+// Required for coach signup consent (Coach Agreement) and to round out
+// the consumer-protection coverage that Stripe + Apple/Google App Store
+// review look for (Refund Policy), the health-and-safety waiver that
+// caps liability on fitness prescriptions (Health Disclaimer), and the
+// GDPR Art. 28 / CCPA service-provider obligations between a Coach
+// (Controller) and MyRX (Processor) when Coaches bring Clients onto
+// the platform (Data Processing Agreement).
+const CoachAgreement             = lazy(() => import('./pages/legal/CoachAgreement'))
+const RefundPolicy               = lazy(() => import('./pages/legal/RefundPolicy'))
+const HealthDisclaimer           = lazy(() => import('./pages/legal/HealthDisclaimer'))
+const DataProcessingAgreement    = lazy(() => import('./pages/legal/DataProcessingAgreement'))
 
 // Coach Platform v1 — Phase 2 (May 24 2026)
 // Public coach signup + Stripe Checkout flow at /coach/*. Separate URL
 // space from /admin/* per CLAUDE.md Lock 7. Portal is gated server-side
 // by is_coach=true (or is_superuser=true for platform owner).
-const CoachSignup  = lazy(() => import('./pages/coach/Signup'))
-const CoachWelcome = lazy(() => import('./pages/coach/Welcome'))
-const CoachPortal  = lazy(() => import('./pages/coach/Portal'))
+const CoachMagicPreview  = lazy(() => import('./pages/preview/CoachMagicPreview'))
+const ForCoaches       = lazy(() => import('./pages/ForCoaches'))
+const CoachPricing     = lazy(() => import('./pages/CoachPricing'))
+const Pricing          = lazy(() => import('./pages/Pricing'))
+const CoachSignup      = lazy(() => import('./pages/coach/Signup'))
+const CoachWelcome     = lazy(() => import('./pages/coach/Welcome'))
+const CoachShell       = lazy(() => import('./pages/coach/CoachShell'))
+const CoachDashboard   = lazy(() => import('./pages/coach/CoachDashboard'))
+const CoachClients     = lazy(() => import('./pages/coach/CoachClients'))
+const CoachInvite      = lazy(() => import('./pages/coach/CoachInvite'))
+const CoachMessages    = lazy(() => import('./pages/coach/CoachMessages'))
+const CoachBriefing    = lazy(() => import('./pages/coach/CoachBriefing'))
+const CoachAdjustments = lazy(() => import('./pages/coach/CoachAdjustments'))
+const CoachProfile     = lazy(() => import('./pages/coach/CoachProfile'))
+const CoachClientDetail = lazy(() => import('./pages/coach/CoachClientDetail'))
+const CoachAcceptInvite = lazy(() => import('./pages/coach/AcceptInvite'))
 
 const AdminShell          = lazy(() => import('./pages/admin/AdminShell'))
 const AdminOverview       = lazy(() => import('./pages/admin/AdminOverview'))
@@ -77,28 +108,68 @@ function ScrollToTop() {
 
 // ── Route trees ───────────────────────────────────────────────────────────────
 
-function EndUserRoutes({ isAdmin, onSwitchToAdminView }) {
+// EndUserRoutes function removed May 27 2026. Per CLAUDE.md "Web / Mobile
+// role rule", athletes have ZERO web surfaces — every athlete URL returns
+// 404. Athletes use the mobile app exclusively. Coaches and admins also
+// use mobile for their own personal training (no athlete UI on web for
+// anyone, ever). The 12 athlete page files were archived to
+// docs/_archive/web-athlete-pages/.
+
+// CoachProtectedLayout — gates /coach/* protected routes on is_coach=true
+// (or is_superuser=true so platform owners can preview the coach surfaces)
+// and wraps the route's content in CoachShell.
+//
+// Mirrors ProtectedLayout's loading/auth gate exactly:
+//   - During initial getSession() (loading=true) → "Loading…" placeholder
+//   - During initial profile fetch (profileLoading && !profile) → same
+//   - No user → redirect to sign-in with ?next=/coach/portal so post-auth
+//     they land back on the coach portal
+//   - Signed in but not a coach AND not admin → redirect to /dashboard
+//     (the end-user app). Plain users have no business in the coach portal.
+//   - All checks pass → render <CoachShell>{children}</CoachShell>
+function CoachProtectedLayout({ children }) {
+  const { user, profile, loading, profileLoading } = useAuth()
+  if (loading || (profileLoading && !profile)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-muted-foreground text-sm">
+        Loading…
+      </div>
+    )
+  }
+  if (!user) return <Redirect to="/auth?mode=signin&next=/coach/portal" />
+  // No profile row → user is mid-signup (interrupted before
+  // init-profile-checkpoint or NameScreen wrote anything). Route
+  // them back to the signup flow that matches their journey marker.
+  // /coach/signup's flow-detection will pick up the resume case.
+  if (!profile) {
+    // Both branches currently route to /coach/signup — the end-user
+    // /signup route isn't wired up in App.jsx yet (Signup.jsx exists
+    // as a file but no <Route path="/signup" /> entry). When end-user
+    // web signup ships, flip the default branch back to '/signup'.
+    // For now, /coach/signup's flow-detection gracefully handles any
+    // incomplete-profile user (it'll land them on the first missing
+    // data screen regardless of which journey they were originally on).
+    const journey = user?.user_metadata?.signup_journey
+    return <Redirect to={journey === 'coach' ? '/coach/signup' : '/coach/signup'} />
+  }
+  // Athletes who somehow reach /coach/* (typed the URL, clicked a stale
+  // link, etc.) land on the "Download the MyRX app" placeholder. /dashboard
+  // no longer exists on web per CLAUDE.md "Web / Mobile role rule".
+  if (profile.is_coach !== true && profile.is_superuser !== true) {
+    return <Redirect to="/app" />
+  }
+  // No viewport-based redirect. Trust the user: if they typed /coach/portal,
+  // render it at whatever viewport they're on. The earlier `if (!isDesktop)`
+  // version broke touchscreen laptops (silently auto-redirected to /dashboard
+  // before the page could even render) AND prevented opening DevTools to
+  // diagnose anything on the coach view. Layout density on truly narrow
+  // screens is a responsive-design problem to solve in CoachShell, not a
+  // reason to destroy navigation state. Locked May 27 2026 after that bug
+  // bit during invite testing.
   return (
-    <AppShell isAdmin={isAdmin} onSwitchToAdminView={onSwitchToAdminView}>
-      <ScrollToTop />
-      <Suspense fallback={<PageLoader />}>
-        <Switch>
-          <Route path="/dashboard"                   component={Dashboard} />
-          <Route path="/strength"                    component={Strength} />
-          <Route path="/cardio"                      component={Cardio} />
-          <Route path="/bodyweight"                  component={Bodyweight} />
-          <Route path="/heart"                       component={Heart} />
-          <Route path="/calories"                    component={Calories} />
-          <Route path="/history"                     component={History} />
-          <Route path="/profile"                     component={EditProfile} />
-          <Route path="/effort/strength/:exercise"   component={StrengthDetail} />
-          <Route path="/effort/cardio/:activity"     component={CardioDetail} />
-          <Route path="/mobility"                    component={Mobility} />
-          <Route path="/mobility/:movement"          component={MobilityDetail} />
-          <Route component={() => <Redirect to="/dashboard" />} />
-        </Switch>
-      </Suspense>
-    </AppShell>
+    <Suspense fallback={<PageLoader />}>
+      <CoachShell>{children}</CoachShell>
+    </Suspense>
   )
 }
 
@@ -143,15 +214,36 @@ function ProtectedLayout() {
     )
   }
   if (!user) return <Redirect to="/auth?mode=signin" />
-  if (!profile) return <CompleteProfile />
+  // No profile row → user is mid-signup. Route back to the matching
+  // signup flow (which has its own resume / flow-detection logic).
+  // Default to /signup for end-user; coach signups carry
+  // signup_journey='coach' in their auth user_metadata.
+  if (!profile) {
+    // Both branches currently route to /coach/signup — the end-user
+    // /signup route isn't wired up in App.jsx yet (Signup.jsx exists
+    // as a file but no <Route path="/signup" /> entry). When end-user
+    // web signup ships, flip the default branch back to '/signup'.
+    // For now, /coach/signup's flow-detection gracefully handles any
+    // incomplete-profile user (it'll land them on the first missing
+    // data screen regardless of which journey they were originally on).
+    const journey = user?.user_metadata?.signup_journey
+    return <Redirect to={journey === 'coach' ? '/coach/signup' : '/coach/signup'} />
+  }
 
-  if (profile.is_superuser && !isClientView) {
+  // Admin shell renders at all viewport sizes — no viewport-based gate.
+  // Trust the user: if they're at an /admin/* route, show admin UI. Layout
+  // density at narrow widths is a responsive-design problem for AdminShell
+  // to solve internally, not a reason to silently navigate away (which
+  // wipes route state, scroll position, open modals, etc.). Same change
+  // as CoachProtectedLayout — see the note there for context.
+  if (profile.is_superuser) {
+    // AdminShell's old onSwitchToClientView prop pointed at /dashboard which
+    // no longer exists per the May 27 2026 athlete-web removal. The prop is
+    // a no-op now — kept on the call site so AdminShell doesn't crash on a
+    // missing handler. Admins use mobile for their own personal training.
     return (
       <Suspense fallback={<PageLoader />}>
-        <AdminShell onSwitchToClientView={() => {
-          setIsClientView(true)
-          navigate('/dashboard')
-        }}>
+        <AdminShell onSwitchToClientView={() => { /* athlete view removed from web */ }}>
           <ScrollToTop />
           <Suspense fallback={<PageLoader />}>
             <Switch>
@@ -177,16 +269,106 @@ function ProtectedLayout() {
     )
   }
 
+  // Non-coach, non-admin (= athlete) successfully signed in. They have ZERO
+  // web surfaces. Land them on the "Download the MyRX app" placeholder.
+  // Their session persists (no auto-logout) but every athlete URL returns
+  // 404 except this placeholder. Per CLAUDE.md "Web / Mobile role rule".
+  return <Redirect to="/app" />
+}
+
+// ── Role-aware root + 404 + portal-redirect components ───────────────────────
+// All stable top-level functions so wouter doesn't remount them on parent
+// re-renders (see scars #5).
+
+function NotFoundPage() {
+  // Hard 404 — no auto-redirect, no app pitch, no recovery prompt. Athletes
+  // hitting any athlete URL on web land here per CLAUDE.md "Web / Mobile
+  // role rule". The /app placeholder is the ONE web surface athletes can
+  // legitimately land on; everything else falls here.
+  //
+  // Design (locked May 27 2026):
+  //   - 404 number: huge, lime/primary, font-mono tabular-nums per the
+  //     app-wide numbers convention (CLAUDE.md font rule).
+  //   - Subhead: coach-voice one-liner in muted-foreground (matches the
+  //     existing copy color across the app). Locked copy:
+  //       "You broke form, re-rack and try again!"
+  //   - "Back home" button (added May 27 2026 after user feedback —
+  //     users hitting a broken link need ONE clear way out). Routes
+  //     to `/?welcome=1` (NOT bare `/`). The `?welcome=1` param tells
+  //     RootRoute to skip RoleRouter and unconditionally render the
+  //     public Landing page. Without the param, a signed-in athlete
+  //     clicking "Back home" would get bounced to /app by RoleRouter
+  //     — which is not what they expect when escaping a 404. They
+  //     expect the actual marketing landing page (bench press demo,
+  //     "One number in. Every projection out."). Signed-in coaches
+  //     and admins also see Landing — if they want their portal, they
+  //     navigate there explicitly.
+  //   - Button uses outlined chrome (not the lime primary fill) so it
+  //     doesn't compete with the giant 404 above it.
   return (
-    <EndUserRoutes
-      isAdmin={profile.is_superuser}
-      onSwitchToAdminView={() => {
-        setIsClientView(false)
-        navigate('/admin/overview')
-      }}
-    />
+    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+      <div className="max-w-2xl w-full text-center">
+        <h1 className="text-8xl font-mono font-bold tabular-nums tracking-tight text-primary">
+          404
+        </h1>
+        <p className="mt-8 text-3xl text-muted-foreground">
+          You broke form, re-rack and try again!
+        </p>
+        <div className="mt-12">
+          <Link href="/?welcome=1">
+            <a className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-5 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:border-primary/40 transition-colors">
+              <span aria-hidden="true">←</span>
+              Back home
+            </a>
+          </Link>
+        </div>
+      </div>
+    </div>
   )
 }
+
+function RoleRouter() {
+  // Used by the root `/` route for signed-in users + as the post-sign-in
+  // redirect destination. Branches by role to the correct portal.
+  const { profile } = useAuth()
+  if (profile?.is_superuser) return <Redirect to="/admin/overview" />
+  if (profile?.is_coach)     return <Redirect to="/coach/portal" />
+  return <Redirect to="/app" />
+}
+
+function RootRoute() {
+  // `/` normally role-routes signed-in users to their portal (/admin/overview
+  // for admins, /coach/portal for coaches, /app for athletes). The
+  // ?welcome=1 escape hatch (added May 27 2026 for the 404 page's "Back
+  // home" button) skips RoleRouter and renders Landing unconditionally —
+  // so a signed-in athlete escaping from a 404 sees the marketing landing
+  // page instead of the App-Store placeholder. Read window.location.search
+  // directly (not via wouter — we're outside a typed route so useSearch
+  // isn't reliable here, and we just need a one-shot read at render).
+  const { user } = useAuth()
+  let forceLanding = false
+  try {
+    forceLanding = new URLSearchParams(window.location.search).get('welcome') === '1'
+  } catch { /* ignore */ }
+  if (forceLanding) return <Landing />
+  if (user) return <RoleRouter />
+  return <Landing />
+}
+
+// ── Stable coach-route component references ──────────────────────────────────
+// Defined at module scope so wouter sees the SAME function identity across
+// every render of AppRoutes. If these are inlined as arrows in the JSX
+// (`component={() => ...}`), wouter unmounts + remounts the page on every
+// parent re-render — destroying local state and forcing a refetch flash.
+// Locked May 27 2026. See route block below for the regression context.
+function CoachPortalRoute()        { return <CoachProtectedLayout><CoachDashboard    /></CoachProtectedLayout> }
+function CoachClientsRoute()       { return <CoachProtectedLayout><CoachClients      /></CoachProtectedLayout> }
+function CoachClientDetailRoute()  { return <CoachProtectedLayout><CoachClientDetail /></CoachProtectedLayout> }
+function CoachInviteRoute()        { return <CoachProtectedLayout><CoachInvite       /></CoachProtectedLayout> }
+function CoachMessagesRoute()      { return <CoachProtectedLayout><CoachMessages     /></CoachProtectedLayout> }
+function CoachBriefingRoute()      { return <CoachProtectedLayout><CoachBriefing     /></CoachProtectedLayout> }
+function CoachAdjustmentsRoute()   { return <CoachProtectedLayout><CoachAdjustments  /></CoachProtectedLayout> }
+function CoachProfileRoute()       { return <CoachProtectedLayout><CoachProfile      /></CoachProtectedLayout> }
 
 function AppRoutes() {
   const { user, loading } = useAuth()
@@ -200,17 +382,63 @@ function AppRoutes() {
   return (
     <Suspense fallback={<PageLoader />}>
       <Switch>
-        <Route path="/" component={() => user ? <Redirect to="/dashboard" /> : <Landing />} />
+        <Route path="/" component={RootRoute} />
         <Route path="/auth/confirm" component={AuthConfirm} />
         <Route path="/auth/recovery" component={AuthConfirm} />
         <Route path="/auth" component={Auth} />
 
+        {/* /app — the ONE web surface athletes can land on. Placeholder right
+            now (apps haven't shipped). Future: full download/launch page with
+            App Store + Play Store badges + QR code. See CLAUDE.md "Web /
+            Mobile role rule" and docs/launch_checklist.xlsx for the full
+            launch-day TODO. */}
+        <Route path="/app" component={DownloadAppPlaceholder} />
+
         {/* Coach Platform v1 — Phase 2 (May 24 2026).
             Public signup at /coach/signup → Stripe Checkout → /coach/welcome.
-            Portal at /coach/portal gates on is_coach=true server-side. */}
+            Everything after /coach/welcome goes through CoachProtectedLayout
+            which gates on is_coach=true OR is_superuser=true and wraps the
+            page in CoachShell (sidebar nav + footer). Mirror of the admin
+            portal's AdminShell/ProtectedLayout pair. */}
+        {/* Preview routes — public, used for design review of signup magic
+            screens before they ship into the real journey. Safe to land
+            here without auth. */}
+        <Route path="/preview/coach-magic"  component={CoachMagicPreview} />
+        <Route path="/for-coaches"          component={ForCoaches} />
+        <Route path="/coach/pricing"        component={CoachPricing} />
+        <Route path="/pricing"              component={Pricing} />
+
         <Route path="/coach/signup"  component={CoachSignup} />
         <Route path="/coach/welcome" component={CoachWelcome} />
-        <Route path="/coach/portal"  component={CoachPortal} />
+
+        {/* Public coach-invite acceptance landing — reads ?token=xxx, previews
+            the coach. For non-coach/non-admin recipients (athletes), this
+            page should route them to /app with the token preserved so the
+            mobile app can pick it up at signup time. For coach/admin
+            recipients, it shows an error since you can't be your own client. */}
+        <Route path="/coach/accept-invite" component={CoachAcceptInvite} />
+
+        {/* /signup route REMOVED May 27 2026 — athlete signup is mobile-only
+            per CLAUDE.md "Web / Mobile role rule". Any old URL like /signup
+            falls through to the 404 catch-all at the bottom. */}
+
+        {/* Coach routes use stable top-level component references (Coach*Route).
+            Earlier these were inline arrows `component={() => <CoachProtectedLayout><X/></CoachProtectedLayout>}`
+            which produced a new function reference on every AppRoutes render →
+            wouter saw a "different" component type → unmounted + remounted the
+            page on every parent re-render. Symptom: state reset, refetch
+            triggered, em-dash skeleton flash on tab return. Locked May 27 2026
+            after that bug surfaced during invite testing — see Coach*Route
+            consts defined just above AppRoutes. */}
+        <Route path="/coach/portal"      component={CoachPortalRoute} />
+        <Route path="/coach/clients"     component={CoachClientsRoute} />
+        <Route path="/coach/client/:id"  component={CoachClientDetailRoute} />
+        <Route path="/coach/invite"      component={CoachInviteRoute} />
+        <Route path="/coach/messages"    component={CoachMessagesRoute} />
+        <Route path="/coach/briefing"    component={CoachBriefingRoute} />
+        <Route path="/coach/adjustments" component={CoachAdjustmentsRoute} />
+        <Route path="/coach/profile"     component={CoachProfileRoute} />
+
         <Route path="/coach"         component={() => <Redirect to="/coach/signup" />} />
 
         {/* Legal docs — public, unauthenticated. Must sit BEFORE the
@@ -218,12 +446,27 @@ function AppRoutes() {
             the SPA's default dashboard redirect. Linked from the
             mobile app's Settings → About tab via openLegalDoc, and
             from the signup consent labels on the web side. */}
-        <Route path="/terms"          component={TermsOfService} />
-        <Route path="/privacy"        component={PrivacyPolicy} />
-        <Route path="/cookies"        component={CookiePolicy} />
-        <Route path="/acceptable-use" component={AcceptableUsePolicy} />
+        <Route path="/terms"             component={TermsOfService} />
+        <Route path="/privacy"           component={PrivacyPolicy} />
+        <Route path="/cookies"           component={CookiePolicy} />
+        <Route path="/acceptable-use"    component={AcceptableUsePolicy} />
+        <Route path="/how-we-compute"    component={HowWeCompute} />
+        <Route path="/coach-agreement"   component={CoachAgreement} />
+        <Route path="/refund-policy"     component={RefundPolicy} />
+        <Route path="/health-disclaimer" component={HealthDisclaimer} />
+        <Route path="/dpa"               component={DataProcessingAgreement} />
 
-        <Route component={ProtectedLayout} />
+        {/* Admin portal — every /admin/* URL routes through ProtectedLayout,
+            which gates on is_superuser and renders AdminShell with the
+            nested admin route Switch. Match both /admin and /admin/anything. */}
+        <Route path="/admin" component={ProtectedLayout} />
+        <Route path="/admin/:rest*" component={ProtectedLayout} />
+
+        {/* Catch-all → 404. NO auto-redirect, no fallback render. Athletes
+            hitting /dashboard, /strength, /cardio, etc. land here. The /app
+            placeholder is the ONE web surface athletes can legitimately use;
+            everything else explicitly does not exist on web. */}
+        <Route component={NotFoundPage} />
       </Switch>
     </Suspense>
   )
@@ -238,10 +481,23 @@ function AppRoutes() {
 // across the app in one place — no per-component changes needed.
 function useKeyboardSafeFocus() {
   useEffect(() => {
+    // Input types that DON'T open a software keyboard. Focusing them should
+    // NOT trigger the scroll-into-view behaviour — a slider grab on desktop
+    // would otherwise pan the page mid-drag, and a checkbox tap shouldn't
+    // re-center the viewport either. This list bit us when the macro-plan
+    // editor's sliders started yanking the page around on every grab.
+    const NON_KEYBOARD_TYPES = new Set([
+      'range', 'checkbox', 'radio', 'button', 'submit', 'reset',
+      'file', 'color', 'image',
+    ])
     function handler(e) {
       const t = e.target
       const tag = t?.tagName
       if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return
+      if (tag === 'INPUT') {
+        const type = (t.type || '').toLowerCase()
+        if (NON_KEYBOARD_TYPES.has(type)) return
+      }
       // Wait long enough for the keyboard to fully open (~300ms on iOS) so
       // the post-keyboard viewport size is known when we measure scroll.
       // `block: 'center'` keeps the input near the middle of the visible
@@ -271,8 +527,18 @@ export default function App() {
               for document-level clicks and unpins everything that wasn't
               a chart's own click. See web/src/lib/chartTooltipScope.jsx. */}
           <ChartTooltipProvider>
-            <AppRoutes />
-            <CookieBanner />
+            {/* ErrorBoundary catches every uncaught render error and
+                shows a recoverable "Reload" UI instead of blanking the
+                screen. Specifically auto-recovers chunk-load failures
+                (the typical post-deploy cause of the "dead-end blank
+                page" pattern) by hard-reloading the page so the cached
+                index.html re-fetches with fresh chunk hashes.
+                See src/components/ErrorBoundary.jsx for the full
+                rationale. */}
+            <ErrorBoundary>
+              <AppRoutes />
+              <CookieBanner />
+            </ErrorBoundary>
           </ChartTooltipProvider>
         </ViewModeProvider>
       </AuthProvider>

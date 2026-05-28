@@ -35,6 +35,11 @@
               "scheme": "https",
               "host": "myrxfit.com",
               "pathPrefix": "/auth"
+            },
+            {
+              "scheme": "https",
+              "host": "myrxfit.com",
+              "pathPrefix": "/coach/accept-invite"
             }
           ],
           "category": [

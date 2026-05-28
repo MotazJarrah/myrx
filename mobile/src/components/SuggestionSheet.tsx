@@ -407,9 +407,9 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
                     </View>
                     <Text style={s.headerTitle}>Suggestions</Text>
                   </View>
-                  <Pressable onPress={onClose} style={s.headerClose} hitSlop={8}>
-                    <X size={16} color={colors.mutedForeground} />
-                  </Pressable>
+                  {/* Close X removed May 27 2026 — swipe-down on the
+                      header dismisses the sheet (every drawer in the
+                      app uses the same gesture). */}
                 </View>
               </View>
             </GestureDetector>

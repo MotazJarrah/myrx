@@ -11,4 +11,6 @@
 - gender consent for none male selections
 - recent activity shifts the page but not the position of the nav bar
 - reporting tool
-- 
+- customer support and ticketing tool
+- need to redo the whole end user sign up process nd create a sign up process specifically for user invited by a coach
+- subscription and refund management on admin portal

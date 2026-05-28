@@ -2017,36 +2017,43 @@ The role model is shifting from today's two-tier (admin → end user) to a three
 
     - **Mechanism**: a `credential_history` table that records every (user_id, email, phone, recorded_at, event_type) tuple over the user's lifecycle. Event types include `signup`, `email_change`, `phone_change`, `deletion`, `resurrection`. The table is append-only — credentials are recorded as they're used / changed, never overwritten.
     - **At signup**: before creating a new profile, check `credential_history` for any prior `user_id` matching the incoming email OR phone. If found, surface a "We found previous data linked to this email — restore it?" prompt to the user. On accept, the new auth user is linked to the OLD profile id (not a new one), and all historical efforts / bodyweight / calories / wearable data / etc. is immediately accessible. On decline, a fresh profile is created and the credential_history row records `signup` as a new lineage.
-    - **At account deletion**: rather than hard-deleting the profile row + all its dependent data, we mark `profiles.deleted_at = now()` and record a `deletion` event in `credential_history`. The auth.users record IS deleted (so the user can't sign in with the old credentials and so we honor right-to-deletion requirements legally), but the underlying data remains keyed to the stable profile id. The user's PII (email, phone, full_name) on the profile row can be tombstoned to a hash to satisfy GDPR / CCPA right-to-erasure if requested; the activity logs themselves stay anonymized but recoverable.
+    - **At account deactivation**: rather than hard-deleting the profile row + all its dependent data, we mark `profiles.deactivated_at = now()` (renamed from the misleading `deleted_at` on May 26 2026) and record a `deletion` event in `credential_history`. The auth.users record IS deleted (so the user can't sign in with the old credentials and so we honor right-to-deletion requirements legally), but the underlying data remains keyed to the stable profile id. The user's PII (email, phone, full_name) on the profile row can be tombstoned to a hash to satisfy GDPR / CCPA right-to-erasure if requested; the activity logs themselves stay anonymized but recoverable.
     - **Schema design implications**: the `profiles.id` becomes a STABLE long-term identifier independent of auth.users.id. A new column `profiles.auth_user_id` references auth.users for the current sign-in mapping. On resurrection, only `auth_user_id` changes — all foreign keys on logs, efforts, bodyweight, etc. continue to reference the original `profiles.id`.
     - **Privacy + legal considerations**: this is COMPATIBLE with GDPR / CCPA when properly scoped — we honor erasure requests by hashing the PII + dropping the credential_history's email/phone columns for that user. The pseudonymous activity data can stay for legitimate-interest purposes (anonymized fitness research, aggregate platform analytics). Specifics will need a privacy-lawyer review before launch but the architecture supports it.
 
 18. **Billing model — locked.**
     - **Coaches pay; their clients NEVER pay.** A client linked to an active coach has full feature access for free. The coach's subscription IS the client's access.
-    - **Coach subscriptions are recurring monthly / annual**, paid via Stripe Checkout on the website (never inside the mobile app — no Apple/Google involvement). Annual = 10 months at monthly rate (2 months free).
-    - **Public users (unlinked) pay one-time per tier.** Upgrading is a single payment that grants lifetime access at that tier. No recurring billing for B2C clients. Three tiers: Free / SemiRX / FullRX. Once they buy SemiRX or FullRX, they own it forever.
+    - **Coach subscriptions are recurring monthly / annual**, paid via Stripe Checkout on the website (never inside the mobile app — no Apple/Google involvement). **Annual = 17% off first year ONLY; renews at full annual rate (monthly × 12) from year 2 onward.** Coach signup copy MUST explicitly say "first year" so the year-2 renewal price isn't a surprise. Pre-renewal email reminder + dashboard banner are part of Phase 9 launch readiness.
+    - **Public users (unlinked) pay one-time per tier.** Upgrading is a single payment that grants lifetime access at that tier. No recurring billing for B2C clients. Three tiers: Free / CoreRX / FullRX. Once they buy CoreRX or FullRX, they own it forever.
     - **Free trial for coaches: 14 days.** Coach signs up via web, enters payment info, gets 14 days of full functionality at the tier they selected. Auto-converts to paid on day 15 unless they cancel. After conversion, follow Stripe's default Smart Retries (4 retry attempts over ~3 weeks) for failed payments. Lapse / soft-grace / hard-grace timeline per Q4 lock.
     - **Payment processor for direct billing: Stripe.** Coach subscriptions + B2C web-purchased one-time tiers both run on Stripe. Square is NOT the path forward — Stripe's subscription + dunning + tax + webhook ecosystem is meaningfully better for SaaS, and the cost is equivalent (~2.9 % + $0.30 / transaction).
     - **B2C in-app purchases use Apple IAP / Google Play Billing.** Mandatory per Apple Guideline 3.1.1 and Google Play Billing policy — any in-app feature unlock MUST use the platform processor. One-time non-consumable purchases work the same as subscriptions for this rule. **Apply for Apple App Store Small Business Program** at launch so revenue under $1M/year drops Apple's cut from 30 % to 15 %. Google Play has an analogous tier.
     - **Acquisition-channel-aware hybrid for B2C** (LOCKED — pattern 3 from Q9 discussion). In-app upgrade button uses IAP (Apple/Google take 15 %). Same upgrade is available on website via Stripe (we keep ~97 %). **Same price on both surfaces** — no in-app promotion of the cheaper web path, no compliance risk with Apple. Marketing (email, social ads, blog, organic search) pushes users to the website where they can convert via Stripe. Most early volume goes through IAP (App Store discoverability); blended cut comes down as the marketing engine matures and more conversions happen on web. Expected blended Apple cut after year 1: ~8-12 % of B2C revenue.
 
-19. **Coach tier prices — locked.**
-    | Tier | Client cap | Monthly | Annual (2 months free) |
-    |---|---|---|---|
-    | Coach Starter | 10 | $19 / mo | $190 / yr |
-    | Coach Pro | 25 | $39 / mo | $390 / yr |
-    | Coach Unlimited | 50 + (truly unlimited) | $99 / mo | $990 / yr |
+19. **Coach tier prices — locked (revised May 25 2026).**
+    Annual prices reflect 17% off year 1 only; year-2 renewal = monthly × 12 (shown in parentheses).
+    | Tier | Client cap | Monthly | Annual (year 1) | Annual renewal (year 2+) |
+    |---|---|---|---|---|
+    | Coach Starter | 10 | $19 / mo | $189 / yr | $228 / yr |
+    | Coach Pro | 25 | $39 / mo | $389 / yr | $468 / yr |
+    | Coach Elite | 26+ (truly unlimited) | $99 / mo | $989 / yr | $1,188 / yr |
 
-20. **Public (B2C) tier prices — locked.** All one-time payments, lifetime access at that tier once purchased.
+    Notes:
+    - Top tier was named "Coach Unlimited" in an earlier draft; renamed to **Coach Elite** May 25 2026. Code references use `elite` as the tier id.
+    - Top-tier cap lowered from 50+ to 26+ — coaches at this volume are the agency / high-volume segment, not the typical solo coach.
+    - **Client count = total clients linked to the coach (not active-only).** Coaches can SUSPEND a client to retain their data while freeing the slot (suspended client loses app access, is gently prompted to switch to a free or paid B2C tier). Reactivation requires the coach to be under their tier cap (or to upgrade). If a suspended client switches to self-coached, they unlink fully and disappear from the coach's roster. **Implementation of the suspend mechanism is its own discussion thread after the v1 pricing UI lands** — covers the suspend button UI on the coach side, the gentle prompt on the client side, the slot-reclamation logic, and the auto-unlink-on-self-coach-switch flow.
+
+20. **Public (B2C) tier prices — locked (revised May 25 2026).** All one-time payments, lifetime access at that tier once purchased.
     | Tier | Pages unlocked | One-time price |
     |---|---|---|
     | Free | Strength + Cardio + Mobility | $0 |
-    | SemiRX | Free + Bodyweight + Calories | $39 (one-time) |
-    | FullRX | SemiRX + Heart + Hydration + Sleep | $59 (one-time) |
+    | CoreRX | Free + Bodyweight + Calories | $39 (one-time) |
+    | FullRX | CoreRX + Heart + Hydration + Sleep | $59 (one-time) |
 
     Notes:
+    - Middle tier was named "SemiRX" in an earlier draft; renamed to **CoreRX** May 25 2026 — reads as "the essential prescription" instead of "half a prescription". Code references use `corerx` as the tier id.
     - Free is genuinely usable (not a trial) — drives adoption and exposes upgrade prompts.
-    - SemiRX adds the two most-asked-for features (body composition tracking + calorie/macro coaching).
+    - CoreRX adds the two most-asked-for features (body composition tracking + calorie/macro coaching).
     - FullRX adds the wellness layer (HR / hydration / sleep) — appeals to power users / wearable owners.
     - Hydration and Sleep are NEW pages to build as part of FullRX (Sleep already has a design spec — see Sleep page section above; Hydration is net-new design + build).
     - Ads: discussion deferred to a separate phase. Free tier currently has no ads listed in this lock.
@@ -2059,22 +2066,101 @@ Open items still to discuss / track outside this thread:
 
 ---
 
-### Launch-required documentation (TBD — track until written)
+### Launch-required documentation — STATUS (updated May 26, 2026)
 
-Before the App Store / Play Store launch and before the first paying coach, we need a written set of legal and policy documents. None of these exist yet; tracking here so they don't slip:
+All 10 baseline docs are written and live. Effective dates and incorporation chain audited + locked May 26, 2026 — see the "Legal docs + consent-chain rules" section further down for the rules that govern future edits. Before paid public launch we still need a fitness-industry-aware lawyer to review (the v1 docs are drafted in-house and incorporate standard provisions, but a lawyer review is still worth doing before significant revenue flows).
 
-1. **Privacy Policy** — mandatory for App Store, Play Store, and most ad-tech / analytics integrations. Must cover what data we collect (auth, health/fitness logs, wearable HR samples, food logs, photos), how it's used, retention, deletion rights, third-party sharing (Supabase, Cloudflare, Twilio, Samsung Health, eventually Apple Health / Strava / Garmin / Whoop / Polar / Fitbit). GDPR + CCPA compliance.
-2. **Terms of Service** — mandatory. Defines the user relationship for clients, coaches, and platform owner. Includes: account responsibilities, acceptable use, intellectual property, dispute resolution, governing law, account-termination rights.
-3. **Coach Agreement** (separate from end-user ToS) — the B2B side. Defines the coach-platform relationship: subscription terms, fee schedule, cancellation, what data coaches can access about clients, code of conduct, suspension/termination grounds, indemnity if a client is harmed by coach advice.
-4. **Refund Policy** — promised here for when the time comes. Covers: free trial cancellation (no charge), mid-subscription cancellation (pro-rated? credit?), client-driven complaints leading to coach-side refund, App Store / Play Store interaction (Apple and Google have their own refund handling for in-app purchases). Will need separate handling for B2C app-store subscriptions vs B2B direct-billed coach subscriptions.
-5. **Health & Medical Disclaimer** — critical given the fitness/health domain. Must state MyRX is not medical advice, users should consult a physician before starting exercise programs, coaches are not medical professionals (or have a separate flag for "licensed RD / PT / etc."), and the app is not for treating medical conditions.
-6. **Subscription auto-renewal disclosure** — required by Apple App Store guideline 3.1.2 and Google Play subscription policies. Specific wording around trial-to-paid transition, billing cycle, cancellation steps, price changes.
-7. **Acceptable Use Policy** — defines what end users and coaches CAN'T do (harassment, spam, illegal activity, impersonation, fake data). Gives platform owner grounds to suspend accounts without breach-of-contract risk.
-8. **Coach Code of Conduct** — bundled into the Coach Agreement or separate. Covers professional standards (don't share client data, don't make medical claims, respond to clients within reasonable time, etc.).
-9. **Data Processing Agreement** (DPA) — only if MyRX has EU users (GDPR Art. 28) or California users at scale (CCPA service-provider terms). For coaches who handle EU client data, the DPA defines our role as processor / subprocessor.
-10. **Cookie Policy** — web-side only. Required for EU visitors under ePrivacy Directive. Web is frozen but if it goes back to active development, this needs to land.
+| # | Doc | URL | Status |
+|---|-----|-----|--------|
+| 1 | Privacy Policy | `/privacy` | ✅ SHIPPED (audited May 26) — §3.3 now correctly describes wearable data collection; §6.1 subprocessor list synced with DPA; §6.2 / §6.6 reference Coach Agreement + DPA |
+| 2 | Terms of Service | `/terms` | ✅ SHIPPED (audited May 26) — §1 incorporates ALL 8 docs by reference; §5.5 defers to Refund Policy; §8 references Coach Agreement + DPA; §9 references Health Disclaimer; §18 lists all 8 in "entire agreement" |
+| 3 | Coach Agreement | `/coach-agreement` | ✅ SHIPPED May 26 — bundles Code of Conduct (#8 below) inside as §5 |
+| 4 | Refund Policy | `/refund-policy` | ✅ SHIPPED May 26 |
+| 5 | Health & Medical Disclaimer | `/health-disclaimer` | ✅ SHIPPED May 26 |
+| 6 | Subscription auto-renewal disclosure | inside Coach Agreement §3 + Refund Policy §1.3 | ✅ SHIPPED May 26 — not a standalone doc; the required disclosures live inside Coach Agreement and Refund Policy as the Stripe + Apple/Google submission process expects |
+| 7 | Acceptable Use Policy | `/acceptable-use` | ✅ SHIPPED (pre-existing) |
+| 8 | Coach Code of Conduct | inside Coach Agreement §5 | ✅ SHIPPED May 26 — bundled into Coach Agreement, not a standalone doc |
+| 9 | Data Processing Agreement (DPA) | `/dpa` | ✅ SHIPPED May 26 — GDPR Art. 28 + CCPA service-provider terms; subprocessor list, SCCs, 72-hour breach notification, audit rights |
+| 10 | Cookie Policy | `/cookies` | ✅ SHIPPED (pre-existing) |
 
-Practical approach when the time comes: most of these can start as Termly / Iubenda generated templates, then refined with a fitness-industry-aware lawyer. Don't ship the first paying coach without 1, 2, 3, 4, 5, 6, and 7 at minimum. The rest can land in waves.
+All 8 routable docs wired in `web/src/App.jsx` (lazy-loaded as PUBLIC routes ABOVE `ProtectedLayout`'s catch-all). All 8 listed in `web/src/pages/legal/LegalLayout.jsx::FOOTER_LINKS` and `mobile/app/(app)/about.tsx`. Consent checkbox on web coach signup names TOS + PP + Coach Agreement + DPA and signals incorporation of the rest; mobile athlete signup names TOS + PP + Health Disclaimer.
+
+---
+
+### Coach Invite Client flow — locked design spec (May 26 2026)
+
+The end-to-end pipeline for a coach to bring a client onto their roster via a one-click email invite link. Shipped end-to-end on May 26 2026; this section is the contract every downstream change must respect.
+
+**Token + invite row:**
+
+- `coach_invites` table — created in Phase 1 migration. Columns: `id`, `coach_id`, `invitee_email`, `invitee_phone`, `coach_message`, `token` (64-char random URL-safe), `status` (`pending` | `accepted` | `revoked` | `declined`), `expires_at` (default `now() + 14 days`), `created_at`, `accepted_at`, `accepted_by`. Unique partial index on `(coach_id, lower(invitee_email))` WHERE `status = 'pending'` blocks duplicate active invites to the same email per coach. RLS: coaches can SELECT/INSERT/UPDATE their own rows (`coach_id = auth.uid()`); anonymous can SELECT a single row by token (gated via the preview RPC).
+- Expiry is **14 days** — long enough that "I saw it but life got busy" still works, short enough that stale links don't sit in inboxes forever.
+- `token` is the secret. NEVER expose it in app logs, error messages, or activity feed details. Only render it inside the email body and the URL hash.
+
+**Edge function — `send-coach-invite`:**
+
+Lives at `supabase/functions/send-coach-invite/index.ts`. JWT-required (caller must be authenticated). Validates:
+1. Caller has `is_coach = true` AND `coach_subscription_status IN ('trialing', 'active')`. Otherwise → 403 with `code: 'not_a_coach'`.
+2. At least one of `invitee_email` / `invitee_phone` is non-null.
+3. Invitee state matrix:
+   - `is_coach = true` on existing profile → reject `cant_invite_coach`
+   - `is_superuser = true` → reject `cant_invite_admin`
+   - `deactivated_at IS NOT NULL` → reject `account_deactivated`
+   - Already on the SAME coach's roster (`profiles.coach_id = caller`) → reject `already_on_roster`
+   - Duplicate pending invite from this coach to this invitee → reject `duplicate_pending_invite`
+4. Generates a 64-char token via `crypto.randomBytes(48).toString('base64url')`.
+5. Inserts `coach_invites` row with 14-day expiry.
+6. **Email** via **SendGrid (Twilio's email product)**. Secrets: `SENDGRID_API_KEY` + `SENDGRID_FROM` (default `"MyRX <invites@myrxfit.com>"`). Vendor choice locked May 26 2026, FULLY PROVISIONED same day: we use SendGrid instead of Resend because Twilio acquired SendGrid in 2019 and we already have a paid Twilio account for Verify — one vendor, one bill, one support relationship covers both email + SMS channels. SendGrid sending domain (myrxfit.com) authenticated via Twilio One Console → Email → Authenticate domain → automated Cloudflare integration (Entri). Three CNAME records auto-installed on Cloudflare DNS: `em6552.myrxfit.com` + `s1._domainkey` + `s2._domainkey` (plus the existing `_dmarc` TXT was kept). DKIM/SPF/DMARC propagated within ~30 seconds via Cloudflare's internal DNS. The edge function posts to `https://api.sendgrid.com/v3/mail/send` with tracking_settings DISABLED — click-tracking would rewrite the accept URL into a SendGrid redirect, leaking the token to their logs AND breaking the Android App Link autoVerify match (different host). Branded HTML template referencing the coach's name + optional personal message + the CTA link `https://myrxfit.com/coach/accept-invite?token=<token>`. Email always fires unless `invitee_email` is null. If `SENDGRID_API_KEY` is missing, the function still inserts the invite row + returns `sent_email: false` so the URL is recoverable from the function logs.
+7. **SMS DEFERRED until Twilio A2P 10DLC approval lands.** Phone is stored on the invite row so the SMS can fire automatically once approval comes through. `sms_deferred: true` flag is returned in the response so the UI can surface this.
+8. Writes a `coach_invite.sent` activity event.
+
+**RPCs — both SECURITY DEFINER + `SET search_path = public`:**
+
+- `preview_coach_invite(p_token text)` — PUBLIC (no auth required). Returns `{ result, invite_id, coach: {id, full_name, avatar_url}, invitee_email, invitee_phone, expires_at, coach_message }`. Result codes: `pending`, `invalid`, `revoked`, `expired`, `accepted`, `declined`. Lets the AcceptInvite landing page show the coach's name + avatar BEFORE the invitee signs in — critical for trust ("oh yes, that's my coach").
+- `accept_coach_invite(p_token text, p_confirm_swap boolean DEFAULT false)` — AUTH REQUIRED. Returns `{ result, coach?, current_coach?, previous_coach?, new_coach?, message?, invite_email?, your_email?, invite_phone?, your_phone? }`. **On `success` / `success_swap` the RPC sets `profiles.chat_enabled = true` on the accepting client** (locked May 26 2026 — the coach platform makes chat the primary communication channel, so a freshly-linked client needs the Chat button enabled immediately, not after admin manually toggles it). Admin retains override authority via AdminUserDetail's chat toggle; re-accepting an invite re-enables it (fresh relationship, fresh trust). Coaches do NOT get chat_enabled toggle authority — the auto-enable is their allowance. Result codes (all 12 MUST be handled by every client surface that calls this):
+  - `success` — fresh link to coach, no previous coach. Returns `coach`.
+  - `success_swap` — was previously coached by someone else; coach_id swapped. Returns `previous_coach` + `new_coach`.
+  - `needs_swap_confirmation` — invitee already has a coach AND `p_confirm_swap=false`. Returns `current_coach`. UI must show inline confirmation, then re-fire with `p_confirm_swap=true`.
+  - `already_accepted_by_you` — re-tap of the same invite link by the same user. Returns `coach`. UI shows soft "you're already linked" + dashboard CTA.
+  - `already_used` — accepted/declined by someone else (or this user previously declined). Terminal.
+  - `revoked` — coach revoked the invite. Terminal.
+  - `expired` — past 14-day expiry. Terminal.
+  - `invalid` — token doesn't exist OR auth.uid() is null OR token is empty. Terminal.
+  - `email_mismatch` / `phone_mismatch` — signed-in account's email/phone doesn't match what the invite was sent to. UI shows both addresses + "sign out and use the right account" CTA.
+  - `is_coach` / `is_admin` — signed-in user is a coach or admin and can't be coached. UI shows "coach/admin accounts can't be coached" block.
+- Atomic token race protection: the `UPDATE coach_invites SET status='accepted' WHERE token=p_token AND status='pending'` returns `0 ROW_COUNT` if a concurrent acceptance won, in which case the RPC returns `already_used`. Both clients fail safely.
+- Writes a `coach.assigned` or `coach.swapped` activity event on success.
+
+**Web surfaces:**
+
+1. **`/coach/invite`** — `web/src/pages/coach/CoachInvite.jsx`. Coach-side form (email + optional phone + 500-char personal message) + pending invites list with Revoke/Resend actions + recently-accepted list (last 10, links to client detail). Realtime via `supabase.channel('coach-invites-${user.id}').on('postgres_changes', { filter: 'coach_id=eq.<id>' }, refetch)`. Resend = revoke the old row + re-fire the edge function (the duplicate-invite guard requires the old row to be revoked first).
+2. **`/coach/accept-invite?token=xxx`** — `web/src/pages/coach/AcceptInvite.jsx`. PUBLIC route — MUST sit ABOVE the `ProtectedLayout` catch-all in `App.jsx`. Reads `?token=` via `new URLSearchParams(window.location.search)` (Wouter's `useLocation` doesn't expose query strings). Renders all 12 RPC result states. Signed-out → routes to `/signup?invite=<token>`. Signed-in → fires the accept RPC. Auto-redirects to `/dashboard?invite_accepted=1` on success.
+3. **`/signup?invite=xxx`** — `web/src/pages/Signup.jsx`. The end-user signup journey. URL param captured into `data.invite` early, persisted to sessionStorage via the existing `safeData` spread (survives app-switching for SMS reads). The final `WelcomeEndScreen.openDashboard()` (lines ~3440-3465) fires `accept_coach_invite({ p_token: data.invite, p_confirm_swap: false })` AFTER `refreshProfile()` AND BEFORE `navigate('/dashboard')`. Failures are non-blocking — user reaches the dashboard regardless; coach can re-invite if the linkage didn't take.
+4. **`/coach/clients`** — `web/src/pages/coach/CoachClients.jsx`. Roster list. Realtime subscription to `profiles` filtered on `coach_id=eq.${user.id}` for INSERT + UPDATE + DELETE. UPDATE handler covers the existing-account-invitee case (their `coach_id` got set after-the-fact). Empty state in coach voice with CTA to `/coach/invite`. Search input appears only when 4+ clients exist.
+
+**Mobile surfaces:**
+
+1. **`mobile/app/(auth)/accept-invite.tsx`** — Public landing screen. PUBLIC (no auth required to view — that's why it sits in `(auth)`). Uses `useLocalSearchParams<{ token?: string; invite?: string }>()` from `expo-router`. Same 12-result-code handling as web. Signed-out → `router.replace('/(auth)/sign-up?invite=<token>')`. Signed-in → fires accept RPC. `needs_swap_confirmation` shows a native `Alert.alert` with "Cancel" + destructive "Switch coach" → re-fires with `p_confirm_swap: true`.
+2. **`mobile/app/(auth)/sign-up.tsx`** — Reads `?invite=xxx` via `useLocalSearchParams`. Stamps into `data.invite` (added to `JourneyData` interface + `defaultData`). Persists across AsyncStorage round-trips (`safeData` spread automatically). On `WelcomeEndScreen.openDashboard()` final navigation, calls `accept_coach_invite` exactly like web — non-blocking failures, route to `/(app)/dashboard?invite_accepted=1` on success.
+
+**Android App Links (`mobile/app.json`):**
+
+The `intentFilters` block has TWO `pathPrefix` entries — `/auth` AND `/coach/accept-invite`. Both verified via the existing `web/public/.well-known/assetlinks.json` (uses `handle_all_urls` so the verification is domain-wide). When the user taps the email-invite link on their phone WITH the dev-client APK installed AND Android App Links verification has succeeded, the link opens the mobile app directly into `/(auth)/accept-invite?token=xxx` instead of the browser. Production APK gets the same treatment via the same intent filter (re-prebuild required after `app.json` changes).
+
+**Voice (LOCKED — every string MUST follow):**
+
+- Form intro: "Send an email invite. Your client signs up for free, joins your roster automatically."
+- Form footer note: "The link in the email lasts 14 days and only works once. The first person to sign up through it links to your roster — that's why we don't share a generic invite URL anywhere in the app."
+- Personal message hint: "Recommended. A personal note triples acceptance rates vs. a bare templated invite — your client knows the link is real and the ask is human."
+- Empty roster state: "Send your first invite from the Invite Client page — your clients sign up free under your subscription and appear here automatically. Once linked, you can manage their macro plan, review their training, and message them from this portal."
+- `needs_swap_confirmation` UI: shows the current coach's name + avatar AND the new coach's name + avatar, with copy explaining "your current coach will lose access to your data the moment you confirm — your training, macro plan, and chat with [current coach] will be replaced with [new coach]". Confirm button is amber/destructive-styled.
+
+**Out of v1 scope (deferred):**
+
+- **SMS dispatch** — depends on Twilio A2P 10DLC approval. Edge function already accepts `invitee_phone`; just doesn't send the text yet. When approval lands, flip the `sms_deferred` branch in `send-coach-invite/index.ts` to actually fire the Verify message.
+- **In-app push notifications** when a client accepts — surfaces as the realtime "Recently Accepted" card in `CoachInvite.jsx` for v1. Push lands in Phase 4 when Expo Push Notifications wiring is added.
+- **Coach-to-coach invite chains** (e.g., one coach inviting another to MyRX). Not a v1 use case.
+- **Invite via shareable QR code** — same security model concern as a generic invite URL. The single-use token is the moat; deferred until we have a clear use case.
 
 ---
 
@@ -2085,7 +2171,7 @@ The single source of truth for what needs to be done when we flip from "ready to
 **Pre-launch hardening (T-1 to T-7 days):**
 
 1. **All Phase 1-8 work merged to `main` and deployed to production.** No outstanding branch work. CI green. Cloudflare Pages serving the latest web build, Expo OTA / store binaries built and ready.
-2. **Full end-to-end smoke test in TEST mode.** Coach signs up via test Stripe, gets test invite link, invites a test client, client accepts, plans flow, chat works, calorie page locks correctly when coached, unlinks correctly. Repeat for B2C: download app, sign up, upgrade to SemiRX via test IAP, verify tier unlock. Document any bugs found, fix before continuing.
+2. **Full end-to-end smoke test in TEST mode.** Coach signs up via test Stripe, gets test invite link, invites a test client, client accepts, plans flow, chat works, calorie page locks correctly when coached, unlinks correctly. Repeat for B2C: download app, sign up, upgrade to CoreRX via test IAP, verify tier unlock. Document any bugs found, fix before continuing.
 3. **Legal docs LIVE on the website** (per Launch-required documentation section above). At MINIMUM 1, 2, 3, 4, 5, 6, 7 must be live before any real money moves. URLs: `myrxfit.com/privacy`, `myrxfit.com/terms`, `myrxfit.com/coach-agreement`, `myrxfit.com/refund-policy`, `myrxfit.com/health-disclaimer`, `myrxfit.com/aup`.
 4. **Privacy Policy URL submitted** in App Store Connect (App Information → Privacy Policy URL) and Google Play Console (Store presence → Main store listing → Privacy Policy). Mandatory for store approval.
 5. **Database backup verification.** Supabase point-in-time-recovery is on (Pro plan default). Manual test: restore a dropped table to a staging instance to confirm restore actually works. Don't find out it's broken during a real incident.
@@ -2108,7 +2194,7 @@ The single source of truth for what needs to be done when we flip from "ready to
 
 14. **Apple Developer Program enrollment** complete and current ($99/yr).
 15. **App Store Connect IAP products created** in production (not just sandbox):
-    - `semirx_unlock` (non-consumable, $39 USD)
+    - `corerx_unlock` (non-consumable, $39 USD)
     - `fullrx_unlock` (non-consumable, $59 USD)
     Status: "Ready to Submit". Localize for at least English. Pricing applied to all relevant territories.
 16. **Apple App Store Small Business Program** application submitted and APPROVED (drops Apple cut from 30 % to 15 % when annual revenue is under $1M). Approval is automatic if you qualify — apply early, takes a day or two.
@@ -2121,7 +2207,7 @@ The single source of truth for what needs to be done when we flip from "ready to
 
 21. **Google Play Developer Account** active ($25 one-time).
 22. **Google Play Console IAP products created**:
-    - `semirx_unlock` ($39 USD)
+    - `corerx_unlock` ($39 USD)
     - `fullrx_unlock` ($59 USD)
     Status: "Active". Match Apple's product IDs so the mobile code uses one constant set.
 23. **Production track release configured** in Play Console (Production → Create new release). APK / AAB uploaded, signed with the production keystore.
@@ -2177,8 +2263,295 @@ The single source of truth for what needs to be done when we flip from "ready to
 
 ---
 
+## iOS reflection checklist (LOCKED — comprehensive sweep, May 26 2026)
+
+MyRX has been built Android-first since day one. The `mobile/` Expo project has a fully wired `mobile/android/` native folder; there is no `mobile/ios/` folder, no Apple Developer Program enrollment, no AASA file, no HealthKit integration. This section is the canonical, exhaustive list of every iOS-specific tackle that must happen before iOS launch — each item linked to where the Android equivalent already lives so the iOS reflection pass has a 1:1 reference. Treat it like the existing "Pre-launch checklist" — work through it top to bottom when the user opens the iOS launch chapter. Length target: terse list, no prose padding.
+
+### 1. Apple Developer Program + App Store Connect prerequisites
+- [ ] Enroll in Apple Developer Program ($99/yr, requires DUNS for Northern Princess LLC entity).
+- [ ] Create App Store Connect app record using `bundleIdentifier: com.myrx.app` (already declared in `mobile/app.json` line 17).
+- [ ] Apply to **Apple Small Business Program** (15% cut vs 30%) — qualifying threshold ~$1M.
+- [ ] Generate Apple Distribution certificate + provisioning profile (EAS Build handles this if `eas.json` is extended with iOS config — currently Android-only at `mobile/eas.json` lines 11-19).
+- [ ] Generate Push Notification certificate (APNs key `.p8` preferred — works for dev + prod, no expiry).
+
+### 2. `mobile/ios/` native folder bootstrap
+- [ ] Run `npx expo prebuild --platform ios` to generate `mobile/ios/` (mirrors how `mobile/android/` was generated). Currently nonexistent.
+- [ ] Add `ios.buildNumber` auto-increment + `ios.supportsTablet` decision (currently `false` at `mobile/app.json` line 16 — confirm vs iPad strategy).
+- [ ] Extend `mobile/eas.json` with `ios` build profile (production + preview). Currently Android-only.
+- [ ] Apply the existing config plugins to iOS: `withSamsungHealth` and `withHealthConnectPermissions` are Android-only by design (skip on iOS — they no-op). Net new iOS config plugin: `withAppleHealthKit` to inject HealthKit entitlement + Info.plist usage strings.
+
+### 3. Info.plist permission rationale strings (all REQUIRED — iOS rejects without)
+Android handles these as runtime prompts driven by `<uses-permission>` declarations in `mobile/android/app/src/main/AndroidManifest.xml` lines 2-17. iOS requires PRE-DECLARED human-readable strings in Info.plist or the app crashes when the permission is requested.
+- [ ] `NSCameraUsageDescription` — already styled prose at `mobile/app.json` line 53 (expo-camera plugin `cameraPermission`). Verify carried into iOS Info.plist via the expo-camera plugin.
+- [ ] `NSFaceIDUsageDescription` — already at `mobile/app.json` line 61 (`faceIDPermission` via expo-local-authentication). Verify iOS injection.
+- [ ] `NSHealthShareUsageDescription` — net new. Mirror Samsung Health blurb from `mobile/app/(app)/profile.tsx` line 2118.
+- [ ] `NSHealthUpdateUsageDescription` — net new (only if writing back; v1 is read-only — set to a forward-looking string anyway since v2 will write).
+- [ ] `NSPhotoLibraryUsageDescription` — for avatar upload via expo-image-picker.
+- [ ] `NSPhotoLibraryAddUsageDescription` — only if we ever export workout images.
+- [ ] `NSMicrophoneUsageDescription` — Android already declares `RECORD_AUDIO` at AndroidManifest line 5; mirror reason on iOS or remove if unused.
+- [ ] `NSUserNotificationsUsageDescription` — for expo-notifications. Android equivalent is the runtime permission in `mobile/app/(auth)/sign-up.tsx` around line 2697.
+- [ ] `NSContactsUsageDescription` — only if coach-invite ever reads contacts (currently no).
+- [ ] `NSMotionUsageDescription` — only if pedometer/CMPedometer used (currently HealthKit will own step data; skip).
+
+### 4. Universal Links (iOS equivalent of Android App Links)
+Android App Links work today via `web/public/.well-known/assetlinks.json` (debug SHA256 only — production cert pending per pre-launch checklist item 24).
+- [ ] Create `web/public/.well-known/apple-app-site-association` (AASA) — JSON, NO `.json` extension, served as `application/json` Content-Type, NO redirect.
+- [ ] Populate AASA with Team ID + bundle ID (`<TEAM_ID>.com.myrx.app`) and `paths` matching every deep-link route currently in `AndroidManifest.xml` lines 51-56 — at minimum `/auth/*` (signup confirm, recovery). Add future routes: `/coach/invite/*`, `/oauth/callback/*` (Strava/Polar/Garmin), `/reset-password`, `/share/*`.
+- [ ] Add `applinks:myrxfit.com` to iOS `com.apple.developer.associated-domains` entitlement.
+- [ ] Cloudflare Pages serves `.well-known/` from `web/public/` automatically — verify the AASA file is reachable at `https://myrxfit.com/.well-known/apple-app-site-association` with correct MIME type.
+
+### 5. Apple HealthKit integration (mirrors Samsung Health Data SDK)
+Samsung Health is the canonical Android integration: `mobile/android/app/src/main/java/com/myrx/app/samsung/SamsungHealthModule.kt` (native Kotlin module) + `mobile/src/lib/integrations/samsungHealth.ts` (TS service) + `mobile/plugins/withSamsungHealth.js` (config plugin). Per CLAUDE.md, `mobile/src/lib/healthConnect.ts` already returns `'unavailable'` on iOS as the safe-default seam.
+- [ ] Pick a library: `react-native-health` (community, mature) OR write a native Swift module (full control, matches Samsung pattern). Recommendation: `react-native-health` for v1 to ship fast.
+- [ ] Add HealthKit entitlement (capability) to iOS target via new config plugin (`withAppleHealthKit`).
+- [ ] Permission set must mirror Samsung's data types: HeartRate, RestingHeartRate, Steps, DistanceWalkingRunning, ActiveEnergyBurned, BodyMass, WorkoutType. See `mobile/plugins/withHealthConnectPermissions.js` lines 40-51 for the Android equivalent list.
+- [ ] Create `mobile/src/lib/integrations/appleHealthKit.ts` mirroring the `samsungHealth.ts` API surface (`requestConnect`, `getStatus`, `disconnect`, `syncRecent`, `ConnectionStatus` type).
+- [ ] Wire `last_sync` storage via existing `mobile/src/lib/lastSyncStorage.ts` (the `'appleHealthKit'` integration key is already in the union — line 20).
+- [ ] Heart page (`mobile/app/(app)/heart.tsx`) and Sleep page (pending — see proposed spec) must auto-switch source from `samsung_health` → `apple_healthkit` on iOS. Per-second HR log path: Samsung exposes `ExerciseSession.log[].heartRate`; HealthKit exposes `HKQuantityTypeIdentifierHeartRate` series — write a normaliser so `wearable_workouts.raw_meta.hr_log` JSONB stays the same shape across platforms.
+- [ ] Add the `apple_healthkit` platform to the `user_integrations` RLS INSERT/UPDATE policies (`access_token IS NULL` guard already in place — migration `user_integrations_allow_owner_native_sdk_writes` covers it).
+- [ ] Update `mobile/app/(app)/profile.tsx` Connect tab — the "Apple Health" placeholder at line 2118 graduates to a functional row mirroring the Health Connect / Samsung Health rows.
+
+### 6. Sign in with Apple (MANDATORY if any social-login is offered)
+App Store Review Guideline 4.8: any app offering third-party social login MUST also offer Sign in with Apple. We don't currently offer social login — but if we add Google / GitHub coach-signup before iOS launch, SIWA becomes mandatory.
+- [ ] Audit signup flows (`mobile/app/(auth)/sign-up.tsx`, `web/src/pages/Signup.jsx`, `web/src/pages/coach/Signup.jsx`) — confirm email-only is the ONLY auth method.
+- [ ] If social login is added: install `expo-apple-authentication`, add iOS capability, render SIWA button per HIG (must be equal prominence to other providers), wire to Supabase OAuth.
+
+### 7. Push notifications (APNs — separate from FCM)
+Currently `mobile/app.json` line 65-70 declares `expo-notifications`. Android side: no `google-services.json` checked in yet — FCM not wired (push is not active anywhere). Sign-up flow asks for permission at `mobile/app/(auth)/sign-up.tsx` line 2697.
+- [ ] Apple Push Notification key (`.p8`) uploaded to Expo / EAS for push token issuance.
+- [ ] Decide between Expo Push (managed) vs raw APNs (direct). For v1, Expo Push is simpler.
+- [ ] Push token storage table in Supabase (`user_push_tokens(user_id, platform, token, created_at)`) — net new, neither platform writes one today.
+- [ ] Notification categories / actions defined per iOS HIG (reply-from-notification for chat, snooze for plan reminders).
+
+### 8. In-app purchases (iOS StoreKit, mirrors Play Billing)
+Pre-launch checklist items 14-20 already cover App Store Connect IAP — extending here for completeness.
+- [ ] Choose IAP wrapper: `react-native-iap` (cross-platform) or RevenueCat (managed). RevenueCat recommended for receipt validation + cross-platform entitlement sync.
+- [ ] Register IAP products in App Store Connect matching Google Play product IDs: `corerx_unlock` ($39), `fullrx_unlock` ($59). Same IDs so client code uses one constant set.
+- [ ] Subscription products (if monthly tier ships): register in App Store Connect with same lookup keys as Stripe (`coach_starter_monthly` etc.).
+- [ ] Sandbox test accounts created in App Store Connect for App Review testing.
+- [ ] Edge function: receipt validation endpoint (calls Apple's `verifyReceipt` / App Store Server API). Mirror what'll eventually exist for Google Play Developer API.
+
+### 9. SMS auto-fill (built-in on iOS, library on Android)
+Android uses `react-native-sms-user-consent` (lazy-required at `mobile/app/(app)/profile.tsx` line 56-60). iOS auto-fills natively via `UITextContentType.oneTimeCode` — no library needed.
+- [ ] Verify every OTP input across the codebase has `textContentType="oneTimeCode"` + `autoComplete="sms-otp"` props set: `mobile/src/components/OTPInput.tsx` line 102 ✓, signup OTP screens, password-reset OTP, phone-OTP, email-OTP.
+- [ ] Verify SMS body format from Supabase + Twilio Verify is compatible with iOS auto-fill heuristic (code must appear near the end of the message).
+
+### 10. Biometric (Face ID branding + entitlement)
+`expo-local-authentication` is cross-platform but Face ID has stricter requirements than Android fingerprint.
+- [ ] `NSFaceIDUsageDescription` already declared at `mobile/app.json` line 61 — verify Expo plugin injects it correctly into Info.plist.
+- [ ] Biometric credential storage already uses `expo-secure-store` which maps to iOS Keychain automatically — no change needed (`mobile/src/contexts/AuthContext.tsx` line 11).
+- [ ] Verify Face ID fallback to passcode + the "Cancel" → "Use Password" flow renders the email/password screen correctly on iOS.
+
+### 11. App Transport Security (ATS) + WebView
+- [ ] Audit all `fetch()` calls for `http://` (non-TLS) URLs — iOS blocks plaintext HTTP by default. Worker URLs, Supabase, Cloudflare all already HTTPS; legal-doc opener (`mobile/src/lib/openLegalDoc.ts`) uses SFSafariViewController on iOS — no ATS issue.
+- [ ] Confirm OAuth callback URLs use HTTPS (already do — `https://myrxfit.com/oauth/callback/*`).
+
+### 12. App Store Connect launch readiness assets
+Pre-launch items 14-20 list these — explicit iOS-only deliverables:
+- [ ] App icon: 1024×1024 PNG, no alpha, no rounded corners (Apple rounds them).
+- [ ] Screenshots: 6.7" iPhone (1290×2796) + 6.1" iPhone (1179×2556) + 13" iPad if iPad supported.
+- [ ] App preview video (optional but boosts conversion): 30 sec max per device class.
+- [ ] App Privacy "nutrition labels" — declare every data type collected (matches existing web `web/src/pages/legal/PrivacyPolicy.jsx`). HealthKit data flagged as "linked to user" + "not used for tracking".
+- [ ] Age rating questionnaire (likely 4+; verify nothing in fitness content triggers higher).
+- [ ] Demo account credentials for App Review (comp'd `fullrx` user with sample logs).
+- [ ] Reviewer notes — coach signup at `myrxfit.com/coach/signup` is web-only, not in-app (App Store reviewers don't need a coach account).
+
+### 13. Codebase audit — "iOS pending" / "iOS deferred" markers
+These spots in the code already document iOS as a follow-up. Each becomes an actionable iOS task:
+- [ ] `mobile/src/lib/healthConnect.ts` lines 9, 14, 41-43, 92, 112, 229, 277 — iOS safe-default branches. Replace with HealthKit dispatch once integration ships.
+- [ ] `mobile/src/lib/integrations/samsungHealth.ts` lines 95, 132 — iOS unsupported_platform return; route to HealthKit on iOS via platform check.
+- [ ] `mobile/src/lib/integrations/polar.ts` line 74 — note that OAuth callback handles iOS Universal Link (AASA must be live first).
+- [ ] `mobile/app/(app)/profile.tsx` lines 2101, 2118, 2360, 2384 — "Apple HealthKit support coming for iOS" placeholder copy. Swap once HealthKit lands.
+- [ ] `CLAUDE.md` line 1525, 1627, 1676 — wearable strategy markers; update when HealthKit migration ships.
+
+### 14. Apple-specific UI / behaviour parity
+- [ ] iOS Safari does NOT support `screen.orientation.lock` (per CLAUDE.md line 3812-3817) — barcode scanner gracefully degrades. Confirm visible "align horizontally" hint is sufficient on iPhone.
+- [ ] Swipe-back gesture: `mobile/app/(auth)/sign-up.tsx` line 3176 notes Android hardware back works; iOS uses edge-swipe — verify every full-screen modal allows edge-swipe-to-dismiss.
+- [ ] iOS Keyboard: `mobile/src/components/KeyboardScreen.tsx` line 7-19 already handles `behavior="padding"` for iOS. Run on physical iPhone to confirm.
+- [ ] Date picker: `mobile/app/(app)/profile.tsx` line 251, 415, 1024 — iOS uses inline picker, Android uses imperative dialog. Already coded conditionally.
+
+### 15. EAS Build + Submit for iOS
+- [ ] `eas.json` extended with `ios` build profile (development + preview + production).
+- [ ] `eas build --platform ios --profile production` succeeds end-to-end.
+- [ ] `eas submit --platform ios` configured with App Store Connect API key.
+- [ ] TestFlight internal testing group set up (Motaz + 1-2 beta testers) before App Review submission.
+
+### 16. Documentation + handoff
+- [ ] After iOS launch: update CLAUDE.md to remove "Android-first" framing and document iOS specifics (build commands, simulator gotchas, Xcode version pins, etc.) — mirrors the depth of the existing Android dev workflow section.
+
+---
+
 ## What This Is
 A React + Vite SPA (web, frozen) + React Native / Expo app (mobile, active) — a fitness coaching platform per the mission above. Clients track strength, cardio, mobility, bodyweight, and calories. Admins (coaches) manage clients, review progress, and communicate via chat/suggestions.
+
+---
+
+## Web / Mobile role rule (LOCKED — May 27 2026, NO EXCEPTIONS)
+
+This is a top-level architectural decision. Every routing change, signup change, sign-in change, and new feature must honour it.
+
+| Role | Web (desktop) | Mobile |
+|---|---|---|
+| **Athlete** (end-user / client) | ❌ Zero web surfaces. No signup, no signin, no app routes. Every athlete URL returns 404 / "page not found". | ✅ ONLY surface — entire app (signup + signin + training) |
+| **Coach** | ✅ Coach portal at `/coach/*` ONLY. No athlete UI on web — not even to log their own training. | ✅ Athlete view ONLY (their own training data). No coach UI access on mobile. |
+| **Admin** | ✅ Admin portal at `/admin/*` ONLY. Same as coach — no athlete UI on web. | ✅ Athlete view ONLY. No admin UI access on mobile. |
+
+**Web entry points (ONLY):**
+- `/` (Landing — marketing)
+- `/for-coaches` — the ONLY page that has a "Sign in" button. Sign-in is for coaches + admins.
+- `/coach/signup`, `/coach/welcome` — coach signup journey
+- `/coach/*` — coach portal (after sign-in for is_coach=true profiles)
+- `/admin/*` — admin portal (after sign-in for is_superuser=true profiles)
+- `/coach/accept-invite?token=...` — invite-email landing. Shows the "Download the app" placeholder for non-coach/admin recipients with token preserved (so when athletes install the mobile app, the invite auto-links).
+- Marketing pages: `/coach/pricing`, `/pricing`, `/about`, etc.
+- Legal pages: `/terms`, `/privacy`, `/cookies`, `/coach-agreement`, etc.
+
+**Web entry points that DO NOT EXIST (athlete-only — removed May 27 2026):**
+- `/signup` — athletes sign up on mobile only
+- `/dashboard`, `/strength`, `/cardio`, `/mobility`, `/bodyweight`, `/heart`, `/calories`, `/history`, `/profile`
+- `/effort/strength/:exercise`, `/effort/cardio/:activity`, `/mobility/:movement`
+
+**Post-sign-in routing (web `/auth?mode=signin`):**
+- `profile.is_coach === true` → `/coach/portal`
+- `profile.is_superuser === true` → `/admin/overview`
+- Neither (athlete) → "Download the app" placeholder page
+
+**Session policy:**
+- When an athlete signs into web (which they should never do once apps ship — but the credentials still work because Supabase Auth doesn't know about roles), they land on the placeholder page. Their web session technically persists (Supabase cookie) but no athlete route consumes it. Manual navigation to any athlete URL → 404.
+- All athlete sessions that existed at the time this rule was enacted (May 27 2026) were force-killed server-side via SQL deletion from `auth.sessions`. Future enforcement happens at the post-sign-in routing layer.
+
+**Mobile behavior:**
+- The mobile app has NO coach or admin UI. Period. A coach signing into mobile sees the athlete client app, scoped to THEIR OWN training data (using their own profile.id as user_id).
+- The mobile signup journey is athlete-only. There's no path on mobile to become a coach or admin. Coach signup happens on `/coach/signup` (web) only.
+
+**Why this rule exists:**
+- The coach/admin portals are dense desktop dashboards that don't fit on a phone screen. Forcing them into mobile would result in poor UX.
+- The athlete app is mobile-first by design (log a lift between sets, track cardio during a run, log food at the table). Forcing it onto a desktop would require building two parallel UIs for the same feature set — wasted maintenance.
+- One surface per use-case = clean mental model + clean codebase. No "responsive both ways" complexity.
+
+**Archive:** the 13 athlete page .jsx files (Dashboard, Strength, StrengthDetail, Cardio, CardioDetail, Mobility, MobilityDetail, Bodyweight, Heart, Calories, History, EditProfile, Signup) were moved out of `web/src/pages/` on May 27 2026 to `docs/_archive/web-athlete-pages/`. Available for reference but no longer in the active build. If a coach/admin page references one of them (the EditProfile usage in AdminProfile, for instance), that import was refactored or copied into a coach/admin equivalent at the same time.
+
+---
+
+## Coach invite → invitee path (LOCKED — May 27 2026)
+
+Architecture spec for the end-to-end coach invite flow. v1 is **email-only**: coach enters email → SendGrid sends a branded invite → invitee taps the accept-link → smart-routes them through install / signup / coach-attachment depending on their state. The "patient invite" pattern (email-match detection in the mobile app) makes the invite **discoverable by ANY path the invitee takes into the app**, not just clicking the original link.
+
+### Why email-only (Branch.io comparison)
+
+Considered Branch.io for deferred-deep-link install attribution ($0.01/click, ~free at our scale). Rejected in favor of email-based detection — not for cost, for **coverage**. Email-match handles cases Branch can't:
+
+| Scenario | Branch | Email-match |
+|---|---|---|
+| Tap link → install → open | ✅ | ✅ |
+| Tap link → don't install → sign up later via App Store | ❌ | ✅ |
+| Friend mentions MyRX → install → sign up with same email coach invited | ❌ | ✅ |
+| Tap link on phone A → install on phone B | ❌ | ✅ |
+| Already have the app, never tapped the link | ❌ | ✅ |
+| Coach manually pings: "hey check your email" | ❌ | ✅ |
+
+Email is a **canonical identity anchor**. Branch is just device fingerprinting. The invite token persists in `coach_invites` for 14 days and the mobile app actively scans for matches — so the invite is "patient" and waits for the invitee to encounter the app via any path.
+
+We can always add Branch LATER if we want install attribution for paid ad campaigns (different problem from invite-coach-attachment).
+
+### The 6-state auth-branching matrix (mobile accept-invite handler)
+
+When the mobile app's deep-link handler receives an invite token (via direct App Link tap OR via email-match detection), it branches on the **current sign-in state**:
+
+| State | Behavior |
+|---|---|
+| **Not signed in** | "Coach Sarah invited you. Sign in or create an account to accept." → after auth completes, `profiles.coach_id = invite.coach_id` |
+| **Signed in as free athlete** (no coach OR `is_self_coached=true`) | "Coach Sarah invited you to her roster. Accept?" → on confirm, `coach_id` set + `is_self_coached=false`. ALL TRAINING DATA PRESERVED (see "free athlete conversion" below). |
+| **Signed in as another coach's client** | "You're currently on Coach Bob's roster. Accept this invite to swap to Coach Sarah?" → on confirm, `coach_id` flips. Old coach loses RLS access; new coach gains it. All data persists. |
+| **Signed in as a different person than invitee** (email mismatch) | "This invite was sent to friend@example.com but you're signed in as athlete@example.com. Sign out and sign in as the invitee to accept." |
+| **Signed in as the inviting coach themselves** | Reject: "Coaches can't accept athlete invites. Sign in as a client account." |
+| **Signed in as admin** | Same rejection. |
+
+### Free athlete → coached athlete (the conversion value prop)
+
+This is the **most important conversion path in the product**. When a free MyRX user (existing account with training history, weight log, calorie history, mobility ROM, food entries) accepts an invite:
+
+1. `UPDATE profiles SET coach_id = invite.coach_id, is_self_coached = false WHERE id = athlete.id`
+2. **Every byte of training data persists.** RLS automatically grants the new coach access via `coach_id` foreign key — no migration, no re-onboarding.
+3. The athlete's self-coached calorie plan stays in place. The coach can override it later, but nothing's lost in the moment.
+4. Mobile app surfaces "Coach Sarah is now coaching you" + a chat-enabled toggle.
+
+This is the recruitment moat: coaches can recruit existing MyRX free users with ZERO re-onboarding cost. Don't break this. Any future change that involves wiping or migrating user data on coach attachment is a regression.
+
+### Patient invite detection (email-match)
+
+The mobile app detects pending invites by email-match at TWO points:
+
+**(1) Signup flow** — when a new user enters their email at signup, the app queries `coach_invites WHERE invitee_email = $email AND status='pending' AND expires_at > NOW()`. If match: show "Coach Sarah invited you to her roster" interstitial → confirm OR skip → continue normal signup → on completion, call `attach-invite-to-current-user(token)` to set `coach_id`.
+
+**(2) App-launch** — on every app foreground (debounced to once/hour, persisted to AsyncStorage), if signed in, query the same table by `currentUser.email`. If match AND user is NOT already on that coach's roster: show a banner "Coach Sarah invited you to her roster. Tap to accept." → same `attach-invite-to-current-user` flow.
+
+These two together mean an invite the coach sends today is detectable by ANY path the user takes into the app, for the 14-day TTL.
+
+### "Have an invite code?" manual fallback
+
+Edge case: invitee signed up with a different email than the one the coach has on file (e.g. invited at work@company.com but signed up with personal@gmail.com). Email-match doesn't fire.
+
+Mitigation: Settings → "Have an invite code?" → user pastes the original accept-link OR the raw token → app calls `attach-invite-to-current-user(token)` → validates the token directly (not via email-match), runs the same auth-state branching matrix, attaches if valid.
+
+### `attach-invite-to-current-user` edge function (Phase 6 build)
+
+JWT-required edge function. Single entry point for ALL paths above (signup detection, app-launch banner, manual paste). Pseudocode:
+
+```
+1. verify JWT, get current user
+2. fetch invite by token from coach_invites
+3. validate: status='pending', not expired, AND (email-match OR token-paste with raw token)
+4. validate current user state: not the coach themselves, not admin, not deactivated
+5. atomically (single transaction):
+   a. UPDATE profiles SET coach_id = invite.coach_id, is_self_coached = false WHERE id = currentUser.id
+   b. UPDATE coach_invites SET status='accepted', accepted_at=NOW(), accepted_by=currentUser.id WHERE token=$token
+6. best-effort: record activity event 'coach.invite_accepted'
+7. return success + invite metadata
+8. mobile app shows confirmation + refreshes profile → coach now visible in chat / suggestions etc.
+```
+
+Idempotency: if invite is already accepted by THIS user, return success silently (no-op). If accepted by a DIFFERENT user, return 409 with friendly error.
+
+### Smart-link routing on `/coach/accept-invite` (Phase 9 launch checklist)
+
+The web page at `myrxfit.com/coach/accept-invite?token=...` is the URL that's actually in the invite email. Currently a React page that just shows "Download the app." Needs to graduate to a server-side device router:
+
+- **iOS Safari/Chrome UA** → 302 redirect to `apps.apple.com/...` with the token preserved in the URL (so iOS Universal Link matches once app is installed)
+- **Android Chrome UA** → 302 redirect to `play.google.com/...` (or Android App Link triggers the installed app directly)
+- **Desktop UA** → show current page with both store badges + QR code so they scan with their phone
+
+This needs to be a Cloudflare Pages Function (not a React route) so the redirect happens BEFORE React loads. Add as a Phase 9 launch-checklist item.
+
+### Out-of-scope (deferred)
+
+- Branch.io / Adjust install attribution — revisit if paid ad campaigns demand it
+- SMS dispatch — A2P 10DLC vetting + carrier fees aren't worth it for zero UX gain over email
+- WhatsApp Business API channel — international expansion only
+- Multi-coach simultaneous invites with priority selection UI — current behavior is "first to accept wins, others go stale"
+
+---
+
+## Testing documentation rule (MANDATORY — locked May 27 2026)
+
+Every new testable feature ships with a corresponding XLSX in `docs/testing/<feature_name>.xlsx` enumerating all end-to-end test scenarios.
+
+**When this rule fires:** any feature that introduces a new user-facing flow with multiple states, edge cases, or branching paths. Examples that QUALIFY: coach invite flow, accept-invite flow, payment flow, signup journey, plan wizard, deferred deep linking. Examples that DO NOT qualify: trivial UI tweaks, copy changes, single-state pages, internal refactors.
+
+**XLSX format (locked):**
+- Title sheet: "Overview" with feature context (2-3 sentences) + summary table (scenario count, priority breakdown)
+- One sheet per major scenario category (Sending, Accepting, Data Integrity, Email Delivery, UI/UX, Error States, etc.)
+- Each scenario row has columns: **ID** (T-001 etc.), **Scenario name**, **Preconditions**, **Steps** (numbered plain-language list), **Expected result**, **Failure modes to watch for**, **Priority** (P0 critical / P1 high / P2 medium)
+- Priority cells color-coded (P0 red, P1 orange, P2 yellow)
+- Auto-filter on header row, frozen header + ID column
+- Wrap text in long columns, auto-sized row heights
+- Sheet names cannot contain `/` (openpyxl rejects — use "UI and UX" not "UI / UX")
+
+**Why this rule exists:** the user reads these XLSX files to do end-to-end manual QA before shipping. Without a checklist, QA is ad-hoc and edge cases slip through. The XLSX format works in Excel + Google Sheets + Numbers, prints to paper, and can be ticked off row-by-row during a test session.
+
+**Builder script convention:** put the openpyxl Python builder at `scripts/build_test_scenarios_<feature>.xlsx.py` so the XLSX can be regenerated from source whenever scenarios change. Mirror the style of existing builders at `scripts/build_launch_checklist_xlsx.py` and `scripts/build_reminders_xlsx.py`.
+
+**Inaugural file (May 27 2026):** `docs/testing/coach_invites.xlsx` — 55 scenarios across 6 sheets (Sending Invites × 14, Accepting Invites × 16, Data Integrity × 7, Email Delivery × 7, UI and UX × 7, Error States × 4). Builder at `scripts/build_test_scenarios_xlsx.py`.
 
 ---
 
@@ -2848,6 +3221,152 @@ Before saying "done" on any non-sync change, the assistant MUST mentally walk th
 
 When in doubt, do the cross-check rather than skipping it. A redundant check costs nothing; missing one creates inconsistency that the user has to point out later.
 
+### Admin ↔ Coach portal mirror rule (MANDATORY — LOCKED May 26, 2026)
+
+**Anything we do to the admin portal in terms of design or functionality MUST be reflected to the coach portal, and vice versa. Same for the reverse direction.** The two portals are siblings — they share the same visual language, the same component library (`AccountSettings`, `MacroPlanEditor`, etc.), the same sidebar shape, and similar information hierarchies because their users (admin = platform owner, coach = paying B2B customer) need the same operational surfaces with role-appropriate scope.
+
+When you change one side, you change the other in the **same turn**:
+
+- Sidebar nav label rename on admin → rename on coach (same turn).
+- New tab on coach portal → add same tab to admin portal (same turn).
+- Theme tweak (colors, fonts, spacing, animations) on either → apply to both.
+- Bug fix in shared code path that affects both → confirm both are fixed.
+- Component update (`AccountSettings`, `MacroPlanEditor`, etc.) → both portals benefit automatically (they share the component); just verify both still render correctly.
+
+**The only exception:** a feature that is **explicitly admin-only** by design (e.g. AdminMovements, AdminFoodLibrary, AdminMessages — features the coach has no business managing). These are admin-only because they govern platform-wide data, not coach-specific data. When you add a new admin-only feature, surface this in your response so the user can confirm it shouldn't mirror to coach.
+
+**Planning rule:** in any plan or proposal that touches admin OR coach portal functionality, layout, or design, **you must include a question about whether this should mirror to the other side — UNLESS you can decide yourself with high confidence.** "Should this mirror to coach?" is a free question the user is happy to answer; not asking it produces inconsistency that the user has to point out later.
+
+**Decision heuristic for when you can decide yourself without asking:**
+- Pure visual / chrome change (color, spacing, copy rename) where both surfaces have the literal target string → mirror automatically.
+- Same-purpose feature that already exists on both surfaces → mirror automatically.
+- A new feature that only makes sense in one role (admin moderating user-generated content, coach inviting their own clients) → don't mirror; surface the decision.
+- Ambiguous (e.g. "do we add a 'sign out everywhere' button — is that admin-specific or both?") → ASK before implementing.
+
+**Concrete recent examples of the mirror rule in action:**
+- May 26 2026: coach sidebar bottom user-card said "Account & settings" → renamed to "Account Settings" → SAME rename applied to admin sidebar in the same edit pass.
+- May 26 2026: coach `CoachProfile.jsx` sub-tab labeled "My Profile" → renamed to "Settings" → SAME rename applied to admin `AdminProfile.jsx` sub-tab.
+- May 26 2026: legal-docs surface added to shared `AccountSettings.jsx::AboutTab` (Refund Policy + Health Disclaimer always; Coach Agreement + DPA gated on `is_coach || is_superuser`). Single component, both surfaces benefit. The `is_superuser` clause is the explicit decision: superusers (admins) DO see the coach-specific docs because they oversee the coach platform.
+
+**Examples of the exception (admin-only, don't mirror):**
+- AdminMovements (movement library CRUD) — platform-wide data, coach has no business editing global movements.
+- AdminFoodLibrary (food library CRUD) — same reasoning.
+- AdminUserDetail / AdminUserPlan — admin viewing/editing a specific client's data. Coaches have their own client view at `/coach/client/:id` which serves the same UX role but scoped to their roster only.
+
+The mirror rule is one of the most-broken rules in this codebase's history (analogous to the web↔mobile rule above). Most "but admin doesn't match coach" complaints come from one-sided edits. The cross-check is non-negotiable.
+
+### Client Detail page — locked patterns (admin + coach mirror, May 26 2026)
+
+The client detail page (`AdminUserDetail.jsx` on the admin side, `CoachClientDetail.jsx` on the coach side) is the single most action-dense surface in either portal. Three patterns are locked as of May 26, 2026 — every future edit must honour them, and they apply to BOTH the admin and coach versions per the portal-mirror rule above.
+
+**1. The right-side action column is exactly 3 rows, grouped by purpose.**
+
+The buttons and pills on the right side of the client header sit in 3 stacked rows, with `gap-2` between rows and `gap-1` within each row. Each row has a specific job, and new buttons added to this page MUST land in the right row by purpose — not by "what looks best on the design":
+
+- **Row 1 — Status pills.** Read-only summary chips that tell the user the client's current intake plan and goal status (Intake Plan, Goal). No actions, no toggles — just at-a-glance state.
+- **Row 2 — Relationship toggles.** Things that change the working relationship between client and coach: Chat on/off, Self-managed vs Coach-managed. Toggling these changes how the client experiences the app, not their account standing.
+- **Row 3 — Account actions.** Account-level operations: Active/Inactive toggle, Settings cog (⚙), Delete. These touch the underlying account state, not the relationship.
+
+**Coach view hides three things.** Coaches do NOT see the Settings cog, the Delete button, or the Active/Inactive toggle. Account-level operations are admin-only — a coach can't deactivate or delete a client they were assigned. The Row 3 grouping still exists on the coach view; it just renders empty (or collapses if all three items are hidden).
+
+When the user asks for a new button on this page, ask which row it belongs in BEFORE writing the JSX. Don't invent a fourth row, don't squeeze the new button into the wrong row because it fits the layout, and don't show admin-only actions to coaches.
+
+**2. The stat chips mirror mobile's Dashboard exactly.**
+
+The compact stat chip row underneath the client header shows the same 5 chips the user sees on their own mobile Dashboard, in the same order, with the same emoji prefixes and the same source data:
+
+- 🏆 Strength PRs this month
+- 🏆 Cardio PRs this month
+- 🍴 Food log count — **distinct `food_logs.log_date` values in the last 14 days** (NOT a consecutive-day streak). Label reads "X day(s) logged in last 14 days". Only shown when the value is > 0. LOCKED May 26 2026 after a real-data audit caught the original consecutive-streak implementation hiding the chip for active users who had any recent 1-2 day gap (e.g. 10 logs across 14 days but no log yesterday → streak walker returned 0 → chip hidden). The compute is now a one-liner: `new Set(logDates).size` against the caller's already-windowed fetch. Function name preserved as `computeFoodLogStreak` (mobile) / `calcStreak` (web admin + coach) for code-grep continuity, but the SEMANTICS are window-count, not streak-walk.
+- ❤️ Lowest BPM in the last 7 days
+- ⚖️ Weekly weight diff
+
+The PR counts come from the same parsing helpers the mobile Dashboard uses — `parseEffort1RM` for strength, `parseCardioBest` for cardio (direction-aware: pace is lower-is-better, speed/distance/duration are higher-is-better). Those helpers live in `mobile/app/(app)/dashboard.tsx` and are mirrored as `parse1RM` + `parseCardioBest` in `web/src/pages/admin/AdminUserDetail.jsx`. Grouping is by exercise/activity NAME (`label.split(' · ')[0]`), not by full label — so a user who PRs their Bench Press once and their Bench Press [Close Grip] once counts as ONE PR, not two. Variants of the same movement are the same movement for PR-counting purposes.
+
+When mobile's Dashboard chip set changes — new chip added, chip removed, emoji swapped, source helper renamed, grouping rule altered — the admin and coach Client Detail pages MUST be updated in the same turn. This is the cross-platform mirror rule applied to chip parity: the user sees the same numbers about themselves on mobile that the admin/coach sees about them on web, and any drift breaks trust.
+
+**3. Admin bypass for client health data — RLS policy on every per-user health table.**
+
+The `efforts` and `bodyweight` tables have always had an `Admin full access` RLS policy keyed off `is_admin()`. May 26, 2026 added the same policy to `food_logs`, `hr_samples`, `step_samples`, and `wearable_workouts` — without it, the admin's AdminUserDetail queries returned empty data for any client whose health rows were guarded by the standard "users own their rows" policy, and chips silently dropped to zero with no error. The user has to look at the mobile app on the client's phone to realize the chip is wrong; that's the kind of slow-leak bug we can't afford.
+
+Going forward: any new Supabase table holding per-user health, training, or wearable data MUST get an `Admin full access` policy at table-creation time. Add it in the same migration that creates the table, not as a follow-up — follow-ups get forgotten and the chip-silently-drops bug recurs. Coaches retain their existing `Coaches see roster` SELECT-only policy (they read their assigned clients' data, they don't get admin-write access). The distinction is: admin = full CRUD across all clients via `is_admin()`; coach = SELECT-only across roster via `is_coach_for(user_id)`.
+
+### Title Case rule for titles, headers, labels, and tab names (MANDATORY — LOCKED May 26, 2026)
+
+**Every visible title, page header, section header, tab label, button label, card title, modal title, dropdown option label, nav item, and chip label in the app uses Title Case.** Title Case = capitalize the first letter of every word EXCEPT short articles, conjunctions, and prepositions (a, an, the, and, but, or, of, in, on, at, to, by, for, with, from).
+
+- ✅ "Account Settings", "My Profile", "Macro Plan", "Coach Platform", "How It Works", "Data Processing Agreement", "Refund Policy", "Health & Medical Disclaimer", "Terms of Service" (preposition "of" stays lowercase), "Acceptable Use Policy"
+- ❌ "Account settings", "Macro plan", "How we compute your numbers", "Refund policy", "Cookie policy"
+
+**Scope — what this rule covers:**
+
+1. **Page titles / h1** — "Account Settings", "Profile", "Calories", "Strength", etc.
+2. **Section headers (h2, h3)** — "Adaptation Zone", "Progression Plan", "Best Effort", "Coach Platform"
+3. **Tab labels** — "Settings", "Macro Plan", "Subscription", "Account", "Preferences", "Security", "About"
+4. **Navigation items** — "Dashboard", "My Clients", "Invite Client", "Suggested Adjustments"
+5. **Button labels** — "Update Plan", "Save Changes", "Sign Out", "Sign In", "Add My First Client"
+6. **Card / modal titles** — "Your Next Training Target", "Personal Best"
+7. **Dropdown option labels** — "Lose Steady", "Build Muscle", "Maintain"
+8. **Section-divider chips / pill labels** — "Strength Phase", "Endurance Zone", "Fly", "Free", "Back"
+9. **Legal doc titles + cross-link labels** — "Terms of Service", "Privacy Policy", "How We Compute Your Numbers"
+10. **Settings group labels** — "Notifications", "Appearance", "Body Stats", "Display Units"
+
+**Scope — what this rule does NOT cover** (intentional sentence case is fine here):
+
+- Body text, descriptions, helper text, tooltip text, error messages, coaching cue lines, info-panel paragraphs — these are PROSE, not titles.
+- Form placeholder text — sentence case (e.g. `"Search for a movement..."` is fine).
+- In-prose embedded references — e.g. inside a paragraph "see your settings page" stays sentence case; "Settings" as a standalone label is Title Case.
+- Legal-doc body text (numbered headings inside legal docs like "1. Agreement to these Terms" follow legal-doc convention and are NOT app titles).
+
+**Recent rename to apply this rule** (May 26 2026):
+
+- "Account settings" → "Account Settings" (web coach + admin sidebar bottom + CoachProfile h1)
+- "How we compute your numbers" → "How We Compute Your Numbers" (AccountSettings AboutTab + HowWeCompute legal-doc title)
+- "How it works" section label → "How It Works"
+
+**Auditing existing titles when you encounter them:** if you're editing a file and you notice a title/header/label that isn't Title Case, fix it in the same edit. Don't leave a known violation behind just because it wasn't the trigger for your edit.
+
+**For future additions:** every time you add or rename a title-class string (per the scope list above), it MUST be Title Case. The user has been burned by lowercase titles slipping in — making the rule explicit makes it harder to miss.
+
+### Always parallelize agents when independent work exists (MANDATORY — LOCKED May 26, 2026)
+
+**For every single task: if independent sub-work exists, spawn the maximum reasonable number of sub-agents in parallel to finish faster.** The user is paying for compute and explicitly wants us to use it. Sequential work that could have been parallel is wasted wall-clock time the user is paying for twice (once to me, once in their own time waiting).
+
+**When to fan out (default to YES):**
+
+- **Audits / research** across multiple files, surfaces, or codebases. One agent per surface (web / mobile / admin / coach / edge functions / DB schema). 3-6 agents typical.
+- **Implementation phases with independent components.** E.g. for the Phase 3 coach-invite flow: agent 1 builds the edge function, agent 2 builds the web invite-form, agent 3 builds the web accept-invite landing page, agent 4 builds the mobile equivalent — all in parallel.
+- **Multi-perspective code review.** security-reviewer + code-reviewer + architecture-critic on the same change. 2-3 agents in parallel, different lenses.
+- **Cross-platform mirror checks** (web↔mobile, admin↔coach). One agent per side, compare reports.
+- **Investigating unknowns to ground design decisions.** When the user asks me a question and I don't have full context, spawn agents to research while I draft the question/answer. Three agents can read three corners of the codebase in the time it'd take me to read one.
+- **Anything that says "audit + report" in the user's request** — fan out by area immediately.
+
+**When NOT to fan out (rare):**
+
+- Pure sequential dependencies (step N truly needs step N-1's output).
+- Tiny single-file edits where agent spin-up exceeds the work itself.
+- Decision-mode Q&A flows where the user is answering one question at a time — those are serial by nature.
+- Edits to the SAME file by multiple agents — they'd step on each other's diffs.
+
+**The mechanics:**
+
+- Use the Agent tool with `subagent_type` selecting the right specialist (general-purpose for research/search, code-reviewer for review, security-reviewer for vuln scan, planner for planning, etc.).
+- Spawn multiple agents in a **single message with parallel tool calls** — they execute concurrently, not sequentially.
+- Use `run_in_background: true` if I have other independent work to do while they run (e.g. continue drafting a response or making my own edits) — I'll be notified on completion automatically. Don't poll.
+- Pass each agent a **self-contained prompt** — they have no context from this conversation. Include file paths, what to look for, and a target word count for the response (typically "under 200-300 words" so their output doesn't bloat my context on return).
+- **Tell the agent whether to write code or just research.** They're not aware of the user's intent.
+
+**Heuristic — "how many agents?":**
+
+- 1 = should I just do it myself? Then no agent.
+- 2-3 = ideal for most research / audit tasks.
+- 4-6 = ideal for implementation phases with 4-6 independent components.
+- 7+ = rare; only when truly independent (e.g. one agent per cardio activity to refactor zone-prescription logic). Coordination overhead dominates past this.
+
+**Concrete recent example (May 26 2026):** during the Phase 3 design Q3 decision flow, I spawned 2 parallel agents — one to audit existing DB state for the invite-accept logic, one to research industry-standard handling of token-race / email-mismatch / forwarded-link scenarios — while I edited CLAUDE.md and drafted the question. Two agent reports + the rule edit + the question draft all in one round-trip instead of three.
+
+**The user's explicit instruction (May 26 2026):** "for every single task you do, if you can apply multiple agents, apply the maximum required agents to finish it faster, every single time, ive paid a lot of money and just now i know about this, we could have been doing things much faster, so lets start using it now". Treat this as a permanent direction — if a turn passes where I could have parallelized but didn't, I'm violating the rule.
+
 ## Formula attribution registry (LOCKED — every published source the app's math leans on)
 
 Single source of truth for "which scientific work each formula in MyRX comes from." Goes here so any future audit, regulator review, marketing claim ("evidence-based"), or migration phase can map every number to a citation without spelunking through file comments. Update this table whenever a new formula lands or an existing one's source changes — the file-level comments and this table must agree.
@@ -3018,6 +3537,35 @@ Env vars are already set in the shell profile. No need to set them manually.
   auto-revoked by Cloudflare's GitHub-secret-scanning integration —
   see commit history if a token shows up in `cfut_…` form anywhere,
   it must be rotated immediately.)
+
+## Email infrastructure (LOCKED — May 26 2026)
+
+The user explicitly asked for vendor unification ("i hate that we have so many channels for everything"). The locked end-state:
+
+**Outbound (all app-generated email): SendGrid via Twilio account.**
+- Coach invites (`send-coach-invite` edge function) → SendGrid HTTPS API
+- Supabase Auth emails — signup confirmation, magic link, password recovery, email change, invite user — Supabase Auth → Custom SMTP → `smtp.sendgrid.net:587` / username `apikey` / password = `SENDGRID_API_KEY`
+- Future: any new app email sender (notifications, weekly digests, etc.) MUST go through SendGrid. No other provider gets added without explicit user approval.
+- Sending domain: myrxfit.com (DKIM + SPF + DMARC verified via Twilio One Console → Email → Domain Authentication, auto-installed via Cloudflare Entri integration on May 26 2026)
+- From addresses (both on the same authenticated domain):
+  - `noreply@myrxfit.com` for Supabase Auth flows (SMTP_ADMIN_EMAIL)
+  - `invites@myrxfit.com` for coach invites (SENDGRID_FROM)
+  - Both share the same DKIM signature and deliverability reputation
+- Sender name: `MyRX`
+- Free tier: 100 emails/day. $20/mo for 40k once volume exceeds the free tier. SendGrid trial ends July 25 2026 — credit card needs to be added before then OR sending will pause.
+
+**Inbound (human inbox for replies to team@myrxfit.com): Zoho Mail.** Kept as-is. Separate from outbound — different problem space (human reading vs. machine sending). No plan to consolidate inbound into SendGrid; Inbound Parse would require building a custom inbox UI inside MyRX admin and that's not worth it for v1.
+
+**SMS: Twilio Verify** (already in use, separate from email channels).
+
+**REMOVED (no longer in use, do not re-add):**
+- Resend — was briefly in the `send-coach-invite` edge function before the Twilio/SendGrid pivot. Killed May 26 2026. If you ever see `RESEND_API_KEY`, `RESEND_FROM`, or `api.resend.com` references in new code, that's a regression — delete them.
+- Supabase Auth's built-in SMTP — still works as a fallback if custom SMTP fails, but the rate limit (4 emails/hour on free tier) made it unusable for OTP volume at scale. The custom SMTP override is permanent.
+
+**Operational notes:**
+- The SendGrid API key is scoped to "Mail Send" only (Restricted Access in SendGrid's permission model). Even if it leaks, attacker can only send email — not read suppression lists, not change billing, not view contacts.
+- Tracking (click-tracking, open-tracking, subscription-tracking) is DISABLED on every outbound. Click-tracking would rewrite our URLs into SendGrid redirects which (a) leak invite tokens to SendGrid's logs and (b) break Android App Link autoVerify because the host changes from `myrxfit.com` to `sendgrid.net`.
+- If deliverability ever drops, first check: SendGrid dashboard → Activity Feed for bounces/blocks/spam reports. Don't blame Supabase — they're just relaying through SendGrid now.
 
 ## Secrets hygiene (MANDATORY)
 
@@ -3402,6 +3950,52 @@ obvious from the docs.
    endpoint. This bit us once and could bite again on any new env
    var added.
 
+## Supabase + Postgres scars
+
+Hard-won lessons from things that aren't obvious from the docs.
+
+1. **EVERY `profiles` upsert MUST include `auth_user_id`** (LOCKED,
+   May 26 2026). The `profiles_active_must_have_auth` CHECK
+   constraint requires `(deactivated_at IS NOT NULL OR auth_user_id IS
+   NOT NULL)`. Looks like a "row-state" rule, but PostgreSQL evaluates
+   CHECK constraints on the **proposed-INSERT row FIRST**, BEFORE
+   the ON CONFLICT branch fires — even when the existing row already
+   has `auth_user_id` set. So an upsert payload like
+   `{ id: user.id, phone: '+1...' }` proposes an INSERT row where
+   `auth_user_id` is NULL → CHECK fails → entire statement errors
+   out before the ON CONFLICT DO UPDATE branch can run.
+
+   **The rule**: every upsert into `profiles` (across web, mobile,
+   and edge functions) MUST include `auth_user_id: <userId>` in the
+   payload, even when you "know" the row already exists. It's a
+   no-op for the UPDATE branch (value matches what's there) and the
+   one thing that makes the fallback INSERT path satisfy the CHECK.
+
+   Where the pattern was reintroduced and burned us (all fixed May
+   26 2026): mobile `sign-up.tsx` (11 upsert sites in UnitsScreen,
+   SexScreen, DOBScreen, HeightScreen, WeightScreen, the batched
+   Promise-screen save, NameScreen, PhoneScreen pre-write,
+   PhotoScreen, welcome-end, bumpCheckpoint); web end-user
+   `Signup.jsx` (same 11 sites mirrored); web coach `Signup.jsx`
+   (NameScreen, PhotoScreen); web `AuthContext.jsx::updateProfile`;
+   edge functions `init-profile-checkpoint` + `verify-phone-otp`.
+
+   Most of those were silently swallowed by `try { ... } catch
+   { /* best-effort */ }` blocks — so users walked through signup
+   thinking everything saved, when half the fields were getting
+   dropped by the CHECK. The verify-phone-otp loud failure (500 to
+   the client) is what finally surfaced the bug. **Don't trust that
+   "the row already exists" rescues you from the CHECK — it doesn't.**
+
+   New upserts: add `auth_user_id: user.id` (web) or
+   `auth_user_id: userId` (edge functions) RIGHT AFTER `id:` in
+   every payload. A code-review heuristic: any line that reads
+   `from('profiles').upsert(` MUST have `auth_user_id` somewhere
+   in the payload object. UPDATE statements (`.from('profiles')
+   .update({...}).eq('id', ...)`) are NOT affected — CHECK on
+   UPDATE only evaluates the post-UPDATE row. Only upserts trigger
+   the proposed-INSERT pre-check.
+
 ## Browser / React scars
 
 Same theme: hard-won lessons from things that don't show up in any
@@ -3414,7 +4008,19 @@ documentation.
    - `Cache-Control: no-store` or `no-cache` on the document. Use
      `max-age=0, must-revalidate` for the same intent without
      killing bfcache.
-   - `self.clients.claim()` in service worker (any version).
+   - **`self.clients.claim()` in service worker (any version). NO
+     EXCEPTIONS — not even "one-time recovery" rationales. BUILD_VERSION
+     bumps on every postbuild, which means a new SW install + activate
+     fires on every deploy. Any claim() in the SW activate handler
+     therefore fires PER DEPLOY, evicting bfcache for every active tab
+     every time. This rule was broken once (May 25 2026 cache-poisoning
+     "one-time recovery" — was actually per-deploy because the deploy
+     cadence + BUILD_VERSION bump invalidated the "one-time" claim) and
+     the regression reproduced the exact constant-reload symptom this
+     rule was written to prevent. Permanently removed May 27 2026.
+     Same ban applies to `self.clients.matchAll().navigate()` — same
+     bfcache impact, plus it force-reloads every controlled tab on
+     activate, which IS the user-visible symptom.**
    - WebSocket connections open at page-hide (pre-Chrome 149).
      Disconnect Supabase realtime on `visibilitychange='hidden'`,
      reconnect on `visible`.
@@ -3426,6 +4032,21 @@ documentation.
    toggle. Use `<button role="switch" aria-checked={state}>` for
    custom toggles — no input element means no focus-scroll behaviour,
    and the button has native keyboard support.
+
+   **Route-level viewport gates must NOT use pure `useIsDesktop()`
+   (matchMedia min-width).** That hook flips false whenever DevTools
+   opens on a laptop (DevTools panel narrows the available width
+   below the breakpoint). If the gate is `if (!isDesktop) <Redirect/>`,
+   opening DevTools silently navigates the user away from the page
+   they were on — and closing DevTools doesn't bring them back, because
+   the destination route doesn't have a reverse gate. Symptom: coach
+   opens DevTools to inspect, gets dumped into /dashboard, can't get
+   back without manually navigating. Locked May 27 2026 after exactly
+   that bug. Use `useIsPhone()` (viewport AND `pointer:coarse`) for
+   route gates — touch-input filter keeps DevTools-resized laptops on
+   the original route. `useIsDesktop()` is still fine for
+   COMPONENT-level layout decisions (3-col vs 1-col grid etc.), just
+   not for redirects.
 
 3. **Chrome popup blocker rejects the SECOND `window.open()` in a
    single click handler.** Only the first one is treated as
@@ -3444,13 +4065,182 @@ documentation.
    refreshes. This was the actual root cause of the "page refresh"
    complaints (NOT bfcache, which was a separate but smaller issue).
 
-5. **Don't auto-clear server-side error state via polling.** When
+5. **Inline-arrow `component={() => ...}` on wouter `<Route>` causes
+   unmount-on-every-parent-render.** Wouter renders `<props.component />`
+   directly, and inline arrows produce a NEW function reference on every
+   AppRoutes render. React's reconciler treats different function types
+   as different components → unmounts the old + mounts a fresh one →
+   page state resets, useEffects re-fire, data refetches, UI flashes
+   skeleton. Symptom is identical to a page reload (em-dash placeholders
+   on stat cards, "Loading…" panels) even though the URL never changes
+   and load count stays the same. The bfcache log will correctly say
+   `(NO reload)` because no navigation happened — the component just
+   tore itself down. Locked May 27 2026 after the coach dashboard
+   reproduced this on every tab-switch.
+   **Fix:** define route components as STABLE top-level functions and
+   pass them by reference: `component={CoachPortalRoute}` not
+   `component={() => <CoachProtectedLayout><CoachDashboard/></CoachProtectedLayout>}`.
+   See App.jsx — the Coach*Route consts above AppRoutes are the
+   reference pattern.
+
+6. **No visibility-change / focus refetches anywhere.** Pages load
+   their data on mount and stay static until the user explicitly
+   navigates away. The "useFocusEffect" pattern from React Native
+   does NOT translate to web — on a desktop browser, the user
+   constantly tab-switches (alt-tabbing to Slack / chat / docs is
+   normal work behavior), and every tab return triggering a fresh
+   fetch produces visible loading skeletons that feel like reloads.
+   That ruined the coach dashboard UX until May 27 2026.
+   **Valid refetch triggers (web):**
+   - Initial mount (`useEffect([])`)
+   - Route change (component remount via wouter)
+   - Supabase realtime UPDATE/INSERT events (server pushes delta)
+   - Explicit user action (button click, pull-to-refresh)
+   **Banned (web):**
+   - `document.addEventListener('visibilitychange', ... fetch ...)`
+   - `window.addEventListener('focus', ... fetch ...)`
+   - `useFocusEffect` from React Navigation (mobile-only, doesn't
+     apply on web — but if a contributor ports the pattern, it gets
+     implemented as visibilitychange and falls under this ban)
+   The visibilitychange handlers in AuthContext.jsx + main.jsx are
+   EXCEPTIONS — they disconnect/reconnect the Supabase realtime
+   WebSocket for bfcache compatibility (pre-Chrome 149). They do
+   NOT trigger fetches.
+
+7. **Don't auto-clear server-side error state via polling.** When
    the admin operations panel showed a stale failure message from a
    previous run, the fix was to clear the in-DB error in a one-time
    capture (set `errorClearedRef`, push empty error to server,
    show in UI until next operation starts). Hammering the worker
    to clear it via repeated POSTs would be cheaper to write but
    nukes the audit trail.
+
+## Legal docs + consent-chain rules (LOCKED, May 26 2026)
+
+Legal docs are a contract, not UI copy. The fact that they live as
+JSX files in `web/src/pages/legal/*.jsx` is an implementation detail
+— treat them as you would a signed PDF. The rules below come from a
+real audit that found 12 gaps after the 4 Phase-2 legal docs (Coach
+Agreement, Refund Policy, Health Disclaimer, DPA) shipped — each
+fix is locked here so the same gaps don't reappear.
+
+1. **Single canonical consent point: the TOS.** The user clicks ONE
+   checkbox during signup. That click must legally bind them to
+   EVERY policy that matters, not just the doc whose name appears in
+   the checkbox label. We achieve this by having the **TOS §1
+   incorporate every other policy by reference**, and the consent
+   checkbox label includes the literal phrase "which together
+   incorporate our [other policies] by reference."
+
+   Current TOS §1 incorporation list (web/src/pages/legal/TermsOfService.jsx):
+   AUP, Cookie Policy, Refund Policy, Health & Medical Disclaimer,
+   and (for Coaches only) Coach Agreement + DPA. **When a new
+   policy ships, it MUST be added to TOS §1's incorporation list in
+   the same PR.** Forgetting to do so means the new policy isn't
+   legally part of the contract, even if the user has read it.
+
+2. **Cross-doc conflicts: more-specific policy ALWAYS controls.** TOS
+   §1 explicitly states this. So when TOS §5.5 (Refunds) says one
+   thing and the Refund Policy says another, the Refund Policy wins.
+   The legacy May-9-2026 TOS §5.5 used to say "all fees are
+   non-refundable except where required by law" — which directly
+   conflicted with the new Refund Policy's 14-day trial, 14-day
+   annual refund window, athlete-unlock 14-day guarantee, etc. The
+   May-26-2026 rewrite REPLACED that paragraph with a summary list
+   that defers explicitly to the Refund Policy. **When you add a new
+   ancillary doc that supersedes any TOS section, you MUST rewrite
+   that TOS section to defer.** Don't leave a contradiction.
+
+3. **TOS §18 "Entire agreement" must list every ancillary doc.**
+   Boilerplate "entire agreement" clauses define the boundary of
+   what's contractually binding. Omitting a doc from this list is a
+   plausible argument that the doc isn't part of the contract — even
+   if it's incorporated by reference elsewhere. Belt-AND-suspenders:
+   the doc must appear in BOTH §1 incorporation AND §18 entire-
+   agreement list.
+
+4. **Privacy Policy reality-check: §3.3 "Information we do not
+   collect" must match what the app ACTUALLY collects.** The May-9
+   PP said "we do not collect health records from connected medical
+   devices" — at a time when the Samsung Health Data SDK integration
+   (May 21) was reading HR samples, step buckets, and per-second
+   workout HR streams. That's a factual misrepresentation under GDPR
+   Art. 13/14 transparency obligation AND CCPA disclosure rules.
+   Fixed by carving "Clinical health records from healthcare
+   providers (lab results, prescriptions, diagnoses, imaging)" into
+   §3.4 and adding a new §3.3 ("Information from wearables and
+   fitness platforms") that describes WHAT we collect from each
+   connected platform.
+
+   **The rule**: every time we ship a new data-collection capability
+   (new wearable integration, new biometric, new analytics signal),
+   the same PR MUST update PP §3.1 (information you provide) OR §3.3
+   (wearables) OR §3.4 (information we DO NOT collect) so the
+   policy and the codebase stay in sync. If you ever find yourself
+   thinking "we'll update the legal docs later," you're creating
+   regulatory exposure.
+
+5. **Subprocessor list in PP §6.1 MUST match DPA's subprocessor
+   list.** Two places that list the same thing → drift is inevitable
+   → users can argue they consented to one list (PP) but not the
+   other (DPA) → coverage gap. The PP now contains an explicit "if
+   a discrepancy ever appears, the DPA is the authoritative list"
+   statement, but the goal is no discrepancies.
+
+   **The rule**: when adding a new subprocessor (e.g. shipping the
+   Apple HealthKit integration), update BOTH the DPA's subprocessor
+   list AND PP §6.1 in the same PR. The DPA's list is the canonical
+   source; PP mirrors it.
+
+6. **Cross-references must use real URLs.** PP §6.2 used to say "the
+   coach is bound by our Coach Terms of Service" — a doc that does
+   not exist. Should have said "Coach Agreement" and linked to
+   `/coach-agreement`. Dangling references in legal docs look
+   amateurish AND create ambiguity about what's actually binding.
+   Whenever you mention another policy by name, link to it by URL.
+
+7. **Bump the effective date EVERY time the legal doc changes
+   materially.** The `effectiveDate` prop on `<LegalLayout>` is the
+   date users see at the top of the doc. If you change a binding
+   provision (incorporation list, cross-references, refund terms,
+   data-collection statements) and don't bump the date, you create
+   an audit-trail gap. The May-26-2026 audit forced a bump on both
+   TOS and PP for exactly this reason.
+
+8. **Consent checkbox text on signup must enumerate the named docs
+   AND signal that they incorporate the rest by reference.** Web
+   coach signup (`pages/coach/Signup.jsx` PasswordScreen) now reads:
+   "I agree to the [TOS], [PP], [Coach Agreement], and [DPA] —
+   which together incorporate our Refund Policy, Health & Medical
+   Disclaimer, Cookie Policy, and Acceptable Use Policy by
+   reference." Mobile athlete signup (`mobile/app/(auth)/sign-up.tsx`
+   PasswordScreen) has the equivalent phrasing minus the coach
+   docs. **When the incorporation list changes, the checkbox copy on
+   BOTH surfaces must change too.**
+
+9. **`LegalLayout.jsx::FOOTER_LINKS` and `mobile/app/(app)/about.tsx`
+   are the two cross-link surfaces.** Both list every legal doc the
+   user might want to navigate to from another legal doc (web) or
+   from the app's About screen (mobile). When a new doc ships, both
+   files must add the link. These are the cross-link surfaces for
+   legal docs; the admin client detail page (`AdminUserDetail.jsx`)
+   is the equivalent cross-link surface for the new `Client Detail`
+   patterns above.
+
+10. **Status of the 4 Phase-2 legal docs:** all SHIPPED (May 26
+    2026) — `/coach-agreement`, `/refund-policy`,
+    `/health-disclaimer`, `/dpa`. All 4 routed in `App.jsx`. All 4
+    incorporated into TOS §1. All 4 included in TOS §18 entire-
+    agreement list. Coach Agreement + DPA referenced in TOS §8
+    coach-specific terms. Health Disclaimer referenced in TOS §9
+    health section. Refund Policy referenced in TOS §5.5 refunds
+    section. PP §6.2 + §6.6 reference Coach Agreement + DPA.
+
+11. **Legal docs are PUBLIC routes** that must sit BEFORE the
+    `ProtectedLayout` catch-all in `App.jsx` so they don't get
+    swallowed by the SPA's default redirect to `/dashboard`. The
+    block of `<Route path="/terms" ... />`, `<Route path="/privacy" ... />`,
+    etc., must remain above `<Route component={ProtectedLayout} />`.
 
 ## Barcode scanner rules (web admin + mobile)
 
@@ -3689,7 +4479,7 @@ Admin-managed custom foods (source = 'myrx') plus synced USDA foods (source = 'u
 - `get_users_for_admin()` — returns all client profiles (id, full_name, email, avatar_url, weight_unit, current_weight, created_at, is_superuser, etc.)
 - `get_user_for_admin(p_user_id uuid)` — single client profile
 - `upsert_profile(...)` — upsert own profile
-- `get_coach_info()` — SECURITY DEFINER; returns `{ full_name, avatar_url }` from the superuser profile. Used by end-user ChatDrawer to show coach photo without hitting RLS. When changing return shape, must `DROP FUNCTION` first.
+- `get_coach_info()` — SECURITY DEFINER; returns `{ full_name, avatar_url, last_seen_at, share_online_status }` of the **caller's linked coach** (via `profiles.coach_id`). Falls back to the superuser's profile when the caller has no linked coach (legacy admin↔client chat model — keeps old chats working). Returns NULL when neither exists. Used by ChatDrawer / ChatSheet / mobile dashboard's "Coached by [name]" badge. **v2 locked May 26 2026** — pre-v2 always returned the superuser regardless of coach_id, which broke once the coach platform shipped. When changing return shape, must `DROP FUNCTION` first.
 
 ---
 

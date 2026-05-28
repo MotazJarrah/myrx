@@ -2,7 +2,7 @@ import LegalLayout from './LegalLayout'
 
 export default function PrivacyPolicy() {
   return (
-    <LegalLayout title="Privacy Policy" effectiveDate="May 9, 2026">
+    <LegalLayout title="Privacy Policy" effectiveDate="May 26, 2026">
       <h2>1. About this policy</h2>
       <p>
         This Privacy Policy describes how MyRX ("MyRX," "we," "us," or "our"),
@@ -77,12 +77,45 @@ export default function PrivacyPolicy() {
         </li>
       </ul>
 
-      <h3>3.3 Information we do not collect</h3>
+      <h3>3.3 Information from wearables and fitness platforms</h3>
+      <p>
+        If you explicitly connect a wearable or fitness platform via
+        Settings → Connect, MyRX reads fitness-grade signals from that
+        platform on your behalf. Currently supported platforms:
+      </p>
+      <ul>
+        <li><strong>Samsung Health Data SDK</strong> (Android — Galaxy and other Samsung devices)</li>
+        <li><strong>Google Health Connect</strong> (Android — Pixel and other Android devices)</li>
+        <li><strong>Apple HealthKit</strong> (iOS — pending implementation)</li>
+        <li>
+          <strong>OAuth-based services</strong> (pending implementation):
+          Strava, Garmin, Whoop, Polar, Fitbit
+        </li>
+      </ul>
+      <p>
+        From these platforms we read only the data types you have
+        granted through the platform's own consent UI, limited to:
+        heart-rate samples (ambient and per-workout), step counts,
+        workout sessions and associated session-level HR streams,
+        sleep stages and durations, and body measurements (weight,
+        body composition). We store this data in your MyRX account
+        (see Section 7, Data retention, for how long) so we can
+        render your trends and coaching surfaces. If you disconnect
+        a platform from Settings → Connect, we stop reading new data
+        from it; data already synced remains until you delete your
+        account or request deletion of that data type.
+      </p>
+
+      <h3>3.4 Information we do not collect</h3>
       <p>We do not collect or process:</p>
       <ul>
         <li>Precise GPS location</li>
         <li>Government-issued identification numbers</li>
-        <li>Health records from connected medical devices or healthcare providers</li>
+        <li>
+          Clinical health records from healthcare providers (e.g. lab
+          results, prescriptions, diagnoses, imaging) — only the
+          fitness-grade wearable signals described in Section 3.3
+        </li>
         <li>Information from third-party social networks unless you explicitly connect them</li>
       </ul>
 
@@ -107,6 +140,24 @@ export default function PrivacyPolicy() {
         <li>Aggregate, anonymize, and analyze usage to improve the Service</li>
         <li>Comply with legal obligations</li>
       </ul>
+
+      <h3>4.1 How we use your sex / gender</h3>
+      <p>
+        Your sex / gender selection is used <strong>only</strong> for metabolic
+        calculations: Basal Metabolic Rate (BMR), Total Daily Energy Expenditure
+        (TDEE), and macronutrient targets. The Mifflin-St Jeor equation we use
+        for BMR only has validated coefficients for Male and Female baselines —
+        for users who select Non-binary or Prefer not to say, we apply the
+        Female coefficients as the more conservative (safer) estimate. See our
+        Terms of Service section 9.1 for the full explanation.
+      </p>
+      <p>
+        Your sex / gender is never visible to other users, never shared with
+        third parties, never used for advertising or analytics segmentation,
+        and never used as a factor in pricing or feature gating. Coaches who
+        manage your account can see it because they need it to set your macro
+        plan correctly; nobody else can.
+      </p>
 
       <h2>5. Legal bases for processing (EU/UK users)</h2>
       <p>
@@ -142,28 +193,54 @@ export default function PrivacyPolicy() {
         only in the limited circumstances below.
       </p>
 
-      <h3>6.1 Service providers</h3>
+      <h3>6.1 Service providers (subprocessors)</h3>
       <p>
-        We use third-party service providers to operate the Service. They
-        process your information only on our instructions and under written
-        confidentiality and data-processing agreements:
+        We use third-party service providers to operate the Service.
+        They process your information only on our instructions and
+        under written confidentiality and data-processing agreements.
+        The same list appears in our{' '}
+        <a href="/dpa">Data Processing Agreement</a>; if a discrepancy
+        ever appears between the two, the DPA is the authoritative
+        list.
       </p>
+      <p><strong>Infrastructure</strong></p>
       <ul>
-        <li><strong>Supabase, Inc.</strong> — database, authentication, file storage (United States)</li>
-        <li><strong>Twilio Inc.</strong> — SMS verification codes via Twilio Verify (United States)</li>
-        <li><strong>Stripe, Inc.</strong> — payment processing for subscriptions purchased on the website (United States)</li>
-        <li><strong>Apple Inc.</strong> and <strong>Google LLC</strong> — app distribution (App Store, Google Play)</li>
+        <li><strong>Supabase, Inc.</strong> — Postgres database, authentication, file storage, edge functions (United States)</li>
+        <li><strong>Cloudflare, Inc.</strong> — web hosting (Pages), edge workers, D1 (United States, with global edge POPs)</li>
         <li><strong>Expo, Inc.</strong> — over-the-air app updates and build infrastructure (United States)</li>
-        <li>Email delivery providers used by our authentication provider for transactional email</li>
+      </ul>
+      <p><strong>Communications &amp; payments</strong></p>
+      <ul>
+        <li><strong>Stripe, Inc.</strong> — payment processing for web-sold subscriptions and one-time purchases (United States)</li>
+        <li><strong>Twilio Inc.</strong> — SMS verification codes via Twilio Verify (United States)</li>
+        <li><strong>Resend</strong> and/or <strong>SendGrid</strong> — transactional email delivery used by our authentication provider (United States)</li>
+      </ul>
+      <p><strong>App distribution</strong></p>
+      <ul>
+        <li><strong>Apple Inc.</strong> — App Store distribution and (when used) Apple In-App Purchase billing</li>
+        <li><strong>Google LLC</strong> — Google Play distribution and (when used) Google Play Billing</li>
+      </ul>
+      <p><strong>Wearable &amp; fitness platforms (only if you connect them)</strong></p>
+      <ul>
+        <li><strong>Samsung Electronics</strong> — Samsung Health Data SDK (Galaxy and other Samsung Android devices)</li>
+        <li><strong>Google LLC</strong> — Google Health Connect (Android)</li>
+        <li><strong>Apple Inc.</strong> — Apple HealthKit (iOS, pending implementation)</li>
+        <li><strong>Strava, Inc.</strong>, <strong>Garmin International, Inc.</strong>, <strong>Whoop, Inc.</strong>, <strong>Polar Electro Oy</strong>, <strong>Fitbit LLC</strong> — pending implementation</li>
       </ul>
 
       <h3>6.2 Coach access</h3>
       <p>
-        If you connect with a coach on MyRX, the coach has access to data you
-        have explicitly chosen to share — your workout logs, body data,
-        nutrition logs, and chat messages with that coach. You can review and
-        adjust what is shared in Settings under your sharing preferences. The
-        coach is bound by our Coach Terms of Service.
+        If you connect with a Coach on MyRX, the Coach has access to data
+        you have explicitly chosen to share — your workout logs, body
+        data, nutrition logs, and chat messages with that Coach. You can
+        review and adjust what is shared in Settings under your sharing
+        preferences. The Coach is bound by our{' '}
+        <a href="/coach-agreement">Coach Agreement</a> and (in their
+        handling of your Personal Data as your Coach) our{' '}
+        <a href="/dpa">Data Processing Agreement</a>, which together
+        require the Coach to keep your data confidential, use it only
+        for the coaching service, and not retain it after the coaching
+        relationship ends.
       </p>
 
       <h3>6.3 Legal compliance and safety</h3>
@@ -183,6 +260,27 @@ export default function PrivacyPolicy() {
 
       <h3>6.5 With your consent</h3>
       <p>We may share your information for any other purpose with your explicit consent.</p>
+
+      <h3>6.6 For Coaches: handling of your Clients' data</h3>
+      <p>
+        If you are a Coach with Clients on MyRX, our handling of your
+        Clients' Personal Data on your behalf is governed by our{' '}
+        <a href="/dpa">Data Processing Agreement</a> (DPA). In that
+        relationship, you are the Controller (you decide what coaching
+        to provide and what data you need) and MyRX is the Processor
+        (we hold and process your Clients' data on your documented
+        instructions). The DPA, which is incorporated into our{' '}
+        <a href="/terms">Terms of Service</a> and{' '}
+        <a href="/coach-agreement">Coach Agreement</a> by reference,
+        covers: the full subprocessor list and 30-day change notice,
+        EU Standard Contractual Clauses for international transfers,
+        72-hour Personal Data Breach notification, technical and
+        organizational security measures, audit rights, and our
+        deletion / return obligations when a coaching relationship
+        ends. This Privacy Policy continues to govern our processing of
+        Personal Data we collect from Coaches in our own right (account
+        registration, billing, support).
+      </p>
 
       <h2>7. Data retention</h2>
       <p>

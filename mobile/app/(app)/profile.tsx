@@ -38,9 +38,11 @@ import { useAuth } from '../../src/contexts/AuthContext'
 import { PasswordInput } from '../../src/components/PasswordInput'
 import { OTPInput } from '../../src/components/OTPInput'
 import { supabase } from '../../src/lib/supabase'
+import { friendlyAuthMessage } from '../../src/lib/authErrors'
 import { NumericInput } from '../../src/components/NumericInput'
 import AnimateRise from '../../src/components/AnimateRise'
 import BodyCompPicker from '../../src/components/BodyCompPicker'
+import CoachInviteCodeCard from '../../src/components/CoachInviteCodeCard'
 import { type BodyFatBand } from '../../src/lib/planPresets'
 import { Select } from '../../src/components/Select'
 import { COUNTRIES, matchCountryFromPhone, type Country } from '../../src/lib/countries'
@@ -1340,6 +1342,14 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
   return (
     <View style={s.formGap}>
 
+      {/* Coach invite code — manual fallback for the email-mismatch
+          edge case (athlete signed up with a different email than the
+          one their coach invited). Card is hidden for coaches + admins
+          inside the component itself (they can't accept invites). */}
+      <AnimateRise>
+        <CoachInviteCodeCard />
+      </AnimateRise>
+
       {/* Preferred units — column-aligned imperial vs metric. The
           column headers (added May 24 2026) sit once above the first
           row and remain accurate because every unit field below uses
@@ -1812,7 +1822,7 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
       setBioPasswordModal(false)
       setBioPasswordInput('')
     } catch (err: any) {
-      setBioPasswordError(err.message || 'Could not enable')
+      setBioPasswordError(friendlyAuthMessage(err, 'Could not enable'))
     } finally {
       setBioBusy(false)
     }
@@ -1871,7 +1881,7 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
       if (signInErr) { setPwdError('Current password is incorrect'); setPwdBusy(false); return }
       // Update to the new password.
       const { error: updateErr } = await supabase.auth.updateUser({ password: pwdNext })
-      if (updateErr) { setPwdError(updateErr.message || 'Could not update password'); setPwdBusy(false); return }
+      if (updateErr) { setPwdError(friendlyAuthMessage(updateErr, 'Could not update password')); setPwdBusy(false); return }
       setPwdSuccess(true)
       setPwdCurrent(''); setPwdNext(''); setPwdConfirm('')
       setTimeout(() => setPwdSuccess(false), 3000)

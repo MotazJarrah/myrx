@@ -3,7 +3,7 @@
  * Privacy Policy, Terms of Service, Cookie Policy, Acceptable Use.
  *
  * Renders:
- *   • A header bar with the wordmark logo (back-to-home link) + theme toggle
+ *   • A header bar with the wordmark logo (back-to-home link)
  *   • An ambient backdrop matching Landing/Auth so the docs don't look
  *     like an unrelated subdomain
  *   • A max-w-3xl reading-width content column with the prose
@@ -20,7 +20,6 @@
 
 import { Link } from 'wouter'
 import { useTheme } from '../../contexts/ThemeContext'
-import { Sun, Moon } from 'lucide-react'
 
 function Logo() {
   const { theme } = useTheme()
@@ -29,14 +28,18 @@ function Logo() {
 }
 
 const FOOTER_LINKS = [
-  { href: '/terms',          label: 'Terms of Service' },
-  { href: '/privacy',        label: 'Privacy Policy' },
-  { href: '/cookies',        label: 'Cookie Policy' },
-  { href: '/acceptable-use', label: 'Acceptable Use' },
+  { href: '/terms',              label: 'Terms of Service' },
+  { href: '/privacy',            label: 'Privacy Policy' },
+  { href: '/cookies',            label: 'Cookie Policy' },
+  { href: '/acceptable-use',     label: 'Acceptable Use' },
+  { href: '/coach-agreement',    label: 'Coach Agreement' },
+  { href: '/refund-policy',      label: 'Refund Policy' },
+  { href: '/health-disclaimer',  label: 'Health Disclaimer' },
+  { href: '/dpa',                label: 'Data Processing Agreement' },
 ]
 
 export default function LegalLayout({ title, effectiveDate, children }) {
-  const { theme, toggle } = useTheme()
+  const { theme } = useTheme()
   return (
     <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
       <div className="pointer-events-none absolute inset-0 ambient-grid opacity-50" aria-hidden />
@@ -46,15 +49,8 @@ export default function LegalLayout({ title, effectiveDate, children }) {
         aria-hidden
       />
 
-      <header className="relative z-10 flex h-16 items-center justify-between px-6">
+      <header className="relative z-10 flex h-16 items-center px-6">
         <Link href="/"><Logo /></Link>
-        <button
-          onClick={toggle}
-          aria-label="Toggle theme"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
       </header>
 
       <main className="relative z-10 mx-auto max-w-3xl px-6 pb-24 pt-8">

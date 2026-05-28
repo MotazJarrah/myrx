@@ -23,6 +23,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { AlertCircle } from 'lucide-react-native'
 import { supabase } from '../../src/lib/supabase'
 import { colors } from '../../src/theme'
+import { friendlyAuthMessage } from '../../src/lib/authErrors'
 
 type ConfirmType = 'signup' | 'magiclink' | 'email_change' | 'recovery' | 'invite'
 
@@ -67,9 +68,11 @@ export default function AuthConfirm() {
         if (error) {
           setStatus({
             kind: 'error',
-            message: /expired|invalid/i.test(error.message)
+            // Branch on error.code so the friendly-message rewrite
+            // doesn't hide the expired-link special case.
+            message: error.code === 'otp_expired'
               ? 'This link has expired or is no longer valid. Request a new one and try again.'
-              : (error.message || 'We could not verify this link.'),
+              : friendlyAuthMessage(error, 'We could not verify this link.'),
           })
           return
         }

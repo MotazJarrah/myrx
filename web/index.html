@@ -12,6 +12,176 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet" />
+
+    <!-- ──────────────────────────────────────────────────────────────────────
+         Pre-React safety net — runs BEFORE the React entry module loads.
+
+         The React ErrorBoundary in src/components/ErrorBoundary.jsx can only
+         catch errors that happen INSIDE the React tree. If the entry module
+         itself fails to load (cache poisoning → HTML returned as JS, stale
+         chunk references after a deploy, MIME-type rejection, etc.), React
+         never mounts and the boundary is dead in the water. The result is
+         a permanently blank page until the user manually clears site data
+         in DevTools — the worst-possible user experience.
+
+         This handler catches the browser-level `error` event for any module
+         load failure that pattern-matches a known recovery scenario, and
+         self-heals by unregistering all service workers, deleting all
+         caches, and forcing a reload. Throttled to once per minute so a
+         legitimately broken deploy doesn't infinite-loop.
+
+         Patterns matched (NARROW — only true MIME mismatch / SPA-fallback
+         HTML returned for a JS path. Lazy-chunk load failures are handled
+         by React's ErrorBoundary instead, so this script does NOT match
+         "Failed to fetch dynamically imported module" or "Loading chunk"
+         — those would compete with the boundary's reload-with-throttle
+         and produce the May 25 2026 infinite-reload loop):
+           "Expected a JavaScript … MIME type of 'text/html'"
+           "MIME type ('text/html') is not executable"
+           Generic "text/html" pattern in module-script errors
+
+         Locked May 25 2026 as part of the cache-poisoning self-heal pass.
+         ────────────────────────────────────────────────────────────────── -->
+    <script>
+      (function () {
+        try {
+          var SAFETY_KEY = 'myrx_safety_nuke_at'
+          var THROTTLE_MS = 60 * 1000  // once per minute max
+
+          // Shared self-heal: render banner, unregister all SWs, wipe all
+          // caches, reload with cache-buster. Throttled to once per minute
+          // so a legitimately broken deploy doesn't infinite-loop.
+          function selfHeal(reason) {
+            try {
+              var last = Number(sessionStorage.getItem(SAFETY_KEY) || 0)
+              if (Date.now() - last < THROTTLE_MS) return false
+              sessionStorage.setItem(SAFETY_KEY, String(Date.now()))
+            } catch (_) {}
+            try { console.warn('[myrx self-heal]', reason) } catch (_) {}
+            try {
+              document.body.innerHTML =
+                '<div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#0a0b0a;color:#e5e7eb;font-family:system-ui,sans-serif;font-size:14px;text-align:center;padding:24px">' +
+                '<div><div style="width:32px;height:32px;border:3px solid #4a4a4a;border-top-color:#c4f154;border-radius:50%;margin:0 auto 16px;animation:spin 0.8s linear infinite"></div>' +
+                'Updating MyRX…<br><span style="color:#9ca3af;font-size:12px">Clearing stale cache. One second.</span></div>' +
+                '<style>@keyframes spin{to{transform:rotate(360deg)}}</style></div>'
+            } catch (_) {}
+            ;(async function () {
+              try {
+                if ('serviceWorker' in navigator) {
+                  var regs = await navigator.serviceWorker.getRegistrations()
+                  await Promise.all(regs.map(function (r) { return r.unregister() }))
+                }
+              } catch (_) {}
+              try {
+                if (typeof caches !== 'undefined') {
+                  var keys = await caches.keys()
+                  await Promise.all(keys.map(function (k) { return caches.delete(k) }))
+                }
+              } catch (_) {}
+              // Cache-busting reload so the browser refetches fresh asset
+              // references from the live index.html.
+              setTimeout(function () {
+                location.replace(location.pathname + '?_recover=' + Date.now())
+              }, 400)
+            })()
+            return true
+          }
+
+          // ── Path A: window 'error' listener for JS module load failures ──
+          // The cache-poisoning case where the server / SW returns HTML for
+          // a /assets/*.js request. JS module failures DO fire window 'error'
+          // events, so this path catches them.
+          //
+          // CSS "Refused to apply style" failures, by contrast, are
+          // console-only warnings and do NOT fire DOM error events — those
+          // are handled by Path B below.
+          //
+          // Patterns matched (NARROW — only true MIME mismatch / SPA-fallback
+          // HTML returned for an asset path. Lazy-chunk load failures are
+          // handled by React's ErrorBoundary instead):
+          //   JS:  "Expected a JavaScript … MIME type … text/html"
+          //        "MIME type ('text/html') is not executable"
+          //   CSS regex kept here as belt-and-suspenders in case future
+          //   Chrome versions DO start firing error events for CSS MIME
+          //   rejections.
+          window.addEventListener('error', function (e) {
+            var msg = (e && (e.message || (e.target && (e.target.src || e.target.href)))) || ''
+            var looksRecoverable =
+              /Expected a JavaScript.*MIME type.*text\/html|MIME type.*text\/html.*is not executable|Refused to apply style.*text\/html|stylesheet MIME type/i
+                .test(String(msg))
+            if (!looksRecoverable) return
+            selfHeal('window.error matched recoverable pattern: ' + msg)
+          }, true)
+
+          // ── Recovery-URL cleanup ──
+          // Self-heal reloads with ?_recover=<timestamp> as a cache-buster.
+          // Once the page has successfully loaded (CSS applied, no further
+          // self-heal needed), strip that query string from the visible URL
+          // via history.replaceState so the user doesn't see an ugly URL.
+          // Don't strip until Path B has had a chance to run (so we don't
+          // accidentally hide a recovery in progress).
+          window.addEventListener('load', function () {
+            setTimeout(function () {
+              try {
+                if (location.search.indexOf('_recover=') === -1) return
+                // Only clean up if the page actually loaded CSS successfully.
+                var hasCss = false
+                for (var i = 0; i < document.styleSheets.length; i++) {
+                  var s = document.styleSheets[i]
+                  if (!s.href || s.href.indexOf(location.origin) !== 0) continue
+                  try { if (s.cssRules && s.cssRules.length > 0) { hasCss = true; break } } catch (_) {}
+                }
+                if (!hasCss) return
+                // Strip _recover from query string, preserve other params
+                var url = new URL(location.href)
+                url.searchParams.delete('_recover')
+                history.replaceState(null, '', url.pathname + (url.search || '') + url.hash)
+              } catch (_) {}
+            }, 1200)  // after Path B (which runs at 800ms)
+          })
+
+          // ── Path B: post-load stylesheet verification ──
+          // Added May 27 2026 after a stale SW served HTML for the
+          // production CSS bundle and Path A never fired (because
+          // "Refused to apply style" is console-only). Result was a fully
+          // unstyled page with no auto-recovery.
+          //
+          // After window 'load' + 800ms (gives the browser time to parse
+          // sheets), we iterate document.styleSheets looking for at least
+          // ONE same-origin sheet with accessible cssRules.length > 0. If
+          // none exists, our CSS bundle failed — typically MIME-rejected
+          // because a stale SW returned HTML.
+          //
+          // Same-origin filter prevents false positives from the
+          // googleapis font sheet (cross-origin throws on .cssRules access
+          // in some browsers, which we'd otherwise mistake for a missing
+          // sheet).
+          window.addEventListener('load', function () {
+            setTimeout(function () {
+              try {
+                var ok = false
+                for (var i = 0; i < document.styleSheets.length; i++) {
+                  var s = document.styleSheets[i]
+                  if (!s.href) continue // inline <style>, skip
+                  if (s.href.indexOf(location.origin) !== 0) continue // cross-origin (fonts etc)
+                  try {
+                    if (s.cssRules && s.cssRules.length > 0) {
+                      ok = true
+                      break
+                    }
+                  } catch (_) {
+                    // cssRules access threw — sheet exists but is broken.
+                    // Treat as still-needs-verification, don't set ok=true.
+                  }
+                }
+                if (ok) return
+                selfHeal('no valid same-origin stylesheet found post-load')
+              } catch (_) {}
+            }, 800)
+          })
+        } catch (_) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -3,13 +3,15 @@ import { Link, useParams } from 'wouter'
 import TickerNumber from '../../components/TickerNumber'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
+import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
-import { ArrowLeft, User, Check, Info, MessageCircle, UserCog } from 'lucide-react'
+import { ArrowLeft, User, Check, Info, MessageCircle, UserCog, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock } from 'lucide-react'
 
 import AdminUserProfile   from './tabs/AdminUserProfile'
 import AdminUserActivity  from './tabs/AdminUserActivity'
 import AdminUserBody      from './tabs/AdminUserBody'
 import AdminUserCalories  from './tabs/AdminUserCalories'
+import ClientSettingsDrawer from '../../components/ClientSettingsDrawer'
 
 // Format height stored in client's unit into admin's preferred display unit
 function formatHeightForAdmin(storedH, clientUnit, adminUnit) {
@@ -44,14 +46,47 @@ function getInitials(name) {
 
 // ── Snapshot helpers ──────────────────────────────────────────────────────────
 
+// Strength 1RM parser — matches mobile/app/(app)/dashboard.tsx parseEffort1RM
+// exactly (regex + return shape). Used for "Strength PRs this month" chip.
 function parse1RM(v) {
-  const m = v?.match(/Est\. 1RM ([\d.]+)/)
+  const m = v?.match(/Est\. 1RM (\d+(?:\.\d+)?)/)
   return m ? parseFloat(m[1]) : null
 }
 
+// Cardio direction-aware best parser — mirrors mobile dashboard's
+// parseCardioBest exactly. Returns { val, lowerBetter } so callers can
+// pick the right min/max direction per activity.
+//   • Pace activities (e.g. "5:30/km", "1:55/500m"): lower is better
+//   • Speed / rate / distance activities: higher is better
+// The `\b` after the unit alternation prevents "/min" (cal/min,
+// floors/min) from being misread as pace via "/mi" substring.
+function parseCardioBest(v) {
+  if (!v) return null
+  const isPace = /\/(km|mi|500m|100m)\b/.test(v)
+  if (isPace) {
+    const m = v.match(/(\d+):(\d+)/)
+    if (!m) return null
+    return { val: parseInt(m[1], 10) * 60 + parseInt(m[2], 10), lowerBetter: true }
+  }
+  const m = v.match(/(\d+(?:\.\d+)?)/)
+  return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
+}
+
+// Legacy parsePace — kept for the few remaining callers (hasPR helper);
+// new code should use parseCardioBest. Will retire when hasPR is removed.
 function parsePace(v) {
   const m = v?.match(/^(\d+):(\d{2})\/km$/)
   return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : null
+}
+
+// Mirrors mobile's grouping convention. Labels look like
+// "Push Up · Barbell" or "Running · 5K" — mobile groups by the EXERCISE
+// name (before " · "), so all variants of an exercise count as one
+// for the "PRs this month" chip. Web was grouping by the full label,
+// which inflated counts. Matches mobile dashboard.tsx::computeStrengthPRsThisMonth.
+function exerciseKey(label) {
+  if (!label) return ''
+  return label.split(' · ')[0]
 }
 
 function hasPR(efforts, parseVal, higherIsBetter, weekAgoISO) {
@@ -72,20 +107,16 @@ function hasPR(efforts, parseVal, higherIsBetter, weekAgoISO) {
   })
 }
 
+// Counts DISTINCT food_logs.log_date values in the caller's 14-day
+// fetch window — matches the chip's "X days logged in last 14 days"
+// label semantics. See the long-form comment on mobile's
+// computeFoodLogStreak (mobile/app/(app)/dashboard.tsx) for the
+// May 26 2026 history on why this is NOT a strict consecutive-streak
+// walker anymore. Mirror change: any future tweak here MUST land in
+// mobile + CoachClientDetail simultaneously.
 function calcStreak(logDates) {
   if (!logDates.length) return 0
-  const sorted = [...logDates].sort().reverse()
-  const today     = new Date().toISOString().split('T')[0]
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
-  if (sorted[0] !== today && sorted[0] !== yesterday) return 0
-  let streak = 1
-  for (let i = 1; i < sorted.length; i++) {
-    const prev = new Date(sorted[i - 1] + 'T12:00:00')
-    const curr = new Date(sorted[i]     + 'T12:00:00')
-    if (Math.round((prev - curr) / 86_400_000) === 1) streak++
-    else break
-  }
-  return streak
+  return new Set(logDates).size
 }
 
 // Training week streak (mirrors Dashboard logic)
@@ -154,6 +185,7 @@ function SnapshotBadge({ children, color }) {
     fuchsia: 'bg-fuchsia-500/10 border-fuchsia-500/20 text-fuchsia-400',
     red:     'bg-red-500/10 border-red-500/20 text-red-400',
     green:   'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
+    zinc:    'bg-zinc-500/10 border-zinc-500/20 text-zinc-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
     <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${cls}`}>
@@ -164,11 +196,17 @@ function SnapshotBadge({ children, color }) {
 
 // ── Tab config ────────────────────────────────────────────────────────────────
 
+// Tab structure locked May 26 2026 — "Profile" was misleading (the page
+// is for VIEWING client data, not editing the profile). Renamed to
+// "Dashboard" and the actual profile/settings forms moved behind the
+// gear icon in the profile card chrome. "Timeline" is admin-only and
+// reads from user_activity_events (admin-only RLS).
 const TABS = [
-  { id: 'profile',  label: 'Profile'    },
-  { id: 'activity', label: 'Efforts'    },
-  { id: 'body',     label: 'Bodyweight' },
-  { id: 'calories', label: 'Calories'   },
+  { id: 'dashboard', label: 'Dashboard'  },
+  { id: 'activity',  label: 'Efforts'    },
+  { id: 'body',      label: 'Bodyweight' },
+  { id: 'calories',  label: 'Calories'   },
+  { id: 'timeline',  label: 'Timeline'   },
 ]
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -184,12 +222,22 @@ export default function AdminUserDetail() {
   const [snapshotKey,    setSnapshotKey]    = useState(0)
   const [togglingChat,   setTogglingChat]   = useState(false)
   const [togglingCoach,  setTogglingCoach]  = useState(false)
+  const [togglingActive, setTogglingActive] = useState(false)
+  const [activeError,    setActiveError]    = useState('')
+  const [deleteOpen,     setDeleteOpen]     = useState(false)
+  const [deleteConfirm,  setDeleteConfirm]  = useState('')
+  const [deleting,       setDeleting]       = useState(false)
+  const [deleteError,    setDeleteError]    = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [activeTab,    setActiveTab]    = useState(() => {
     const params   = new URLSearchParams(window.location.search)
     const urlTab   = params.get('tab')
-    const validTabs = ['profile', 'activity', 'body', 'calories']
+    const validTabs = ['dashboard', 'activity', 'body', 'calories', 'timeline']
     if (urlTab && validTabs.includes(urlTab)) return urlTab
-    return localStorage.getItem(`admin-user-tab-${id}`) || 'profile'
+    // Legacy: old 'profile' tab → new 'dashboard'
+    const stored = localStorage.getItem(`admin-user-tab-${id}`)
+    if (stored === 'profile') return 'dashboard'
+    return stored || 'dashboard'
   })
 
   function handleTabChange(tabId) {
@@ -213,54 +261,110 @@ export default function AdminUserDetail() {
   }, [id])
 
   // ── Load snapshot (re-runs when an effort is saved) ───────────────────────
+  // Chip set mirrors the mobile Dashboard exactly (locked May 24 2026):
+  //   • Strength PRs this month  (per-exercise best 1RM, +1 if hit this month)
+  //   • Cardio PRs this month    (per-activity best pace/speed/distance/rate)
+  //   • Food log streak          (days with food_logs in last 14, walked back)
+  //   • Lowest BPM last 7 days   (MIN ambient hr_samples.bpm)
+  //   • Weekly weight diff       (latest in last 7d vs latest 8-14d ago)
+  // The OLD "weekly training streak" + "monthly PRs aggregate" were removed
+  // from mobile per the May 24 2026 overhaul; admin now matches.
   useEffect(() => {
     async function loadSnapshot() {
       const weekAgoISO     = new Date(Date.now() - 7  * 86_400_000).toISOString()
       const fourteenAgoISO = new Date(Date.now() - 14 * 86_400_000).toISOString()
-      const thirtyDaysDate = new Date(Date.now() - 30 * 86_400_000).toISOString().split('T')[0]
+      const monthStartISO  = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
+      const fourteenDate   = new Date(Date.now() - 14 * 86_400_000).toISOString().split('T')[0]
 
-      const [efRes, romRes, calRes, bwRes, allEfRes, allRomRes] = await Promise.all([
-        supabase.from('efforts').select('label, value, type, created_at').eq('user_id', id).gte('created_at', fourteenAgoISO).limit(200),
-        supabase.from('rom_records').select('movement_key, degrees, created_at').eq('user_id', id).gte('created_at', fourteenAgoISO).limit(100),
-        supabase.from('calorie_logs').select('log_date').eq('user_id', id).gte('log_date', thirtyDaysDate).order('log_date', { ascending: false }).limit(31),
-        supabase.from('bodyweight').select('created_at').eq('user_id', id).gte('created_at', weekAgoISO).limit(20),
-        supabase.from('efforts').select('created_at, label, value, type').eq('user_id', id).limit(2000),
-        supabase.from('rom_records').select('movement_key, degrees, created_at').eq('user_id', id).limit(500),
+      const [allEfRes, foodRes, hrRes, bw14Res] = await Promise.all([
+        // Per-exercise / per-activity best logic needs ALL efforts.
+        supabase.from('efforts').select('created_at, label, value, type').eq('user_id', id).limit(5000),
+        // Food log streak — distinct days in last 14.
+        supabase.from('food_logs').select('log_date').eq('user_id', id).gte('log_date', fourteenDate).order('log_date', { ascending: false }).limit(50),
+        // Lowest ambient BPM in last 7 days (mirrors Heart page resting filter).
+        supabase.from('hr_samples').select('bpm').eq('user_id', id).is('workout_id', null).gte('measured_at', weekAgoISO).order('bpm', { ascending: true }).limit(1),
+        // Weekly weight diff — needs 2 weeks of bodyweight to find both anchors.
+        supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', id).gte('created_at', fourteenAgoISO).order('created_at', { ascending: false }).limit(50),
       ])
 
-      const strengthEfforts = (efRes.data || []).filter(e => e.type === 'strength')
-      const cardioEfforts   = (efRes.data || []).filter(e => e.type === 'cardio')
-
-      const strengthPR = hasPR(strengthEfforts, parse1RM, true,  weekAgoISO)
-      const cardioPR   = hasPR(cardioEfforts,   parsePace, false, weekAgoISO)
-
-      const romData  = romRes.data || []
-      const romByKey = {}
-      romData.forEach(r => {
-        if (!romByKey[r.movement_key]) romByKey[r.movement_key] = { recent: [], older: [] }
-        if (r.created_at >= weekAgoISO) romByKey[r.movement_key].recent.push(r.degrees)
-        else romByKey[r.movement_key].older.push(r.degrees)
+      // ── Strength PRs this month ─────────────────────────────────────────
+      // Per-EXERCISE highest Est. 1RM ever; +1 if best-ever was hit this
+      // calendar month. Grouped by exerciseKey (split on " · ") so all
+      // variants of an exercise count once. Mirrors mobile dashboard's
+      // computeStrengthPRsThisMonth byte-for-byte (May 26 2026 audit).
+      const allStrength = (allEfRes.data || []).filter(e => e.type === 'strength')
+      const bestByExStrength = {}
+      allStrength.forEach(e => {
+        const v = parse1RM(e.value)
+        if (!v) return
+        const key = exerciseKey(e.label)
+        if (!key) return
+        if (!bestByExStrength[key] || v > bestByExStrength[key].best) {
+          bestByExStrength[key] = { best: v, at: e.created_at }
+        }
       })
-      const mobilityPR = Object.values(romByKey).some(({ recent, older }) => {
-        if (!recent.length) return false
-        const rMax = Math.max(...recent)
-        if (!older.length) return rMax > 0
-        return rMax > Math.max(...older)
+      const strengthPRsThisMonth = Object.values(bestByExStrength)
+        .filter(({ at }) => at >= monthStartISO).length
+
+      // ── Cardio PRs this month ───────────────────────────────────────────
+      // Per-ACTIVITY best, direction-aware via parseCardioBest's
+      // { val, lowerBetter } return. Counts speed/rate/distance PRs
+      // (higher-is-better) as well as pace PRs (lower-is-better) —
+      // previous web version only counted pace, missing Air Bike
+      // cal/min, StairMill floors/min, distance-based runs, etc.
+      // Mirrors mobile dashboard's computeCardioPRsThisMonth.
+      const allCardio = (allEfRes.data || []).filter(e => e.type === 'cardio')
+      const bestByActCardio = {}
+      allCardio.forEach(e => {
+        const parsed = parseCardioBest(e.value)
+        if (!parsed) return
+        const key = exerciseKey(e.label)
+        if (!key) return
+        const existing = bestByActCardio[key]
+        const isBetter = existing
+          ? (parsed.lowerBetter ? parsed.val < existing.best : parsed.val > existing.best)
+          : true
+        if (isBetter) {
+          bestByActCardio[key] = { best: parsed.val, at: e.created_at }
+        }
       })
+      const cardioPRsThisMonth = Object.values(bestByActCardio)
+        .filter(({ at }) => at >= monthStartISO).length
 
-      const calDates  = (calRes.data || []).map(c => c.log_date)
-      const calStreak = calcStreak(calDates)
-      const weighIns  = (bwRes.data || []).length
+      // ── Food log streak (days in last 14, walked backward) ──────────────
+      const foodDates  = [...new Set((foodRes.data || []).map(r => r.log_date))]
+      const foodStreak = calcStreak(foodDates)
 
-      const allEffortDates    = (allEfRes.data || []).map(e => e.created_at)
-      const allStrengthEfforts = (allEfRes.data || []).filter(e => e.type === 'strength')
-      const trainingStreak    = computeWeekStreak(allEffortDates)
-      const monthlyPRs        = computeMonthlyPRs(allStrengthEfforts, allRomRes.data || [])
+      // ── Lowest BPM last 7 days ──────────────────────────────────────────
+      const lowestBpm = hrRes.data?.[0]?.bpm ?? null
 
-      setSnapshot({ strengthPR, cardioPR, mobilityPR, calStreak, weighIns, trainingStreak, monthlyPRs })
+      // ── Weekly weight diff (signed, in admin's display unit) ────────────
+      let weightDiff = null
+      const bw = bw14Res.data || []
+      if (bw.length >= 2) {
+        const weekAgoTs = new Date(weekAgoISO).getTime()
+        const recent    = bw.find(r => new Date(r.created_at).getTime() >= weekAgoTs)
+        const older     = bw.find(r => new Date(r.created_at).getTime() <  weekAgoTs)
+        if (recent && older) {
+          // Normalize both to kg, subtract, convert to admin's preferred unit
+          const recentKg = toKg(parseFloat(recent.weight), recent.unit || 'lb')
+          const olderKg  = toKg(parseFloat(older.weight),  older.unit  || 'lb')
+          const diffKg   = recentKg - olderKg
+          const adminUnit = adminProfile?.weight_unit || 'lb'
+          weightDiff = adminUnit === 'kg' ? diffKg : diffKg / 0.453592
+        }
+      }
+
+      setSnapshot({
+        strengthPRsThisMonth,
+        cardioPRsThisMonth,
+        foodStreak,
+        lowestBpm,
+        weightDiff,
+      })
     }
     loadSnapshot()
-  }, [id, snapshotKey])
+  }, [id, snapshotKey, adminProfile?.weight_unit])
 
   if (loading) {
     return <div className="py-20 text-center text-sm text-muted-foreground">Loading user…</div>
@@ -330,10 +434,103 @@ export default function AdminUserDetail() {
     setTogglingCoach(false)
   }
 
+  // Active / Inactive toggle (May 24 2026).
+  //   ACTIVE   → user can log in normally; data accessible.
+  //   INACTIVE → auth user is banned (~100 yr) AND profiles.deactivated_at set.
+  //              User cannot sign in. All data (efforts, weight, calories,
+  //              messages, etc.) stays in the DB. Reversible.
+  // Calls the admin-user-management edge function which requires service-role
+  // privileges — the browser cannot ban auth users directly.
+  async function toggleActive() {
+    if (togglingActive) return
+    setTogglingActive(true)
+    setActiveError('')
+    const wasDeactivated = !!profile.deactivated_at
+    const action = wasDeactivated ? 'activate' : 'deactivate'
+    try {
+      // supabase.functions.invoke() auto-attaches the URL, Authorization
+      // header (from the active session), and apikey. Avoids the
+      // VITE_SUPABASE_URL env-var pitfall — this codebase hardcodes those
+      // constants in lib/supabase.js rather than reading import.meta.env.
+      const { data, error } = await supabase.functions.invoke(
+        'admin-user-management',
+        { body: { action, target_user_id: id } },
+      )
+      if (error) throw error
+      if (!data?.success) {
+        throw new Error(data?.error || data?.detail || 'Unknown error')
+      }
+      setProfile(prev => ({
+        ...prev,
+        deactivated_at: wasDeactivated ? null : new Date().toISOString(),
+      }))
+    } catch (err) {
+      setActiveError(err?.message || 'Failed to update status.')
+    } finally {
+      setTogglingActive(false)
+    }
+  }
+
+  // Hard-delete the account. Calls auth.admin.deleteUser via the edge
+  // function, which cascades through every FK that references auth.users
+  // ON DELETE CASCADE — wipes profiles, efforts, bodyweight, rom_records,
+  // calorie_logs, calorie_plans, food_logs, hr_samples, step_samples,
+  // wearable_workouts, user_integrations, messages, credential_history,
+  // plus auth internals (identities, sessions, etc.). IRREVERSIBLE.
+  async function doHardDelete() {
+    if (deleting) return
+    if (deleteConfirm !== 'DELETE') {
+      setDeleteError('Type DELETE to confirm.')
+      return
+    }
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        'admin-user-management',
+        { body: {
+          action: 'hard_delete',
+          target_user_id: id,
+          confirm: 'DELETE',
+        } },
+      )
+      if (error) throw error
+      if (!data?.success) {
+        throw new Error(data?.error || data?.detail || 'Unknown error')
+      }
+
+      // Tear down the open modal + cached state BEFORE navigating so the
+      // unmount race that previously blanked the page can't fire. The
+      // previous version used wouter's setLocation here, which kept the
+      // entire React tree mounted while routes swapped. AdminDashboard /
+      // AdminFeed had cached entries pointing at this now-deleted user,
+      // and a stale read during the render churn was crashing the tree
+      // (manifesting as a blank screen until the user hard-refreshed).
+      //
+      // Two-part fix:
+      //   1. Bust every cached admin entry — they'll re-fetch fresh on
+      //      next mount with no reference to the deleted profile.
+      //   2. window.location.replace() instead of setLocation — hard
+      //      navigation, zero React state survives, no race. Same
+      //      pattern AuthContext.signOut() uses ("Hard navigate so no
+      //      React state race condition can land on CompleteProfile").
+      //   3. replace() (not assign()) so Back doesn't return to a 404
+      //      detail page for the user we just deleted.
+      setDeleteOpen(false)
+      dataCache.bustPrefix('admin:')
+      window.location.replace('/admin/clients')
+    } catch (err) {
+      setDeleteError(err?.message || 'Failed to delete account.')
+      setDeleting(false)
+    }
+  }
+
   const hasSnapshot = snapshot && (
-    snapshot.strengthPR || snapshot.cardioPR || snapshot.mobilityPR ||
-    snapshot.calStreak > 0 || snapshot.weighIns > 0 ||
-    snapshot.trainingStreak > 0 || snapshot.monthlyPRs > 0
+    (snapshot.strengthPRsThisMonth > 0) ||
+    (snapshot.cardioPRsThisMonth > 0) ||
+    (snapshot.foodStreak > 0) ||
+    (snapshot.lowestBpm != null) ||
+    (snapshot.weightDiff != null)
   )
 
   return (
@@ -378,59 +575,136 @@ export default function AdminUserDetail() {
             <p className="text-xs text-muted-foreground truncate">{profile.email}</p>
           </div>
 
-          <div className="flex flex-col items-end gap-1 shrink-0">
-            {existingPlan && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
-                <Check className="h-3 w-3" /> Intake Plan
-              </span>
-            )}
-            {existingPlan?.goal_reached && (
-              <span className="inline-flex items-center rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[11px] font-medium text-blue-400">
-                🎯 Goal
-              </span>
-            )}
-            {/* Chat toggle */}
-            <button
-              onClick={toggleChat}
-              disabled={togglingChat}
-              title={profile.chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
-              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                profile.chat_enabled
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                  : 'border-border text-muted-foreground hover:border-border hover:text-muted-foreground'
-              } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-            >
-              <MessageCircle className="h-3 w-3" />
-              {profile.chat_enabled ? 'Chat on' : 'Chat off'}
-            </button>
+          {/* Right-side action column — restructured May 26 2026 into 3
+              priority-ordered visual rows (was previously one long stack
+              of unrelated chips). Per the locked layout:
+                Row 1 = status pills (read-only badges)
+                Row 2 = relationship toggles (chat + plan ownership)
+                Row 3 = account actions (active + delete + settings)
+              Visual separation between rows makes the hierarchy obvious. */}
+          <div className="flex flex-col items-end gap-2 shrink-0">
 
-            {/* Self-coached toggle (May 23 2026) — when ON the client owns
-                their plan via the mobile wizard; when OFF the admin owns it
-                via the AdminUserPlan tab. Flipping ON → OFF deletes the
-                existing plan (see toggleSelfCoached above for full rule). */}
-            <button
-              onClick={toggleSelfCoached}
-              disabled={togglingCoach}
-              title={profile.is_self_coached
-                ? 'Switch to admin-coached (you take over the plan; deletes their self-set plan)'
-                : 'Switch to self-coached (client manages their own plan from the app)'}
-              className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                profile.is_self_coached
-                  ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
-                  : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
-              } ${togglingCoach ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-            >
-              <UserCog className="h-3 w-3" />
-              {profile.is_self_coached ? 'Self-coached' : 'Admin-coached'}
-            </button>
+            {/* Row 1 — Status pills (read-only badges).
+                Only render when the relevant signal exists. */}
+            {(existingPlan || existingPlan?.goal_reached) && (
+              <div className="flex flex-wrap items-center justify-end gap-1">
+                {existingPlan && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                    <Check className="h-3 w-3" /> Intake Plan
+                  </span>
+                )}
+                {existingPlan?.goal_reached && (
+                  <span className="inline-flex items-center rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[11px] font-medium text-blue-400">
+                    🎯 Goal
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Row 2 — Relationship toggles. Chat on/off + plan ownership
+                (Self-managed vs Coach-managed, relabeled May 26 2026 from
+                the misleading "Admin-coached"). */}
+            <div className="flex flex-wrap items-center justify-end gap-1">
+              <button
+                onClick={toggleChat}
+                disabled={togglingChat}
+                title={profile.chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  profile.chat_enabled
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                    : 'border-border text-muted-foreground hover:border-border hover:text-muted-foreground'
+                } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <MessageCircle className="h-3 w-3" />
+                {profile.chat_enabled ? 'Chat on' : 'Chat off'}
+              </button>
+
+              {/* Plan ownership toggle. Labels locked May 26 2026:
+                  Self-managed = client owns plan via mobile wizard.
+                  Coach-managed = admin/coach owns plan via AdminUserPlan tab.
+                  Was "Self-coached / Admin-coached" — misleading because
+                  coaches also own client plans, not just admins. */}
+              <button
+                onClick={toggleSelfCoached}
+                disabled={togglingCoach}
+                title={profile.is_self_coached
+                  ? 'Switch to coach-managed (you take over the plan; deletes their self-set plan)'
+                  : 'Switch to self-managed (client manages their own plan from the app)'}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  profile.is_self_coached
+                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+                } ${togglingCoach ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <UserCog className="h-3 w-3" />
+                {profile.is_self_coached ? 'Self-managed' : 'Coach-managed'}
+              </button>
+            </div>
+
+            {/* Row 3 — Account actions (Active/Inactive + Settings + Delete).
+                Less prominent than the relationship toggles — these are
+                serious account-level operations, not casual flips. */}
+            <div className="flex flex-wrap items-center justify-end gap-1">
+              <button
+                onClick={toggleActive}
+                disabled={togglingActive}
+                title={profile.deactivated_at
+                  ? 'Reactivate this account — restores sign-in'
+                  : 'Deactivate this account — blocks sign-in (data preserved)'}
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                  profile.deactivated_at
+                    ? 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400 hover:bg-zinc-500/20'
+                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                } ${togglingActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <Power className="h-3 w-3" />
+                {profile.deactivated_at ? 'Inactive' : 'Active'}
+              </button>
+
+              <button
+                onClick={() => setSettingsOpen(true)}
+                title="Open this client's account settings"
+                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors border-border text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+              >
+                <SettingsIcon className="h-3 w-3" />
+                Settings
+              </button>
+
+              <button
+                onClick={() => { setDeleteOpen(true); setDeleteConfirm(''); setDeleteError('') }}
+                disabled={deleting}
+                title="Permanently delete this account and all associated data"
+                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors bg-destructive/10 border-destructive/30 text-destructive hover:bg-destructive/20 cursor-pointer"
+              >
+                <Trash2 className="h-3 w-3" />
+                Delete
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Stats strip */}
+        {activeError && (
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{activeError}</span>
+          </div>
+        )}
+
+        {profile.deactivated_at && !activeError && (
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-zinc-500/30 bg-zinc-500/10 px-3 py-2 text-xs text-zinc-400">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>Account deactivated {new Date(profile.deactivated_at).toLocaleDateString()} — user cannot sign in. Their data is preserved.</span>
+          </div>
+        )}
+
+        {/* Identity strip — Age / Gender / Phone / Weight / Height.
+            Phone added May 26 2026 to mirror mobile dashboard's identity
+            chips. Renders the formatted national number prefixed by the
+            country flag + dial code where present. */}
         <div className="mt-3 flex items-center gap-4 flex-wrap text-[11px]">
           {[
             { label: 'Age',    value: age ? `${age}y` : '—' },
             { label: 'Gender', value: profile.gender ? profile.gender.charAt(0).toUpperCase() + profile.gender.slice(1) : '—' },
+            { label: 'Phone',  value: profile.phone || '—' },
             { label: 'Weight', value: displayWeight },
             { label: 'Height', value: displayHeight },
           ].map(({ label, value }, i) => (
@@ -442,16 +716,36 @@ export default function AdminUserDetail() {
           ))}
         </div>
 
-        {/* Snapshot badges */}
+        {/* Stat chips — mirrors the mobile Dashboard 5-chip set exactly
+            (locked May 24 2026, ported to admin May 26 2026). Each chip
+            only renders when the underlying signal exists. */}
         {hasSnapshot && (
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {snapshot.trainingStreak > 0 && <SnapshotBadge color="blue">🗓️ <TickerNumber value={snapshot.trainingStreak} />-wk training streak</SnapshotBadge>}
-            {snapshot.monthlyPRs > 0     && <SnapshotBadge color="amber">🏆 <TickerNumber value={snapshot.monthlyPRs} /> PR{snapshot.monthlyPRs !== 1 ? 's' : ''} this month</SnapshotBadge>}
-            {snapshot.strengthPR  && <SnapshotBadge color="blue">💪 Strength PR this week</SnapshotBadge>}
-            {snapshot.cardioPR    && <SnapshotBadge color="amber">🏃 Cardio PR this week</SnapshotBadge>}
-            {snapshot.mobilityPR  && <SnapshotBadge color="fuchsia">🤸 Mobility PR this week</SnapshotBadge>}
-            {snapshot.calStreak > 0 && <SnapshotBadge color="red">🔥 <TickerNumber value={snapshot.calStreak} />-day nutrition streak</SnapshotBadge>}
-            {snapshot.weighIns > 0  && <SnapshotBadge color="green">⚖️ <TickerNumber value={snapshot.weighIns} /> weigh-in{snapshot.weighIns !== 1 ? 's' : ''} this week</SnapshotBadge>}
+            {snapshot.strengthPRsThisMonth > 0 && (
+              <SnapshotBadge color="blue">
+                🏆 <TickerNumber value={snapshot.strengthPRsThisMonth} /> Strength PR{snapshot.strengthPRsThisMonth !== 1 ? 's' : ''} this month
+              </SnapshotBadge>
+            )}
+            {snapshot.cardioPRsThisMonth > 0 && (
+              <SnapshotBadge color="amber">
+                🏆 <TickerNumber value={snapshot.cardioPRsThisMonth} /> Cardio PR{snapshot.cardioPRsThisMonth !== 1 ? 's' : ''} this month
+              </SnapshotBadge>
+            )}
+            {snapshot.foodStreak > 0 && (
+              <SnapshotBadge color="red">
+                🍴 <TickerNumber value={snapshot.foodStreak} /> day{snapshot.foodStreak !== 1 ? 's' : ''} logged in last 14 days
+              </SnapshotBadge>
+            )}
+            {snapshot.lowestBpm != null && (
+              <SnapshotBadge color="green">
+                ❤️ <TickerNumber value={snapshot.lowestBpm} /> bpm low (7d)
+              </SnapshotBadge>
+            )}
+            {snapshot.weightDiff != null && (
+              <SnapshotBadge color="zinc">
+                ⚖️ {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {adminProfile?.weight_unit || 'lb'} this week
+              </SnapshotBadge>
+            )}
           </div>
         )}
 
@@ -464,12 +758,28 @@ export default function AdminUserDetail() {
       </div>
 
       {/* ── Tab content ── */}
-      {activeTab === 'profile' && (
-        <AdminUserProfile
-          profile={profile}
-          userId={id}
-          onProfileSaved={updated => setProfile(prev => ({ ...prev, ...updated }))}
-        />
+
+      {/* Dashboard — 2×2 grid of placeholder cards. Real content
+          (weight trend chart, food intake snapshot, strength PR chart,
+          cardio PR chart) lands in a follow-on. The tab was previously
+          called "Profile" and rendered the Edit profile / Edit settings
+          forms inline; those moved behind the gear icon May 26 2026
+          so the top-level tabs are pure read-only dashboards. */}
+      {activeTab === 'dashboard' && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {[
+            { icon: Scale,    label: 'Bodyweight trend', tint: 'text-emerald-400' },
+            { icon: Apple,    label: 'Food intake',      tint: 'text-amber-400'   },
+            { icon: Dumbbell, label: 'Strength PRs',     tint: 'text-blue-400'    },
+            { icon: Activity, label: 'Cardio PRs',       tint: 'text-orange-400'  },
+          ].map(({ icon: Icon, label, tint }) => (
+            <div key={label} className="rounded-xl border border-border bg-card p-5 min-h-[200px] flex flex-col items-center justify-center text-center gap-2">
+              <Icon className={`h-8 w-8 ${tint} opacity-50`} />
+              <p className="text-sm font-semibold text-foreground">{label}</p>
+              <p className="text-xs text-muted-foreground">Snapshot coming soon</p>
+            </div>
+          ))}
+        </div>
       )}
 
       {activeTab === 'activity' && (
@@ -495,6 +805,117 @@ export default function AdminUserDetail() {
           onPlanSaved={updated => setExistingPlan(updated)}
           onSaved={() => setSnapshotKey(k => k + 1)}
         />
+      )}
+
+      {/* Timeline — admin-only step-by-step move log. Reads from
+          user_activity_events (admin-only RLS). UI ships in a
+          follow-on; placeholder for now so the tab is visible. */}
+      {activeTab === 'timeline' && (
+        <div className="rounded-xl border border-border bg-card p-10 text-center">
+          <Clock className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+          <h2 className="text-base font-semibold mb-2">Activity Timeline</h2>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto">
+            Step-by-step log of every system event for this client —
+            sign-ins, profile edits, coach assignments, plan changes,
+            wearable connections, deactivations, and more. Searchable
+            + filterable. UI lands in the next iteration.
+          </p>
+        </div>
+      )}
+
+      {/* Settings drawer — opens via the gear icon in the profile
+          card chrome. Renders the same Account / Preferences /
+          Security tabs the client sees on /profile, but scoped to
+          this client and with admin support actions where direct
+          edits aren't possible (send password reset, etc.). */}
+      <ClientSettingsDrawer
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        clientUserId={id}
+        clientProfile={profile}
+        viewerRole="admin"
+        onProfileSaved={updated => setProfile(prev => ({ ...prev, ...updated }))}
+      />
+
+
+      {/* ── Hard-delete confirm modal ── */}
+      {deleteOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => !deleting && setDeleteOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-destructive/30 bg-card shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-destructive/15">
+                  <AlertTriangle className="h-5 w-5 text-destructive" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-foreground">Delete account</h2>
+                  <p className="text-xs text-muted-foreground">This cannot be undone.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => !deleting && setDeleteOpen(false)}
+                disabled={deleting}
+                className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-xs text-foreground leading-relaxed">
+                You're about to permanently delete <span className="font-semibold">{profile.full_name || profile.email}</span>.
+                This wipes their <span className="font-semibold">profile, all logged efforts, body weight history, ROM records, calorie + food logs, intake plan, wearable data, messages, and authentication record.</span>
+                {' '}There is no undo and no recovery path — not even from a backup the user could initiate.
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  Type <span className="font-mono text-destructive">DELETE</span> to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirm}
+                  onChange={e => { setDeleteConfirm(e.target.value); setDeleteError('') }}
+                  placeholder="DELETE"
+                  autoFocus
+                  disabled={deleting}
+                  className="w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm font-mono text-foreground outline-none focus:border-destructive focus:ring-1 focus:ring-destructive transition-colors disabled:opacity-50"
+                />
+              </div>
+
+              {deleteError && (
+                <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{deleteError}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+              <button
+                onClick={() => setDeleteOpen(false)}
+                disabled={deleting}
+                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={doHardDelete}
+                disabled={deleting || deleteConfirm !== 'DELETE'}
+                className="flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-xs font-semibold text-destructive-foreground hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {deleting
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Deleting…</>
+                  : <><Trash2 className="h-3.5 w-3.5" /> Permanently delete</>}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

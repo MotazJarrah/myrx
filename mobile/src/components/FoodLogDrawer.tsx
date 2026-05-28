@@ -1308,7 +1308,11 @@ export default function FoodLogDrawer({
                   <Text style={s.sheetTitle}>Food Log</Text>
                   <Text style={s.sheetSub}>{day ? fmtDay(day) : ''}</Text>
                 </View>
-                <CloseBtn onPress={onClose} />
+                {/* Close X removed May 27 2026 — swipe-down on the
+                    header dismisses the drawer (uniform across all
+                    bottom sheets in the app). cancelEdit X stays
+                    below because that's a "cancel edit" action, not
+                    a drawer close. */}
               </>
             )}
             {view === 'search' && (
@@ -1358,7 +1362,7 @@ export default function FoodLogDrawer({
             {view === 'portion' && (
               <View style={s.headerRowWide}>
                 <Text style={s.sheetSubTitle}>Choose portion</Text>
-                <CloseBtn onPress={onClose} />
+                {/* Close X removed May 27 2026 — swipe-down dismisses. */}
               </View>
             )}
             {view === 'edit' && (

@@ -159,7 +159,7 @@ export default function AdminShell({ children }) {
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-semibold">{displayName}</p>
-              <p className="text-[11px] text-muted-foreground">Account &amp; settings</p>
+              <p className="text-[11px] text-muted-foreground">Account Settings</p>
             </div>
             <Settings className="h-4 w-4 shrink-0 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
           </a>
@@ -231,7 +231,7 @@ export default function AdminShell({ children }) {
                   }
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold truncate">{displayName}</p>
-                    <p className="text-[11px] text-muted-foreground">Account &amp; settings</p>
+                    <p className="text-[11px] text-muted-foreground">Account Settings</p>
                   </div>
                   <Settings className="h-4 w-4 shrink-0 text-muted-foreground/60 group-hover:text-foreground transition-colors" />
                 </a>

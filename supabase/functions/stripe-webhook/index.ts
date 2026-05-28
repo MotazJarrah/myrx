@@ -129,7 +129,12 @@ async function stripeGet(path: string): Promise<any> {
 // ── Tier + status mappers ───────────────────────────────────────────
 function tierFromLookupKey(lookupKey: string | null) {
   if (!lookupKey) return null
-  const m = lookupKey.match(/^coach_(starter|pro|unlimited)_(monthly|yearly)$/)
+  // Stripe lookup_keys use canonical tier + interval names per CLAUDE.md
+  // (May 24 2026 lock): starter/pro/elite × monthly/annual. Renamed
+  // from legacy unlimited/yearly via scripts/rename-stripe-coach-tiers.mjs.
+  // We map 'annual' → 'year' here because coach_subscriptions.interval
+  // stores Stripe's standard recurring values ('month'/'year').
+  const m = lookupKey.match(/^coach_(starter|pro|elite)_(monthly|annual)$/)
   if (!m) return null
   return { tier: m[1], interval: m[2] === "monthly" ? "month" : "year" }
 }
@@ -260,7 +265,7 @@ async function handleCheckoutSessionCompleted(session: any, supabase: any) {
   }
   const userId = session.metadata?.user_id
   const tier   = session.metadata?.tier
-  if (!userId || !tier || (tier !== "semirx" && tier !== "fullrx")) {
+  if (!userId || !tier || (tier !== "corerx" && tier !== "fullrx")) {
     console.error(`[webhook] Bad B2C metadata: user_id=${userId} tier=${tier}`)
     return
   }

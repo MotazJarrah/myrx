@@ -35,6 +35,7 @@ import { getEffortTags, TAG_STYLES } from '../../src/lib/effortTags'
 import DeleteAction from '../../src/components/DeleteAction'
 import TickerNumber from '../../src/components/TickerNumber'
 import AnimateRise from '../../src/components/AnimateRise'
+import InviteBanner from '../../src/components/InviteBanner'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── Helpers (1:1 with Dashboard.jsx) ─────────────────────────────────────────
@@ -218,21 +219,22 @@ function computeCardioPRsThisMonth(allCardioEfforts: any[]): number {
  * past 14).
  */
 function computeFoodLogStreak(logDates: string[]): number {
+  // Counts DISTINCT log_dates in the last 14 days (matches the chip's
+  // "X days logged in last 14 days" label semantics).
+  //
+  // Earlier this function walked backwards counting only CONSECUTIVE
+  // days — a stricter "streak" definition that reset to 0 the moment
+  // the user skipped 2+ recent days, even if the rest of the 14-day
+  // window had heavy activity. That contradicted the label and made
+  // the chip vanish for genuinely-active users who took a weekend off
+  // food-logging (locked May 26 2026 after a real-data audit on
+  // Motaz's account: 10 logs across 14 days but a 3-day tail gap →
+  // chip hid).
+  //
+  // The caller already filters its food_logs SELECT to >= today-14,
+  // so we just dedupe + count.
   if (!logDates || logDates.length === 0) return 0
-  const dateSet = new Set(logDates)
-  const todayKey = new Date().toISOString().slice(0, 10)
-  const check = new Date()
-  // Allow today to be missing — start counting from yesterday if so —
-  // so the streak doesn't reset to 0 the moment the user opens the app
-  // before logging their first meal of the day.
-  if (!dateSet.has(todayKey)) check.setDate(check.getDate() - 1)
-  let streak = 0
-  while (true) {
-    const key = check.toISOString().slice(0, 10)
-    if (dateSet.has(key)) { streak++; check.setDate(check.getDate() - 1) }
-    else break
-  }
-  return streak
+  return new Set(logDates).size
 }
 
 /**
@@ -258,6 +260,19 @@ function computeWeeklyWeightDiff(bwLogs: { weight: number; unit: string; created
   if (!previous) return null
   const toKg = (w: number, u: string) => u === 'lb' ? w * 0.453592 : w
   return { deltaKg: toKg(recent.weight, recent.unit) - toKg(previous.weight, previous.unit) }
+}
+
+// ── Coach info ───────────────────────────────────────────────────────────────
+//
+// Returned by the SECURITY DEFINER RPC `get_coach_info()` which resolves
+// the caller's linked coach (profiles.coach_id), falling back to the
+// admin superuser when no coach is linked. Returns NULL when neither
+// exists — in which case the dashboard simply doesn't render the badge.
+interface CoachInfo {
+  full_name?: string | null
+  avatar_url?: string | null
+  last_seen_at?: string | null
+  share_online_status?: boolean
 }
 
 // ── ROM metadata ──────────────────────────────────────────────────────────────
@@ -437,6 +452,12 @@ export default function Dashboard() {
   const [foodStreak, setFoodStreak]         = useState<number | null>(cached?.foodStreak ?? null)
   const [lowestHR7d, setLowestHR7d]         = useState<number | null>(cached?.lowestHR   ?? null)
   const [weeklyWeightKg, setWeeklyWeightKg] = useState<number | null>(cached?.weeklyKg   ?? null)
+  // "Coached by [name]" mini-badge data. Resolved via SECURITY DEFINER
+  // RPC `get_coach_info()` which returns the caller's linked coach (or
+  // the admin superuser fallback). Render is gated on chat_enabled +
+  // non-admin/non-coach role downstream; we still fetch unconditionally
+  // because the RPC is cheap and the gate may flip after this fetch.
+  const [coachInfo, setCoachInfo]           = useState<CoachInfo | null>(cached?.coachInfo ?? null)
 
   // Re-fetch every time the dashboard tab gains focus (May 24 2026
   // bug fix). The previous `useEffect([user])` only ran on initial
@@ -480,7 +501,11 @@ export default function Dashboard() {
       // computeWeeklyWeightDiff can find both a "last week" and "this
       // week" anchor point.
       supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', user.id).gte('created_at', fourteenDaysAgoISO).order('created_at', { ascending: false }),
-    ]).then(([efRes, romRes, bwRes, calRes, allEffRes, allRomRes, foodLogRes, hrRes, bwWindowRes]) => {
+      // Coach info — SECURITY DEFINER RPC; returns the caller's linked
+      // coach or the admin superuser fallback (or null). Drives the
+      // "Coached by [name]" badge in the profile card.
+      supabase.rpc('get_coach_info'),
+    ]).then(([efRes, romRes, bwRes, calRes, allEffRes, allRomRes, foodLogRes, hrRes, bwWindowRes, coachRes]) => {
       const efforts  = efRes.data  ?? []
       const rom      = romRes.data ?? []
       const bw       = bwRes.data  ?? []
@@ -508,6 +533,21 @@ export default function Dashboard() {
       const weeklyDiff   = computeWeeklyWeightDiff(bwWindow)
       const weeklyKgVal  = weeklyDiff ? weeklyDiff.deltaKg : null
 
+      // Coach info — RPC returns NULL when neither a linked coach nor
+      // an admin superuser fallback exists (self-coached and no admin
+      // account). Otherwise: strip "Coach " prefix from full_name and
+      // keep only the first name — matches ChatSheet's identical
+      // transformation so the badge shows the same display name.
+      const rawCoach = (coachRes.data ?? null) as CoachInfo | null
+      let coachVal: CoachInfo | null = null
+      if (rawCoach && rawCoach.full_name) {
+        const firstName = rawCoach.full_name
+          .replace(/^coach\s+/i, '')
+          .trim()
+          .split(' ')[0] ?? ''
+        coachVal = { ...rawCoach, full_name: firstName }
+      }
+
       setRecentEfforts(efforts)
       setRecentROM(rom)
       setRecentBW(bw)
@@ -517,6 +557,7 @@ export default function Dashboard() {
       setFoodStreak(foodStreakV)
       setLowestHR7d(lowestHRv)
       setWeeklyWeightKg(weeklyKgVal)
+      setCoachInfo(coachVal)
 
       if (cacheKey) dataCache.set(cacheKey, {
         efforts, rom, bw, calories,
@@ -525,6 +566,7 @@ export default function Dashboard() {
         foodStreak:  foodStreakV,
         lowestHR:    lowestHRv,
         weeklyKg:    weeklyKgVal,
+        coachInfo:   coachVal,
       })
     })
   }, [user, cacheKey])
@@ -576,8 +618,34 @@ export default function Dashboard() {
   const detailChips = [gender, age != null ? `${age} yrs` : null, phoneDisplay].filter(Boolean) as string[]
   const bodyChips   = [displayWeight, displayHeight].filter(Boolean) as string[]
 
+  // "Coached by [name]" mini-badge visibility gate. Renders only when:
+  //   1. We have a resolved coach (RPC returned a row + display name)
+  //   2. The viewer is NOT themselves an admin or a coach — those
+  //      accounts ARE the coach, so the badge would be self-referential
+  //
+  // chat_enabled is INTENTIONALLY NOT a gate here (locked May 27 2026).
+  // The badge reflects the coaching relationship (coach_id is set);
+  // chat is an independent module the coach can toggle on/off without
+  // affecting the fact that they're coaching the user. Gating the badge
+  // on chat_enabled would hide the coaching relationship whenever a
+  // coach disables chat, which is the wrong product model.
+  const showCoachBadge =
+    coachInfo != null
+    && !!coachInfo.full_name
+    && profile?.is_superuser !== true
+    && profile?.is_coach !== true
+
   return (
     <View style={d.container}>
+
+      {/* ── Pending coach invite banner ───────────────────────────────
+          Renders only when the AuthContext has pending invites for this
+          user's email. Tap → opens AcceptInviteModal with the top invite
+          (most recent first per get_pending_invites_for_current_user
+          ORDER BY created_at DESC). Hidden for coaches + admins (gated
+          in AuthContext.fetchPendingInvites). See CLAUDE.md "Patient
+          invite detection" lock for the architecture. */}
+      <InviteBanner />
 
       {/* ── Profile card ─────────────────────────────────────────────── */}
       {/* The card is wrapped in a positioning View so the edit pencil can
@@ -631,6 +699,31 @@ export default function Dashboard() {
             )}
           </View>
         </View>
+
+        {/* Coached-by mini-badge — sits between the profile row and the
+            stats border. Tiny avatar + "Coached by [FirstName]" inline
+            row. Non-interactive in v1: opening the chat sheet is owned
+            by the parent AppShell (uses setChatOpen) and the dashboard
+            has no handle on that state, so the badge is informational
+            only. Visibility gated on showCoachBadge (linked coach +
+            chat enabled + non-admin/non-coach viewer). */}
+        {showCoachBadge && coachInfo && (
+          <View style={d.coachBadgeRow}>
+            {coachInfo.avatar_url ? (
+              <Image source={{ uri: coachInfo.avatar_url }} style={d.coachAvatar} contentFit="cover" />
+            ) : (
+              <View style={d.coachAvatarPlaceholder}>
+                <Text style={d.coachAvatarInitial}>
+                  {(coachInfo.full_name ?? '?').charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
+            <Text style={d.coachBadgeText} numberOfLines={1}>
+              <Text style={d.coachBadgeMuted}>Coached by </Text>
+              <Text style={d.coachBadgeName}>{coachInfo.full_name}</Text>
+            </Text>
+          </View>
+        )}
 
         {/* Stats footer — border-top.
             Locked May 24 2026: replaced the older weekly-training-streak
@@ -857,6 +950,31 @@ const d = StyleSheet.create({
     color: colors.primary, fontSize: 11,
     fontFamily: fonts.mono[400], fontVariant: ['tabular-nums'],
   },
+
+  // Coached-by mini-badge — sits between the profile row and the stats
+  // border. Small inline pill: 24-px avatar + "Coached by [FirstName]".
+  // Top margin matches the stats footer's spacing so the badge feels
+  // like a continuation of the profile block, not a free-floating row.
+  coachBadgeRow: {
+    flexDirection: 'row', alignItems: 'center',
+    gap: 8, marginTop: 16,
+  },
+  coachAvatar: {
+    width: 24, height: 24, borderRadius: 12,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  coachAvatarPlaceholder: {
+    width: 24, height: 24, borderRadius: 12,
+    borderWidth: 1, borderColor: colors.border,
+    backgroundColor: alpha(colors.primary, 0.10),
+    alignItems: 'center', justifyContent: 'center',
+  },
+  coachAvatarInitial: {
+    color: colors.primary, fontSize: 11, fontWeight: '600',
+  },
+  coachBadgeText:  { fontSize: 13, flexShrink: 1 },
+  coachBadgeMuted: { color: colors.mutedForeground, fontSize: 13 },
+  coachBadgeName:  { color: colors.foreground,      fontSize: 13, fontWeight: '600' },
 
   // Stats row — `mt-5 flex flex-wrap gap-1.5 border-t border-border pt-4`
   statsRow: {

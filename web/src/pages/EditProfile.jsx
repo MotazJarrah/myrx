@@ -12,6 +12,7 @@ const ENTER_KEY = 'myrx_enter_to_send'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import { supabase } from '../lib/supabase'
+import { friendlyAuthMessage } from '../lib/authErrors'
 import { COUNTRIES, matchCountryFromPhone } from '../lib/countries'
 import AvatarCropper from '../components/AvatarCropper'
 
@@ -660,7 +661,7 @@ export function ProfileTab({ profile, user }) {
       // which the user found jarring).
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {
-      setError(err.message || 'Something went wrong.')
+      setError(friendlyAuthMessage(err, 'Something went wrong.'))
     } finally {
       setLoading(false)
     }
@@ -1172,7 +1173,7 @@ export function SettingsTab({ profile, user }) {
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {
-      setError(err.message || 'Something went wrong.')
+      setError(friendlyAuthMessage(err, 'Something went wrong.'))
     } finally {
       setLoading(false)
     }

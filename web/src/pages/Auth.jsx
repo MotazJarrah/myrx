@@ -1,11 +1,12 @@
 import { useState, useRef } from 'react'
 import { Link, useLocation } from 'wouter'
-import { ArrowLeft, Camera, User, Sun, Moon, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react'
+import { ArrowLeft, Camera, User, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react'
 import PhoneInput from 'react-phone-number-input'
 import 'react-phone-number-input/style.css'
 import { useAuth } from '../contexts/AuthContext'
-import { useTheme } from '../contexts/ThemeContext'
 import { supabase } from '../lib/supabase'
+import { friendlyAuthMessage } from '../lib/authErrors'
+import { useIsDesktop } from '../hooks/useIsDesktop'
 
 function checkStrength(pw) {
   let score = 0
@@ -83,7 +84,7 @@ export default function Auth() {
 
   const [, navigate] = useLocation()
   const { signInWithEmailOrPhone } = useAuth()
-  const { theme, toggle } = useTheme()
+  const isDesktop = useIsDesktop()
 
   async function handleSignIn(e) {
     e.preventDefault()
@@ -92,9 +93,48 @@ export default function Auth() {
     try {
       const { error } = await signInWithEmailOrPhone(email, password)
       if (error) throw error
-      navigate('/dashboard')
+
+      // ?next=/some/path — explicit redirect target wins over role-based
+      // defaults. Used by coach signup's "your email is already
+      // registered, sign in to convert" flow which sends users to
+      // /auth?mode=signin&next=/coach/signup so the round-trip lands
+      // them back at coach signup in resume mode. Whitelist to internal
+      // app paths only — never trust an open redirect.
+      try {
+        const params = new URLSearchParams(window.location.search)
+        const next = params.get('next')
+        if (next && next.startsWith('/') && !next.startsWith('//')) {
+          navigate(next)
+          return
+        }
+      } catch { /* fall through to role-based default */ }
+
+      // Route by role + viewport. Per CLAUDE.md "Web / Mobile role rule"
+      // (LOCKED May 27 2026): athletes have ZERO web surfaces — they all
+      // 404. The /app placeholder is the ONE legitimate athlete landing
+      // (Download the App). Coaches and admins are desktop-only on the
+      // /admin and /coach portals; a coach signing in from a phone lands
+      // on /app (their athlete-account view, which is just the download
+      // placeholder until mobile coach features ship).
+      // We can't rely on AuthContext profile state here (it loads async
+      // via onAuthStateChange and may not be populated by the time this
+      // turn finishes) — do a direct lookup. Falling back to /app keeps
+      // any unknown role landing on the safe athlete surface.
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user && isDesktop) {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('is_superuser, is_coach')
+            .eq('id', user.id)
+            .single()
+          if (prof?.is_superuser) { navigate('/admin/overview'); return }
+          if (prof?.is_coach)     { navigate('/coach/portal');  return }
+        }
+      } catch { /* fall through to default */ }
+      navigate('/app')
     } catch (err) {
-      setError(err.message || 'Something went wrong')
+      setError(friendlyAuthMessage(err, 'Something went wrong.'))
     } finally {
       setLoading(false)
     }
@@ -110,7 +150,7 @@ export default function Auth() {
       setSignedUpUser(data.user)
       setEmailSent(true) // Show "check your email" immediately after step 1
     } catch (err) {
-      setError(err.message || 'Something went wrong')
+      setError(friendlyAuthMessage(err, 'Something went wrong.'))
     } finally {
       setLoading(false)
     }
@@ -155,7 +195,7 @@ export default function Auth() {
       if (profileError) throw profileError
       setEmailSent(true)
     } catch (err) {
-      setError(err.message || 'Something went wrong')
+      setError(friendlyAuthMessage(err, 'Something went wrong.'))
     } finally {
       setLoading(false)
     }
@@ -197,15 +237,8 @@ export default function Auth() {
         style={{ background: 'radial-gradient(ellipse, hsl(var(--primary) / 0.2), transparent 70%)' }}
         aria-hidden
       />
-      <header className="relative z-10 flex h-16 items-center justify-between px-6">
+      <header className="relative z-10 flex h-16 items-center px-6">
         <Link href="/"><Logo /></Link>
-        <button
-          onClick={toggle}
-          aria-label="Toggle theme"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
       </header>
       <main className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] max-w-md items-center px-6 pb-12">
         <div className="w-full">

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'wouter'
-import { Loader2, AlertCircle, CheckCircle2, Eye, EyeOff, Sun, Moon } from 'lucide-react'
+import { Loader2, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useTheme } from '../contexts/ThemeContext'
+import { friendlyAuthMessage } from '../lib/authErrors'
 
 // Auth confirmation handler.
 //
@@ -41,7 +41,6 @@ function checkStrength(pw) {
 
 export default function AuthConfirm() {
   const [, navigate] = useLocation()
-  const { theme, toggle } = useTheme()
 
   // status: 'verifying' | 'success' | 'recovery' | 'error'
   const [status, setStatus] = useState('verifying')
@@ -57,6 +56,41 @@ export default function AuthConfirm() {
 
   // Guard against React 18 strict-mode double invocation in dev.
   const verifyStartedRef = useRef(false)
+
+  // Post-confirmation destination — resolved at verify-time from TWO
+  // signals, with metadata winning over the URL param because the URL
+  // param doesn't survive Supabase's email-template rendering.
+  //
+  // Signal 1 (URL param, best-effort):
+  //   The signUp call sets options.emailRedirectTo = '/auth/confirm?
+  //   next=/coach/signup'. Supabase renders the email link as roughly
+  //   '{SiteURL}/auth/confirm?token_hash=...&type=...' — and the extra
+  //   ?next param does NOT reliably survive. So we read it if it's
+  //   there, but treat it as advisory only.
+  //
+  // Signal 2 (auth user_metadata, durable):
+  //   The coach signUp ALSO sets options.data.signup_journey = 'coach',
+  //   which gets stamped onto the auth user. After verifyOtp succeeds
+  //   we fetch the user and check user_metadata.signup_journey — if it
+  //   says 'coach', route to /coach/signup regardless of what the URL
+  //   said. This is 100% reliable across email-template / Supabase-
+  //   version changes.
+  //
+  // Whitelist guard on the URL signal: must start with "/" AND not
+  // start with "//" — prevents an attacker from crafting an email
+  // link with ?next=https://evil.com (open-redirect attack).
+  // [State, resolved during verify()]: final dest + isCoachFlow.
+  const nextParamRaw = (() => {
+    try { return new URLSearchParams(window.location.search).get('next') } catch { return null }
+  })()
+  const nextParamSafe = (nextParamRaw && nextParamRaw.startsWith('/') && !nextParamRaw.startsWith('//'))
+    ? nextParamRaw
+    : null
+  // Default to /app per CLAUDE.md "Web / Mobile role rule" (LOCKED May 27
+  // 2026): athletes have no web surfaces, /app is the placeholder. Coach
+  // signup flows pass ?next=/coach/signup so they override this default.
+  const [nextDest, setNextDest] = useState(nextParamSafe || '/app')
+  const [isCoachFlow, setIsCoachFlow] = useState(nextParamSafe?.startsWith('/coach/') || false)
 
   useEffect(() => {
     if (verifyStartedRef.current) return
@@ -75,7 +109,7 @@ export default function AuthConfirm() {
       if (hasHashSession) {
         setStatus(linkType === 'recovery' ? 'recovery' : 'success')
         if (linkType !== 'recovery') {
-          setTimeout(() => navigate('/dashboard'), 1200)
+          setTimeout(() => navigate(nextDest), 1200)
         }
         return
       }
@@ -96,10 +130,14 @@ export default function AuthConfirm() {
 
         if (error) {
           setStatus('error')
+          // Branch on error.code so the friendly-message rewrite doesn't
+          // hide the expired-link special case (the OTP_expired mapped
+          // message contains "expired" so the old regex would still match,
+          // but checking by code is more robust to future copy edits).
           setMessage(
-            /expired|invalid/i.test(error.message)
+            error.code === 'otp_expired'
               ? 'This link has expired or is no longer valid. Request a new one and try again.'
-              : (error.message || 'We could not verify this link.')
+              : friendlyAuthMessage(error, 'We could not verify this link.')
           )
           return
         }
@@ -109,15 +147,117 @@ export default function AuthConfirm() {
           return
         }
 
+        // Resolve final destination from user metadata. verifyOtp just
+        // created a session — fetch the user and check signup_journey.
+        // Falls back to whatever the URL ?next= said (if anything), then
+        // /dashboard. The 'coach' branch overrides any URL value so
+        // coach signups always route correctly even when Supabase strips
+        // the next param from the email link (which it does in practice).
+        let finalDest    = nextDest
+        let finalIsCoach = isCoachFlow
+        try {
+          const { data: { user: confirmedUser } } = await supabase.auth.getUser()
+          const journey = confirmedUser?.user_metadata?.signup_journey
+          if (journey === 'coach') {
+            finalDest    = '/coach/signup'
+            finalIsCoach = true
+            setNextDest('/coach/signup')
+            setIsCoachFlow(true)
+          }
+        } catch { /* best-effort — fall through to whatever the URL said */ }
+
         setStatus('success')
         setMessage(
           linkType === 'email_change'
             ? 'Email address updated.'
             : linkType === 'magiclink'
               ? 'Signed in successfully.'
-              : 'Email confirmed. Welcome to MyRX.'
+              : finalIsCoach
+                // Coach signup magic-link → user is mid-funnel, not done.
+                // Tailor the copy so the "All set" headline doesn't lie.
+                ? "Email confirmed — let's pick up where you left off."
+                : 'Email confirmed. Welcome to MyRX.'
         )
-        setTimeout(() => navigate('/dashboard'), 1500)
+
+        // ── Mobile handoff: deep-link back into the app ─────────────────
+        //
+        // The locked May 27 2026 Web/Mobile role rule means athletes ONLY
+        // use the mobile app. When an athlete starts signup on mobile,
+        // gets the confirmation email, and taps the magic-link button,
+        // Android opens the browser instead of the app because the link
+        // routes through Supabase first (supabase.co → 302 → myrxfit.com)
+        // and intra-browser redirects don't re-fire as intents that
+        // Android App Links can intercept.
+        //
+        // Fix: after web confirmation succeeds, try to hand off back to
+        // the app via the registered `myrx://` URL scheme. If the app is
+        // installed, Android brings it to the front and the
+        // InviteDeepLinkHost handler in app/_layout.tsx catches the URL +
+        // calls supabase.auth.refreshSession() — which updates the
+        // mobile session's email_confirmed_at and triggers the existing
+        // cross-tab useEffect in sign-up.tsx that auto-advances the OTP
+        // screen.
+        //
+        // We skip the handoff for the coach flow (coaches sign up on
+        // web, not mobile) and for plain magic-link / email-change types.
+        //
+        // Detection is "mobile UA" — the same heuristic the smart-link
+        // accept-invite page uses. If the user's on desktop, the handoff
+        // line silently does nothing and we fall through to the
+        // close-tab / navigate flow below.
+        const isMobileUA = /Android|iPhone|iPad/i.test(navigator.userAgent)
+        const shouldHandoff = isMobileUA && !finalIsCoach && (linkType === 'signup' || linkType === 'magiclink')
+        if (shouldHandoff) {
+          // Tell the user what's happening before we trigger the handoff,
+          // in case the app is NOT installed and the user gets bounced
+          // back to a still-open browser tab.
+          setMessage('Returning you to the MyRX app...')
+          setTimeout(() => {
+            try {
+              window.location.href = 'myrx://auth/confirmed?type=' + encodeURIComponent(linkType)
+            } catch { /* swallow — fall through to the close-tab path below */ }
+          }, 600)
+          // Detect failure: if the page is still visible 2.5s after the
+          // handoff attempt, the app probably isn't installed. Update
+          // the copy to give the user a useful next step.
+          setTimeout(() => {
+            if (cancelled) return
+            if (document.visibilityState === 'visible' && !window.closed) {
+              setMessage("Couldn't open the MyRX app — install it from your app store and open it to continue.")
+            }
+          }, 2500)
+          return
+        }
+
+        // Try to close the tab. This works ONLY if the tab was opened
+        // by window.open() from our own page — which is rare for email
+        // links (most email clients open links as their own top-level
+        // tabs, which browsers refuse to let scripts close). When close
+        // fails, swap the copy to "you can close this tab" since the
+        // original signup tab has already auto-advanced via the cross-
+        // tab onAuthStateChange listener (see coach/Signup.jsx OTPScreen).
+        // We give the user a moment to read "Email confirmed" first.
+        setTimeout(() => {
+          try {
+            window.close()
+          } catch { /* security exception in some browsers */ }
+          // 200ms later check if we're still open. If yes, the close
+          // was blocked — show the "you can close this tab" message
+          // instead of navigating, since the original tab already moved.
+          setTimeout(() => {
+            if (!cancelled && !window.closed) {
+              setMessage(finalIsCoach
+                ? 'You can close this tab — your signup is continuing in the other tab.'
+                : 'You can close this tab — you are signed in.')
+              // Still navigate after another beat as a safety net, in
+              // case the original tab is also gone (e.g. user closed
+              // it). The flow-detection at /coach/signup / dashboard
+              // will pick them up from whatever profile state they're
+              // in.
+              setTimeout(() => { if (!cancelled) navigate(finalDest) }, 2000)
+            }
+          }, 200)
+        }, 1500)
       } catch (err) {
         if (cancelled) return
         setStatus('error')
@@ -147,9 +287,9 @@ export default function AuthConfirm() {
       if (error) throw error
       setStatus('success')
       setMessage('Password updated. Redirecting…')
-      setTimeout(() => navigate('/dashboard'), 1200)
+      setTimeout(() => navigate(nextDest), 1200)
     } catch (err) {
-      setResetError(err?.message || 'Could not update password.')
+      setResetError(friendlyAuthMessage(err, 'Could not update password.'))
     } finally {
       setResetting(false)
     }
@@ -163,15 +303,8 @@ export default function AuthConfirm() {
         style={{ background: 'radial-gradient(ellipse, hsl(var(--primary) / 0.2), transparent 70%)' }}
         aria-hidden
       />
-      <header className="relative z-10 flex h-16 items-center justify-between px-6">
+      <header className="relative z-10 flex h-16 items-center px-6">
         <Link href="/"><Logo /></Link>
-        <button
-          onClick={toggle}
-          aria-label="Toggle theme"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
       </header>
       <main className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] max-w-md items-center px-6 pb-12">
         <div className="w-full">{content}</div>
@@ -190,10 +323,15 @@ export default function AuthConfirm() {
   }
 
   if (status === 'success') {
+    // Coach-funnel users are NOT "all set" yet — they still need to
+    // finish phone, photo, plan, and Stripe. Title for them is
+    // mid-journey-friendly. End-user signup users are genuinely done.
     return shell(
       <div className="animate-rise rounded-2xl border border-border bg-card/80 p-8 shadow-lg backdrop-blur text-center">
         <CheckCircle2 className="mx-auto h-8 w-8 text-primary" />
-        <h1 className="mt-4 text-xl font-semibold">All set</h1>
+        <h1 className="mt-4 text-xl font-semibold">
+          {isCoachFlow ? 'Email confirmed' : 'All set'}
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">{message}</p>
       </div>
     )

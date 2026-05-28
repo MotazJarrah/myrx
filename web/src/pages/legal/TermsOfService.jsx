@@ -2,7 +2,7 @@ import LegalLayout from './LegalLayout'
 
 export default function TermsOfService() {
   return (
-    <LegalLayout title="Terms of Service" effectiveDate="May 9, 2026">
+    <LegalLayout title="Terms of Service" effectiveDate="May 26, 2026">
       <h2>1. Agreement to these Terms</h2>
       <p>
         These Terms of Service ("Terms") are a binding contract between you
@@ -18,9 +18,30 @@ export default function TermsOfService() {
         use the Service.</strong>
       </p>
       <p>
-        These Terms also incorporate by reference our{' '}
-        <a href="/acceptable-use">Acceptable Use Policy</a> and our{' '}
-        <a href="/cookies">Cookie Policy</a>.
+        These Terms incorporate by reference the following additional
+        policies, each of which forms part of the binding contract
+        between you and us:
+      </p>
+      <ul>
+        <li>Our <a href="/acceptable-use">Acceptable Use Policy</a></li>
+        <li>Our <a href="/cookies">Cookie Policy</a></li>
+        <li>Our <a href="/refund-policy">Refund Policy</a></li>
+        <li>Our <a href="/health-disclaimer">Health &amp; Medical Disclaimer</a></li>
+        <li>
+          For Coaches only: our{' '}
+          <a href="/coach-agreement">Coach Agreement</a> and our{' '}
+          <a href="/dpa">Data Processing Agreement</a>
+        </li>
+      </ul>
+      <p>
+        <strong>By agreeing to these Terms, you also agree to each of
+        the policies listed above to the extent they apply to you.</strong>
+        Where a more specific policy (e.g., the Refund Policy for
+        refund matters, the Health &amp; Medical Disclaimer for
+        health-related matters, the Coach Agreement for coach
+        subscription matters) addresses a topic that is also covered
+        in these Terms, the more specific policy controls in case of
+        conflict.
       </p>
 
       <h2>2. Eligibility</h2>
@@ -138,12 +159,45 @@ export default function TermsOfService() {
 
       <h3>5.5 Refunds</h3>
       <p>
-        Except where required by applicable law (including, where applicable,
-        the EU 14-day right of withdrawal for digital services), all fees
-        are non-refundable. If you believe you have been charged in error,
-        contact us at{' '}
-        <a href="mailto:privacy@myrxfit.com">privacy@myrxfit.com</a> within
-        30 days of the charge and we will review your request in good faith.
+        Refund eligibility, windows, and procedures are governed by our{' '}
+        <a href="/refund-policy">Refund Policy</a>, which is incorporated
+        into these Terms by reference and <strong>controls in case of
+        conflict with this section</strong>. In summary:
+      </p>
+      <ul>
+        <li>Coach subscriptions include a 14-day free trial.</li>
+        <li>
+          Annual coach subscriptions are fully refundable within 14
+          days of the initial charge; after 14 days, refunds are
+          pro-rated to the nearest whole month for the unused remainder.
+        </li>
+        <li>
+          Monthly subscriptions cancel at the end of the current
+          billing period without pro-rated refund.
+        </li>
+        <li>
+          Athlete one-time unlocks (CoreRX, FullRX) carry a 14-day
+          money-back guarantee from the date of purchase.
+        </li>
+        <li>
+          Purchases made through the Apple App Store or Google Play
+          are refunded by Apple or Google, respectively, under their
+          own refund policies — not by us.
+        </li>
+        <li>
+          Statutory consumer-protection rights (including the EU
+          14-day right of withdrawal for digital services and the UK
+          Consumer Contracts Regulations 2013) are preserved and apply
+          where stronger than this section.
+        </li>
+      </ul>
+      <p>
+        For the full terms, see the{' '}
+        <a href="/refund-policy">Refund Policy</a>. If you believe you
+        have been charged in error, contact{' '}
+        <a href="mailto:billing@myrxfit.com">billing@myrxfit.com</a>{' '}
+        within 30 days of the charge and we will review your request in
+        good faith.
       </p>
 
       <h3>5.6 Taxes</h3>
@@ -195,7 +249,20 @@ export default function TermsOfService() {
 
       <h2>8. Coach-specific terms</h2>
       <p>
-        If you subscribe to MyRX as a coach, the following additional terms apply:
+        <strong>If you subscribe to MyRX as a Coach, you are also bound
+        by our <a href="/coach-agreement">Coach Agreement</a> and our{' '}
+        <a href="/dpa">Data Processing Agreement</a></strong>, both of
+        which are incorporated by reference and control where they
+        conflict with this section. The Coach Agreement covers
+        subscription tiers and billing, the coach code of conduct, your
+        obligations toward Clients, indemnification, suspension and
+        termination, and intellectual property. The Data Processing
+        Agreement governs how MyRX (as Processor) handles your Clients'
+        Personal Data under GDPR Art. 28, the UK GDPR, and the CCPA.
+      </p>
+      <p>
+        The summary in this section is informational only. The
+        high-level rules:
       </p>
       <ul>
         <li>
@@ -258,6 +325,44 @@ export default function TermsOfService() {
         Service. You assume all risks associated with any physical activity,
         nutrition program, or lifestyle change you undertake based on the
         Service.
+      </p>
+      <p>
+        <strong>For the full health-and-safety disclaimer — including
+        population-specific guidance (pregnancy, minors, eating-disorder
+        history, chronic conditions), warnings about specific MyRX
+        feature outputs (calorie/macro targets, training prescriptions,
+        heart-rate zones, wearable data), and emergency-care contacts —
+        see our <a href="/health-disclaimer">Health &amp; Medical
+        Disclaimer</a></strong>, which is incorporated by reference and
+        controls where it is more specific than this section.
+      </p>
+
+      <h3>9.1 Health calculations and the male / female baseline</h3>
+      <p>
+        MyRX uses the Mifflin-St Jeor equation for Basal Metabolic Rate (BMR)
+        and Total Daily Energy Expenditure (TDEE), and standard macronutrient
+        partitioning formulas (with protein and fat floors derived from body
+        weight). The Mifflin-St Jeor equation only has validated coefficients
+        for two biological sex baselines: Male and Female. There is no
+        peer-reviewed validated formula for non-binary or unspecified
+        baselines.
+      </p>
+      <p>
+        For users who select Non-binary or Prefer not to say on the sex /
+        gender screen, the Service applies the Female coefficients to BMR,
+        TDEE, and downstream macro calculations. We use the Female baseline
+        rather than Male because the Female formula produces the more
+        conservative (lower) BMR estimate, which is the safer error to make
+        during caloric deficits — over-eating recovers more easily than
+        under-eating.
+      </p>
+      <p>
+        This is a mathematical convention, not a statement about your
+        identity. You can change your sex / gender selection at any time
+        in Settings, and any changes will recompute your calculations
+        going forward. If you would like a longer explanation of how each
+        formula works and why, see Settings → About → How we compute your
+        numbers.
       </p>
 
       <h2>10. Intellectual property</h2>
@@ -411,9 +516,18 @@ export default function TermsOfService() {
       <h2>18. Miscellaneous</h2>
       <ul>
         <li>
-          <strong>Entire agreement</strong>: these Terms (together with the
-          Privacy Policy, Acceptable Use Policy, and Cookie Policy) are the
-          entire agreement between you and us regarding the Service.
+          <strong>Entire agreement</strong>: these Terms, together with
+          the <a href="/privacy">Privacy Policy</a>, the{' '}
+          <a href="/acceptable-use">Acceptable Use Policy</a>, the{' '}
+          <a href="/cookies">Cookie Policy</a>, the{' '}
+          <a href="/refund-policy">Refund Policy</a>, the{' '}
+          <a href="/health-disclaimer">Health &amp; Medical Disclaimer</a>,
+          and (for Coaches) the{' '}
+          <a href="/coach-agreement">Coach Agreement</a> and the{' '}
+          <a href="/dpa">Data Processing Agreement</a>, constitute the
+          entire agreement between you and us regarding the Service and
+          supersede all prior or contemporaneous understandings,
+          agreements, or representations on the subject.
         </li>
         <li>
           <strong>Severability</strong>: if any provision is held

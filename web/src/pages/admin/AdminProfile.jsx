@@ -17,26 +17,22 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { ProfileTab } from '../EditProfile'
-import AdminUserPlan from './tabs/AdminUserPlan'
-
-function getGreeting() {
-  const h = new Date().getHours()
-  if (h >= 5 && h < 12) return 'Good morning'
-  if (h < 17) return 'Good afternoon'
-  return 'Good evening'
-}
+import AccountSettings from '../../components/AccountSettings'
+import MacroPlanEditor from '../../components/MacroPlanEditor'
+import { usePersistedState } from '../../hooks/usePersistedState'
 
 const TABS = [
-  { id: 'profile', label: 'My Profile'  },
-  { id: 'plan',    label: 'Intake Plan' },
+  { id: 'profile', label: 'Settings'   },
+  { id: 'plan',    label: 'Macro Plan' },
 ]
 
 export default function AdminProfile() {
   const { user, profile: ctxProfile } = useAuth()
   const [existingPlan, setExistingPlan] = useState(null)
   const [planLoading,  setPlanLoading]  = useState(true)
-  const [activeTab,    setActiveTab]    = useState('profile')
+  // Survive reloads (bfcache eviction), reset on nav-away / sign-out.
+  // See src/hooks/usePersistedState.js for why clearOnUnmount works.
+  const [activeTab,    setActiveTab]    = usePersistedState('myrx:admin_profile_tab', 'profile', { clearOnUnmount: true })
 
   useEffect(() => {
     if (!user?.id) return
@@ -63,12 +59,16 @@ export default function AdminProfile() {
   return (
     <div className="space-y-4">
 
-      {/* Greeting */}
+      {/* Page header — mirrors CoachProfile's "Account Settings" pattern
+          (LOCKED May 26 2026 per the admin↔coach mirror rule). The
+          previous greeting + name h1 was an admin-only flavor that
+          diverged from coach; the user chose full mirror so both
+          portals' Account Settings pages read identically. */}
       <div>
-        <p className="text-sm text-muted-foreground">{getGreeting()},</p>
-        <h1 className="text-2xl font-bold tracking-tight">
-          {profile?.full_name || user?.email?.split('@')[0] || 'Admin'}
-        </h1>
+        <h1 className="text-2xl font-bold tracking-tight">Account Settings</h1>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Your account, your settings, and your plan.
+        </p>
       </div>
 
       {/* Top-level tab bar: My Profile | Intake Plan */}
@@ -88,27 +88,29 @@ export default function AdminProfile() {
         ))}
       </div>
 
-      {/* My Profile tab — Account only. Reuses the end-user ProfileTab
-          (from EditProfile.jsx) so it's byte-for-byte identical to what
-          a client sees on /profile. Preferences / Security / About were
-          intentionally NOT mirrored — scope is Account only per the
-          May 23 2026 lock. */}
+      {/* My Profile tab — full 4-tab AccountSettings (Account /
+          Preferences / Security / About). Mirrors the mobile profile
+          page's tab structure, scoped to the surfaces that make sense
+          on web for an admin (Connect / wearable integrations are
+          mobile-only and intentionally omitted). The same component
+          renders on /coach/profile — shared layout, shared behaviour.
+          May 24 2026 — replaces the previous Account-only scope. */}
       {activeTab === 'profile' && (
-        <div className="max-w-lg mx-auto">
-          <ProfileTab profile={profile} user={user} />
-        </div>
+        <AccountSettings profile={profile} user={user} />
       )}
 
-      {/* Intake Plan tab — admin-only feature, kept as-is */}
+      {/* Macro Plan tab — admin's own plan. Uses the unified
+          MacroPlanEditor (same component the coach side uses) for
+          consistent behaviour. Replaces the old AdminUserPlan form
+          per the May 25 2026 macro-plan refresh. */}
       {activeTab === 'plan' && (
         planLoading ? (
           <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
         ) : (
-          <AdminUserPlan
+          <MacroPlanEditor
             profile={profile}
+            user={user}
             existingPlan={existingPlan}
-            userId={user.id}
-            adminUserId={user.id}
             onPlanSaved={updated => setExistingPlan(updated)}
           />
         )
