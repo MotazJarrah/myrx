@@ -2381,6 +2381,39 @@ These spots in the code already document iOS as a follow-up. Each becomes an act
 
 ---
 
+## No placeholder text — ANYWHERE (MANDATORY, LOCKED May 28 2026)
+
+**Never use placeholder text in any input, search field, textarea, dropdown, picker, OTP cell, or composer — anywhere in the app or web.** This is a hard rule, no exceptions. Applies to web (admin portal, coach portal, marketing pages, legal docs, signup, sign-in), mobile (every screen and every sheet), and any future surface.
+
+"Placeholder text" = the gray text inside an empty input that vanishes the moment the user starts typing (HTML `placeholder=` attribute, React Native `placeholder=` prop, custom faux-placeholder Views that disappear on focus, etc.).
+
+**Why this is banned:**
+- Placeholder text disappears the moment the user types, so they lose the prompt before they're done answering. Forces re-blanking the field to re-read it.
+- It's the SAME color and weight as muted helper text in our design system, so users sometimes think a field is already filled and skip it.
+- Accessibility-broken: most screen readers don't announce placeholders consistently. Users who rely on them can't tell what the field is for.
+- The label-vs-placeholder confusion ("is that the label or the value?") is a known UX anti-pattern documented in the Nielsen Norman Group's research from 2014 onward.
+- The user has explicitly forbidden it across the entire product.
+
+**Replacement patterns (use these instead):**
+- **Visible label above the input.** Plain text, normal foreground color, explicit field name. Stays visible while the user types. Required field markers (`*` or "Required") go in the label, not in placeholder.
+- **Helper text below the input** for examples or format hints. e.g. for a "Reason" field, the examples line "e.g. Subpoena #12345, Client data request, Abuse investigation" goes BELOW the textarea as muted helper text — always visible, never disappears.
+- **Icon inside the input** for the field affordance. e.g. magnifying glass for a search field is fine; the magnifying glass IS the hint that this is a search input. No "Search…" text needed alongside.
+- **Empty-state copy inside the result area** for "type to see results"-style affordances. e.g. after the search input but before the results, render a muted "Type to see clients" line in the results area — it sits where the results will go, not inside the input itself.
+
+**What's NOT a placeholder (so don't strip these):**
+- Icons in inputs (magnifying glass, send arrow, clear-X button)
+- Empty-state text shown BELOW or BESIDE an input (e.g. "No results yet — try a different term")
+- Default-selected values in dropdowns (the dropdown shows the selected option's label, that's a value, not a placeholder)
+- Labels above inputs
+- Helper text below inputs
+- Mask/format hints baked into the input chrome (e.g. the static `/` separators in a date picker between the day, month, year cells)
+
+**Audit follow-up:** the codebase has accumulated existing placeholders across signup, sign-in, search inputs, chat composers, food log search, coach signup, admin forms, etc. They all need to be swept and replaced with visible labels + helper text. This is a separate cleanup task to track once the Export Conversation feature ships — sweep all `placeholder=` attributes across web + mobile + edit drawers in one pass.
+
+When in doubt: visible label above, helper text below, no placeholder inside. Ever.
+
+---
+
 ## What This Is
 A React + Vite SPA (web, frozen) + React Native / Expo app (mobile, active) — a fitness coaching platform per the mission above. Clients track strength, cardio, mobility, bodyweight, and calories. Admins (coaches) manage clients, review progress, and communicate via chat/suggestions.
 

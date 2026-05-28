@@ -440,3 +440,16 @@ input[type="range"].signup-slider:active::-moz-range-thumb {
 .animate-caret-blink {
   animation: caret-blink 1s step-end infinite;
 }
+
+/* Typing-dot bounce — three dots in a row, each delayed by 150 ms so the
+   wave reads as "something is happening on the other end." Mirrors the
+   mobile ChatSheet's TypingBubble animation (Reanimated worklet there;
+   pure CSS here). 1.2 s loop = the canonical iMessage / WhatsApp cadence.
+   Used on the coach Messages page when the client is actively typing. */
+@keyframes typing-dot-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-4px); opacity: 1; }
+}
+.animate-typing-dot {
+  animation: typing-dot-bounce 1.2s ease-in-out infinite;
+}

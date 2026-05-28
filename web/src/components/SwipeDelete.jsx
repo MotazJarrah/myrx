@@ -1,19 +1,27 @@
 import { useRef, useState, useEffect } from 'react'
-import { Trash2, Check } from 'lucide-react'
+import { Trash2, Check, Pencil } from 'lucide-react'
 
 const IS_TOUCH = typeof window !== 'undefined'
   && window.matchMedia('(pointer: coarse)').matches
 
-const REVEAL = 80
+// Reveal width when swiping the bubble on touch devices.
+// 80 px = single-action reveal (Delete only).
+// 96 px = stacked-action reveal (Edit on top, Delete on bottom).
+const REVEAL_SINGLE  = 80
+const REVEAL_STACKED = 96
 
 export default function SwipeDelete({
   onDelete,
+  onEdit,       // optional — when set, Edit appears stacked ABOVE Delete
   onTap,
   children,
   className = '',
   bg        = 'bg-card',
   swipe     = false,
 }) {
+  const stacked = !!onEdit
+  const REVEAL  = stacked ? REVEAL_STACKED : REVEAL_SINGLE
+
   const [removing,      setRemoving]      = useState(false)
   const [confirming,    setConfirming]    = useState(false)
   const [offset,        setOffset]        = useState(0)
@@ -61,6 +69,13 @@ export default function SwipeDelete({
     cancelTimer.current = setTimeout(() => setConfirming(false), 3000)
   }
 
+  function handleEditClick(e) {
+    e.stopPropagation()
+    clearTimer(); setConfirming(false)
+    resetSwipeNow()
+    onEdit?.()
+  }
+
   function handleRowClick() {
     if (confirming) { clearTimer(); setConfirming(false); return }
     onTap?.()
@@ -93,6 +108,11 @@ export default function SwipeDelete({
     setRemoving(true)
     try { await onDelete() } catch { setRemoving(false) }
   }
+  function doSwipeEdit(e) {
+    e.stopPropagation()
+    resetSwipeNow()
+    onEdit?.()
+  }
 
   // Reset swipe when user taps anywhere else in the page
   useEffect(() => {
@@ -105,11 +125,10 @@ export default function SwipeDelete({
     return <div className="h-0 overflow-hidden transition-[height] duration-300" />
   }
 
-  // ── Mobile chat bubbles: swipe to delete ─────────────────────────────────
+  // ── Mobile chat bubbles: swipe to reveal ────────────────────────────────
   // Only apply transform (and create a GPU compositing layer) when the bubble
-  // is actually displaced or mid-animation. At rest (offset=0, transitioning=false)
-  // no transform means no compositing layer, so overflow-hidden fully clips the
-  // red zone and nothing bleeds through on mobile Chrome.
+  // is actually displaced or mid-animation. At rest no transform means no
+  // compositing layer, so overflow-hidden fully clips the action zone.
   const isActive = offset !== 0 || transitioning
 
   if (swipe && IS_TOUCH) {
@@ -119,8 +138,23 @@ export default function SwipeDelete({
         style={{ zIndex: offset < 0 ? 2 : 'auto' }}
       >
         {isActive && (
-          <div className="absolute inset-y-0 right-0 flex w-20 items-center justify-center bg-destructive">
-            <button onClick={doSwipeDelete} className="flex flex-col items-center gap-0.5 text-white">
+          <div
+            className="absolute inset-y-0 right-0 flex flex-col"
+            style={{ width: REVEAL }}
+          >
+            {stacked && (
+              <button
+                onClick={doSwipeEdit}
+                className="flex flex-1 flex-col items-center justify-center gap-0.5 bg-muted text-foreground"
+              >
+                <Pencil className="h-4 w-4" />
+                <span className="text-[10px] font-semibold">Edit</span>
+              </button>
+            )}
+            <button
+              onClick={doSwipeDelete}
+              className="flex flex-1 flex-col items-center justify-center gap-0.5 bg-destructive text-white"
+            >
               <Trash2 className="h-4 w-4" />
               <span className="text-[10px] font-semibold">Delete</span>
             </button>
@@ -146,8 +180,7 @@ export default function SwipeDelete({
 
   // ── Default layout (desktop + mobile non-chat) ───────────────────────────
   // `bg` lives on the outer div so overflow-hidden + border-radius clips
-  // both the content and the delete button to the same rounded shape.
-  // This preserves bubble appearance for chat messages on desktop.
+  // both the content and the action buttons to the same rounded shape.
   return (
     <div className={`group flex items-stretch overflow-hidden ${bg}${className ? ` ${className}` : ''}`}>
 
@@ -159,19 +192,50 @@ export default function SwipeDelete({
         {children}
       </div>
 
-      <button
-        onClick={handleDeleteClick}
-        aria-label={confirming ? 'Confirm delete' : 'Delete'}
-        className={`flex w-10 shrink-0 items-center justify-center transition-all duration-150 ${
-          confirming
-            ? 'bg-destructive text-destructive-foreground'
-            : IS_TOUCH
-              ? 'text-muted-foreground/40 active:text-destructive active:bg-destructive/10'
-              : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10'
-        }`}
-      >
-        {confirming ? <Check className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
-      </button>
+      {/* Action column — when onEdit is set, renders Edit stacked above
+          Delete in a vertical 40px-wide column with EACH button carrying
+          its own solid background so the icons stay legible regardless of
+          the bubble's color (lime admin bubble would otherwise wash out
+          muted-gray icons). Mirrors mobile MessageActions: Edit = muted
+          bg + foreground icon; Delete = destructive red bg + white icon.
+          Only rendered on hover via group-hover so resting bubbles stay
+          clean. */}
+      {stacked ? (
+        <div className="flex w-10 shrink-0 flex-col opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={handleEditClick}
+            aria-label="Edit"
+            className="flex flex-1 items-center justify-center bg-muted text-foreground hover:bg-muted/80 transition-colors"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={handleDeleteClick}
+            aria-label={confirming ? 'Confirm delete' : 'Delete'}
+            className={`flex flex-1 items-center justify-center transition-colors ${
+              confirming
+                ? 'bg-destructive text-destructive-foreground'
+                : 'bg-destructive/80 text-white hover:bg-destructive'
+            }`}
+          >
+            {confirming ? <Check className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={handleDeleteClick}
+          aria-label={confirming ? 'Confirm delete' : 'Delete'}
+          className={`flex w-10 shrink-0 items-center justify-center transition-all duration-150 ${
+            confirming
+              ? 'bg-destructive text-destructive-foreground'
+              : IS_TOUCH
+                ? 'text-muted-foreground/40 active:text-destructive active:bg-destructive/10'
+                : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10'
+          }`}
+        >
+          {confirming ? <Check className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+        </button>
+      )}
     </div>
   )
 }

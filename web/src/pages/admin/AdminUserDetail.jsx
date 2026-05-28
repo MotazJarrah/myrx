@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
-import { ArrowLeft, User, Check, Info, MessageCircle, UserCog, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock } from 'lucide-react'
+import { ArrowLeft, User, Check, Info, MessageCircle, UserCog, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil } from 'lucide-react'
 
 import AdminUserProfile   from './tabs/AdminUserProfile'
 import AdminUserActivity  from './tabs/AdminUserActivity'
@@ -206,8 +206,147 @@ const TABS = [
   { id: 'activity',  label: 'Efforts'    },
   { id: 'body',      label: 'Bodyweight' },
   { id: 'calories',  label: 'Calories'   },
-  { id: 'timeline',  label: 'Timeline'   },
+  { id: 'timeline',  label: 'Activity Feed' },
 ]
+
+// ── Activity Feed (reads get_activity_feed RPC) ──────────────────────────────
+// Renders the per-user audit log: every meaningful event (efforts, food,
+// weight, mobility, plans, chat exports, deletion lifecycle) timestamped
+// and ordered most-recent-first. RLS on activity_events enforces the
+// admin / coach / self access rules — this component just calls the RPC.
+//
+// xlsx + pdf export buttons are queued for the next iteration (task #226).
+function ActivityFeed({ userId }) {
+  const [events, setEvents] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setErr(null)
+    supabase.rpc('get_activity_feed', { p_user_id: userId, p_limit: 500, p_offset: 0 })
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) { setErr(error.message); setEvents([]) }
+        else setEvents(data || [])
+        setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [userId])
+
+  // Translate event_type + event_data into a human-readable label + icon.
+  // Keep the switch tight — undocumented event types fall through to the
+  // raw event_type so nothing goes missing.
+  function describe(e) {
+    const t = e.event_type
+    const d = e.event_data || {}
+    switch (t) {
+      case 'account:created':              return { icon: User,          color: 'text-emerald-400', label: 'Account created' }
+      case 'account:signed_in':            return { icon: Power,         color: 'text-emerald-400', label: 'Signed in' }
+      case 'account:signed_out':           return { icon: Power,         color: 'text-zinc-400',    label: 'Signed out' }
+      case 'account:deletion_scheduled':   return { icon: Clock,         color: 'text-amber-400',   label: `Deletion scheduled · grace ends ${d.grace_ends_at ? new Date(d.grace_ends_at).toLocaleDateString() : '—'}${d.admin_initiated ? ' (admin)' : ''}` }
+      case 'account:deletion_cancelled':   return { icon: X,             color: 'text-emerald-400', label: `Deletion cancelled${d.admin_initiated ? ' (admin)' : ''}` }
+      case 'account:deleted':              return { icon: Trash2,        color: 'text-zinc-400',    label: `Account anonymized${d.orphaned_athlete_count ? ` · released ${d.orphaned_athlete_count} athlete${d.orphaned_athlete_count === 1 ? '' : 's'}` : ''}` }
+      case 'chat:exported_transcript':     return { icon: MessageCircle, color: 'text-blue-400',    label: `Chat transcript exported · ${d.message_count ?? '?'} messages · "${d.reason || ''}"` }
+      // chat:message_edited — written by the messages_edit_activity_trg DB
+      // trigger on UPDATE OF body. The event row's occurred_at carries
+      // the edit timestamp (COALESCE(edited_at, now())). event_data
+      // includes sender_role ('athlete' | 'coach_or_admin'),
+      // old_body_excerpt + new_body_excerpt (140-char clamps) so the
+      // label can show provenance without dumping the full body into
+      // the feed.
+      case 'chat:message_edited':          return { icon: Pencil,        color: 'text-amber-400',   label: `Message edited${d.sender_role === 'athlete' ? ' (athlete message)' : d.sender_role === 'coach_or_admin' ? ' (coach/admin message)' : ''}${d.new_body_excerpt ? ` — "${d.new_body_excerpt}"` : ''}` }
+      case 'training:efforts_insert':      return { icon: Dumbbell,      color: 'text-blue-400',    label: `Logged ${d.type || 'effort'}: ${d.label || ''}${d.value ? ` (${d.value})` : ''}` }
+      case 'training:bodyweight_insert':   return { icon: Scale,         color: 'text-purple-400',  label: `Logged weight: ${d.weight ?? '?'} ${d.unit || ''}` }
+      case 'training:food_logs_insert':    return { icon: Apple,         color: 'text-amber-400',   label: `Logged food: ${d.food_name || ''}${d.brand_name ? ` (${d.brand_name})` : ''} · ${d.calories ?? '?'} kcal${d.meal_slot ? ` · ${d.meal_slot}` : ''}` }
+      case 'training:rom_records_insert':  return { icon: Activity,      color: 'text-lime-400',    label: `Logged mobility: ${d.movement_key || ''} ${d.degrees ?? '?'}°` }
+      case 'training:calorie_plans_insert':return { icon: Apple,         color: 'text-amber-400',   label: 'Calorie plan updated' }
+      case 'training:wearable_workouts_insert': return { icon: Activity, color: 'text-emerald-400', label: `Synced wearable workout: ${d.exercise_type || '?'}${d.duration_s ? ` · ${Math.round(d.duration_s/60)} min` : ''}${d.platform ? ` · ${d.platform}` : ''}` }
+      default:                             return { icon: Info, color: 'text-muted-foreground', label: t }
+    }
+  }
+
+  function formatWhen(iso) {
+    const d = new Date(iso)
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+
+  if (loading) {
+    return <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">Loading activity feed…</div>
+  }
+  if (err) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+        <AlertTriangle className="inline h-4 w-4 mr-2" />
+        Failed to load activity feed: {err}
+      </div>
+    )
+  }
+  if (events.length === 0) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-10 text-center">
+        <Clock className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+        <h2 className="text-base font-semibold mb-2">No activity yet</h2>
+        <p className="text-sm text-muted-foreground max-w-md mx-auto">
+          Every meaningful event for this account appears here — workouts logged, weigh-ins,
+          food entries, sign-ins, deletion requests, chat-transcript exports. Nothing has
+          happened yet, or events predate the audit log (started May 28 2026).
+        </p>
+      </div>
+    )
+  }
+
+  // Group events by day for readability.
+  const grouped = {}
+  for (const e of events) {
+    const key = new Date(e.occurred_at).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+    if (!grouped[key]) grouped[key] = []
+    grouped[key].push(e)
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Activity Feed</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Every meaningful event for this account, most recent first. Showing {events.length} event{events.length === 1 ? '' : 's'}.
+          </p>
+        </div>
+        {/* xlsx + pdf export buttons land in the next iteration */}
+      </div>
+
+      <div className="space-y-3">
+        {Object.entries(grouped).map(([day, dayEvents]) => (
+          <div key={day} className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="border-b border-border bg-accent/30 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {day}
+            </div>
+            <div className="divide-y divide-border">
+              {dayEvents.map(e => {
+                const { icon: Icon, color, label } = describe(e)
+                return (
+                  <div key={e.id} className="flex items-start gap-3 px-4 py-3">
+                    <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${color}`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm leading-snug">{label}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground font-mono tabular-nums">
+                        {formatWhen(e.occurred_at)}
+                        {' · '}
+                        <span className="uppercase">{e.source}</span>
+                      </p>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -471,56 +610,53 @@ export default function AdminUserDetail() {
     }
   }
 
-  // Hard-delete the account. Calls auth.admin.deleteUser via the edge
-  // function, which cascades through every FK that references auth.users
-  // ON DELETE CASCADE — wipes profiles, efforts, bodyweight, rom_records,
-  // calorie_logs, calorie_plans, food_logs, hr_samples, step_samples,
-  // wearable_workouts, user_integrations, messages, credential_history,
-  // plus auth internals (identities, sessions, etc.). IRREVERSIBLE.
-  async function doHardDelete() {
+  // Schedule the account for deletion (30-day grace period). Updated
+  // 2026-05-28 — used to be a hard-delete via edge function, now calls
+  // schedule_account_deletion RPC which sets profiles.scheduled_for_deletion_at
+  // = now() + 30 days. The pg_cron job 'anonymize_expired_accounts' fires
+  // anonymize_account_now() at grace expiry: profile identity wiped,
+  // training data purged, athletes released, messages retained, auth
+  // banned. Admin can cancel during the 30-day window via doCancelDeletion.
+  //
+  // True permanent SQL-level wipe is reserved for test-user cleanup by
+  // the dev team — see CLAUDE.md "test user deletion handoff" note.
+  async function doScheduleDeletion() {
     if (deleting) return
-    if (deleteConfirm !== 'DELETE') {
-      setDeleteError('Type DELETE to confirm.')
-      return
-    }
     setDeleting(true)
     setDeleteError('')
     try {
-      const { data, error } = await supabase.functions.invoke(
-        'admin-user-management',
-        { body: {
-          action: 'hard_delete',
-          target_user_id: id,
-          confirm: 'DELETE',
-        } },
-      )
+      const { data, error } = await supabase.rpc('schedule_account_deletion', { p_user_id: id })
       if (error) throw error
-      if (!data?.success) {
-        throw new Error(data?.error || data?.detail || 'Unknown error')
-      }
-
-      // Tear down the open modal + cached state BEFORE navigating so the
-      // unmount race that previously blanked the page can't fire. The
-      // previous version used wouter's setLocation here, which kept the
-      // entire React tree mounted while routes swapped. AdminDashboard /
-      // AdminFeed had cached entries pointing at this now-deleted user,
-      // and a stale read during the render churn was crashing the tree
-      // (manifesting as a blank screen until the user hard-refreshed).
-      //
-      // Two-part fix:
-      //   1. Bust every cached admin entry — they'll re-fetch fresh on
-      //      next mount with no reference to the deleted profile.
-      //   2. window.location.replace() instead of setLocation — hard
-      //      navigation, zero React state survives, no race. Same
-      //      pattern AuthContext.signOut() uses ("Hard navigate so no
-      //      React state race condition can land on CompleteProfile").
-      //   3. replace() (not assign()) so Back doesn't return to a 404
-      //      detail page for the user we just deleted.
+      // Update local profile state so the UI immediately reflects the new
+      // scheduled timestamp (Delete button → Cancel button, status banner appears).
+      setProfile(prev => ({
+        ...prev,
+        scheduled_for_deletion_at: data?.scheduled_for_deletion_at ?? new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      }))
       setDeleteOpen(false)
       dataCache.bustPrefix('admin:')
-      window.location.replace('/admin/clients')
     } catch (err) {
-      setDeleteError(err?.message || 'Failed to delete account.')
+      setDeleteError(err?.message || 'Failed to schedule deletion.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  // Cancel a scheduled deletion (within the 30-day grace window). Reverts
+  // profiles.scheduled_for_deletion_at to NULL. Cannot be used after the
+  // account has been fully anonymized.
+  async function doCancelDeletion() {
+    if (deleting) return
+    setDeleting(true)
+    setDeleteError('')
+    try {
+      const { error } = await supabase.rpc('cancel_scheduled_deletion', { p_user_id: id })
+      if (error) throw error
+      setProfile(prev => ({ ...prev, scheduled_for_deletion_at: null }))
+      dataCache.bustPrefix('admin:')
+    } catch (err) {
+      setDeleteError(err?.message || 'Failed to cancel scheduled deletion.')
+    } finally {
       setDeleting(false)
     }
   }
@@ -532,6 +668,18 @@ export default function AdminUserDetail() {
     (snapshot.lowestBpm != null) ||
     (snapshot.weightDiff != null)
   )
+
+  // Days remaining in the deletion grace window. Computed once per render
+  // outside JSX so React 19's strict-purity rule doesn't flag the Date.now()
+  // call (calling impure functions inside JSX IIFEs is forbidden under the
+  // React Compiler — see https://react.dev/reference/rules/components-and-hooks-must-be-pure).
+  // Stale-by-a-few-ms is fine — the value is only displayed as a whole
+  // day count, and the page reads it once on mount + when profile changes.
+  const deletionDaysLeft = profile?.scheduled_for_deletion_at
+    ? Math.max(0, Math.ceil(
+        (new Date(profile.scheduled_for_deletion_at).getTime() - Date.now()) / 86_400_000
+      ))
+    : null
 
   return (
     <div className="space-y-4">
@@ -670,15 +818,41 @@ export default function AdminUserDetail() {
                 Settings
               </button>
 
-              <button
-                onClick={() => { setDeleteOpen(true); setDeleteConfirm(''); setDeleteError('') }}
-                disabled={deleting}
-                title="Permanently delete this account and all associated data"
-                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors bg-destructive/10 border-destructive/30 text-destructive hover:bg-destructive/20 cursor-pointer"
-              >
-                <Trash2 className="h-3 w-3" />
-                Delete
-              </button>
+              {/* Three states for the Delete pill:
+                  - Anonymized → grey "Deleted" badge, no action (terminal state).
+                  - Scheduled (in 30-day grace) → amber "Cancel deletion" button.
+                  - Active → red "Delete" button that opens the schedule modal.
+                  See CLAUDE.md "account deletion lifecycle" section for the flow. */}
+              {profile.anonymized_at ? (
+                <span
+                  title={'Account deleted on ' + new Date(profile.anonymized_at).toLocaleDateString()}
+                  className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium bg-zinc-500/10 border-zinc-500/30 text-zinc-400"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Deleted
+                </span>
+              ) : profile.scheduled_for_deletion_at ? (
+                <button
+                  onClick={doCancelDeletion}
+                  disabled={deleting}
+                  title={'Scheduled for deletion on ' + new Date(profile.scheduled_for_deletion_at).toLocaleDateString() + ' — click to cancel'}
+                  className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20 cursor-pointer disabled:opacity-50"
+                >
+                  {deleting
+                    ? <><Loader2 className="h-3 w-3 animate-spin" /> Cancelling…</>
+                    : <><X className="h-3 w-3" /> Cancel deletion</>}
+                </button>
+              ) : (
+                <button
+                  onClick={() => { setDeleteOpen(true); setDeleteConfirm(''); setDeleteError('') }}
+                  disabled={deleting}
+                  title="Schedule this account for deletion (30-day grace period)"
+                  className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors bg-destructive/10 border-destructive/30 text-destructive hover:bg-destructive/20 cursor-pointer"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Delete
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -693,6 +867,35 @@ export default function AdminUserDetail() {
           <div className="mt-2 flex items-start gap-2 rounded-md border border-zinc-500/30 bg-zinc-500/10 px-3 py-2 text-xs text-zinc-400">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>Account deactivated {new Date(profile.deactivated_at).toLocaleDateString()} — user cannot sign in. Their data is preserved.</span>
+          </div>
+        )}
+
+        {/* Scheduled-for-deletion status banner. Shows during the 30-day grace
+            window. Renders only when active_error is absent so it doesn't
+            stack on top of an in-flight activation error. */}
+        {profile.scheduled_for_deletion_at && !profile.anonymized_at && !activeError && (
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Scheduled for deletion on{' '}
+              <span className="font-semibold">{new Date(profile.scheduled_for_deletion_at).toLocaleDateString()}</span>
+              {deletionDaysLeft != null && (
+                <> &nbsp;·&nbsp; <span className="font-mono tabular-nums">{deletionDaysLeft}</span> day{deletionDaysLeft === 1 ? '' : 's'} remaining</>
+              )}
+              {' '}— profile, training history, and coach links will be wiped at expiry. Chat history + transactional records are retained per policy.
+            </span>
+          </div>
+        )}
+
+        {/* Anonymized terminal state — admin can see they're gone but can't do anything */}
+        {profile.anonymized_at && !activeError && (
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-zinc-500/30 bg-zinc-500/10 px-3 py-2 text-xs text-zinc-400">
+            <Trash2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Account deleted on{' '}
+              <span className="font-semibold">{new Date(profile.anonymized_at).toLocaleDateString()}</span>.
+              Profile + training data are wiped. Chat history, transactional records, and the audit log are retained per legal-compliance policy.
+            </span>
           </div>
         )}
 
@@ -807,20 +1010,13 @@ export default function AdminUserDetail() {
         />
       )}
 
-      {/* Timeline — admin-only step-by-step move log. Reads from
-          user_activity_events (admin-only RLS). UI ships in a
-          follow-on; placeholder for now so the tab is visible. */}
+      {/* Timeline / Activity Feed — reads from get_activity_feed RPC.
+          Backend writes events from DB triggers (efforts, food, weight,
+          mobility, plans), lifecycle RPCs (deletion scheduled/cancelled/
+          deleted), chat exports, and (Phase 2) auth events. xlsx/pdf
+          export buttons land in the next iteration. */}
       {activeTab === 'timeline' && (
-        <div className="rounded-xl border border-border bg-card p-10 text-center">
-          <Clock className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
-          <h2 className="text-base font-semibold mb-2">Activity Timeline</h2>
-          <p className="text-sm text-muted-foreground max-w-md mx-auto">
-            Step-by-step log of every system event for this client —
-            sign-ins, profile edits, coach assignments, plan changes,
-            wearable connections, deactivations, and more. Searchable
-            + filterable. UI lands in the next iteration.
-          </p>
-        </div>
+        <ActivityFeed userId={id} />
       )}
 
       {/* Settings drawer — opens via the gear icon in the profile
@@ -845,17 +1041,17 @@ export default function AdminUserDetail() {
           onClick={() => !deleting && setDeleteOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-destructive/30 bg-card shadow-2xl"
+            className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-card shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
               <div className="flex items-center gap-2">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-destructive/15">
-                  <AlertTriangle className="h-5 w-5 text-destructive" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-500/15">
+                  <Clock className="h-5 w-5 text-amber-400" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-foreground">Delete account</h2>
-                  <p className="text-xs text-muted-foreground">This cannot be undone.</p>
+                  <h2 className="text-base font-bold text-foreground">Schedule account for deletion</h2>
+                  <p className="text-xs text-muted-foreground">30-day grace period · can be cancelled anytime before expiry</p>
                 </div>
               </div>
               <button
@@ -868,25 +1064,21 @@ export default function AdminUserDetail() {
             </div>
 
             <div className="space-y-4 px-5 py-4">
-              <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-xs text-foreground leading-relaxed">
-                You're about to permanently delete <span className="font-semibold">{profile.full_name || profile.email}</span>.
-                This wipes their <span className="font-semibold">profile, all logged efforts, body weight history, ROM records, calorie + food logs, intake plan, wearable data, messages, and authentication record.</span>
-                {' '}There is no undo and no recovery path — not even from a backup the user could initiate.
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2.5 text-xs text-foreground leading-relaxed">
+                You're scheduling{' '}
+                <span className="font-semibold">{profile.full_name || profile.email}</span>{' '}
+                for deletion. Their account enters a 30-day grace period — during that window,
+                any of these will cancel the deletion:
+                <ul className="mt-2 ml-4 list-disc text-muted-foreground space-y-0.5">
+                  <li>The user signs in and chooses Reactivate.</li>
+                  <li>You click "Cancel deletion" on this page.</li>
+                </ul>
               </div>
 
-              <div>
-                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Type <span className="font-mono text-destructive">DELETE</span> to confirm
-                </label>
-                <input
-                  type="text"
-                  value={deleteConfirm}
-                  onChange={e => { setDeleteConfirm(e.target.value); setDeleteError('') }}
-                  placeholder="DELETE"
-                  autoFocus
-                  disabled={deleting}
-                  className="w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm font-mono text-foreground outline-none focus:border-destructive focus:ring-1 focus:ring-destructive transition-colors disabled:opacity-50"
-                />
+              <div className="rounded-lg border border-border bg-background/40 px-3 py-2.5 text-[11px] text-muted-foreground leading-relaxed">
+                At expiry: profile fields wiped, all training history deleted, athletes released from this coach.
+                Chat history + transactional records + audit logs are <span className="font-semibold text-foreground">retained</span> per legal-compliance policy.
+                There is no revert once the grace period ends.
               </div>
 
               {deleteError && (
@@ -905,13 +1097,13 @@ export default function AdminUserDetail() {
                 Cancel
               </button>
               <button
-                onClick={doHardDelete}
-                disabled={deleting || deleteConfirm !== 'DELETE'}
-                className="flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-xs font-semibold text-destructive-foreground hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={doScheduleDeletion}
+                disabled={deleting}
+                className="flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-zinc-900 hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleting
-                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Deleting…</>
-                  : <><Trash2 className="h-3.5 w-3.5" /> Permanently delete</>}
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Scheduling…</>
+                  : <><Clock className="h-3.5 w-3.5" /> Schedule deletion (30 days)</>}
               </button>
             </div>
           </div>

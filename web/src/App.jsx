@@ -281,30 +281,32 @@ function ProtectedLayout() {
 // re-renders (see scars #5).
 
 function NotFoundPage() {
-  // Hard 404 — no auto-redirect, no app pitch, no recovery prompt. Athletes
-  // hitting any athlete URL on web land here per CLAUDE.md "Web / Mobile
-  // role rule". The /app placeholder is the ONE web surface athletes can
-  // legitimately land on; everything else falls here.
+  // Hard 404 — no auto-redirect, no app pitch, no recovery prompt.
   //
-  // Design (locked May 27 2026):
+  // Design (locked May 27 2026, updated May 28 2026):
   //   - 404 number: huge, lime/primary, font-mono tabular-nums per the
   //     app-wide numbers convention (CLAUDE.md font rule).
-  //   - Subhead: coach-voice one-liner in muted-foreground (matches the
-  //     existing copy color across the app). Locked copy:
-  //       "You broke form, re-rack and try again!"
-  //   - "Back home" button (added May 27 2026 after user feedback —
-  //     users hitting a broken link need ONE clear way out). Routes
-  //     to `/?welcome=1` (NOT bare `/`). The `?welcome=1` param tells
-  //     RootRoute to skip RoleRouter and unconditionally render the
-  //     public Landing page. Without the param, a signed-in athlete
-  //     clicking "Back home" would get bounced to /app by RoleRouter
-  //     — which is not what they expect when escaping a 404. They
-  //     expect the actual marketing landing page (bench press demo,
-  //     "One number in. Every projection out."). Signed-in coaches
-  //     and admins also see Landing — if they want their portal, they
-  //     navigate there explicitly.
+  //   - Subhead: coach-voice one-liner in muted-foreground.
+  //   - "Back home" button — role-aware destination:
+  //       • Signed-in admin   → /admin/overview
+  //       • Signed-in coach   → /coach/portal
+  //       • Signed-in athlete → /app
+  //       • Signed-out        → / (Landing)
+  //     Updated May 28 2026 after user feedback: the previous
+  //     "/?welcome=1" forced Landing even for signed-in users, which
+  //     felt like a sign-out from their POV. Signed-in users hitting
+  //     a 404 should be routed back into the portal they were ALREADY
+  //     IN, not dumped on the marketing page.
   //   - Button uses outlined chrome (not the lime primary fill) so it
   //     doesn't compete with the giant 404 above it.
+  const { profile } = useAuth()
+  const homeHref = profile?.is_superuser
+    ? '/admin/overview'
+    : profile?.is_coach
+      ? '/coach/portal'
+      : profile
+        ? '/app'
+        : '/'
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="max-w-2xl w-full text-center">
@@ -315,7 +317,7 @@ function NotFoundPage() {
           You broke form, re-rack and try again!
         </p>
         <div className="mt-12">
-          <Link href="/?welcome=1">
+          <Link href={homeHref}>
             <a className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-5 py-2.5 text-sm font-medium text-foreground hover:bg-muted hover:border-primary/40 transition-colors">
               <span aria-hidden="true">←</span>
               Back home
@@ -458,9 +460,21 @@ function AppRoutes() {
 
         {/* Admin portal — every /admin/* URL routes through ProtectedLayout,
             which gates on is_superuser and renders AdminShell with the
-            nested admin route Switch. Match both /admin and /admin/anything. */}
-        <Route path="/admin" component={ProtectedLayout} />
-        <Route path="/admin/:rest*" component={ProtectedLayout} />
+            nested admin route Switch.
+            ⚠ LOCKED May 28 2026 — wouter v3 path syntax traps:
+              • `/admin/:rest*`  matches only ONE segment after /admin
+                (regexparam treats `*` as part of the param name, not a
+                quantifier). Broke /admin/user/<uuid> silently.
+              • `/admin*`        treats the `*` as a regex quantifier on
+                the literal `m`, matching /admin, /adminm, /adminmm —
+                NOT /admin/overview. Broke EVERY admin URL.
+              • `/admin/*?`      ← the correct syntax. Generates the
+                regex `^/admin(?:/(.*))?/?$` which matches /admin AND
+                /admin/anything/at/any/depth. Per the README example
+                `/orders/*?` which matches "/orders", "/orders/", and
+                "/orders/completed/list".
+            Verified live May 28 2026 after two prior misses. */}
+        <Route path="/admin/*?" component={ProtectedLayout} />
 
         {/* Catch-all → 404. NO auto-redirect, no fallback render. Athletes
             hitting /dashboard, /strength, /cardio, etc. land here. The /app

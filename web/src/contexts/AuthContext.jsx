@@ -149,6 +149,65 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
+  // ── Foreground presence heartbeat ────────────────────────────────────────
+  // Mirrors mobile/src/contexts/AuthContext.tsx — writes profiles.last_seen_at
+  // = now() every 60 s while the user is signed in AND the tab is visible.
+  //
+  // Why it matters for coaches: the mobile ChatSheet reads `last_seen_at` (via
+  // get_coach_info) to render the coach's "Active now" / "Last seen X ago"
+  // subtitle. Without this heartbeat, a coach who only ever uses the web
+  // portal has a NULL or weeks-old `last_seen_at`, so every client sees them
+  // as permanently offline. The coach side also reads roster `last_seen_at`
+  // for the same purpose (see CoachMessages.jsx).
+  //
+  // We always WRITE the column regardless of share_online_status — the flag
+  // is enforced at READ time (get_coach_info masks it when off). That way
+  // flipping the toggle ON shows fresh data immediately, not 60 s later.
+  //
+  // bfcache-friendly: pauses on visibilitychange → hidden, resumes on
+  // visible. No work runs while the tab is in background, and the listener
+  // is a single boolean toggle (no fetch/refetch — mirrors the same pattern
+  // as the realtime disconnect handler above).
+  useEffect(() => {
+    if (!user?.id) return
+
+    let timer = null
+    async function tick() {
+      try {
+        await supabase
+          .from('profiles')
+          .update({ last_seen_at: new Date().toISOString() })
+          .eq('id', user.id)
+      } catch {
+        // Offline / network blip — silent, will retry next interval.
+      }
+    }
+
+    function start() {
+      if (timer) return
+      tick() // immediate update on focus
+      timer = setInterval(tick, 60_000)
+    }
+    function stop() {
+      if (!timer) return
+      clearInterval(timer)
+      timer = null
+    }
+
+    // Initial state: start ticking unless we mount in a hidden tab.
+    if (document.visibilityState !== 'hidden') start()
+
+    function onVisibility() {
+      if (document.visibilityState === 'hidden') stop()
+      else start()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      stop()
+    }
+  }, [user?.id])
+
   // ── Realtime profile sync ────────────────────────────────────────────────
   // Subscribe to UPDATEs on the user's own profiles row. When admin flips
   // a field server-side (Self-coached / Admin-coached toggle, chat_enabled,
@@ -200,6 +259,21 @@ export function AuthProvider({ children }) {
   }
 
   const signOut = useCallback(async () => {
+    // Mark last_seen_at well into the past BEFORE tearing down the session.
+    // Otherwise any watcher (mobile ChatSheet's "Active now" header, coach
+    // roster green dots, AdminMessages indicators) that uses the heartbeat
+    // fallback would still see this user as active for up to 5 min because
+    // the most recent heartbeat was fresh. Writing a past timestamp instantly
+    // flips every fallback-based indicator to "Last seen X ago".
+    try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser()
+      if (currentUser?.id) {
+        await supabase
+          .from('profiles')
+          .update({ last_seen_at: new Date(Date.now() - 10 * 60_000).toISOString() })
+          .eq('id', currentUser.id)
+      }
+    } catch { /* best-effort — never block sign-out on this */ }
     await supabase.auth.signOut()
     // Hard navigate so no React state race condition can land on CompleteProfile
     window.location.replace('/auth?mode=signin')

@@ -426,6 +426,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // starts cleanly; without this, a sign-out + sign-in within the
     // 1-min relock window would skip the lock prompt incorrectly.
     clearAuthState()
+    // Mark last_seen_at well into the past BEFORE tearing down the session.
+    // Otherwise any watcher (coach roster's green dot, CoachMessages list
+    // rows) that uses the 5-min last_seen_at fallback would still show this
+    // user as "Active now" for up to 5 min after sign-out, because the most
+    // recent heartbeat was fresh. Writing a past timestamp instantly flips
+    // every fallback-based indicator to "Last seen X ago".
+    try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser()
+      if (currentUser?.id) {
+        await supabase.from('profiles')
+          .update({ last_seen_at: new Date(Date.now() - 10 * 60_000).toISOString() })
+          .eq('id', currentUser.id)
+      }
+    } catch { /* best-effort — never block sign-out on this */ }
     await supabase.auth.signOut()
   }, [])
 

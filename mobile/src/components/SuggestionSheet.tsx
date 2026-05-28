@@ -67,6 +67,16 @@ interface Suggestion {
   is_suggestion: boolean
   read: boolean
   created_at: string
+  // Soft-delete columns (added May 28 2026) — when deleted_at is non-null,
+  // the row is preserved in the DB for legal export but hidden from UI.
+  deleted_at?: string | null
+  deleted_by?: string | null
+  sent_by?: string | null
+  // Edit tracking (added May 28 2026) — when edited_at is non-null, the
+  // bubble shows an "Edited" marker. The DB trigger writes the timestamp
+  // to activity_events for the user's Activity Feed tab.
+  edited_at?: string | null
+  edited_by?: string | null
 }
 
 interface Props {
@@ -130,6 +140,7 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
       .select('*')
       .eq('user_id', user.id)
       .eq('is_suggestion', true)
+      .is('deleted_at', null)
       // DESC so newest is first in the array. The FlatList renders
       // `inverted`, which flips the visual order — newest ends up at
       // the BOTTOM of the screen (matches chat behaviour, keeps the
@@ -147,6 +158,7 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
       }, payload => {
         const newRow = payload.new as Suggestion
         if (!newRow.is_suggestion) return
+        if (newRow.deleted_at) return // defensive — never show soft-deleted
         // PREPEND — with `inverted` FlatList + DESC data, position 0 is
         // the visual bottom. New suggestions slide in there and push
         // older ones up.
@@ -160,6 +172,11 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
       }, payload => {
         const upd = payload.new as Suggestion
         if (!upd.is_suggestion) return
+        // Soft-delete arrived (admin side did it) — drop locally.
+        if (upd.deleted_at) {
+          setSuggestions(prev => prev.filter(s => s.id !== upd.id))
+          return
+        }
         setSuggestions(prev => prev.map(s => s.id === upd.id ? upd : s))
       })
       .on('postgres_changes', {
@@ -234,14 +251,26 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
     setInputHeight(40)
     try {
       if (wasEditing) {
-        // Optimistic local update so the user sees their edit immediately
-        // without waiting for the realtime UPDATE round-trip.
-        setSuggestions(prev => prev.map(s => s.id === wasEditing ? { ...s, body: trimmed } : s))
-        await supabase.from('messages').update({ body: trimmed }).eq('id', wasEditing)
+        // Optimistic local update so the user sees their edit + "Edited"
+        // marker immediately, without waiting for the realtime UPDATE
+        // round-trip. edited_at + edited_by are written explicitly so
+        // the DB trigger messages_edit_activity_trg (migration
+        // messages_edit_tracking_v2) has the timestamp + editor id to
+        // log the chat:message_edited event to activity_events.
+        const editedAt = new Date().toISOString()
+        setSuggestions(prev => prev.map(s =>
+          s.id === wasEditing ? { ...s, body: trimmed, edited_at: editedAt, edited_by: user.id } : s
+        ))
+        await supabase
+          .from('messages')
+          .update({ body: trimmed, edited_at: editedAt, edited_by: user.id })
+          .eq('id', wasEditing)
       } else {
+        // sent_by = athlete's own user_id — mirrors ChatSheet / web pattern.
         await supabase.from('messages').insert({
           user_id:       user.id,
           from_admin:    false,
+          sent_by:       user.id,
           body:          trimmed,
           is_suggestion: true,
           read:          false,
@@ -265,11 +294,15 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
   }, [])
 
   const handleDelete = useCallback(async (id: string) => {
-    // Optimistic local removal — instant disappearance. Realtime DELETE
-    // event will then be a no-op (idempotent: already gone).
+    // SOFT delete preserves the row for admin Export Conversation tool +
+    // legal retention. UI hides it immediately via local-state removal;
+    // the realtime UPDATE handler will be a no-op (already gone).
     setSuggestions(prev => prev.filter(s => s.id !== id))
-    await supabase.from('messages').delete().eq('id', id)
-  }, [])
+    const u = user
+    await supabase.from('messages')
+      .update({ deleted_at: new Date().toISOString(), deleted_by: u?.id ?? null })
+      .eq('id', id)
+  }, [user])
 
   // Enter-to-send handling: when enterToSend is true and the user types a
   // newline (Return key), strip it and submit instead.
@@ -486,7 +519,10 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
                           >
                             {item.body}
                           </Text>
-                          <Text style={s.suggestionTime}>{formatTime(item.created_at)}</Text>
+                          <Text style={s.suggestionTime}>
+                            {formatTime(item.created_at)}
+                            {item.edited_at ? ' · Edited' : ''}
+                          </Text>
                         </View>
                       </View>
                     </MessageActions>

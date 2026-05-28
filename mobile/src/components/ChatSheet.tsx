@@ -55,10 +55,14 @@ import MessageActions from './MessageActions'
 import { getEnterToSend } from '../lib/chatPrefs'
 import { colors, alpha, palette } from '../theme'
 
-// ── Online-status threshold ──────────────────────────────────────────────────
-// "Online" = active in the app within the last 5 min. Matches the heartbeat
-// cadence (60 s, with a few-minute grace period for spotty networks).
-const ONLINE_WINDOW_MS = 5 * 60 * 1000
+// (Removed May 28 2026 — ONLINE_WINDOW_MS) "Active now" used to fall back
+// to a 5-min last_seen_at window when the coach wasn't in the presence
+// channel. That made the coach show as Active for up to 5 min after they
+// navigated away from /coach/messages, signed out, or closed their tab —
+// because the web heartbeat keeps writing last_seen_at while the coach is
+// logged in elsewhere. coachOnline is now channel-only — see its inline
+// comment for the locked rationale. Constant retained-then-removed for
+// the git-blame trail.
 // Time gap above which we insert a "header row" timestamp between two
 // consecutive bubbles. Below this, bubbles are rendered without an explicit
 // time so the chat feels less noisy.
@@ -131,8 +135,8 @@ function TypingBubble() {
 // `s` StyleSheet defined at the bottom of the file — JS hoisting handles
 // the forward reference at render time.
 function ChatBubble({
-  isMine, body, revealed,
-}: { isMine: boolean; body: string; revealed?: boolean }) {
+  isMine, body, revealed, edited,
+}: { isMine: boolean; body: string; revealed?: boolean; edited?: boolean }) {
   return (
     <View
       style={[
@@ -151,6 +155,17 @@ function ChatBubble({
       >
         {body}
       </Text>
+      {/* "Edited" marker — shown when edited_at is non-null. Sits as a
+          small italic footer inside the bubble; matches the WhatsApp /
+          iMessage convention. The web side renders the same marker
+          beside the timestamp. The DB trigger writes the edit timestamp
+          to activity_events so the user's Activity Feed tab has the
+          full provenance. */}
+      {edited && (
+        <Text style={[s.bubbleEdited, isMine ? s.bubbleEditedMine : s.bubbleEditedTheirs]}>
+          Edited
+        </Text>
+      )}
     </View>
   )
 }
@@ -165,6 +180,19 @@ interface Message {
   is_suggestion: boolean
   read: boolean
   created_at: string
+  // Soft-delete columns (added May 28 2026) — when deleted_at is non-null,
+  // the row is preserved in the DB for legal export but hidden from UI.
+  deleted_at?: string | null
+  deleted_by?: string | null
+  // Sender attribution — required by admin's Export Conversation tool to
+  // distinguish multiple coaches over time.
+  sent_by?: string | null
+  // Edit tracking (added May 28 2026) — when edited_at is non-null, the
+  // bubble shows an "Edited" marker beside the timestamp. The DB trigger
+  // messages_edit_activity_trg logs each body-change to activity_events
+  // for the user's Activity Feed tab.
+  edited_at?: string | null
+  edited_by?: string | null
 }
 
 interface CoachInfo {
@@ -269,11 +297,14 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
     let mounted = true
 
     async function load() {
+      // Skip soft-deleted messages — the Export Conversation tool on admin
+      // side is the only place that reads them, via SECURITY DEFINER RPC.
       const { data } = await supabase
         .from('messages')
         .select('*')
         .eq('user_id', user!.id)
         .eq('is_suggestion', false)
+        .is('deleted_at', null)
         .order('created_at', { ascending: true })
       if (mounted) setMessages((data as Message[] | null) ?? [])
 
@@ -284,6 +315,7 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
         .eq('user_id', user!.id)
         .eq('from_admin', true)
         .eq('read', false)
+        .is('deleted_at', null)
     }
     load()
 
@@ -297,6 +329,7 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
       }, payload => {
         const newRow = payload.new as Message
         if (newRow.is_suggestion) return
+        if (newRow.deleted_at) return // defensive — never show soft-deleted
         setMessages(prev => prev.some(m => m.id === newRow.id) ? prev : [...prev, newRow])
         // If a fresh admin message arrives while we're open, mark it read immediately.
         if (newRow.from_admin && !newRow.read) {
@@ -311,6 +344,12 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
       }, payload => {
         const upd = payload.new as Message
         if (upd.is_suggestion) return
+        // Soft-delete arrived from anywhere (admin web, coach web, or this
+        // client's own swipe-delete) — drop from local state so UI hides it.
+        if (upd.deleted_at) {
+          setMessages(prev => prev.filter(m => m.id !== upd.id))
+          return
+        }
         setMessages(prev => prev.map(m => m.id === upd.id ? upd : m))
       })
       .on('postgres_changes', {
@@ -479,17 +518,32 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
     setInputHeight(40)
     try {
       if (wasEditing) {
-        // Optimistic local update — rewrite the bubble's body immediately
-        // so the user sees their edit reflected without waiting for the
-        // realtime UPDATE event to round-trip from Postgres. The realtime
-        // event will then re-set this same row idempotently when it
-        // arrives.
-        setMessages(prev => prev.map(m => m.id === wasEditing ? { ...m, body: trimmed } : m))
-        await supabase.from('messages').update({ body: trimmed }).eq('id', wasEditing)
+        // Optimistic local update — rewrite the bubble's body + stamp
+        // edited_at immediately so the user sees the edit + "Edited"
+        // marker without waiting for the realtime UPDATE event to
+        // round-trip from Postgres. The realtime event will then re-set
+        // this row idempotently when it arrives.
+        //
+        // edited_at + edited_by are written explicitly so the DB trigger
+        // messages_edit_activity_trg (migration messages_edit_tracking_v2)
+        // has the timestamp + editor id to log the chat:message_edited
+        // event to activity_events with full provenance.
+        const editedAt = new Date().toISOString()
+        setMessages(prev => prev.map(m =>
+          m.id === wasEditing ? { ...m, body: trimmed, edited_at: editedAt, edited_by: user.id } : m
+        ))
+        await supabase
+          .from('messages')
+          .update({ body: trimmed, edited_at: editedAt, edited_by: user.id })
+          .eq('id', wasEditing)
       } else {
+        // sent_by carries the athlete's own user_id so admin exports can
+        // attribute messages to a specific person if the athlete's account
+        // is ever transferred. Mirrors web's CoachMessages + AdminMessages.
         await supabase.from('messages').insert({
           user_id:       user.id,
           from_admin:    false,
+          sent_by:       user.id,
           body:          trimmed,
           is_suggestion: false,
           read:          false,
@@ -513,11 +567,16 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
   }, [])
 
   const handleDelete = useCallback(async (id: string) => {
-    // Optimistic local removal so the row disappears instantly. Realtime
-    // DELETE event will be a no-op when it arrives (already gone).
+    // Optimistic local removal so the row disappears instantly. SOFT
+    // delete preserves the row for legal/admin exports (see Export
+    // Conversation tool). The realtime UPDATE event will arrive shortly
+    // with deleted_at set, and our handler will be a no-op (already gone).
     setMessages(prev => prev.filter(m => m.id !== id))
-    await supabase.from('messages').delete().eq('id', id)
-  }, [])
+    const u = user
+    await supabase.from('messages')
+      .update({ deleted_at: new Date().toISOString(), deleted_by: u?.id ?? null })
+      .eq('id', id)
+  }, [user])
 
   const handleChangeText = useCallback((newText: string) => {
     if (enterToSend && newText.length > body.length && newText.endsWith('\n')) {
@@ -538,16 +597,24 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
   }, [])
 
   // ── Online status derivation ────────────────────────────────────────────
-  // Three-tier check:
+  // CHANNEL-ONLY (locked May 28 2026) — "Active now" means the coach is
+  // literally in the presence channel for THIS chat right now. We do NOT
+  // fall back to the 5-min `last_seen_at` heartbeat window because:
+  //   • The web heartbeat keeps firing as long as the coach is logged in
+  //     anywhere (dashboard, clients, briefing, etc.) — so the fallback
+  //     would show "Active now" even when the coach navigated away from
+  //     Messages and isn't actually in the chat with this user.
+  //   • Sign-out also leaves a fresh heartbeat behind for up to 60 s →
+  //     stale "Active now" after the user already left.
+  // Subtitle fallback for "Last seen X ago" still uses last_seen_at —
+  // that one's a different semantic ("when did we last see them in the
+  // app at all" vs "are they in the chat with me right now").
+  // The two-tier check is now just:
   //   1. share_online_status off → never online (privacy gate)
-  //   2. admin currently in the presence channel → online (instant)
-  //   3. last_seen_at within 5 min → online (handles brief disconnects
-  //      before the persistent heartbeat catches up)
+  //   2. coach currently in the presence channel → online (instant)
   const coachOnline = useMemo(() => {
     if (coach.share_online_status === false) return false
-    if (adminPresent) return true
-    if (!coach.last_seen_at) return false
-    return Date.now() - new Date(coach.last_seen_at).getTime() < ONLINE_WINDOW_MS
+    return adminPresent
   }, [coach, adminPresent])
 
   // Last-seen subtitle source — adminLeftAt (this-session disconnect)
@@ -835,9 +902,15 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
                 disableIntervalMomentum={false}
                 onScroll={onScrollList}
                 scrollEventThrottle={16}
-                // The inverted list shows its HEADER component at the visual
-                // bottom of the screen — perfect spot for the typing bubble.
-                ListHeaderComponent={coachTyping ? <TypingBubble /> : null}
+                // Typing indicator used to live here as ListHeaderComponent.
+                // Moved to a sibling below the list so toggling it doesn't
+                // mutate the list's content size — when the coach started
+                // typing, the inverted list re-anchored from the bottom and
+                // visibly shifted the reader's position up by ~36 px. Now
+                // the bubble renders OUTSIDE the scroll surface, in a slot
+                // between the FlatList and the editing banner. Mirrors the
+                // web AdminMessages + CoachMessages pattern exactly. Reader
+                // position is sacred.
                 renderItem={({ item }) => {
                   if (item.kind === 'time') {
                     return (
@@ -873,13 +946,20 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
                         isOpen={revealedMsgId === m.id}
                         onOpenChange={open => setRevealedMsgId(open ? m.id : null)}
                       >
-                        <ChatBubble isMine={isMine} body={m.body} />
+                        <ChatBubble isMine={isMine} body={m.body} edited={!!m.edited_at} />
                       </MessageActions>
                     </Animated.View>
                   )
                 }}
               />
             )}
+
+            {/* Typing indicator — sibling slot, NOT inside the FlatList.
+                Rendered between the messages list and the editing banner /
+                input. Toggling it doesn't shift the list's scroll position
+                because it's not part of the list's content. Matches web
+                AdminMessages + CoachMessages behaviour. */}
+            {coachTyping ? <TypingBubble /> : null}
 
             {/* Editing banner */}
             {editingId ? (
@@ -1102,6 +1182,14 @@ const s = StyleSheet.create({
   bubbleText:        { fontSize: 14, lineHeight: 20 },
   bubbleTextMine:    { color: colors.primaryForeground },
   bubbleTextTheirs:  { color: colors.foreground },
+
+  // "Edited" marker — small italic footer inside the bubble when
+  // edited_at is non-null. Uses 0.65 opacity so it reads as metadata,
+  // not body content. Mirrors the web-side bubble timestamp's "· Edited"
+  // affix visually + semantically.
+  bubbleEdited:        { fontSize: 10, lineHeight: 12, marginTop: 4, fontStyle: 'italic' },
+  bubbleEditedMine:    { color: alpha(colors.primaryForeground, 0.65) },
+  bubbleEditedTheirs:  { color: alpha(colors.foreground, 0.55) },
 
   // Time-group separator (between bubble groups with > 5 min gap)
   timeRow: {
