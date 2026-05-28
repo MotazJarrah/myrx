@@ -1,23 +1,26 @@
 /**
  * Admin Messages — /admin/messages
  *
- * Three top-level tabs:
- *   1. Messages              — your direct chats with YOUR OWN clients
- *                              (coach-attached clients filtered out for
- *                              privacy; see "Coach-client chat privacy"
- *                              section below).
- *   2. Suggestions           — every suggestion from every client.
- *                              Suggestions are explicitly routed to admin
- *                              (the platform), so cross-coach visibility
- *                              is by design.
- *   3. Export Conversation   — privacy-respecting transcript tool with
- *                              its own sub-tabs (New Export + Audit Log).
+ * Two top-level tabs:
+ *   1. Messages      — your direct chats with YOUR OWN clients
+ *                      (coach-attached clients filtered out for privacy;
+ *                      see "Coach-client chat privacy" section below).
+ *   2. Suggestions   — every suggestion from every client. Suggestions
+ *                      are explicitly routed to admin (the platform),
+ *                      so cross-coach visibility is by design.
+ *
+ * The "Export Conversation" tab that used to be a third tab here moved
+ * to /admin/exports (the Exports page) on May 28 2026. Conversation
+ * exports + the deleted-account archive now share a single page so the
+ * admin doesn't have to remember which surface to open for which kind
+ * of export.
  *
  * ── Coach-client chat privacy (locked May 28 2026) ──────────────────────
  * Coach↔client chats no longer surface in the admin's Messages tab. The
- * only way for the admin to read them is through the Export Conversation
- * tool, which requires a reason and writes an audit log row. Quiet access
- * (no notification to coach or client). Matches Trainerize / TrueCoach.
+ * only way for the admin to read them is through the Exports page's
+ * Conversations tab, which requires a reason and writes an audit log
+ * row. Quiet access (no notification to coach or client). Matches
+ * Trainerize / TrueCoach.
  *
  * ── Soft delete (locked May 28 2026) ────────────────────────────────────
  * Messages are never hard-deleted. UI hides messages where deleted_at IS
@@ -40,7 +43,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-import { MessageCircle, Lightbulb, Send, ArrowLeft, FileDown, Search, X, Check, Pencil } from 'lucide-react'
+import { MessageCircle, Lightbulb, Send, ArrowLeft, Pencil } from 'lucide-react'
 import SwipeDelete from '../../components/SwipeDelete'
 
 const ENTER_KEY = 'myrx_enter_to_send'
@@ -165,551 +168,6 @@ function Tab({ active, onClick, children, badge }) {
         </span>
       )}
     </button>
-  )
-}
-
-// ── Searchable single-select combobox ──────────────────────────────────────
-// Visible label above + magnifying-glass icon inside + always-visible
-// filtered option list below. NO placeholder per the no-placeholder rule.
-// `getOptionKey(option)` returns the option's id; `renderOption` returns the
-// JSX for each row. `value` is the selected key (string), or null.
-/**
- * RowPicker — always-visible list of selectable rows below a search input.
- *
- * Replaces the previous popover-style SearchableSelect for the Export
- * Conversation form. The popover read as "one floating block" when only
- * one option matched; this version makes the list explicit:
- *
- *   • Search box at top filters rows live.
- *   • Header line above the list reports the option count
- *     ("3 conversations" / "1 client matches") so the user knows the
- *     scrollable card IS a list, not a single decorative panel.
- *   • Rows have left dividers, hover state, and a lime checkmark when
- *     selected. Selected row also gets a lime ring.
- *   • Loading / disabled / empty states each render a distinct message
- *     inside the same card frame so the UI never collapses.
- */
-function RowPicker({
-  label,
-  helperText,
-  options,
-  value,
-  onChange,
-  filterFn,
-  renderRow,
-  emptyMessage,
-  countLabel,            // function (n) => "3 conversations"
-  loading = false,
-  disabled = false,
-}) {
-  const [query, setQuery] = useState('')
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return options
-    return options.filter(o => filterFn(o, q))
-  }, [options, query, filterFn])
-
-  return (
-    <div>
-      <label className="block text-sm font-medium mb-1.5">{label}</label>
-
-      {/* Search input — always visible, filters the rows below in real time. */}
-      <div className={`relative flex items-center rounded-lg border bg-background transition-colors ${
-        disabled ? 'border-border opacity-50' : 'border-border focus-within:border-primary'
-      }`}>
-        <Search className="absolute left-3 h-4 w-4 text-muted-foreground pointer-events-none" />
-        <input
-          type="text"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          placeholder=""
-          disabled={disabled}
-          className="w-full bg-transparent pl-10 pr-9 py-2.5 text-sm outline-none disabled:cursor-not-allowed"
-        />
-        {query && !disabled && (
-          <button
-            type="button"
-            onClick={() => setQuery('')}
-            aria-label="Clear search"
-            className="absolute right-2 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
-
-      {helperText && (
-        <p className="mt-1.5 text-xs text-muted-foreground">{helperText}</p>
-      )}
-
-      {/* Row list — always visible. The "X results" header above makes it
-          unambiguous that this is a pick-from list, not a single block. */}
-      <div className="mt-2.5">
-        {disabled ? null : loading ? (
-          <div className="rounded-lg border border-border bg-card px-4 py-6 text-center text-xs text-muted-foreground">
-            Loading…
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border bg-card px-4 py-6 text-center text-xs text-muted-foreground">
-            {emptyMessage}
-          </div>
-        ) : (
-          <>
-            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {countLabel ? countLabel(filtered.length) : `${filtered.length} option${filtered.length === 1 ? '' : 's'}`}
-            </p>
-            <div className="rounded-lg border border-border bg-card overflow-hidden divide-y divide-border max-h-80 overflow-y-auto">
-              {filtered.map(o => {
-                const isSelected = value === o.id
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={() => onChange(isSelected ? null : o.id)}
-                    className={`w-full text-left px-3 py-2.5 flex items-center gap-2 transition-colors ${
-                      isSelected
-                        ? 'bg-primary/15 ring-1 ring-inset ring-primary/40'
-                        : 'hover:bg-accent/40'
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">{renderRow(o)}</div>
-                    {isSelected
-                      ? <Check className="h-4 w-4 text-primary shrink-0" />
-                      : <span className="h-4 w-4 shrink-0 rounded-full border border-border" />
-                    }
-                  </button>
-                )
-              })}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── Export Conversation — New Export form ───────────────────────────────────
-function NewExportForm({ users }) {
-  const [athleteId,  setAthleteId]  = useState(null)
-  const [partnerId,  setPartnerId]  = useState(null)
-  const [partners,   setPartners]   = useState([])
-  const [partnersLoading, setPartnersLoading] = useState(false)
-  const [reason,     setReason]     = useState('')
-  const [busy,       setBusy]       = useState(false)
-  const [err,        setErr]        = useState(null)
-
-  // Athletes list = all roster clients (alphabetical by name).
-  const athletes = useMemo(() => {
-    return [...users].sort((a, b) =>
-      (a.full_name || a.email || '').localeCompare(b.full_name || b.email || '')
-    )
-  }, [users])
-
-  const athleteFilter  = (o, q) => (o.full_name || '').toLowerCase().includes(q) || (o.email || '').toLowerCase().includes(q)
-  const partnerFilter  = (o, q) => (o.partner_name || '').toLowerCase().includes(q)
-
-  // When athlete changes, refetch partners + reset partner selection.
-  useEffect(() => {
-    setPartnerId(null)
-    if (!athleteId) { setPartners([]); return }
-    setPartnersLoading(true)
-    supabase.rpc('get_chat_partners_for_athlete', { p_athlete_id: athleteId })
-      .then(({ data, error }) => {
-        if (error) {
-          console.error('get_chat_partners_for_athlete failed:', error)
-          setPartners([])
-        } else {
-          // Map to the shape SearchableSelect expects (id + display fields).
-          setPartners((data || []).map(p => ({
-            id:            p.partner_id,
-            partner_name:  p.partner_name,
-            partner_role:  p.partner_role,
-            message_count: p.message_count,
-            last_at:       p.last_message_at,
-          })))
-        }
-        setPartnersLoading(false)
-      })
-  }, [athleteId])
-
-  const selectedAthlete = athletes.find(a => a.id === athleteId)
-  const selectedPartner = partners.find(p => p.id === partnerId)
-  const reasonValid = reason.trim().length >= 5
-  const canExport   = !!athleteId && !!partnerId && reasonValid && !busy
-
-  async function handleGenerate() {
-    if (!canExport) return
-    setBusy(true)
-    setErr(null)
-    try {
-      // 1. Fetch transcript
-      const { data: transcript, error: tErr } = await supabase.rpc('get_chat_transcript_for_export', {
-        p_athlete_id: athleteId,
-        p_partner_id: partnerId,
-      })
-      if (tErr) throw tErr
-      const rows = transcript || []
-
-      // 2. Write audit log row
-      const { error: lErr } = await supabase.rpc('log_chat_export', {
-        p_athlete_id:    athleteId,
-        p_partner_id:    partnerId,
-        p_partner_role:  selectedPartner.partner_role,
-        p_reason:        reason.trim(),
-        p_message_count: rows.length,
-      })
-      if (lErr) throw lErr
-
-      // 3. Open printable transcript in a new window + trigger print
-      openPrintableTranscript({
-        athleteName: selectedAthlete.full_name || selectedAthlete.email,
-        athleteEmail: selectedAthlete.email,
-        partnerName: selectedPartner.partner_name,
-        partnerRole: selectedPartner.partner_role,
-        reason: reason.trim(),
-        rows,
-      })
-
-      // 4. Reset form (admin can do another export immediately)
-      setAthleteId(null)
-      setPartnerId(null)
-      setReason('')
-
-      // 5. Tell the parent surface that the audit log just gained a row
-      //    so the Audit Log sub-tab refreshes on next visit.
-      window.dispatchEvent(new CustomEvent('myrx_chat_export_logged'))
-    } catch (e) {
-      setErr(e?.message || 'Export failed. Try again.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="space-y-6 max-w-2xl">
-      {/* Step 1 — pick athlete */}
-      <RowPicker
-        label="Athlete"
-        helperText="Pick the client whose conversation you need to export."
-        options={athletes}
-        value={athleteId}
-        onChange={setAthleteId}
-        filterFn={athleteFilter}
-        countLabel={n => `${n} client${n === 1 ? '' : 's'}${athletes.length !== n ? ` (of ${athletes.length})` : ''}`}
-        renderRow={a => (
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary overflow-hidden">
-              {a.avatar_url
-                ? <img src={a.avatar_url} alt={a.full_name} className="h-8 w-8 object-cover" />
-                : (a.full_name?.[0]?.toUpperCase() ?? '?')}
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-medium truncate">{a.full_name || 'Unnamed'}</p>
-              <p className="text-[11px] text-muted-foreground truncate">{a.email}</p>
-            </div>
-          </div>
-        )}
-        emptyMessage="No clients match"
-      />
-
-      {/* Step 2 — pick partner (appears after athlete chosen) */}
-      <RowPicker
-        label="Conversation partner"
-        helperText={
-          athleteId
-            ? 'Lists everyone who has chatted with this client. Pick which conversation to export.'
-            : 'Pick the athlete above first.'
-        }
-        options={partners}
-        value={partnerId}
-        onChange={setPartnerId}
-        filterFn={partnerFilter}
-        loading={partnersLoading}
-        disabled={!athleteId}
-        countLabel={n => `${n} conversation${n === 1 ? '' : 's'} with this client`}
-        renderRow={p => (
-          <div className="flex items-center gap-2.5">
-            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold overflow-hidden ${
-              p.partner_role === 'coach'
-                ? 'bg-blue-500/15 text-blue-400'
-                : 'bg-purple-500/15 text-purple-400'
-            }`}>
-              {p.partner_name?.[0]?.toUpperCase() ?? '?'}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate">
-                {p.partner_name}
-                <span className={`ml-1.5 text-[9px] font-bold uppercase tracking-wide ${
-                  p.partner_role === 'coach' ? 'text-blue-400' : 'text-purple-400'
-                }`}>
-                  {p.partner_role}
-                </span>
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                {p.message_count} message{p.message_count === 1 ? '' : 's'}
-                {p.last_at && ` · last ${formatTime(p.last_at)}`}
-              </p>
-            </div>
-          </div>
-        )}
-        emptyMessage="No chat history found for this client."
-      />
-
-      {/* Step 3 — reason (required, min 5 chars) */}
-      <div>
-        <label className="block text-sm font-medium mb-1.5">Reason for export</label>
-        <textarea
-          value={reason}
-          onChange={e => setReason(e.target.value)}
-          rows={3}
-          className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary resize-y"
-        />
-        <p className="mt-1.5 text-xs text-muted-foreground">
-          Required. Example reasons: Subpoena #12345 · Client data export request · Investigating harassment complaint · Billing dispute · Safety review.
-          Stored in the audit log alongside the export.
-        </p>
-      </div>
-
-      {err && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-          {err}
-        </div>
-      )}
-
-      <div>
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={!canExport}
-          className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
-            canExport
-              ? 'bg-primary text-primary-foreground hover:opacity-90'
-              : 'bg-muted text-muted-foreground/60 cursor-not-allowed'
-          }`}
-        >
-          <FileDown className="h-4 w-4" />
-          {busy ? 'Generating…' : 'Generate transcript'}
-        </button>
-        <p className="mt-2 text-xs text-muted-foreground">
-          Opens a printable transcript in a new window. Use your browser's "Save as PDF" in the print dialog.
-        </p>
-      </div>
-    </div>
-  )
-}
-
-// Build a printable HTML transcript and open it in a new tab, then trigger
-// the print dialog. User saves as PDF via the dialog. No PDF library
-// dependency. The new window includes a self-documenting header with the
-// export metadata so the saved file is forensically complete.
-function openPrintableTranscript({ athleteName, athleteEmail, partnerName, partnerRole, reason, rows }) {
-  const win = window.open('', '_blank')
-  if (!win) return // popup blocked — caller can detect via err if needed
-
-  const exportedAt = new Date().toLocaleString(undefined, {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  })
-
-  const esc = s => String(s ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-
-  const bodyRows = rows.map(r => {
-    const ts = new Date(r.created_at).toLocaleString()
-    const sender = esc(r.sender_name)
-    const role = r.from_admin ? partnerRole : 'athlete'
-    const body = esc(r.body).replace(/\n/g, '<br/>')
-    const deleted = r.deleted_at ? `<span class="deleted-flag">[Deleted on ${new Date(r.deleted_at).toLocaleString()}]</span>` : ''
-    // edited_at + edited_by ride along on every transcript row (RPC
-    // get_chat_transcript_for_export returns them). Including the
-    // timestamp lets a legal reviewer see WHEN the message was edited
-    // without needing to cross-reference activity_events. The trigger
-    // messages_edit_activity_trg keeps a separate row-per-edit log for
-    // multi-edit cases (this marker only shows the most recent edit).
-    const edited = r.edited_at ? `<span class="edited-flag">[Edited on ${new Date(r.edited_at).toLocaleString()}]</span>` : ''
-    return `
-      <div class="msg msg-${role}">
-        <div class="meta">
-          <span class="sender">${sender}</span>
-          <span class="role">${role.toUpperCase()}</span>
-          <span class="ts">${ts}</span>
-          ${edited}
-          ${deleted}
-        </div>
-        <div class="body">${body}</div>
-      </div>
-    `
-  }).join('')
-
-  const html = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>MyRX Conversation Transcript — ${esc(athleteName)}</title>
-  <style>
-    @media print { @page { margin: 0.5in; } }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Geist, system-ui, sans-serif; color: #111; max-width: 760px; margin: 24px auto; padding: 0 16px; line-height: 1.4; }
-    h1 { font-size: 18px; margin: 0 0 4px 0; }
-    .header { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 24px; background: #fafafa; }
-    .header dl { display: grid; grid-template-columns: 140px 1fr; gap: 4px 12px; margin: 12px 0 0 0; font-size: 13px; }
-    .header dt { color: #666; font-weight: 600; }
-    .header dd { margin: 0; }
-    .header .legal { font-size: 11px; color: #666; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee; line-height: 1.5; }
-    .msg { margin: 0 0 12px 0; padding: 8px 12px; border-radius: 6px; border-left: 3px solid; }
-    .msg-athlete { background: #f4f6f8; border-left-color: #888; }
-    .msg-coach { background: #eff6ff; border-left-color: #3b82f6; }
-    .msg-admin { background: #f5f3ff; border-left-color: #8b5cf6; }
-    .meta { font-size: 11px; color: #555; margin-bottom: 4px; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
-    .meta .sender { font-weight: 700; color: #222; font-size: 12px; }
-    .meta .role { font-size: 9px; letter-spacing: 0.5px; color: #777; padding: 1px 6px; background: #eee; border-radius: 3px; }
-    .meta .ts { color: #888; font-variant-numeric: tabular-nums; }
-    .meta .deleted-flag { color: #b91c1c; font-style: italic; }
-    .meta .edited-flag { color: #b45309; font-style: italic; }
-    .body { font-size: 13px; white-space: pre-wrap; word-wrap: break-word; }
-    .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #ddd; font-size: 10px; color: #888; text-align: center; }
-    .empty { text-align: center; padding: 40px 16px; color: #888; font-style: italic; }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <h1>MyRX — Conversation Transcript</h1>
-    <dl>
-      <dt>Athlete</dt><dd>${esc(athleteName)} &lt;${esc(athleteEmail || '')}&gt;</dd>
-      <dt>Conversation partner</dt><dd>${esc(partnerName)} (${esc(partnerRole)})</dd>
-      <dt>Exported by</dt><dd>You (administrator)</dd>
-      <dt>Exported on</dt><dd>${esc(exportedAt)}</dd>
-      <dt>Reason</dt><dd>${esc(reason)}</dd>
-      <dt>Message count</dt><dd>${rows.length}</dd>
-    </dl>
-    <p class="legal">
-      This transcript was generated from MyRX's message archive for the stated reason above.
-      The export event is recorded in MyRX's audit log alongside the administrator's identity, the
-      reason, the timestamp, and the conversation parties. Deleted messages are included and flagged
-      so the transcript is forensically complete.
-    </p>
-  </div>
-  ${rows.length === 0
-    ? '<div class="empty">No messages were found between these two parties.</div>'
-    : bodyRows}
-  <div class="footer">End of transcript — MyRX message archive</div>
-</body>
-</html>`
-
-  win.document.open()
-  win.document.write(html)
-  win.document.close()
-  // Wait a tick for content to render, then trigger the print dialog.
-  win.onload = () => setTimeout(() => { try { win.print() } catch { /* swallow */ } }, 100)
-}
-
-// ── Export Conversation — Audit Log sub-tab ─────────────────────────────────
-function AuditLogList() {
-  const [logs,    setLogs]    = useState([])
-  const [loading, setLoading] = useState(true)
-
-  const refresh = () => {
-    setLoading(true)
-    supabase
-      .from('messages_admin_access_log')
-      .select('id, athlete_id, partner_id, partner_role, reason, message_count, created_at')
-      .order('created_at', { ascending: false })
-      .then(async ({ data, error }) => {
-        if (error) {
-          console.error('AuditLogList fetch failed:', error)
-          setLogs([])
-          setLoading(false)
-          return
-        }
-        const baseLogs = data || []
-        // Hydrate names for athlete + partner.
-        const ids = Array.from(new Set([
-          ...baseLogs.map(r => r.athlete_id),
-          ...baseLogs.map(r => r.partner_id),
-        ]))
-        let nameById = {}
-        if (ids.length) {
-          const { data: profiles } = await supabase
-            .from('profiles')
-            .select('id, full_name')
-            .in('id', ids)
-          ;(profiles || []).forEach(p => { nameById[p.id] = p.full_name || '—' })
-        }
-        setLogs(baseLogs.map(r => ({
-          ...r,
-          athlete_name: nameById[r.athlete_id] || '—',
-          partner_name: nameById[r.partner_id] || '—',
-        })))
-        setLoading(false)
-      })
-  }
-
-  useEffect(() => {
-    refresh()
-    function onLogged() { refresh() }
-    window.addEventListener('myrx_chat_export_logged', onLogged)
-    return () => window.removeEventListener('myrx_chat_export_logged', onLogged)
-  }, [])
-
-  if (loading) {
-    return <div className="py-12 text-center text-sm text-muted-foreground">Loading audit log…</div>
-  }
-
-  if (logs.length === 0) {
-    return (
-      <div className="rounded-xl border border-border bg-card py-16 text-center">
-        <FileDown className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-        <p className="text-sm text-muted-foreground">No exports yet</p>
-        <p className="text-xs text-muted-foreground/60 mt-1 max-w-md mx-auto">
-          When you export a conversation transcript, the action is recorded here permanently —
-          who exported, which conversation, the reason given, and when.
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
-      <table className="w-full text-sm">
-        <thead className="bg-accent/40 text-xs text-muted-foreground uppercase tracking-wide">
-          <tr>
-            <th className="text-left px-4 py-2.5 font-semibold">When</th>
-            <th className="text-left px-4 py-2.5 font-semibold">Athlete</th>
-            <th className="text-left px-4 py-2.5 font-semibold">Partner</th>
-            <th className="text-left px-4 py-2.5 font-semibold">Role</th>
-            <th className="text-left px-4 py-2.5 font-semibold">Messages</th>
-            <th className="text-left px-4 py-2.5 font-semibold">Reason</th>
-          </tr>
-        </thead>
-        <tbody>
-          {logs.map(r => (
-            <tr key={r.id} className="border-t border-border align-top">
-              <td className="px-4 py-3 whitespace-nowrap text-xs tabular-nums">{new Date(r.created_at).toLocaleString()}</td>
-              <td className="px-4 py-3">{r.athlete_name}</td>
-              <td className="px-4 py-3">{r.partner_name}</td>
-              <td className="px-4 py-3"><span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-accent text-foreground">{r.partner_role}</span></td>
-              <td className="px-4 py-3 tabular-nums">{r.message_count}</td>
-              <td className="px-4 py-3 text-muted-foreground">{r.reason}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-// ── Export Conversation — outer container with sub-tabs ─────────────────────
-function ExportConversationTab({ users }) {
-  const [subTab, setSubTab] = useState('new')
-  return (
-    <div className="space-y-4">
-      <div className="flex border-b border-border">
-        <Tab active={subTab === 'new'}     onClick={() => setSubTab('new')}>New export</Tab>
-        <Tab active={subTab === 'history'} onClick={() => setSubTab('history')}>Audit log</Tab>
-      </div>
-      {subTab === 'new' ? <NewExportForm users={users} /> : <AuditLogList />}
-    </div>
   )
 }
 
@@ -910,7 +368,7 @@ function MessagesTab({
         <p className="text-xs text-muted-foreground/60 mt-1 max-w-md mx-auto leading-relaxed">
           This page shows chats between you and clients you coach directly. Coach-attached
           clients aren't shown here — their conversations are private to their coach. Use the
-          Export Conversation tab if you need a transcript for legal or safety review.
+          Exports page (sidebar → Exports) if you need a transcript for legal or safety review.
         </p>
       </div>
     )
@@ -1197,7 +655,7 @@ export default function AdminMessages() {
 
   // Admin's DIRECT clients — passed to Messages tab. Coach-attached
   // clients are filtered OUT so the admin never sees those chats here.
-  // (The Export Conversation tool can still pull them on demand.)
+  // (The Exports page → Conversations tab can still pull them on demand.)
   const directUsers = useMemo(
     () => allUsers.filter(u => !u.coach_id),
     [allUsers]
@@ -1395,15 +853,17 @@ export default function AdminMessages() {
         </p>
       </div>
 
+      {/* Tab bar — Messages + Suggestions. The "Export Conversation" tab
+          that used to live here moved to /admin/exports (the Exports page)
+          on May 28 2026 as part of the admin nav hierarchy rebuild.
+          Conversation exports + the deleted-account archive search now
+          share that single Exports page with two tabs. */}
       <div className="flex border-b border-border">
         <Tab active={tab === 'messages'}    onClick={() => setTab('messages')}    badge={unreadMessages}>
           <MessageCircle className="h-3.5 w-3.5" /> Messages
         </Tab>
         <Tab active={tab === 'suggestions'} onClick={() => setTab('suggestions')} badge={unreadSuggestions}>
           <Lightbulb className="h-3.5 w-3.5" /> Suggestions
-        </Tab>
-        <Tab active={tab === 'export'}      onClick={() => setTab('export')}>
-          <FileDown className="h-3.5 w-3.5" /> Export Conversation
         </Tab>
       </div>
 
@@ -1423,10 +883,8 @@ export default function AdminMessages() {
           onNewMessage={handleNewMessage}
           onDeleteMessage={handleDeleteMessage}
         />
-      ) : tab === 'suggestions' ? (
-        <SuggestionsTab users={allUsers} messages={messages} onDelete={handleDeleteMessage} />
       ) : (
-        <ExportConversationTab users={allUsers} />
+        <SuggestionsTab users={allUsers} messages={messages} onDelete={handleDeleteMessage} />
       )}
     </div>
   )

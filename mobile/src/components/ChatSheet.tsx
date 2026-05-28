@@ -296,8 +296,31 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
     if (!isOpen || !user) return
     let mounted = true
 
+    // Mark every unread admin/coach message for this user as read.
+    // Idempotent — safe to call any number of times. Used by the
+    // initial load AND by the INSERT handler below, so a message that
+    // arrives while the drawer is open gets cleared along with any
+    // siblings that landed at the same time.
+    //
+    // Used to be `.eq('id', newRow.id)` inside the INSERT handler —
+    // fire-and-forget and ONLY for the single new row. That created
+    // the bug: two messages arriving back-to-back during the open
+    // window could leave one stuck unread (its fire-and-forget update
+    // raced the badge subscription's recount and lost). Sweeping ALL
+    // unread on every INSERT is race-proof.
+    async function markAllRead() {
+      const { error } = await supabase
+        .from('messages')
+        .update({ read: true })
+        .eq('user_id', user!.id)
+        .eq('from_admin', true)
+        .eq('read', false)
+        .is('deleted_at', null)
+      if (error) console.warn('[chat] mark-all-read failed:', error.message)
+    }
+
     async function load() {
-      // Skip soft-deleted messages — the Export Conversation tool on admin
+      // Skip soft-deleted messages — the Exports tool on admin
       // side is the only place that reads them, via SECURITY DEFINER RPC.
       const { data } = await supabase
         .from('messages')
@@ -307,15 +330,7 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
         .is('deleted_at', null)
         .order('created_at', { ascending: true })
       if (mounted) setMessages((data as Message[] | null) ?? [])
-
-      // Mark all admin messages as read while the sheet is open.
-      await supabase
-        .from('messages')
-        .update({ read: true })
-        .eq('user_id', user!.id)
-        .eq('from_admin', true)
-        .eq('read', false)
-        .is('deleted_at', null)
+      await markAllRead()
     }
     load()
 
@@ -331,9 +346,14 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
         if (newRow.is_suggestion) return
         if (newRow.deleted_at) return // defensive — never show soft-deleted
         setMessages(prev => prev.some(m => m.id === newRow.id) ? prev : [...prev, newRow])
-        // If a fresh admin message arrives while we're open, mark it read immediately.
+        // If a fresh admin/coach message arrives while we're open,
+        // sweep all unread (not just newRow.id) so we don't miss any
+        // sibling messages that landed in the same realtime burst.
+        // Awaited via .then() so a console.warn surfaces on RLS / net
+        // failure — silent failures here are how stuck-unread badges
+        // happen.
         if (newRow.from_admin && !newRow.read) {
-          supabase.from('messages').update({ read: true }).eq('id', newRow.id)
+          markAllRead().catch(e => console.warn('[chat] insert-mark-read threw:', e?.message))
         }
       })
       .on('postgres_changes', {
@@ -362,7 +382,18 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
       })
       .subscribe()
 
-    return () => { mounted = false; supabase.removeChannel(channel) }
+    return () => {
+      mounted = false
+      supabase.removeChannel(channel)
+      // Final sweep on drawer close — catches any message that landed
+      // in the tiny window between the last INSERT handler firing and
+      // the cleanup running. Without this, a message arriving right as
+      // the user swipes the drawer down can leave a stale unread that
+      // appears in the badge AFTER the close animation completes —
+      // exactly the bug reported May 28 2026. Fire-and-forget here is
+      // fine; the component is unmounting either way.
+      markAllRead().catch(e => console.warn('[chat] close-sweep mark-read failed:', e?.message))
+    }
     // Depend on user?.id rather than the user object — AuthContext often
     // re-renders with a new user reference even when the underlying ID is
     // unchanged, which would tear down + recreate the channel and (in the

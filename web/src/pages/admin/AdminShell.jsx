@@ -3,20 +3,29 @@ import { Link, useLocation } from 'wouter'
 import { useAuth } from '../../contexts/AuthContext'
 import {
   Users, LogOut, X, Menu, ShieldCheck,
-  LayoutDashboard, TrendingUp, Utensils, Activity,
-  MessageCircle, Dumbbell, BookOpen, Settings,
+  LayoutDashboard, TrendingUp, Utensils,
+  MessageCircle, BookOpen, Settings, FileDown,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
 const NAV = [
   { href: '/admin/overview',  label: 'Dashboard',            icon: LayoutDashboard },
-  { href: '/admin/clients',   label: 'Client Overview',      icon: Users },
+  { href: '/admin/clients',   label: 'Clients',              icon: Users },
   { href: '/admin/progress',  label: 'Weight Goal Progress', icon: TrendingUp },
   { href: '/admin/nutrition', label: 'Nutrition Overview',   icon: Utensils },
-  { href: '/admin/feed',      label: 'Activity Feed',        icon: Activity },
+  // Activity Feed dropped from the sidebar (May 28 2026) — it now
+  // lives as the Timeline tab inside each client's detail page
+  // (AdminUserDetail). Per-client scope is more useful than a
+  // global firehose, and admin can hop client → client via the
+  // Clients roster. The /admin/feed route stays registered in
+  // App.jsx for any saved deep-links.
   { href: '/admin/messages',  label: 'Messages',             icon: MessageCircle },
-  { href: '/admin/movements',     label: 'Movement Library', icon: Dumbbell  },
-  { href: '/admin/food-library',  label: 'Food Library',     icon: BookOpen  },
+  // "Libraries" merges what used to be two sibling entries
+  // (Movement Library + Food Library) into one tabbed page. The two
+  // old hrefs still resolve via back-compat redirects in App.jsx.
+  // Locked May 28 2026.
+  { href: '/admin/libraries', label: 'Libraries',            icon: BookOpen  },
+  { href: '/admin/exports',   label: 'Exports',              icon: FileDown  },
 ]
 
 function Logo() {
@@ -91,12 +100,22 @@ export default function AdminShell({ children }) {
   // ── Unread messages + goals reached ─────────────────────────────────────────
   useEffect(() => {
     async function fetchUnread() {
+      // Anonymized accounts' messages stay in the table for legal
+      // export but get marked read=true at anonymization time (see
+      // anonymize_account_now migration "anonymize_marks_messages_
+      // read_clears_badge", May 28 2026). The `.eq('read', false)`
+      // filter alone is therefore enough to exclude them — no JOIN
+      // needed. `deleted_at IS NULL` keeps soft-deleted messages out
+      // of the count even if they slip in unread (defensive — the
+      // soft-delete RPC doesn't currently flip read, but it could
+      // start to and the badge would silently re-leak).
       const { count } = await supabase
         .from('messages')
         .select('id', { count: 'exact', head: true })
         .eq('from_admin', false)
         .eq('read', false)
         .eq('is_suggestion', false)
+        .is('deleted_at', null)
       setUnreadMessages(count ?? 0)
     }
 

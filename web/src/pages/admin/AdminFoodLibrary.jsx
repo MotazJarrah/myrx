@@ -823,15 +823,16 @@ export default function AdminFoodLibrary() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-5">
-      {/* Header */}
+      {/* Header — page-level "Libraries" title is owned by the parent
+          AdminLibraries.jsx (May 28 2026 nav rebuild). The static
+          "Food Library" h1 was dropped because the parent tab bar
+          already says "Foods". Stats + Add button stay — they're the
+          only useful bits at this level. */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Food Library</h1>
-          <div className="mt-1 flex flex-col gap-0.5 text-xs text-muted-foreground">
-            <span><span className="text-sky-400 font-medium">{(stats.usda ?? 0).toLocaleString()}</span> USDA</span>
-            <span><span className="text-violet-400 font-medium">{(stats.on ?? 0).toLocaleString()}</span> OpenNutrition</span>
-            <span><span className="text-emerald-400 font-medium">{(stats.myrx ?? 0).toLocaleString()}</span> MYRX</span>
-          </div>
+        <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+          <span><span className="text-sky-400 font-medium">{(stats.usda ?? 0).toLocaleString()}</span> USDA</span>
+          <span><span className="text-violet-400 font-medium">{(stats.on ?? 0).toLocaleString()}</span> OpenNutrition</span>
+          <span><span className="text-emerald-400 font-medium">{(stats.myrx ?? 0).toLocaleString()}</span> MYRX</span>
         </div>
         <button
           onClick={() => setPanel({ mode: 'add' })}

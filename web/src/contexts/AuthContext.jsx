@@ -284,6 +284,32 @@ export function AuthProvider({ children }) {
     return Promise.resolve()
   }, [user, fetchProfile])
 
+  // ── Auto-signout on anonymization (locked May 28 2026) ──────────────────
+  // When an account reaches the terminal anonymized state (admin fired
+  // anonymize_account_now, or the nightly cron expired a 30-day grace
+  // window), `profiles.anonymized_at` flips non-null AND
+  // `auth.users.banned_until` becomes 2099. The Realtime profile-self
+  // subscription above re-fetches the profile, and we land here with
+  // `profile.anonymized_at` set.
+  //
+  // Without this effect, the existing cached JWT keeps the session
+  // "valid" until it next expires (~1 hr) OR until the next backend
+  // call hits a 401 — so the user would stare at a "Deleted User"
+  // coach/admin shell until then. Force a signOut() the moment we
+  // detect the state — signOut does a hard window.location.replace
+  // to /auth, so no React state race can leave them mid-shell.
+  //
+  // Scheduled-for-deletion is INTENTIONALLY excluded — that state keeps
+  // the user signed in so ReactivationGate can offer Reactivate.
+  // Mirrors mobile's AuthContext (mobile/src/contexts/AuthContext.tsx).
+  useEffect(() => {
+    if (!user?.id) return
+    if (!profile?.anonymized_at) return
+    // eslint-disable-next-line no-console
+    console.warn('[auth] account anonymized server-side; forcing signOut')
+    signOut().catch(() => { /* best-effort — the session is dead either way */ })
+  }, [user?.id, profile?.anonymized_at, signOut])
+
   const updateProfile = useCallback(async (data) => {
     if (!user?.id) throw new Error('No authenticated user')
     // auth_user_id satisfies the profiles_active_must_have_auth CHECK

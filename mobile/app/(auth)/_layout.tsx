@@ -31,9 +31,22 @@ export default function AuthLayout() {
   //
   // While `profileLoading` is true (i.e. mid-fetch), we keep them in
   // the current auth route — flipping mid-fetch causes a flash.
+  //
+  // ALSO CRUCIAL: never auto-redirect anonymized users to /(app).
+  // Their `onboarded_at` is preserved by anonymize_account_now (it's
+  // a historical fact, not PII), so isProfileComplete still returns
+  // true. Without this guard, signing out an anonymized user creates
+  // a redirect loop: /(app) sees anonymized_at and redirects here →
+  // here sees onboarded_at and redirects back → dashboard "wins"
+  // the React state race. The user's bug report: "im trying to sign
+  // out from mobile but it keeps going back to dashboard". The
+  // AuthContext auto-signOut effect handles the actual session
+  // teardown; this guard just stops the layout-level ping-pong while
+  // that's in flight. Locked May 28 2026.
   const onSignUp = pathname === '/sign-up'
   const profileReady = isProfileComplete(profile) && !profileLoading
-  if (!loading && user && profileReady && !onSignUp) {
+  const anonymized = Boolean((profile as any)?.anonymized_at)
+  if (!loading && user && profileReady && !onSignUp && !anonymized) {
     return <Redirect href={'/(app)/dashboard' as any} />
   }
 

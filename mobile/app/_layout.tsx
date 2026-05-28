@@ -34,6 +34,21 @@ import { View, LogBox, Text, TextInput } from 'react-native'
 //     falls asleep because the prior wake lock is still held during the
 //     transition; the error is a pure dev-mode LogBox annoyance.
 //
+//   • "AuthRetryableFetchError" — Supabase auth-js's wrapper around a
+//     transient network failure during session.refresh() (status 0, fetch
+//     returned "Network request failed"). Fires when the app comes back
+//     to foreground after being backgrounded and the WiFi/cell hasn't
+//     finished negotiating yet, OR mid-WiFi-roam. Auth-js automatically
+//     retries on the next foreground event or token-expiry tick — the
+//     session stays valid throughout. The "Retryable" name in the error
+//     class itself signals this is non-fatal. Locked May 28 2026 after
+//     observing it appear in the dev LogBox post-Reactivation-Gate work
+//     with no actual functional regression.
+//
+//   • Standalone "TypeError: Network request failed" — same root cause
+//     as above, but logged by the underlying fetch one frame BEFORE
+//     auth-js wraps it. Suppressing both prevents a double-toast.
+//
 // Production builds suppress LogBox entirely; this filter is purely a
 // dev-experience cleanup.
 LogBox.ignoreLogs([
@@ -41,6 +56,8 @@ LogBox.ignoreLogs([
   /Refresh Token Not Found/,
   /AuthApiError: Invalid Refresh Token/,
   /Unable to activate keep awake/,
+  /AuthRetryableFetchError/,
+  /TypeError: Network request failed/,
 ])
 import {
   useFonts,

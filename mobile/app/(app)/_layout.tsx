@@ -27,6 +27,7 @@ import { supabase } from '../../src/lib/supabase'
 import ChatSheet from '../../src/components/ChatSheet'
 import SuggestionSheet from '../../src/components/SuggestionSheet'
 import { BiometricLockGate } from '../../src/components/BiometricLockGate'
+import ReactivationGate from '../../src/components/ReactivationGate'
 import RadialNav from '../../src/components/RadialNav'
 import { colors, alpha, palette } from '../../src/theme'
 import { isProfileComplete } from '../../src/lib/profile'
@@ -172,12 +173,20 @@ export default function AppShellLayout() {
     let mounted = true
 
     async function fetchUnread() {
+      // is_suggestion=false: suggestions are handled by SuggestionSheet
+      // and have their own routing; if a coach sends a suggestion, it
+      // shouldn't bump the chat badge.
+      // deleted_at IS NULL: soft-deleted messages don't count. Defensive
+      // — the soft-delete RPC doesn't currently leave them unread, but
+      // if it ever does the badge would silently leak.
       const { count } = await supabase
         .from('messages')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user!.id)
         .eq('from_admin', true)
         .eq('read', false)
+        .eq('is_suggestion', false)
+        .is('deleted_at', null)
       if (mounted) setUnread(count ?? 0)
     }
     fetchUnread()
@@ -215,6 +224,32 @@ export default function AppShellLayout() {
   // birthdate + current_weight + current_height (see isProfileComplete);
   // phone + avatar are not strictly required.
   if (!isProfileComplete(profile)) return <Redirect href={'/(auth)/sign-up' as any} />
+
+  // Anonymized terminal-state gate (locked May 28 2026). If the account
+  // was anonymized server-side (admin fired anonymize_account_now, or
+  // the nightly cron expired a 30-day grace window), the profile's
+  // anonymized_at flips non-null AND auth.users.banned_until is 2099.
+  // AuthContext's auto-signout effect catches this via the Realtime
+  // subscription and triggers signOut() — but there's a brief window
+  // (the time between Realtime delivering the UPDATE and signOut()
+  // tearing down the session) where this layout would otherwise render
+  // a "Deleted User" dashboard. Bounce to sign-in immediately as a
+  // belt-and-suspenders defence against that race.
+  if ((profile as any)?.anonymized_at) {
+    return <Redirect href={'/(auth)/sign-in' as any} />
+  }
+
+  // Scheduled-for-deletion gate (locked May 28 2026). During the 30-day
+  // grace period the athlete CAN authenticate (Supabase auth still works)
+  // but every protected route renders the reactivation gate instead of
+  // the normal AppShell. Reactivate → cancel_scheduled_deletion RPC →
+  // AuthContext refreshes profile → scheduled_for_deletion_at clears →
+  // this gate unmounts → normal shell renders. Mirrors the web
+  // CoachProtectedLayout gate (web/src/App.jsx) so coach + athlete have
+  // identical deletion-grace behaviour.
+  if ((profile as any)?.scheduled_for_deletion_at) {
+    return <ReactivationGate />
+  }
 
   return (
     <BiometricLockGate>

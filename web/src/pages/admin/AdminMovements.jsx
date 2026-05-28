@@ -1400,11 +1400,19 @@ export default function AdminMovements() {
             <ChevronLeft className="h-5 w-5" />
           </button>
         )}
+        {/* Header — page-level "Libraries" title is owned by the parent
+            AdminLibraries.jsx (May 28 2026 nav rebuild). This block now
+            renders only the edit-mode heading (so the user knows they
+            switched to edit mode) + the contextual subtitle. The static
+            "Movement Library" h1 was dropped because the parent tab bar
+            already says "Movements". */}
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">
-            {editingMovement ? `Edit: ${editingMovement.name}` : 'Movement Library'}
-          </h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
+          {editingMovement && (
+            <h2 className="text-xl font-semibold tracking-tight">
+              Edit: {editingMovement.name}
+            </h2>
+          )}
+          <p className={`text-sm text-muted-foreground ${editingMovement ? 'mt-0.5' : ''}`}>
             {editingMovement
               ? 'Change any property — updates take effect immediately across all client search lists.'
               : 'Manage movements — they appear instantly in every client\'s search list.'}

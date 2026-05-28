@@ -43,6 +43,7 @@ import { NumericInput } from '../../src/components/NumericInput'
 import AnimateRise from '../../src/components/AnimateRise'
 import BodyCompPicker from '../../src/components/BodyCompPicker'
 import CoachInviteCodeCard from '../../src/components/CoachInviteCodeCard'
+import BillingTab from '../../src/components/BillingTab'
 import { type BodyFatBand } from '../../src/lib/planPresets'
 import { Select } from '../../src/components/Select'
 import { COUNTRIES, matchCountryFromPhone, type Country } from '../../src/lib/countries'
@@ -2632,11 +2633,23 @@ function ConnectTab() {
 // tab just gives the user a fifth swipeable slot inside Settings
 // instead of forcing a navigation jump for low-frequency metadata.
 
+// Locked list — every legal document an athlete might need to re-read
+// after agreeing to it at signup. Mirrors the public-site legal footer
+// minus the coach-only docs (Coach Agreement, DPA). May 28 2026 added
+// Health Disclaimer + Refund Policy + How We Compute to close the gap
+// the deleted /(app)/about page had.
+//
+// URLs go to the public legal pages (single source of truth — the web
+// LegalLayout component lives there). openLegalDoc opens each in an
+// in-app browser sheet so the user stays inside the app.
 const ABOUT_LEGAL_LINKS = [
-  { url: 'https://myrxfit.com/terms',          label: 'Terms of Service' },
-  { url: 'https://myrxfit.com/privacy',        label: 'Privacy Policy' },
-  { url: 'https://myrxfit.com/cookies',        label: 'Cookie Policy' },
-  { url: 'https://myrxfit.com/acceptable-use', label: 'Acceptable Use' },
+  { url: 'https://myrxfit.com/terms',             label: 'Terms of Service' },
+  { url: 'https://myrxfit.com/privacy',           label: 'Privacy Policy' },
+  { url: 'https://myrxfit.com/cookies',           label: 'Cookie Policy' },
+  { url: 'https://myrxfit.com/acceptable-use',    label: 'Acceptable Use' },
+  { url: 'https://myrxfit.com/health-disclaimer', label: 'Health & Medical Disclaimer' },
+  { url: 'https://myrxfit.com/refund-policy',     label: 'Refund Policy' },
+  { url: 'https://myrxfit.com/how-we-compute',    label: 'How We Compute' },
 ]
 
 function AboutTab() {
@@ -2684,7 +2697,7 @@ function AboutTab() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type SettingsTabKey = 'account' | 'preferences' | 'security' | 'connect' | 'about'
+type SettingsTabKey = 'account' | 'preferences' | 'security' | 'connect' | 'billing' | 'about'
 
 interface SettingsTabDef {
   key:   SettingsTabKey
@@ -2694,13 +2707,17 @@ interface SettingsTabDef {
 // Tab order — left → right. Parallel tabs (no hardness ranking), so the
 // order is chosen by usage frequency: Account (most-edited identity stuff)
 // first, then Preferences (units / meal layout), then Security (low-
-// frequency credential management), then Connect (newest, rarest).
-// Pattern 4 default landing = slot 0 = Account.
+// frequency credential management), then Connect (wearables / OAuth),
+// then Billing (transaction history — read-only today, grows when B2C
+// ships), then About. Pattern 4 default landing = slot 0 = Account.
+// Billing added May 28 2026 to mirror the web coach Settings → Billing
+// tab so admin viewing this surface sees consistent data across roles.
 const SETTINGS_TABS: readonly SettingsTabDef[] = [
   { key: 'account',     label: 'Account'     },
   { key: 'preferences', label: 'Preferences' },
   { key: 'security',    label: 'Security'    },
   { key: 'connect',     label: 'Connect'     },
+  { key: 'billing',     label: 'Billing'     },
   { key: 'about',       label: 'About'       },
 ] as const
 
@@ -2950,6 +2967,7 @@ export default function EditProfile() {
                    : tab.key === 'preferences' ? <PreferencesTab profile={profile} user={user} />
                    : tab.key === 'security'    ? <SecurityTab    profile={profile} user={user} />
                    : tab.key === 'connect'     ? <ConnectTab />
+                   : tab.key === 'billing'     ? (user ? <BillingTab userId={user.id} /> : null)
                    : <AboutTab />}
                 </View>
               </View>

@@ -609,6 +609,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (user?.id) await fetchProfile(user.id)
   }, [user, fetchProfile])
 
+  // ── Auto-signout on anonymization (locked May 28 2026) ──────────────────
+  // When an account reaches the terminal anonymized state (admin fired
+  // anonymize_account_now, or the nightly cron expired a 30-day grace
+  // window), `profiles.anonymized_at` flips non-null AND `auth.users.banned_until`
+  // becomes 2099. The Realtime profile-self subscription above re-fetches
+  // the profile, and we land here with `profile.anonymized_at` set.
+  //
+  // Without this effect, the existing cached JWT keeps the session "valid"
+  // until it next expires (~1 hr) OR until the next backend call hits a
+  // 401 — so the user would stare at a "Deleted User" dashboard until
+  // then. Force a signOut() the moment we detect the state — the (app)
+  // layout's `if (!user)` guard then redirects to /(auth)/sign-in cleanly.
+  //
+  // Also clear biometric credentials. Otherwise the fingerprint button on
+  // the sign-in screen would keep re-attempting the saved password,
+  // hitting "Account suspended" forever — useless to the user and noisy
+  // in logs. They'll need to re-enroll if they ever sign up again.
+  //
+  // Scheduled-for-deletion is INTENTIONALLY excluded — that state keeps
+  // the user signed in so the ReactivationGate can offer them Reactivate.
+  // Only the terminal anonymized state forces signOut.
+  //
+  // Defined AFTER signOut + disableBiometric in the file body to avoid TDZ
+  // ReferenceError on the deps array — both are stable useCallbacks with
+  // no deps of their own, so the effect re-fires only when the user id
+  // or anonymized_at flag actually changes.
+  useEffect(() => {
+    if (!user?.id) return
+    if (!(profile as any)?.anonymized_at) return
+    console.warn('[auth] account anonymized server-side; forcing signOut')
+    disableBiometric().catch(() => { /* best-effort */ })
+    signOut().catch(() => { /* best-effort — the session is dead either way */ })
+  }, [user?.id, (profile as any)?.anonymized_at, signOut, disableBiometric])
+
   // ── Pending coach invites detection ──────────────────────────────────────
   // Query the get_pending_invites_for_current_user RPC, which returns the
   // list of un-accepted, un-revoked, un-expired invites whose invitee_email

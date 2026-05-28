@@ -2414,6 +2414,81 @@ When in doubt: visible label above, helper text below, no placeholder inside. Ev
 
 ---
 
+## Account-deletion lifecycle + retention contract (MANDATORY, LOCKED May 28 2026)
+
+Two phases of "deletion" — a 30-day reversible grace, then permanent anonymization that scrubs PII but retains specific tables for legal compliance.
+
+### Phase 1 — Scheduled (reversible, 30 days)
+
+Triggered by either path:
+- **User-initiated**: athlete or coach taps "Delete my account" in their Settings → calls `schedule_account_deletion(null)` RPC.
+- **Admin-initiated**: admin opens `/admin/user/:id` → clicks the Delete pill → calls `schedule_account_deletion(p_user_id)` RPC with admin auth.
+
+Result: `profiles.scheduled_for_deletion_at = now() + 30 days`. The user CAN still authenticate (Supabase auth is untouched) but every protected route renders the **reactivation gate** instead of the normal shell:
+- **Web**: `web/src/components/ReactivationGate.jsx`, mounted by `CoachProtectedLayout` AND `ProtectedLayout` whenever `profile.scheduled_for_deletion_at` is non-null.
+- **Mobile**: `mobile/src/components/ReactivationGate.tsx`, mounted by `app/(app)/_layout.tsx` with the same condition.
+
+Gate page shows: name + amber alert icon + days remaining + target date + [Reactivate my account] (calls `cancel_scheduled_deletion()`) + [Sign out]. On successful reactivation, `scheduled_for_deletion_at` clears → AuthContext refreshes profile → gate unmounts → normal shell renders.
+
+If they never reactivate within 30 days, the nightly cron calls `anonymize_account_now(user_id)` for every profile whose `scheduled_for_deletion_at < now()`.
+
+### Phase 2 — Anonymized (permanent, irreversible)
+
+`anonymize_account_now()` does ALL of the following in one atomic transaction:
+
+1. **Scrub `profiles` PII**: `full_name = 'Deleted User'`, `phone = NULL`, `avatar_url = NULL`, `birthdate = NULL`, `gender = NULL`, `anonymized_at = now()`, `anonymized_by = caller`, `scheduled_for_deletion_at = NULL`.
+2. **Hard-delete personal training data** (bodyweight, efforts, food_logs, calorie_logs, rom_records, calorie_plans, hr_samples, step_samples, wearable_workouts, user_integrations) — these are not legally required to retain and contain sensitive health info.
+3. **Unlink coach's athletes** (if the deleted account is a coach): all athletes get `coach_id = NULL`, `is_self_coached = true`, `coach_lost_banner_dismissed_at = NULL`.
+4. **Scrub `auth.users`**: `email = 'deleted-<uuid>@anon.myrx.local'` (frees the original email for re-signup), `phone = NULL`, `banned_until = '2099-12-31'` (blocks future sign-in attempts permanently).
+5. **Write `account:deleted` activity_events gravestone**.
+
+### Retention contract — what survives anonymization
+
+Anonymization NEVER touches these tables. They retain their `user_id` linkage forever (or per legal retention windows, typically 7 years):
+
+| Table | Why retained |
+|---|---|
+| `messages` | Chat transcripts for legal export (subpoenas, abuse investigations, safety review) |
+| `messages_admin_access_log` | Audit trail of every admin chat export |
+| `activity_events` | Per-user audit log — every meaningful event for the account |
+| `coach_subscriptions` | Stripe customer + subscription IDs for tax reconciliation |
+| `billing_events` | Immutable per-event Stripe billing history (invoices, charges, refunds, disputes) — required for tax + accounting compliance |
+| `b2c_purchases` | One-time athlete purchases — same compliance reason |
+
+**The `billing_events` table is NEVER deleted from, by any caller, including admin.** Even when admin clicks Delete on a user, the trigger preserves the billing rows by virtue of `user_id` being a FK with `ON DELETE SET NULL` (we never hard-delete auth.users anyway — anonymization bans + scrubs the row instead). If a billing row is genuinely wrong, we issue a corrective Stripe event (refund, credit note) which creates a NEW `billing_events` row — never modify or delete existing ones.
+
+### Fresh signup with the same email after anonymization
+
+YES, the original email is freed for reuse the moment `anonymize_account_now()` runs (Step 4 above). When the user signs up again:
+- Brand-new `auth.users` row → brand-new `user_id`
+- Brand-new `profiles` row → no link to the old account
+- Old anonymized profile still in DB under "Deleted User" with `auth.users.email = 'deleted-<old-uuid>@anon.myrx.local'` and `banned_until = '2099'`
+- Old billing/messages/activity still queryable under the OLD `user_id` by admin
+- New account has ZERO connection to the old data — clean slate from their perspective
+
+This matches industry standard (Google, Apple, Meta all allow email reuse after account deletion).
+
+### Activity Feed surfaces billing automatically
+
+The trigger `billing_events_to_activity_events_trg` on `billing_events` mirrors every insert into `activity_events` with `event_type = 'billing:' || type`. So every invoice payment, refund, subscription change, and dispute shows up in the per-user Activity Feed tab without the UI needing to read two tables. `event_data` carries `amount_cents`, `currency`, `status`, `description`, and the relevant Stripe IDs for deep-link to Stripe Dashboard.
+
+The `formatBillingAmount(d)` helper in `AdminUserDetail.jsx`'s `ActivityFeed` component formats the amount inline using `Intl.NumberFormat`. Same format as `BillingView` so the two surfaces read identically.
+
+### Billing surface (`<BillingView userId={x} viewer="user"|"admin" />`)
+
+One component, three places:
+1. **Admin → `/admin/user/:id` → Billing tab** (`viewer="admin"`) — works for active, scheduled, AND anonymized accounts (anonymized gets the amber "tax records retained" header).
+2. **Coach → `/coach/profile` → Billing tab** (`viewer="user"`) — coach's own billing surface. Scheduled / anonymized branches unreachable (reactivation gate blocks them, anonymized = can't sign in).
+3. **Athlete → Settings → Billing** (Phase 7, when B2C ships) — same component, scoped to athlete user_id.
+
+Layout: two stacked sections.
+- **Current** — adaptive header. Coach sub: tier + status + renewal + Stripe customer ID. Anonymized: amber "anonymized on X" banner with retention notice. Athlete (Phase 7): purchase / sub status.
+- **Transactions** — universal chronological list from `billing_events`, grouped by month, with tone-coded icons (green = paid, red = failed/refunded, blue = lifecycle, amber = dispute). Each row links out to Stripe Dashboard.
+
+The component reads from `profiles` + `coach_subscriptions` + `billing_events` directly with no RPC needed — RLS on `billing_events` enforces the access rules (users see own, admins see all).
+
+---
+
 ## What This Is
 A React + Vite SPA (web, frozen) + React Native / Expo app (mobile, active) — a fitness coaching platform per the mission above. Clients track strength, cardio, mobility, bodyweight, and calories. Admins (coaches) manage clients, review progress, and communicate via chat/suggestions.
 
@@ -4420,13 +4495,14 @@ src/pages/admin/tabs/              — AdminUserProfile, AdminUserActivity,
 
 ### Calorie / Food logging components
 ```
-src/components/CalorieStrip.jsx    — Scrollable day-tile strip; sums calories from
-                                     food_logs (not calorie_logs); tile click fires
-                                     onDayClick(iso); accepts refreshKey prop
 src/components/FoodLogDrawer.jsx   — Bottom-sheet food logger (max-h 92dvh).
                                      Three views: 'log' | 'search' | 'portion'.
                                      USDA search → portion picker → Supabase insert.
-                                     Props: userId, day, onClose, onEntriesChange
+                                     Props: userId, day, onClose, onEntriesChange.
+                                     CalorieStrip.jsx was deleted May 28 2026 as
+                                     part of the web-orphan cleanup — athlete-web
+                                     pages were removed earlier so the strip had
+                                     no consumers left.
 ```
 
 ### Lib
@@ -4442,9 +4518,19 @@ src/lib/foodLibrary.js      — Unified food search: fans out to Cloudflare Work
                               partial prefix match (LIKE digits%) as user types,
                               exact match at 12+ digits.
                               Custom myrx results always appear first in merged results.
-src/lib/usda.js             — Legacy USDA-only wrapper. Superseded by foodLibrary.js for
-                              new work. Still imported by FoodLogDrawer.
 ```
+
+> Web-orphan cleanup batch (May 28 2026) deleted these formerly-mentioned web
+> files. None are referenced by the live app anymore:
+>   • pages/AboutMyRX, pages/admin/AdminSettings,
+>     pages/admin/tabs/AdminUserPlan, pages/coach/Portal
+>   • components/CalorieStrip, LoadingScreen, MessageActions, NumericInput,
+>     PhantomWheel, PlanWizardSheet, Skeleton
+>   • lib/usda, lib/opennutrition, lib/projections, lib/signupResume, lib/effortTags
+> All replacements live elsewhere — MacroPlanEditor replaces AdminUserPlan,
+> foodLibrary replaces usda+opennutrition, formulas replaces projections, the
+> mobile copies of PhantomWheel + MessageActions + effortTags are the live
+> versions (web copies were never wired up).
 
 ---
 
@@ -4634,9 +4720,8 @@ Admins (`is_superuser = true`) see an "Admin Portal" button in the client nav, o
 - **Supabase MCP tool** (`mcp__8dbdae5c-*`) is available — prefer it for migrations over raw SQL in bash.
 - **AdminFeed** uses `dataCache` to avoid re-fetching on every visit.
 - **Avatar**: if `avatar_url` is set, show `<img>` instead of initials — applies to ALL admin list views (clients, progress, nutrition, feed, messages, UserDetail).
-- **Food logging vs calorie_logs**: `food_logs` is the live system. `calorie_logs` is legacy — don't delete it, admin "Manual Logs" tab still reads it. CalorieStrip reads `food_logs` and sums calories in JS.
-- **CalorieStrip `refreshKey` prop**: bump this integer from the parent after any `food_logs` mutation to trigger a re-fetch. Pattern: `setStripRefreshKey(k => k + 1)`.
-- **USDA / food search**: use `foodLibrary.js` (`searchFoods`, `getFoodPortions`, `calcMacros`) for all new food search work. It merges custom myrx foods (Supabase) + USDA (Cloudflare Worker D1). `usda.js` is legacy.
+- **Food logging vs calorie_logs**: `food_logs` is the live system. `calorie_logs` is legacy — don't delete it, admin "Manual Logs" tab still reads it. The mobile CalorieStrip component reads `food_logs` and sums calories in JS. (The web copy of CalorieStrip was deleted May 28 2026 with the orphan cleanup — athlete-web pages are gone.)
+- **USDA / food search**: use `foodLibrary.js` (`searchFoods`, `getFoodPortions`, `calcMacros`) for all food search work. It merges custom myrx foods (Supabase) + USDA (Cloudflare Worker D1). The legacy `usda.js` + `opennutrition.js` wrappers were deleted May 28 2026 — they had zero remaining consumers.
 - **UPC progressive search**: queries of 3+ digits trigger UPC mode in both `foodLibrary.js` (Supabase ilike prefix) and the Cloudflare Worker (SQL `LIKE digits%`). 12+ digits = exact match. This means results narrow as the user types — no need to scan a complete barcode.
 - **RLS bypass for cross-row reads**: end users can't read admin profile rows. Use `SECURITY DEFINER` RPC functions for any data that clients need from the admin's profile (e.g. `get_coach_info()`). Always `SET search_path = public` on SECURITY DEFINER functions.
 - **Coach avatar in ChatDrawer**: only in the drawer header, NOT on individual message bubbles. User explicitly rejected per-message photos.

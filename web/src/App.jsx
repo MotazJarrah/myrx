@@ -14,6 +14,7 @@ import AppShell from './components/Navbar'
 // legacy CompleteProfile recovery form.
 import CookieBanner from './components/CookieBanner'
 import ErrorBoundary from './components/ErrorBoundary'
+import ReactivationGate from './components/ReactivationGate'
 import { useIsDesktop } from './hooks/useIsDesktop'
 
 // ── Lazy page imports — each becomes its own JS chunk ─────────────────────────
@@ -87,8 +88,12 @@ const AdminEffortDetail   = lazy(() => import('./pages/admin/AdminEffortDetail')
 const AdminCardioDetail   = lazy(() => import('./pages/admin/AdminCardioDetail'))
 const AdminMobilityDetail = lazy(() => import('./pages/admin/AdminMobilityDetail'))
 const AdminMessages       = lazy(() => import('./pages/admin/AdminMessages'))
-const AdminMovements      = lazy(() => import('./pages/admin/AdminMovements'))
-const AdminFoodLibrary    = lazy(() => import('./pages/admin/AdminFoodLibrary'))
+// AdminLibraries is the unified page that hosts Movements + Foods as
+// tabs (May 28 2026 nav rebuild). The child pages still exist as their
+// own modules — AdminLibraries imports + renders them inside its tab
+// shell — so we don't need separate lazy imports for them here.
+const AdminLibraries      = lazy(() => import('./pages/admin/AdminLibraries'))
+const AdminExports        = lazy(() => import('./pages/admin/AdminExports'))
 
 // ── Shared loading fallback ───────────────────────────────────────────────────
 
@@ -157,6 +162,28 @@ function CoachProtectedLayout({ children }) {
   // no longer exists on web per CLAUDE.md "Web / Mobile role rule".
   if (profile.is_coach !== true && profile.is_superuser !== true) {
     return <Redirect to="/app" />
+  }
+  // Anonymized terminal-state gate (locked May 28 2026). The AuthContext
+  // auto-signout effect catches `anonymized_at` via the Realtime
+  // subscription and triggers signOut() — but there's a brief window
+  // between Realtime delivering the UPDATE and signOut() tearing down
+  // the session where this layout would otherwise render the coach
+  // shell with a "Deleted User" identity. Bounce to /auth immediately
+  // as a belt-and-suspenders defence against that race. Mirrors the
+  // mobile (app)/_layout.tsx anonymized gate.
+  if (profile.anonymized_at) {
+    return <Redirect to="/auth?mode=signin" />
+  }
+  // Scheduled-for-deletion gate (locked May 28 2026). During the 30-day
+  // grace period the coach CAN authenticate (Supabase auth still works)
+  // but every protected route renders the reactivation gate instead of
+  // the normal shell. Reactivate → cancel_scheduled_deletion RPC fires
+  // → AuthContext refreshes profile → scheduled_for_deletion_at clears
+  // → this gate unmounts → normal CoachShell renders. Mirrors the mobile
+  // (app)/_layout.tsx gate exactly so coach + athlete have identical
+  // deletion-grace behaviour.
+  if (profile.scheduled_for_deletion_at) {
+    return <ReactivationGate />
   }
   // No viewport-based redirect. Trust the user: if they typed /coach/portal,
   // render it at whatever viewport they're on. The earlier `if (!isDesktop)`
@@ -230,6 +257,27 @@ function ProtectedLayout() {
     return <Redirect to={journey === 'coach' ? '/coach/signup' : '/coach/signup'} />
   }
 
+  // Anonymized terminal-state gate (locked May 28 2026). The AuthContext
+  // auto-signout effect catches anonymized_at via Realtime and triggers
+  // signOut(); this layout-level redirect is the belt-and-suspenders
+  // defence against the brief race window before signOut() completes.
+  // Mirrors the mobile (app)/_layout.tsx + CoachProtectedLayout gates.
+  if (profile.anonymized_at) {
+    return <Redirect to="/auth?mode=signin" />
+  }
+
+  // Scheduled-for-deletion gate (locked May 28 2026). Admin OR athlete
+  // (in case a future admin schedules their own account for deletion).
+  // During the 30-day grace, every protected route renders the
+  // reactivation gate instead of the normal shell. Reactivate →
+  // cancel_scheduled_deletion RPC fires → AuthContext refreshes profile
+  // → this gate unmounts → admin / placeholder routes render normally.
+  // See CoachProtectedLayout for the locked rationale; the gate is
+  // role-agnostic because the same component handles any signed-in user.
+  if (profile.scheduled_for_deletion_at) {
+    return <ReactivationGate />
+  }
+
   // Admin shell renders at all viewport sizes — no viewport-based gate.
   // Trust the user: if they're at an /admin/* route, show admin UI. Layout
   // density at narrow widths is a responsive-design problem for AdminShell
@@ -253,8 +301,19 @@ function ProtectedLayout() {
               <Route path="/admin/nutrition" component={AdminNutrition} />
               <Route path="/admin/feed"      component={AdminFeed} />
               <Route path="/admin/messages"  component={AdminMessages} />
-              <Route path="/admin/movements"     component={AdminMovements} />
-              <Route path="/admin/food-library" component={AdminFoodLibrary} />
+              <Route path="/admin/libraries"     component={AdminLibraries} />
+              {/* Back-compat redirects (May 28 2026 nav rebuild). Any
+                  saved /admin/movements or /admin/food-library link
+                  lands on the new Libraries page with the right tab
+                  pre-selected. Old code that calls navigate() on these
+                  paths still works. */}
+              <Route path="/admin/movements"    component={() => <Redirect to="/admin/libraries?tab=movements" />} />
+              <Route path="/admin/food-library" component={() => <Redirect to="/admin/libraries?tab=foods" />} />
+              <Route path="/admin/exports"      component={AdminExports} />
+              {/* Back-compat: any saved /admin/archive link lands on the
+                  new Exports page with the Archive tab pre-selected.
+                  Locked May 28 2026 after the Archive → Exports rename. */}
+              <Route path="/admin/archive"      component={() => <Redirect to="/admin/exports?tab=archive" />} />
               <Route path="/admin/profile"      component={AdminProfile} />
               <Route path="/admin/user/:userId/effort/mobility/:movement" component={AdminMobilityDetail} />
               <Route path="/admin/user/:userId/effort/cardio/:slug"       component={AdminCardioDetail} />

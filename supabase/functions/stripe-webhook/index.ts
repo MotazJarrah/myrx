@@ -153,6 +153,96 @@ function mapStatus(stripeStatus: string): string {
   return map[stripeStatus] ?? "lapsed"
 }
 
+// ── billing_events writer ───────────────────────────────────────────
+// Idempotent local mirror of every relevant Stripe event. Each call
+// inserts one row into `billing_events`; stripe_event_id is UNIQUE so
+// re-deliveries (Stripe's at-least-once semantics) are silently
+// dropped. Row content is the same regardless of source (coach subs OR
+// B2C purchases) — the type field plus stripe_invoice_id /
+// stripe_subscription_id / stripe_charge_id disambiguates downstream.
+//
+// Trigger `billing_events_to_activity_events_trg` on this table mirrors
+// each insert into `activity_events` so the user's Activity Feed
+// surface picks the event up automatically.
+//
+// userId resolution priority:
+//   1. Explicit caller-passed userId (subscription handlers know it from
+//      coach_subscriptions lookup).
+//   2. Look up by stripe_customer_id from existing coach_subscriptions
+//      or b2c_purchases rows (charges + refunds rarely carry user
+//      metadata; they reference the customer).
+//   3. NULL — orphan billing row. We still log it so we don't lose tax
+//      records; admin can manually reconcile via Stripe Dashboard.
+async function logBillingEvent({
+  event, supabase, userId,
+  type, amountCents, currency, status, description,
+  stripeCustomerId, stripeSubscriptionId, stripeInvoiceId, stripeChargeId,
+}: {
+  event: any
+  supabase: any
+  userId: string | null
+  type: string
+  amountCents: number | null
+  currency: string | null
+  status: string | null
+  description: string | null
+  stripeCustomerId: string | null
+  stripeSubscriptionId: string | null
+  stripeInvoiceId: string | null
+  stripeChargeId: string | null
+}) {
+  // If userId not provided, try to resolve from stripe_customer_id.
+  let resolvedUserId = userId
+  if (!resolvedUserId && stripeCustomerId) {
+    const { data: sub } = await supabase
+      .from('coach_subscriptions')
+      .select('coach_id')
+      .eq('stripe_customer_id', stripeCustomerId)
+      .maybeSingle()
+    resolvedUserId = sub?.coach_id ?? null
+    if (!resolvedUserId) {
+      // B2C purchase fallback — b2c_purchases.meta might carry the
+      // customer linkage. Defensive; may not exist yet for charge-only
+      // flows.
+      const { data: b2c } = await supabase
+        .from('b2c_purchases')
+        .select('user_id')
+        .filter('meta->>stripe_customer_id', 'eq', stripeCustomerId)
+        .limit(1)
+        .maybeSingle()
+      resolvedUserId = b2c?.user_id ?? null
+    }
+  }
+
+  const row = {
+    user_id:                resolvedUserId,
+    stripe_event_id:        event.id,
+    stripe_customer_id:     stripeCustomerId,
+    stripe_subscription_id: stripeSubscriptionId,
+    stripe_invoice_id:      stripeInvoiceId,
+    stripe_charge_id:       stripeChargeId,
+    type,
+    amount_cents:           amountCents,
+    currency,
+    status,
+    description,
+    occurred_at:            new Date((event.created ?? Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+    raw_payload:            event,
+  }
+
+  // Idempotent insert — UNIQUE(stripe_event_id) silently rejects
+  // duplicates (Stripe sometimes re-delivers). Use onConflict to
+  // explicitly ignore rather than throwing on the constraint violation.
+  const { error } = await supabase
+    .from('billing_events')
+    .upsert(row, { onConflict: 'stripe_event_id', ignoreDuplicates: true })
+  if (error) {
+    console.error(`[billing] write failed for event ${event.id}:`, error.message)
+  } else {
+    console.log(`[billing] wrote ${type} for user=${resolvedUserId ?? '(unresolved)'} event=${event.id}`)
+  }
+}
+
 // ── Event handlers ──────────────────────────────────────────────────
 async function handleSubscriptionUpsert(sub: any, supabase: any) {
   const item = sub.items?.data?.[0]
@@ -309,23 +399,170 @@ Deno.serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
   try {
+    // 1. Run the domain-specific handler that maintains coach_subscriptions
+    //    + profiles + b2c_purchases. Existing behaviour.
+    // 2. After it succeeds, write a row to billing_events as the immutable
+    //    tax/audit record. The DB trigger billing_events_to_activity_events_trg
+    //    fans this out into activity_events automatically so the user's
+    //    Activity Feed picks it up.
     switch (event.type) {
       case "customer.subscription.created":
-      case "customer.subscription.updated":
-        await handleSubscriptionUpsert(event.data.object, supabase)
+      case "customer.subscription.updated": {
+        const sub = event.data.object
+        await handleSubscriptionUpsert(sub, supabase)
+        // Look up coach_id from the row we just upserted so the billing
+        // event is bound to a user even when sub.metadata didn't carry
+        // coach_id (Stripe portal-initiated changes lose metadata).
+        const { data: existing } = await supabase
+          .from("coach_subscriptions")
+          .select("coach_id")
+          .eq("stripe_subscription_id", sub.id)
+          .maybeSingle()
+        await logBillingEvent({
+          event, supabase,
+          userId: existing?.coach_id ?? sub.metadata?.coach_id ?? null,
+          type: event.type === "customer.subscription.created"
+            ? "subscription_started"
+            : "subscription_updated",
+          amountCents: sub.items?.data?.[0]?.price?.unit_amount ?? null,
+          currency:    sub.items?.data?.[0]?.price?.currency ?? sub.currency ?? null,
+          status:      mapStatus(sub.status),
+          description: `Coach subscription ${event.type === "customer.subscription.created" ? "started" : "updated"}`,
+          stripeCustomerId:     sub.customer ?? null,
+          stripeSubscriptionId: sub.id,
+          stripeInvoiceId:      null,
+          stripeChargeId:       null,
+        })
         break
-      case "customer.subscription.deleted":
-        await handleSubscriptionDeleted(event.data.object, supabase)
+      }
+      case "customer.subscription.deleted": {
+        const sub = event.data.object
+        await handleSubscriptionDeleted(sub, supabase)
+        const { data: existing } = await supabase
+          .from("coach_subscriptions")
+          .select("coach_id")
+          .eq("stripe_subscription_id", sub.id)
+          .maybeSingle()
+        await logBillingEvent({
+          event, supabase,
+          userId: existing?.coach_id ?? sub.metadata?.coach_id ?? null,
+          type: "subscription_cancelled",
+          amountCents: null,
+          currency:    sub.currency ?? null,
+          status:      "cancelled",
+          description: sub.cancellation_details?.reason
+            ? `Coach subscription cancelled (${sub.cancellation_details.reason})`
+            : "Coach subscription cancelled",
+          stripeCustomerId:     sub.customer ?? null,
+          stripeSubscriptionId: sub.id,
+          stripeInvoiceId:      null,
+          stripeChargeId:       null,
+        })
         break
-      case "invoice.paid":
-        await handleInvoicePaid(event.data.object, supabase)
+      }
+      case "invoice.paid": {
+        const inv = event.data.object
+        await handleInvoicePaid(inv, supabase)
+        await logBillingEvent({
+          event, supabase,
+          userId: null,                    // resolved by helper via customer
+          type: "invoice_paid",
+          amountCents: inv.amount_paid ?? null,
+          currency:    inv.currency ?? null,
+          status:      "paid",
+          description: inv.lines?.data?.[0]?.description
+                       ?? inv.description
+                       ?? "Invoice paid",
+          stripeCustomerId:     inv.customer ?? null,
+          stripeSubscriptionId: inv.subscription ?? null,
+          stripeInvoiceId:      inv.id,
+          stripeChargeId:       inv.charge ?? null,
+        })
         break
-      case "invoice.payment_failed":
-        await handleInvoiceFailed(event.data.object, supabase)
+      }
+      case "invoice.payment_failed": {
+        const inv = event.data.object
+        await handleInvoiceFailed(inv, supabase)
+        await logBillingEvent({
+          event, supabase,
+          userId: null,
+          type: "invoice_failed",
+          amountCents: inv.amount_due ?? null,
+          currency:    inv.currency ?? null,
+          status:      "failed",
+          description: "Invoice payment failed",
+          stripeCustomerId:     inv.customer ?? null,
+          stripeSubscriptionId: inv.subscription ?? null,
+          stripeInvoiceId:      inv.id,
+          stripeChargeId:       inv.charge ?? null,
+        })
         break
-      case "checkout.session.completed":
-        await handleCheckoutSessionCompleted(event.data.object, supabase)
+      }
+      case "checkout.session.completed": {
+        const session = event.data.object
+        await handleCheckoutSessionCompleted(session, supabase)
+        // Only log billing for B2C one-time purchases here. Subscription-mode
+        // sessions are logged via customer.subscription.created which fires
+        // separately and carries the price/amount cleanly.
+        if (session.mode === "payment") {
+          await logBillingEvent({
+            event, supabase,
+            userId: session.metadata?.user_id ?? null,
+            type: "b2c_purchase",
+            amountCents: session.amount_total ?? null,
+            currency:    session.currency ?? null,
+            status:      "completed",
+            description: session.metadata?.tier
+              ? `One-time purchase — ${session.metadata.tier}`
+              : "One-time purchase",
+            stripeCustomerId:     session.customer ?? null,
+            stripeSubscriptionId: null,
+            stripeInvoiceId:      null,
+            stripeChargeId:       session.payment_intent ?? null,
+          })
+        }
         break
+      }
+      // Refunds, disputes — surface them in billing history even though
+      // we don't have a domain handler (they don't mutate
+      // coach_subscriptions). The logBillingEvent helper resolves user_id
+      // via the customer lookup.
+      case "charge.refunded": {
+        const charge = event.data.object
+        await logBillingEvent({
+          event, supabase,
+          userId: null,
+          type: "refund_issued",
+          amountCents: charge.amount_refunded ?? null,
+          currency:    charge.currency ?? null,
+          status:      "refunded",
+          description: charge.refunds?.data?.[0]?.reason
+            ? `Refund issued (${charge.refunds.data[0].reason})`
+            : "Refund issued",
+          stripeCustomerId:     charge.customer ?? null,
+          stripeSubscriptionId: null,
+          stripeInvoiceId:      charge.invoice ?? null,
+          stripeChargeId:       charge.id,
+        })
+        break
+      }
+      case "charge.dispute.created": {
+        const dispute = event.data.object
+        await logBillingEvent({
+          event, supabase,
+          userId: null,
+          type: "dispute_opened",
+          amountCents: dispute.amount ?? null,
+          currency:    dispute.currency ?? null,
+          status:      dispute.status ?? "needs_response",
+          description: `Dispute opened (${dispute.reason ?? "unknown reason"})`,
+          stripeCustomerId:     null,         // dispute doesn't carry customer directly
+          stripeSubscriptionId: null,
+          stripeInvoiceId:      null,
+          stripeChargeId:       dispute.charge ?? null,
+        })
+        break
+      }
       default:
         console.log(`[webhook] Ignoring event type ${event.type}`)
     }

@@ -5,13 +5,14 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
-import { ArrowLeft, User, Check, Info, MessageCircle, UserCog, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil } from 'lucide-react'
+import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, UserCog, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign } from 'lucide-react'
 
 import AdminUserProfile   from './tabs/AdminUserProfile'
 import AdminUserActivity  from './tabs/AdminUserActivity'
 import AdminUserBody      from './tabs/AdminUserBody'
 import AdminUserCalories  from './tabs/AdminUserCalories'
 import ClientSettingsDrawer from '../../components/ClientSettingsDrawer'
+import BillingView from '../../components/BillingView'
 
 // Format height stored in client's unit into admin's preferred display unit
 function formatHeightForAdmin(storedH, clientUnit, adminUnit) {
@@ -206,6 +207,7 @@ const TABS = [
   { id: 'activity',  label: 'Efforts'    },
   { id: 'body',      label: 'Bodyweight' },
   { id: 'calories',  label: 'Calories'   },
+  { id: 'billing',   label: 'Billing'    },
   { id: 'timeline',  label: 'Activity Feed' },
 ]
 
@@ -235,6 +237,61 @@ function ActivityFeed({ userId }) {
     return () => { cancelled = true }
   }, [userId])
 
+  // Realtime — subscribe to activity_events inserts for THIS user_id so
+  // new rows (deletion scheduled / cancelled, chat exports, billing
+  // events fanned out via the billing_events → activity_events trigger,
+  // every effort / weigh-in / food log via their own DB triggers, etc)
+  // show up at the top of the feed within ~1 second of landing, without
+  // admin needing to refresh. Supabase Realtime publication was extended
+  // to include activity_events on May 28 2026.
+  //
+  // Inserts are prepended to local state. The realtime payload's row
+  // shape matches what get_activity_feed RPC returns (id, user_id,
+  // event_type, event_data, source, caused_by, occurred_at) — same
+  // table, same columns — so we can drop it straight into the existing
+  // events array without re-querying.
+  //
+  // Dedup guard: if an INSERT arrives that's somehow already in state
+  // (e.g. the initial fetch finished mid-subscription), skip it.
+  useEffect(() => {
+    if (!userId) return
+    const channel = supabase
+      .channel(`activity-feed-${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event:  'INSERT',
+          schema: 'public',
+          table:  'activity_events',
+          filter: `user_id=eq.${userId}`,
+        },
+        payload => {
+          const row = payload.new
+          if (!row) return
+          setEvents(prev => prev.some(e => e.id === row.id) ? prev : [row, ...prev])
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [userId])
+
+  // Format an inline currency amount from a billing event's event_data
+  // for the feed row label. Uses the same Intl pattern as BillingView so
+  // the two surfaces format identically. Falls back to "—" when the row
+  // has no amount (lifecycle events like subscription_updated where the
+  // amount didn't change).
+  function formatBillingAmount(d) {
+    if (d?.amount_cents == null) return '—'
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: (d.currency || 'usd').toUpperCase(),
+      }).format(d.amount_cents / 100)
+    } catch {
+      return `${(d.amount_cents / 100).toFixed(2)} ${(d.currency || '').toUpperCase()}`
+    }
+  }
+
   // Translate event_type + event_data into a human-readable label + icon.
   // Keep the switch tight — undocumented event types fall through to the
   // raw event_type so nothing goes missing.
@@ -249,6 +306,20 @@ function ActivityFeed({ userId }) {
       case 'account:deletion_cancelled':   return { icon: X,             color: 'text-emerald-400', label: `Deletion cancelled${d.admin_initiated ? ' (admin)' : ''}` }
       case 'account:deleted':              return { icon: Trash2,        color: 'text-zinc-400',    label: `Account anonymized${d.orphaned_athlete_count ? ` · released ${d.orphaned_athlete_count} athlete${d.orphaned_athlete_count === 1 ? '' : 's'}` : ''}` }
       case 'chat:exported_transcript':     return { icon: MessageCircle, color: 'text-blue-400',    label: `Chat transcript exported · ${d.message_count ?? '?'} messages · "${d.reason || ''}"` }
+      // billing:* — written by the trg_billing_event_to_activity trigger
+      // on every billing_events insert. d carries amount_cents, currency,
+      // status, description, and the Stripe IDs (invoice / sub / charge)
+      // for deep-link to Stripe Dashboard from the row label later.
+      // formatBillingAmount inlines amount + currency so the feed row
+      // reads cleanly without admin needing to click into the Billing tab.
+      case 'billing:invoice_paid':           return { icon: CheckCircle2, color: 'text-emerald-400', label: `Invoice paid · ${formatBillingAmount(d)}` }
+      case 'billing:invoice_failed':         return { icon: XCircle,      color: 'text-red-400',     label: `Invoice payment failed · ${formatBillingAmount(d)}` }
+      case 'billing:subscription_started':   return { icon: CreditCard,   color: 'text-blue-400',    label: `Subscription started${d.description ? ` — ${d.description}` : ''}` }
+      case 'billing:subscription_updated':   return { icon: CreditCard,   color: 'text-blue-400',    label: `Subscription updated${d.description ? ` — ${d.description}` : ''}` }
+      case 'billing:subscription_cancelled': return { icon: XCircle,      color: 'text-blue-400',    label: `Subscription cancelled${d.description ? ` — ${d.description}` : ''}` }
+      case 'billing:refund_issued':          return { icon: DollarSign,   color: 'text-red-400',     label: `Refund issued · ${formatBillingAmount(d)}` }
+      case 'billing:dispute_opened':         return { icon: AlertTriangle, color: 'text-amber-400',  label: `Dispute opened · ${formatBillingAmount(d)}${d.description ? ` — ${d.description}` : ''}` }
+      case 'billing:b2c_purchase':           return { icon: CheckCircle2, color: 'text-emerald-400', label: `One-time purchase · ${formatBillingAmount(d)}${d.description ? ` (${d.description})` : ''}` }
       // chat:message_edited — written by the messages_edit_activity_trg DB
       // trigger on UPDATE OF body. The event row's occurred_at carries
       // the edit timestamp (COALESCE(edited_at, now())). event_data
@@ -397,6 +468,47 @@ export default function AdminUserDetail() {
       setLoading(false)
     }
     load()
+  }, [id])
+
+  // ── Realtime sync — keep the profile state fresh when the row changes
+  //    outside the admin's own actions. The in-page Cancel-deletion pill
+  //    + Chat toggle + self-coached toggle all call setProfile locally so
+  //    they're already in sync. The cases this subscription catches:
+  //      • End-user cancels their own scheduled deletion from the mobile
+  //        reactivation gate while admin has this page open.
+  //      • End-user self-schedules deletion from mobile (when that ships).
+  //      • Cron job anonymizes the account at grace expiry.
+  //      • Another admin makes a change in a different browser tab.
+  //    Without this, the deletion banner + the role pills go stale and
+  //    the user has to refresh manually to see the truth.
+  //
+  //    Filtered by id so admin only gets THIS user's updates. UPDATE
+  //    events overwrite the existing profile state; the page never
+  //    unmounts because the layout's ProtectedLayout already guards
+  //    against profile-refresh thrash.
+  useEffect(() => {
+    if (!id) return
+    const channel = supabase
+      .channel(`admin-user-detail-${id}`)
+      .on(
+        'postgres_changes',
+        {
+          event:  'UPDATE',
+          schema: 'public',
+          table:  'profiles',
+          filter: `id=eq.${id}`,
+        },
+        payload => {
+          const next = payload.new
+          if (!next) return
+          // Merge with prev so any fields the RPC enriched (email from
+          // auth.users via hydrateEmails, computed metrics, etc.) survive
+          // — Realtime row only carries the literal profiles columns.
+          setProfile(prev => prev ? { ...prev, ...next } : next)
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
   }, [id])
 
   // ── Load snapshot (re-runs when an effort is saved) ───────────────────────
@@ -751,72 +863,86 @@ export default function AdminUserDetail() {
 
             {/* Row 2 — Relationship toggles. Chat on/off + plan ownership
                 (Self-managed vs Coach-managed, relabeled May 26 2026 from
-                the misleading "Admin-coached"). */}
-            <div className="flex flex-wrap items-center justify-end gap-1">
-              <button
-                onClick={toggleChat}
-                disabled={togglingChat}
-                title={profile.chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                  profile.chat_enabled
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                    : 'border-border text-muted-foreground hover:border-border hover:text-muted-foreground'
-                } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <MessageCircle className="h-3 w-3" />
-                {profile.chat_enabled ? 'Chat on' : 'Chat off'}
-              </button>
+                the misleading "Admin-coached").
+                Hidden on anonymized accounts — the relationships no longer
+                exist (chat scrubbed of identity, plan ownership moot when
+                profile is wiped). Only the Deleted pill below remains. */}
+            {!profile.anonymized_at && (
+              <div className="flex flex-wrap items-center justify-end gap-1">
+                <button
+                  onClick={toggleChat}
+                  disabled={togglingChat}
+                  title={profile.chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    profile.chat_enabled
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                      : 'border-border text-muted-foreground hover:border-border hover:text-muted-foreground'
+                  } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  <MessageCircle className="h-3 w-3" />
+                  {profile.chat_enabled ? 'Chat on' : 'Chat off'}
+                </button>
 
-              {/* Plan ownership toggle. Labels locked May 26 2026:
-                  Self-managed = client owns plan via mobile wizard.
-                  Coach-managed = admin/coach owns plan via AdminUserPlan tab.
-                  Was "Self-coached / Admin-coached" — misleading because
-                  coaches also own client plans, not just admins. */}
-              <button
-                onClick={toggleSelfCoached}
-                disabled={togglingCoach}
-                title={profile.is_self_coached
-                  ? 'Switch to coach-managed (you take over the plan; deletes their self-set plan)'
-                  : 'Switch to self-managed (client manages their own plan from the app)'}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                  profile.is_self_coached
-                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
-                    : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
-                } ${togglingCoach ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <UserCog className="h-3 w-3" />
-                {profile.is_self_coached ? 'Self-managed' : 'Coach-managed'}
-              </button>
-            </div>
+                {/* Plan ownership toggle. Labels locked May 26 2026:
+                    Self-managed = client owns plan via mobile wizard.
+                    Coach-managed = admin/coach owns plan via AdminUserPlan tab.
+                    Was "Self-coached / Admin-coached" — misleading because
+                    coaches also own client plans, not just admins. */}
+                <button
+                  onClick={toggleSelfCoached}
+                  disabled={togglingCoach}
+                  title={profile.is_self_coached
+                    ? 'Switch to coach-managed (you take over the plan; deletes their self-set plan)'
+                    : 'Switch to self-managed (client manages their own plan from the app)'}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                    profile.is_self_coached
+                      ? 'bg-blue-500/10 border-blue-500/30 text-blue-400 hover:bg-blue-500/20'
+                      : 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+                  } ${togglingCoach ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  <UserCog className="h-3 w-3" />
+                  {profile.is_self_coached ? 'Self-managed' : 'Coach-managed'}
+                </button>
+              </div>
+            )}
 
             {/* Row 3 — Account actions (Active/Inactive + Settings + Delete).
                 Less prominent than the relationship toggles — these are
-                serious account-level operations, not casual flips. */}
+                serious account-level operations, not casual flips.
+                On anonymized accounts only the terminal "Deleted" pill
+                renders — Active toggle is meaningless (account is banned
+                in auth.users until 2099) and Settings has nothing to edit
+                (PII is scrubbed). Showing them would imply the admin can
+                still act on the account, which they can't. */}
             <div className="flex flex-wrap items-center justify-end gap-1">
-              <button
-                onClick={toggleActive}
-                disabled={togglingActive}
-                title={profile.deactivated_at
-                  ? 'Reactivate this account — restores sign-in'
-                  : 'Deactivate this account — blocks sign-in (data preserved)'}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                  profile.deactivated_at
-                    ? 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400 hover:bg-zinc-500/20'
-                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                } ${togglingActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <Power className="h-3 w-3" />
-                {profile.deactivated_at ? 'Inactive' : 'Active'}
-              </button>
+              {!profile.anonymized_at && (
+                <>
+                  <button
+                    onClick={toggleActive}
+                    disabled={togglingActive}
+                    title={profile.deactivated_at
+                      ? 'Reactivate this account — restores sign-in'
+                      : 'Deactivate this account — blocks sign-in (data preserved)'}
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                      profile.deactivated_at
+                        ? 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400 hover:bg-zinc-500/20'
+                        : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                    } ${togglingActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <Power className="h-3 w-3" />
+                    {profile.deactivated_at ? 'Inactive' : 'Active'}
+                  </button>
 
-              <button
-                onClick={() => setSettingsOpen(true)}
-                title="Open this client's account settings"
-                className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors border-border text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
-              >
-                <SettingsIcon className="h-3 w-3" />
-                Settings
-              </button>
+                  <button
+                    onClick={() => setSettingsOpen(true)}
+                    title="Open this client's account settings"
+                    className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors border-border text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                  >
+                    <SettingsIcon className="h-3 w-3" />
+                    Settings
+                  </button>
+                </>
+              )}
 
               {/* Three states for the Delete pill:
                   - Anonymized → grey "Deleted" badge, no action (terminal state).
@@ -870,9 +996,12 @@ export default function AdminUserDetail() {
           </div>
         )}
 
-        {/* Scheduled-for-deletion status banner. Shows during the 30-day grace
-            window. Renders only when active_error is absent so it doesn't
-            stack on top of an in-flight activation error. */}
+        {/* Scheduled-for-deletion status banner. Shows during the 30-day
+            grace window. Minimum legally required: state the date + days
+            remaining. Retention details live in the Privacy Policy. Renders
+            only when active_error is absent so it doesn't stack on top of
+            an in-flight activation error. Matches the client-facing
+            ReactivationGate copy lockdown. */}
         {profile.scheduled_for_deletion_at && !profile.anonymized_at && !activeError && (
           <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
             <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -880,21 +1009,31 @@ export default function AdminUserDetail() {
               Scheduled for deletion on{' '}
               <span className="font-semibold">{new Date(profile.scheduled_for_deletion_at).toLocaleDateString()}</span>
               {deletionDaysLeft != null && (
-                <> &nbsp;·&nbsp; <span className="font-mono tabular-nums">{deletionDaysLeft}</span> day{deletionDaysLeft === 1 ? '' : 's'} remaining</>
+                <> {' · '} <span className="font-mono tabular-nums">{deletionDaysLeft}</span> day{deletionDaysLeft === 1 ? '' : 's'} remaining</>
               )}
-              {' '}— profile, training history, and coach links will be wiped at expiry. Chat history + transactional records are retained per policy.
+              {' · '}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-200">
+                Privacy Policy
+              </a>
             </span>
           </div>
         )}
 
-        {/* Anonymized terminal state — admin can see they're gone but can't do anything */}
+        {/* Anonymized terminal state — minimum legally required: state the
+            deletion date. Retention details live in the Privacy Policy
+            (linked inline). Matches the script-trimming we did on the
+            client-facing ReactivationGate so we don't lecture the admin
+            either — they know what anonymization means. */}
         {profile.anonymized_at && !activeError && (
           <div className="mt-2 flex items-start gap-2 rounded-md border border-zinc-500/30 bg-zinc-500/10 px-3 py-2 text-xs text-zinc-400">
             <Trash2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
               Account deleted on{' '}
-              <span className="font-semibold">{new Date(profile.anonymized_at).toLocaleDateString()}</span>.
-              Profile + training data are wiped. Chat history, transactional records, and the audit log are retained per legal-compliance policy.
+              <span className="font-semibold">{new Date(profile.anonymized_at).toLocaleDateString()}</span>
+              {' · '}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-zinc-200">
+                Privacy Policy
+              </a>
             </span>
           </div>
         )}
@@ -1010,11 +1149,20 @@ export default function AdminUserDetail() {
         />
       )}
 
+      {/* Billing tab — adaptive Current section (coach sub status /
+          athlete purchase / anonymized stub) + universal transactions
+          list from billing_events. viewer="admin" enables the
+          anonymized-account header branch (which user-side never sees
+          because anonymized accounts can't sign in). */}
+      {activeTab === 'billing' && (
+        <BillingView userId={id} viewer="admin" />
+      )}
+
       {/* Timeline / Activity Feed — reads from get_activity_feed RPC.
           Backend writes events from DB triggers (efforts, food, weight,
-          mobility, plans), lifecycle RPCs (deletion scheduled/cancelled/
-          deleted), chat exports, and (Phase 2) auth events. xlsx/pdf
-          export buttons land in the next iteration. */}
+          mobility, plans, billing), lifecycle RPCs (deletion scheduled/
+          cancelled/deleted), chat exports, and (Phase 2) auth events.
+          xlsx/pdf export buttons land in the next iteration. */}
       {activeTab === 'timeline' && (
         <ActivityFeed userId={id} />
       )}

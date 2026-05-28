@@ -14,16 +14,43 @@
 
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
-import { CreditCard, Sparkles } from 'lucide-react'
+import { Sparkles, ChevronRight } from 'lucide-react'
 import AccountSettings from '../../components/AccountSettings'
 import MacroPlanEditor from '../../components/MacroPlanEditor'
+import BillingView from '../../components/BillingView'
 import { supabase } from '../../lib/supabase'
 import { usePersistedState } from '../../hooks/usePersistedState'
 
+// "Subscription" tab was renamed to "Billing" (May 28 2026) when the
+// BillingView component shipped. "About" added the same day so coach
+// has the same legal-doc access surface athlete does on mobile (gear
+// → Settings → About). Without it, the coach has zero legal-doc re-
+// read surface inside the portal — they only saw the docs at signup
+// time. About is at the END so it's predictable (bottom of the row).
 const TABS = [
-  { id: 'profile',      label: 'Settings'     },
-  { id: 'macro',        label: 'Macro Plan'   },
-  { id: 'subscription', label: 'Subscription' },
+  { id: 'profile', label: 'Settings'    },
+  { id: 'macro',   label: 'Macro Plan'  },
+  { id: 'billing', label: 'Billing'     },
+  { id: 'about',   label: 'About'       },
+]
+
+// Coach legal docs — adds Coach Agreement + Data Processing Agreement
+// on top of the common 4 (TOS / Privacy / Cookie / Acceptable Use) and
+// the consumer-protection 3 (Health Disclaimer / Refund Policy / How
+// We Compute). 9 docs total. Stays in the same order as the public
+// legal-footer convention so coaches who see it elsewhere recognise
+// the layout. Mirrors the athlete-side ABOUT_LEGAL_LINKS list in
+// mobile profile.tsx — keep the two in sync when a doc is added.
+const COACH_ABOUT_LEGAL_LINKS = [
+  { url: '/terms',             label: 'Terms of Service' },
+  { url: '/privacy',           label: 'Privacy Policy' },
+  { url: '/cookies',           label: 'Cookie Policy' },
+  { url: '/acceptable-use',    label: 'Acceptable Use' },
+  { url: '/coach-agreement',   label: 'Coach Agreement' },
+  { url: '/refund-policy',     label: 'Refund Policy' },
+  { url: '/health-disclaimer', label: 'Health & Medical Disclaimer' },
+  { url: '/dpa',               label: 'Data Processing Agreement' },
+  { url: '/how-we-compute',    label: 'How We Compute' },
 ]
 
 export default function CoachProfile() {
@@ -106,48 +133,70 @@ export default function CoachProfile() {
         )
       )}
 
-      {activeTab === 'subscription' && (
-        <div className="rounded-xl border border-border bg-card p-5 space-y-4 max-w-lg mx-auto">
-          <div className="flex items-center gap-2">
-            <CreditCard className="h-5 w-5 text-primary" />
-            <h2 className="text-base font-semibold">Subscription</h2>
-          </div>
+      {activeTab === 'billing' && (
+        // Billing surface is the same component admin uses on
+        // /admin/user/:id → Billing tab. viewer="user" omits the
+        // anonymized-account branch (coach can never be anonymized
+        // while signed-in — the reactivation gate would have caught
+        // them first). Shows current subscription + transactions list.
+        <div className="max-w-2xl mx-auto">
+          <BillingView userId={user.id} viewer="user" />
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg bg-muted/30 p-3">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Status</p>
-              <p className="text-sm font-semibold">
-                {profile.coach_subscription_status
-                  ? profile.coach_subscription_status.charAt(0).toUpperCase() + profile.coach_subscription_status.slice(1)
-                  : '—'}
-              </p>
-            </div>
-            <div className="rounded-lg bg-muted/30 p-3">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Tier</p>
-              <p className="text-sm font-semibold">
-                {profile.coach_subscription_tier
-                  ? profile.coach_subscription_tier.charAt(0).toUpperCase() + profile.coach_subscription_tier.slice(1)
-                  : '—'}
-              </p>
-            </div>
-          </div>
-
-          {profile.coach_trial_ends_at && profile.coach_subscription_status === 'trialing' && (
-            <p className="text-xs text-muted-foreground">
-              Trial ends {new Date(profile.coach_trial_ends_at).toLocaleDateString(undefined, {
-                month: 'short', day: 'numeric', year: 'numeric',
-              })}. Your card will be charged on day 15.
-            </p>
-          )}
-
-          <div className="flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/20 p-3">
+          {/* Stripe Customer Portal CTA — placeholder until Phase 4
+              wires the actual portal session edge function. Until then,
+              coach uses the portal link Stripe emails with every
+              receipt. */}
+          <div className="mt-4 flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/20 p-3">
             <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
             <p className="text-xs text-muted-foreground leading-relaxed">
-              Subscription management (update card, cancel, change tier) ships
-              in Phase 4 via a Stripe Customer Portal link. In the meantime,
-              Stripe emails you a portal link with every receipt.
+              Card update, cancellation, and tier changes are managed via
+              the Stripe Customer Portal — Stripe emails you a portal
+              link with every receipt. Direct in-app portal access ships
+              in the next release.
             </p>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'about' && (
+        // Coach About — version + legal docs + entity footer. Mirrors
+        // the athlete AboutTab in mobile profile.tsx layout so the
+        // two surfaces stay visually consistent (the legal docs are
+        // shared content; coaches and athletes should see them in
+        // the same arrangement). Locked May 28 2026.
+        <div className="max-w-2xl mx-auto space-y-4">
+
+          {/* Version card */}
+          <div className="rounded-xl border border-border bg-card p-4 flex items-center justify-between">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Version</span>
+            <span className="text-sm font-mono tabular-nums">1.0.0</span>
+          </div>
+
+          {/* Legal links */}
+          <div>
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Legal</p>
+            <div className="rounded-xl border border-border bg-card divide-y divide-border overflow-hidden">
+              {COACH_ABOUT_LEGAL_LINKS.map(item => (
+                <a
+                  key={item.url}
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between px-4 py-3 text-sm hover:bg-accent/40 transition-colors"
+                >
+                  <span>{item.label}</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </a>
+              ))}
+            </div>
+          </div>
+
+          {/* Operating-entity footer — required disclosure (the entity
+              the coach is contracting with for ToS / Coach Agreement). */}
+          <p className="text-center text-[11px] text-muted-foreground/70 leading-relaxed">
+            MyRX is operated by Northern Princess LLC, Michigan, USA.<br />
+            © {new Date().getFullYear()} Northern Princess LLC. All rights reserved.
+          </p>
         </div>
       )}
     </div>
