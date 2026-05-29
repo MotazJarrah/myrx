@@ -23,6 +23,7 @@ import {
 } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
+import { uniqueChannelName } from '../../src/lib/realtime'
 import ChatSheet from '../../src/components/ChatSheet'
 import SuggestionSheet from '../../src/components/SuggestionSheet'
 import { BiometricLockGate } from '../../src/components/BiometricLockGate'
@@ -145,8 +146,13 @@ export default function AppShellLayout() {
     }
     fetchUnread()
 
+    // Nonce-suffixed name dodges the singleton-channel race that fires
+    // when this effect re-runs (AppState foreground triggers a profile
+    // refetch in AuthContext which flips chatEnabled which re-runs us
+    // here before removeChannel's async unsubscribe has resolved). See
+    // src/lib/realtime.ts for the full diagnosis.
     const channel = supabase
-      .channel(`unread-client-${user.id}`)
+      .channel(uniqueChannelName('unread-client', user.id))
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'messages', filter: `user_id=eq.${user.id}` },
         () => fetchUnread()

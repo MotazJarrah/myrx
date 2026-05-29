@@ -3,6 +3,7 @@ import { AppState, type AppStateStatus } from 'react-native'
 import * as SecureStore from 'expo-secure-store'
 import * as LocalAuthentication from 'expo-local-authentication'
 import { supabase } from '../lib/supabase'
+import { uniqueChannelName } from '../lib/realtime'
 import { recordAuthSuccess, clearAuthState } from '../lib/lockState'
 import { mapAuthError, isBannedError } from '../lib/authErrors'
 import type { User } from '@supabase/supabase-js'
@@ -394,7 +395,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user?.id) return
     const channel = supabase
-      .channel(`profile-self-${user.id}`)
+      .channel(uniqueChannelName('profile-self', user.id))
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
@@ -845,7 +846,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (profile?.is_coach === true || profile?.is_superuser === true) return
 
     const channel = supabase
-      .channel(`coach-invites-self-${user.id}`)
+      .channel(uniqueChannelName('coach-invites-self', user.id))
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'coach_invites' },

@@ -50,6 +50,7 @@ import Animated, {
 import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { uniqueChannelName } from '../lib/realtime'
 import { useAuth } from '../contexts/AuthContext'
 import MessageActions from './MessageActions'
 import { getEnterToSend } from '../lib/chatPrefs'
@@ -335,7 +336,7 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
     load()
 
     const channel = supabase
-      .channel(`chat-client-${user.id}`)
+      .channel(uniqueChannelName('chat-client', user.id))
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
@@ -407,7 +408,7 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
   // the typing bubble appears/disappears.
   useEffect(() => {
     if (!isOpen || !user) return
-    const channel = supabase.channel(`presence-chat-${user.id}`, {
+    const channel = supabase.channel(uniqueChannelName('presence-chat', user.id), {
       config: { presence: { key: user.id } },
     })
     // Channel splits responsibilities:

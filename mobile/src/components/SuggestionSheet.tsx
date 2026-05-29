@@ -35,6 +35,7 @@ import Animated, {
 } from 'react-native-reanimated'
 import { GestureHandlerRootView, Gesture, GestureDetector } from 'react-native-gesture-handler'
 import { supabase } from '../lib/supabase'
+import { uniqueChannelName } from '../lib/realtime'
 import { useAuth } from '../contexts/AuthContext'
 import MessageActions from './MessageActions'
 import { getEnterToSend } from '../lib/chatPrefs'
@@ -149,7 +150,7 @@ export default function SuggestionSheet({ isOpen, onClose }: Props) {
       .then(({ data }) => { if (mounted) setSuggestions((data as Suggestion[] | null) ?? []) })
 
     const channel = supabase
-      .channel(`suggestions-client-${user.id}`)
+      .channel(uniqueChannelName('suggestions-client', user.id))
       .on('postgres_changes', {
         event: 'INSERT',
         schema: 'public',
