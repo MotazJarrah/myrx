@@ -1,0 +1,26 @@
+-- Coach's /coach/invite page kept showing an accepted invite in the
+-- Pending bucket. The DB row was correctly set to status='accepted'
+-- (via attach-invite-to-current-user edge fn, service-role UPDATE) but
+-- the coach's UI never refreshed via the realtime sub on coach_invites.
+--
+-- Same root cause as profiles earlier this session: coach_invites had
+-- REPLICA IDENTITY DEFAULT, so the WAL row image for an UPDATE only
+-- carried the PK. Supabase Realtime's apply_rls couldn't evaluate the
+-- coach's SELECT policy (`coach_id = auth.uid()`) against the new row
+-- — coach_id wasn't in the image — and conservatively dropped the
+-- event delivery. The coach's `coach-invites-${user.id}` channel never
+-- got the postgres_changes event, so loadInvites() never re-ran, so
+-- the pending list stayed stale showing the row that had since flipped
+-- to status='accepted'.
+--
+-- Same fix: include every column in the WAL row image. Cost is a small
+-- bump in WAL volume; coach_invites' update rate is very low (one or
+-- two writes per invite lifecycle) so the impact is negligible.
+--
+-- This also retroactively fixes the athlete-side flow we touched
+-- earlier today — the athlete's coach_invites realtime sub for revoke
+-- events would have hit the same dropping behaviour after a coach
+-- revoke, since the athlete-SELECT policy reads invitee_email which
+-- also wasn't in the default WAL row.
+
+ALTER TABLE public.coach_invites REPLICA IDENTITY FULL;
