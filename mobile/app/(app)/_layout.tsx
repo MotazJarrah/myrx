@@ -19,7 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Slot, Link, Redirect, usePathname, router } from 'expo-router'
 import {
-  LayoutDashboard, Dumbbell, Activity, Flower2, Weight, Flame, Heart, History as HistoryIcon,
+  LayoutDashboard, Dumbbell, Activity, Flower2, Weight, Flame, Heart, Moon, Droplet, History as HistoryIcon,
   LogOut, Lightbulb, MessageCircle,
 } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
@@ -35,6 +35,17 @@ import { shellScrollRef } from '../../src/lib/shellScroll'
 import { ChartTooltipProvider } from '../../src/lib/chartTooltipScope'
 
 // ── Nav config — mirrors `links` array in Navbar.jsx ─────────────────────────
+// Order rationale (locked May 28 2026 alongside Roadmap A — Hydration +
+// Sleep pages):
+//   Training surfaces    → Dashboard / Strength / Cardio / Mobility
+//   Body-state daily logs → Bodyweight
+//   Wearable readiness   → Heart / Sleep (recovery signals from the watch)
+//   Daily intake         → Hydration / Calories (what goes IN today)
+//   Archive              → History
+// Hydration sits right before Calories so the two "intake today" metrics
+// cluster visually — same way Heart + Sleep cluster as "readiness from the
+// watch". Older comment about Heart placement preserved below.
+//
 // Heart sits right after Bodyweight so the "recovery / body state" metrics
 // cluster together visually (weight → resting HR are conceptually related —
 // both daily readiness signals).
@@ -45,6 +56,8 @@ const NAV_LINKS = [
   { href: '/(app)/mobility',   label: 'Mobility',   icon: Flower2         },
   { href: '/(app)/bodyweight', label: 'Bodyweight', icon: Weight          },
   { href: '/(app)/heart',      label: 'Heart',      icon: Heart           },
+  { href: '/(app)/sleep',      label: 'Sleep',      icon: Moon            },
+  { href: '/(app)/hydration',  label: 'Hydration',  icon: Droplet         },
   { href: '/(app)/calories',   label: 'Calories',   icon: Flame           },
   { href: '/(app)/history',    label: 'History',    icon: HistoryIcon     },
 ] as const

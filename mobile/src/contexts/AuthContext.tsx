@@ -111,6 +111,11 @@ interface Profile {
   weight_unit: string | null
   height_unit: string | null
   distance_unit: string | null
+  // Hydration display unit — independent of weight_unit / distance_unit so a
+  // user who tracks weight in kg can still log water in oz (and vice versa).
+  // Defaults to 'oz' for new profiles; CHECK constraint allows 'oz' | 'mL'.
+  // Added May 28 2026 alongside the Hydration page (Roadmap A).
+  fluid_unit?: 'oz' | 'mL' | null
   current_weight: number | null
   current_height: number | null
   // Nutrition plan
