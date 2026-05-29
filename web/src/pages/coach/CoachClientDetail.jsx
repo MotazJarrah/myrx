@@ -164,7 +164,7 @@ export default function CoachClientDetail() {
         supabase.from('calorie_plans').select('*').eq('user_id', id).maybeSingle(),
       ])
       if (profileErr || !profileData) {
-        setError('Could not load this client. They might not be on your roster.')
+        setError("Couldn't load this client — they may not be on your roster.")
         setLoading(false)
         return
       }

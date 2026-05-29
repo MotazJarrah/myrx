@@ -259,7 +259,7 @@ export default function CoachDashboard() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Welcome back, Coach {profile?.full_name?.split(' ')[0] || ''}. Your roster at a glance.
+          Coach {profile?.full_name?.split(' ')[0] || ''} — here's your roster.
         </p>
       </div>
 
@@ -307,7 +307,7 @@ export default function CoachDashboard() {
             ) : recentClients.length === 0 ? (
               <div className="py-10 px-5 text-center text-sm text-muted-foreground">
                 {clients.length === 0
-                  ? 'Your roster will populate here once invited clients accept.'
+                  ? 'Invitees show up here the moment they accept.'
                   : 'No new clients in the last two weeks.'}
               </div>
             ) : (
@@ -385,9 +385,9 @@ export default function CoachDashboard() {
         <AnimateRise delay={500}>
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-5 text-center">
             <UserPlus className="h-8 w-8 text-primary mx-auto mb-3" />
-            <h3 className="text-base font-semibold mb-1">Ready to Onboard Your First Client?</h3>
+            <h3 className="text-base font-semibold mb-1">Add your first client</h3>
             <p className="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
-              Send an email or SMS invite link. They'll sign up with full feature access — on you — and link directly to your roster.
+              Drop an email. They get a one-tap accept link and land on your roster the moment they sign up.
             </p>
             <button
               onClick={() => navigate('/coach/invite')}
@@ -406,9 +406,9 @@ export default function CoachDashboard() {
             <CheckCircle2 className="h-4 w-4 text-primary" /> Your Subscription Is Active
           </h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            Stripe will email you a receipt and the link to manage your subscription
-            (update card, cancel, change tier). You'll also reach all of that from
-            the Profile page in the sidebar once Phase 4 lands.
+            Stripe emails the receipt and a manage-subscription link with every
+            charge — card, cancellation, tier swap all live there. Direct in-app
+            access ships next.
           </p>
         </div>
       )}

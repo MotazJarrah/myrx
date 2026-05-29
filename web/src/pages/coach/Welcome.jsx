@@ -105,10 +105,10 @@ export default function CoachWelcome() {
             </div>
             <div>
               <h1 className="text-2xl font-semibold mb-1">
-                Welcome to MyRX{coach?.full_name ? `, ${coach.full_name.split(' ')[0]}` : ''}!
+                You're in{coach?.full_name ? `, ${coach.full_name.split(' ')[0]}` : ''}.
               </h1>
               <p className="text-sm text-muted-foreground">
-                Your 14-day trial is active. Your first invoice will be sent on day 15 — cancel anytime before then with no charge.
+                14-day trial active. First invoice on day 15 — cancel before then for no charge.
               </p>
             </div>
             <div className="space-y-2 pt-2">
@@ -133,9 +133,8 @@ export default function CoachWelcome() {
             <div>
               <h1 className="text-2xl font-semibold mb-1">Payment received!</h1>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Your payment has been confirmed by Stripe, but it's taking us a bit longer than usual
-                to finish setting up your account. This is rare and usually clears within a minute.
-                You can refresh this page or head straight to your portal.
+                Payment in. Stripe confirmed it, but we're a beat behind on the rest of the setup —
+                usually clears within a minute. Refresh, or head straight to your portal.
               </p>
             </div>
             <div className="space-y-2 pt-2">

@@ -3,8 +3,8 @@
  *
  * Email-only v1 (LOCKED May 27 2026, see CLAUDE.md "Coach invite →
  * invitee path"). The coach enters an email; the invite ships with
- * a preset coach-voice message by default. The coach can toggle on
- * the custom-message editor to personalize.
+ * a single locked preset coach-voice message (no per-invite custom
+ * override — decision 2b, May 2026).
  *
  * Why email-only:
  *   - SMS adds 1-3 weeks of A2P 10DLC vetting + monthly carrier fees
@@ -17,10 +17,16 @@
  *     invitee-state matches (e.g. coach's own phone collided with
  *     other profiles) — removing it eliminates the whole class of bug.
  *
+ * Why no custom-message override:
+ *   - Voice consistency across every invitee's inbox. One locked script
+ *     means we control tone + accuracy + length, and the coach can't
+ *     write something that contradicts the surrounding chrome.
+ *   - Removes a form field + a state branch + an opportunity for typos.
+ *
  * The flow:
- *   1. Coach enters email + optional custom message
+ *   1. Coach enters email
  *   2. `send-coach-invite` edge fn validates, inserts coach_invites row,
- *      fires SendGrid email with the preset OR custom message
+ *      fires SendGrid email with the preset message
  *   3. Invitee receives email → taps "Accept invite" → smart-link page
  *      routes to App Store / Play Store / sign-in based on device + auth
  *      state. Once in the app, email-match detection attaches them to
@@ -36,29 +42,28 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { Link } from 'wouter'
 import {
   UserPlus, Mail, Send, X, Check, AlertCircle, Loader2, RefreshCw,
-  Clock, CheckCircle2, ChevronRight, Copy, MessageSquarePlus,
+  Clock, CheckCircle2, ChevronRight, Copy,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import AnimateRise from '../../components/AnimateRise'
 import { humanizeInvokeError, humanizeServerErrorAsync } from '../../lib/serverError'
 
-// ── Preset script (locked May 27 2026) ──────────────────────────────────────
+// ── Preset script (locked May 27 2026; custom-override removed May 2026) ────
 //
-// The default message every invite ships with unless the coach toggles
-// the editor on and writes their own. Coach voice (per CLAUDE.md "Voice
-// and Coaching Philosophy") — acknowledges the prospect, names the
-// product mechanism, and gives a concrete next step.
+// Every invite ships with this exact message. Coach voice (per CLAUDE.md
+// "Voice and Coaching Philosophy") — acknowledges the channel (email
+// with a one-tap link), names the product mechanism, and gives the
+// concrete next step (one tap, then we work the plan).
 //
-// Kept short on purpose: the email already has a big "Accept invite"
-// CTA button and the coach's name in the subject + heading. The
-// personal message slot is for setting context, not repeating
-// instructions the chrome already gives.
+// Kept short on purpose: the email chrome already has the big "Accept
+// invite" CTA button and the coach's name in the subject + heading.
+// The message slot is for setting context, not repeating instructions
+// the chrome already gives.
 const PRESET_MESSAGE =
-  "I'm running my coaching through MyRX now — strength, cardio, " +
-  "nutrition, and recovery all in one place. Tap the link below to " +
-  "install the app and accept. Your account is fully covered under " +
-  "my subscription. Let's get to work."
+  "I'm running my coaching through MyRX now. You'll get an email with " +
+  "a one-tap accept link — once you're in, I see your training, your " +
+  "numbers, and we work the plan together."
 
 // ── Relative time helpers ────────────────────────────────────────────────────
 
@@ -95,8 +100,6 @@ export default function CoachInvite() {
 
   // Form state
   const [email,         setEmail]         = useState('')
-  const [customMessage, setCustomMessage] = useState('')
-  const [useCustom,     setUseCustom]     = useState(false)
   const [sending,       setSending]       = useState(false)
   // success shape: { target, sent_email, accept_url }
   // accept_url is rendered inline as a "copy this link manually" fallback
@@ -195,16 +198,13 @@ export default function CoachInvite() {
     setSuccess(null)
 
     const trimmedEmail = email.trim()
-    const messageToSend = useCustom
-      ? (customMessage.trim() || PRESET_MESSAGE)
-      : PRESET_MESSAGE
 
     if (!trimmedEmail) {
       setError('Add an email so we know where to send the invite.')
       return
     }
     if (!looksLikeEmail(trimmedEmail)) {
-      setError("That email doesn't look right. Double-check the spelling.")
+      setError("That email doesn't look right. Check the spelling.")
       return
     }
 
@@ -213,7 +213,7 @@ export default function CoachInvite() {
       const { data, error: fnError } = await supabase.functions.invoke('send-coach-invite', {
         body: {
           invitee_email: trimmedEmail,
-          coach_message: messageToSend,
+          coach_message: PRESET_MESSAGE,
         },
       })
 
@@ -235,8 +235,6 @@ export default function CoachInvite() {
       })
       setCopiedUrl(false)
       setEmail('')
-      setCustomMessage('')
-      setUseCustom(false)
       // Explicit refresh — the realtime subscription would normally
       // catch the INSERT and re-fetch, but realtime events can lag or
       // drop entirely. Awaiting the explicit re-fetch here means the
@@ -254,7 +252,7 @@ export default function CoachInvite() {
 
   async function handleRevoke(invite) {
     if (revokingId) return
-    const ok = window.confirm(`Revoke the invite to ${invite.invitee_email}? The link in their email will stop working.`)
+    const ok = window.confirm(`Revoke the invite to ${invite.invitee_email}? The link in their inbox goes dead immediately.`)
     if (!ok) return
 
     setRevokingId(invite.id)
@@ -299,7 +297,7 @@ export default function CoachInvite() {
       const { data, error: fnError } = await supabase.functions.invoke('send-coach-invite', {
         body: {
           invitee_email: invite.invitee_email,
-          coach_message: invite.coach_message || PRESET_MESSAGE,
+          coach_message: PRESET_MESSAGE,
         },
       })
 
@@ -340,7 +338,7 @@ export default function CoachInvite() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Invite a Client</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Send an email invite. Your client signs up for free, joins your roster automatically.
+          Drop an email. They get a one-tap accept link, and land on your roster the moment they sign up.
         </p>
       </div>
 
@@ -356,7 +354,7 @@ export default function CoachInvite() {
               <h2 className="text-base font-semibold">Send an invite</h2>
             </div>
             <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-              The link in the email is single-use and expires in 14 days. Your client gets full access under your subscription.
+              The link is single-use and expires in 14 days. They get full access from day one.
             </p>
           </div>
 
@@ -379,57 +377,20 @@ export default function CoachInvite() {
             </div>
           </div>
 
-          {/* Personal message — preset by default, toggle to customize */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Personal message
-              </label>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={useCustom}
-                onClick={() => setUseCustom(v => !v)}
-                disabled={sending}
-                className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors disabled:opacity-50 ${
-                  useCustom
-                    ? 'bg-primary border-primary'
-                    : 'bg-muted border-border hover:bg-muted/80'
-                }`}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full shadow-md transition-transform ${
-                    useCustom
-                      ? 'translate-x-6 bg-primary-foreground'
-                      : 'translate-x-0.5 bg-foreground'
-                  }`}
-                />
-                <span className="sr-only">Write a custom message</span>
-              </button>
+          {/* What the email says — read-only preview of the locked preset.
+              Replaces the previous toggle + textarea (decision 2b, May 2026).
+              Collapsed by default so the form stays short; one tap expands. */}
+          <details className="group rounded-lg border border-border bg-background/40">
+            <summary className="cursor-pointer list-none px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors flex items-center justify-between">
+              <span>What the email says</span>
+              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="px-3 pb-3 pt-1 border-t border-border">
+              <p className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap">
+                {PRESET_MESSAGE}
+              </p>
             </div>
-
-            {useCustom ? (
-              <textarea
-                value={customMessage}
-                onChange={e => setCustomMessage(e.target.value)}
-                rows={5}
-                maxLength={500}
-                disabled={sending}
-                autoFocus
-                className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:border-primary disabled:opacity-50 resize-none leading-relaxed"
-              />
-            ) : (
-              <div className="rounded-lg border border-border bg-background/40 px-3 py-2.5">
-                <p className="text-sm text-foreground/85 leading-relaxed">
-                  {PRESET_MESSAGE}
-                </p>
-                <p className="mt-2 text-[11px] text-muted-foreground flex items-center gap-1.5">
-                  <MessageSquarePlus className="h-3 w-3" />
-                  Default message. Toggle on to write your own.
-                </p>
-              </div>
-            )}
-          </div>
+          </details>
 
           {/* Error banner */}
           {error && (
@@ -451,7 +412,7 @@ export default function CoachInvite() {
                   <p className="text-[11px] text-emerald-500/80 mt-0.5 leading-relaxed">
                     {success.sent_email
                       ? 'Email is on its way. They have 14 days to accept.'
-                      : 'Stored on your roster as pending. The accept link is below — share it manually until the email channel is configured.'}
+                      : 'Saved as pending. The accept link is below — send it however you reach them until email is wired up.'}
                   </p>
                 </div>
               </div>
@@ -535,7 +496,7 @@ export default function CoachInvite() {
           ) : pending.length === 0 ? (
             <div className="py-10 px-5 text-center">
               <p className="text-sm text-muted-foreground">
-                No pending invites — send your first above.
+                Nothing pending. Add an email above and we'll move.
               </p>
             </div>
           ) : (

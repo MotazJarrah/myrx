@@ -251,9 +251,9 @@ export default function CoachClients() {
             <p className="text-sm text-muted-foreground mb-5 max-w-md mx-auto leading-relaxed">
               Send your first invite from the{' '}
               <span className="font-semibold text-foreground">Invite Client</span>{' '}
-              page — your clients sign up free under your subscription and appear
-              here automatically. Once linked, you can manage their macro plan,
-              review their training, and message them from this portal.
+              page. They land on your roster the moment they accept — then you
+              manage their macros, see every session, and message them from this
+              portal.
             </p>
             <button
               onClick={() => navigate('/coach/invite')}

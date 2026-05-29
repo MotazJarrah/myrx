@@ -203,8 +203,8 @@ function WhatToDoNow({ isMobile }) {
           <h3 className="text-sm font-semibold text-foreground">What to do now</h3>
           <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
             {isMobile
-              ? "You're on a phone — when the apps launch, you'll be able to install them directly from this page. We'll email you the moment they're available."
-              : "When the apps launch, you'll see download badges and a QR code right here. For now, watch for the launch email."}
+              ? "You're on a phone — once the apps ship, you'll install them straight from here. We'll email the moment they're live."
+              : "Once the apps ship, you'll get download badges + a QR code right here. For now, watch your inbox."}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <AppleBadge />
@@ -224,7 +224,7 @@ function InviteCodeBox({ token }) {
   return (
     <div className="mt-6 w-full rounded-xl border border-border bg-muted/40 p-4">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-        Your invite code (save this if needed)
+        Your invite code — save this in case you need to paste it later
       </div>
       <div className="mt-1.5 break-all font-mono text-xs text-foreground">
         {token}
@@ -304,7 +304,7 @@ export default function CoachAcceptInvite() {
       <PageShell>
         <div className="mt-16 flex flex-col items-center gap-4 text-muted-foreground">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />
-          <p className="text-sm">Loading your invite...</p>
+          <p className="text-sm">Looking up your invite…</p>
         </div>
       </PageShell>
     )
@@ -318,7 +318,7 @@ export default function CoachAcceptInvite() {
           icon={AlertCircle}
           tone="destructive"
           title="No invite link"
-          body={"This page needs an invite link from your coach. Ask them to send you the email again — the link in it carries the code we need to recognise you."}
+          body={"This page needs the invite link from your coach's email. Ask them to resend — the code is baked into the link."}
         />
       </PageShell>
     )
@@ -346,7 +346,7 @@ export default function CoachAcceptInvite() {
           icon={Clock}
           tone="warning"
           title="This invite has expired"
-          body={`This invite from Coach ${coachName} expired ${expiredOn}. Ask them for a fresh one — your account is still ready when the new invite arrives.`}
+          body={`Your invite from Coach ${coachName} expired ${expiredOn}. Ping them for a fresh one — everything's still ready on our side.`}
         />
       </PageShell>
     )
@@ -360,7 +360,7 @@ export default function CoachAcceptInvite() {
           icon={AlertCircle}
           tone="muted"
           title="This invite is no longer valid"
-          body={`This invite is no longer valid — ${coachName} revoked it. Reach out if you'd like to be added again.`}
+          body={`${coachName} revoked this invite. Reach out if you want back in.`}
         />
       </PageShell>
     )
@@ -374,7 +374,7 @@ export default function CoachAcceptInvite() {
           icon={AlertCircle}
           tone="muted"
           title="This invite has already been used"
-          body={"This invite has already been used. If that was you, sign in to the MyRX app once it launches. If not, contact your coach for a fresh invite."}
+          body={"Already used. If that was you, sign in once the MyRX app ships. If not, ask your coach to send a fresh one."}
         />
       </PageShell>
     )
@@ -391,7 +391,7 @@ export default function CoachAcceptInvite() {
           icon={AlertCircle}
           tone="destructive"
           title="Invite not found"
-          body={"This invite link isn't recognised. Ask your coach to send a new one — the original link may have been mistyped or removed."}
+          body={"We don't recognise this link. Ask your coach to resend — the original may have been mistyped or revoked."}
         />
       </PageShell>
     )
@@ -407,7 +407,7 @@ export default function CoachAcceptInvite() {
         {/* Headline + coach card */}
         <div className="text-center">
           <p className="text-xs uppercase tracking-wider text-muted-foreground">
-            You've been invited
+            Your coach invited you
           </p>
           <h1 className="mt-1 text-lg font-semibold tracking-tight">
             {coachName} invited you to MyRX
@@ -424,12 +424,11 @@ export default function CoachAcceptInvite() {
         <div className="mt-6 w-full rounded-2xl border border-primary/30 bg-primary/5 p-5">
           <h2 className="text-sm font-semibold text-foreground">The MyRX app is launching shortly</h2>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            MyRX lives on iOS and Android. Once the apps go live, install MyRX
-            and sign up with{' '}
+            MyRX runs on iOS and Android. Install once it ships, sign up with{' '}
             <span className="font-medium text-foreground">
               {inviteeEmail || 'the email your coach used to invite you'}
             </span>
-            {' '}— your invite will attach automatically.
+            , and your invite attaches itself.
           </p>
         </div>
 

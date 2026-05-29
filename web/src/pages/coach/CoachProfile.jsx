@@ -144,7 +144,7 @@ export default function CoachProfile() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Account Settings</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Your account, your settings, and your billing.
+          Account, settings, billing.
         </p>
       </div>
 
@@ -189,11 +189,11 @@ export default function CoachProfile() {
             </div>
             <div className="px-5 py-4 space-y-3">
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Deleting your account starts a 30-day grace period. You can sign
-                in any time within those 30 days to reactivate. After that,
-                your coach profile, client links, and account data are
-                permanently wiped — billing records are retained per legal
-                requirement.
+                Deleting starts a 30-day grace period. Sign in within those 30
+                days to reactivate. After that, your coach profile, client
+                links, and account data are permanently wiped. Billing records
+                stay on file — we're required to keep those for tax + dispute
+                resolution.
               </p>
               <button
                 onClick={() => {
@@ -329,7 +329,8 @@ export default function CoachProfile() {
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Until then, sign in to reactivate. After that, your coach
                 profile, client links, and account data are permanently wiped.
-                Billing records are retained per legal requirement —{' '}
+                Billing records stay on file — we're required to keep those for
+                tax + dispute resolution.{' '}
                 <a
                   href="/privacy"
                   target="_blank"

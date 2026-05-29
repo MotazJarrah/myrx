@@ -47,19 +47,19 @@ const GENERIC_PATTERNS = [
   },
   {
     test: /edge function returned a non-?2xx/i,
-    msg:  "The server didn't accept that request — usually means something's already in flight or just changed. Refresh the list and try again.",
+    msg:  "Something already happened or just changed. Refresh and try again.",
   },
   {
     test: /non-?2xx status code/i,
-    msg:  "The server didn't accept that request. Refresh and try again in a moment.",
+    msg:  "That didn't go through. Refresh and try again in a moment.",
   },
   {
     test: /timeout|timed out/i,
-    msg:  "That took longer than expected and timed out. Try again — most likely a temporary slowdown.",
+    msg:  "That took too long. Try again — usually a temporary slowdown.",
   },
   {
     test: /aborted|abortError/i,
-    msg:  "That request was cancelled before it finished. Try again.",
+    msg:  "That got cancelled. Try again.",
   },
   {
     test: /jwt expired|invalid jwt|session.*expired/i,
@@ -67,19 +67,19 @@ const GENERIC_PATTERNS = [
   },
   {
     test: /rate limit|too many requests/i,
-    msg:  "You've made too many requests in a short window. Wait a minute, then try again.",
+    msg:  "Too many tries in a row. Wait a minute and try again.",
   },
   {
     test: /permission denied|forbidden|not authorized|unauthorized/i,
-    msg:  "You don't have permission to do that. If you think you should, sign out and back in to refresh your access.",
+    msg:  "You don't have permission for that. Sign out and back in if you think you should.",
   },
   {
     test: /not found/i,
-    msg:  "We couldn't find what you were looking for. It may have been removed since you opened this page.",
+    msg:  "We couldn't find that. It may have been removed since you loaded the page.",
   },
   {
     test: /duplicate key|unique constraint|conflict/i,
-    msg:  "Looks like that already exists. Refresh the list — it's probably already there.",
+    msg:  "That already exists. Refresh the list to see it.",
   },
 ]
 

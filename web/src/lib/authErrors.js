@@ -36,42 +36,42 @@ const SUPPORT_EMAIL = 'team@myrxfit.com'
 // to a substring match on `message` for legacy / passthrough errors.
 const CODE_MESSAGES = {
   user_banned:
-    `Your account has been suspended. Please contact support — ${SUPPORT_EMAIL}.`,
+    `Your account is suspended. Email ${SUPPORT_EMAIL} to sort it out.`,
   email_not_confirmed:
-    'Your email hasn’t been verified yet. Please check your inbox for the verification email.',
+    'Your email hasn’t been verified yet. Check your inbox for the verification email.',
   invalid_credentials:
-    'The email or password you entered is incorrect. Please try again.',
+    'Email or password is wrong. Try again.',
   email_address_invalid:
-    'That email address doesn’t look valid. Please double-check it and try again.',
+    'That email doesn’t look valid. Check it and try again.',
   email_address_not_authorized:
     'This email address isn’t allowed to sign up right now.',
   weak_password:
-    'Your password is too weak. Please use at least 8 characters with a mix of letters and numbers.',
+    'Password’s too weak. Use at least 8 characters with letters and numbers.',
   same_password:
-    'Your new password must be different from your current password.',
+    'Pick a new password — this one matches your current one.',
   // The legacy 6-char rule appears as a plain message — handled below.
 
   over_email_send_rate_limit:
-    'We’ve sent too many emails recently. Please wait a minute, then try again.',
+    'We’ve sent too many emails just now. Wait a minute and try again.',
   over_sms_send_rate_limit:
-    'We’ve sent too many text messages recently. Please wait a minute, then try again.',
+    'We’ve sent too many texts just now. Wait a minute and try again.',
   over_request_rate_limit:
-    'You’ve made too many requests. Please wait a moment, then try again.',
+    'Too many tries in a row. Wait a moment and try again.',
 
   otp_expired:
-    'That verification code has expired. Please request a new one and try again.',
+    'That code expired. Request a new one.',
   otp_disabled:
     'One-time codes aren’t enabled for this account.',
 
   user_already_exists:
-    'An account with these details already exists. Try signing in instead.',
+    'An account with these details already exists — sign in instead.',
   email_exists:
-    'An account with this email already exists. Try signing in instead.',
+    'An account with this email already exists — sign in instead.',
   phone_exists:
-    'An account with this phone number already exists. Try signing in instead.',
+    'An account with this phone number already exists — sign in instead.',
 
   signup_disabled:
-    'New signups are temporarily paused. Please try again later.',
+    'New signups are paused for now. Check back later.',
   email_provider_disabled:
     'Email signup isn’t available right now.',
   phone_provider_disabled:
@@ -80,29 +80,29 @@ const CODE_MESSAGES = {
     'This sign-in method isn’t available right now.',
 
   captcha_failed:
-    'We couldn’t verify the security check. Please try again.',
+    'We couldn’t verify the security check. Try again.',
 
   reauthentication_needed:
-    'Please re-enter your password to confirm this change.',
+    'Re-enter your password to confirm.',
   reauthentication_not_valid:
-    'That confirmation didn’t match. Please try again.',
+    'That didn’t match. Try again.',
 
   bad_jwt:
-    'Your session is no longer valid. Please sign in again.',
+    'Your session ended. Sign in again.',
   session_not_found:
-    'Your session has expired. Please sign in again.',
+    'Your session ended. Sign in again.',
   session_expired:
-    'Your session has expired. Please sign in again.',
+    'Your session ended. Sign in again.',
 
   manual_linking_disabled:
     'Linking accounts is disabled.',
   provider_email_needs_verification:
-    'Please verify your email with that provider first.',
+    'Verify your email with that provider first.',
 
   validation_failed:
-    'Some of the information you entered didn’t pass validation. Please check and try again.',
+    'Some of what you entered isn’t valid. Check it and try again.',
   unexpected_failure:
-    `Something went wrong on our end. Please try again, and contact ${SUPPORT_EMAIL} if it keeps happening.`,
+    `Something went wrong on our end. Try again — email ${SUPPORT_EMAIL} if it keeps happening.`,
 }
 
 // Message-substring fallbacks for cases where the Supabase response
@@ -132,7 +132,7 @@ const MESSAGE_FALLBACKS = [
 ]
 
 // Browser / network errors that surface as plain Error objects.
-const NETWORK_MESSAGE = 'Connection lost. Please check your internet and try again.'
+const NETWORK_MESSAGE = 'Connection lost. Check your network and try again.'
 function isNetworkError(err) {
   if (!err) return false
   const m = String(err.message || err.name || '').toLowerCase()
@@ -169,7 +169,7 @@ export function mapAuthError(error) {
 export function friendlyAuthMessage(error, fallback) {
   if (!error) return fallback || ''
   const mapped = mapAuthError(error)
-  return mapped?.message || fallback || 'Something went wrong. Please try again.'
+  return mapped?.message || fallback || 'Something went wrong. Try again.'
 }
 
 export function isBannedError(error) {
