@@ -377,20 +377,11 @@ export default function CoachInvite() {
             </div>
           </div>
 
-          {/* What the email says — read-only preview of the locked preset.
-              Replaces the previous toggle + textarea (decision 2b, May 2026).
-              Collapsed by default so the form stays short; one tap expands. */}
-          <details className="group rounded-lg border border-border bg-background/40">
-            <summary className="cursor-pointer list-none px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors flex items-center justify-between">
-              <span>What the email says</span>
-              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
-            </summary>
-            <div className="px-3 pb-3 pt-1 border-t border-border">
-              <p className="text-sm text-foreground/85 leading-relaxed whitespace-pre-wrap">
-                {PRESET_MESSAGE}
-              </p>
-            </div>
-          </details>
+          {/* No message preview by design. The coach doesn't need to see what
+              the email body says — the system ships the locked PRESET_MESSAGE
+              every time. Decision 2b (May 29 2026) removed the editable
+              textarea; the May 29 2026 follow-up removed the read-only
+              preview disclosure too. Form is now Email → Send. */}
 
           {/* Error banner */}
           {error && (
