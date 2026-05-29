@@ -130,9 +130,17 @@ export default function CoachDashboard() {
           // clients yet" in the UI. Removed May 27 2026. If emails are
           // needed later, fetch via a SECURITY DEFINER RPC that joins
           // auth.users (see admin portal's get_users_for_admin pattern).
+          //
+          // Filter anonymized_at IS NULL added May 29 2026 — defensive
+          // belt-and-suspenders. anonymize_account_now now clears the
+          // anonymized profile's coach_id (so they should naturally drop
+          // off this query via the .eq('coach_id', user.id) clause), but
+          // the filter guards against any pre-fix rows that didn't get
+          // backfilled.
           .select('id, full_name, avatar_url, created_at')
           .eq('coach_id', user.id)
           .is('deactivated_at', null)
+          .is('anonymized_at', null)
           .order('created_at', { ascending: false }),
         supabase
           .from('coach_invites')

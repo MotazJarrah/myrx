@@ -93,12 +93,17 @@ export default function CoachClients() {
       setLoading(true)
       // Filter out deactivated profiles via deactivated_at IS NULL (column
       // renamed from deleted_at on May 26 2026 — see CLAUDE.md migration note).
+      // Also filter anonymized profiles — anonymize_account_now now clears
+      // coach_id on the anonymized profile (May 29 2026) so they should
+      // naturally drop off, but the defensive WHERE clause guards against
+      // any pre-fix rows that haven't been backfilled.
       const { data, error } = await supabase
         .from('profiles')
         // profiles has no `email` column — see CoachDashboard fix lock.
         .select('id, full_name, phone, avatar_url, macros_managed_by_coach, created_at')
         .eq('coach_id', user.id)
         .is('deactivated_at', null)
+        .is('anonymized_at', null)
         .order('created_at', { ascending: false })
 
       if (cancelled) return
@@ -129,6 +134,16 @@ export default function CoachClients() {
           prev.some(c => c.id === payload.new.id) ? prev : [payload.new, ...prev]
         )
       })
+      // UPDATE handler — fires when the athlete's profile changes WHILE
+      // coach_id still equals this coach (name change, weight log, etc.).
+      // Does NOT fire for detachments (anonymize / admin Switch-to-Self),
+      // because once coach_id flips to NULL the row no longer matches the
+      // filter AND the coach loses RLS read access — Supabase realtime
+      // therefore drops the event. Detachments surface only after the
+      // coach refreshes the page; rare event, not worth a polling
+      // workaround. The DB-side anonymize_account_now NULL-out of
+      // coach_id (May 29 2026) is the durable fix — the data is correct
+      // at rest; only the in-page realtime reflection is best-effort.
       .on('postgres_changes', {
         event:  'UPDATE',
         schema: 'public',
@@ -138,12 +153,13 @@ export default function CoachClients() {
         setClients(prev => {
           // If they weren't in the roster before, add them (coach_id just got set).
           if (!prev.some(c => c.id === payload.new.id)) {
-            // Don't add deactivated profiles
+            // Don't add deactivated or anonymized profiles
             if (payload.new.deactivated_at) return prev
+            if (payload.new.anonymized_at) return prev
             return [payload.new, ...prev]
           }
-          // If they're now deactivated, remove
-          if (payload.new.deactivated_at) {
+          // If they're now deactivated or anonymized, remove
+          if (payload.new.deactivated_at || payload.new.anonymized_at) {
             return prev.filter(c => c.id !== payload.new.id)
           }
           // Otherwise replace the row in place.
