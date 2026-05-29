@@ -138,13 +138,17 @@ function CoachMessage({ message }: { message?: string }) {
 }
 
 // ── Coverage note (always shown on pending states) ───────────────────
-function CoverageNote({ coachName }: { coachName?: string | null }) {
-  const name = coachName || 'your coach'
+// Locked May 29 2026: copy is intentionally static — no coach-name
+// interpolation, no fallback branch. "your coach" reads uniformly
+// whether the preview RPC returns a name or not, and we already
+// surface the coach's name + photo in the YOUR COACH block above
+// this card, so naming them twice felt redundant.
+function CoverageNote() {
   return (
     <View style={s.coverageNote}>
       <Shield size={16} color={colors.primary} style={{ marginBottom: 6 }} />
       <Text style={s.coverageText}>
-        Your MyRX subscription is covered by {name}. No payment is required from you.
+        Your MyRX subscription is covered by your coach. No payment is required from you.
       </Text>
     </View>
   )
@@ -408,7 +412,7 @@ export default function AcceptInvite() {
         </View>
 
         <CoachMessage message={preview?.coach_message} />
-        <CoverageNote coachName={coach?.full_name} />
+        <CoverageNote />
 
         {acceptResult ? (
           <AcceptResultPanel
