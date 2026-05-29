@@ -29,7 +29,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import {
-  View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator,
+  View, Text, ScrollView, Pressable, StyleSheet,
   RefreshControl,
 } from 'react-native'
 import { useFocusEffect, router } from 'expo-router'
@@ -45,6 +45,7 @@ import TickerNumber from '../../src/components/TickerNumber'
 import Hypnogram, {
   type HypnogramSegment, type SleepStage,
 } from '../../src/components/Hypnogram'
+import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── DB row shapes ────────────────────────────────────────────────────────────
@@ -667,10 +668,23 @@ export default function SleepPage() {
         </Text>
       </View>
 
+      {/* Loading skeleton — placeholder cards while the initial Supabase
+          fetch resolves on cold-start. Approximates the rendered surface:
+          verdict card + 2x2 dimension grid + hypnogram + sparkline. Only
+          shown when there's no cached sleep data yet. */}
       {loading && !hasAnyData && (
-        <View style={s.loaderRow}>
-          <ActivityIndicator size="small" color={palette.indigo[400]} />
-          <Text style={s.loaderText}>Loading…</Text>
+        <View style={{ gap: 16 }}>
+          <Skeleton style={{ height: 90, width: '100%', borderRadius: 12 }} />
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Skeleton style={{ height: 140, flex: 1, borderRadius: 12 }} />
+            <Skeleton style={{ height: 140, flex: 1, borderRadius: 12 }} />
+          </View>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Skeleton style={{ height: 140, flex: 1, borderRadius: 12 }} />
+            <Skeleton style={{ height: 140, flex: 1, borderRadius: 12 }} />
+          </View>
+          <Skeleton style={{ height: 100, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 180, width: '100%', borderRadius: 12 }} />
         </View>
       )}
 

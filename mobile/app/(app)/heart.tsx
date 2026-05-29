@@ -51,6 +51,7 @@ import {
   type ConnectionStatus as SamsungStatus,
 } from '../../src/lib/integrations/samsungHealth'
 import { formatLastSync } from '../../src/lib/lastSyncStorage'
+import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha } from '../../src/theme'
 
 // ── DB row shapes ────────────────────────────────────────────────────────────
@@ -577,11 +578,23 @@ export default function HeartPage() {
         </Text>
       </View>
 
-      {/* Loading shimmer skeleton */}
+      {/* Loading skeleton — placeholder cards while the initial Supabase
+          fetch resolves on cold-start. Heights approximate the rendered
+          surface: 2x2 stat tiles + resting HR indicator + HR range chart
+          + history list. Only shown when there's no cached data yet. */}
       {loading && hrSamples.length === 0 && (
-        <View style={s.loaderRow}>
-          <ActivityIndicator size="small" color={palette.red[400]} />
-          <Text style={s.loaderText}>Loading…</Text>
+        <View style={{ gap: 16 }}>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Skeleton style={{ height: 110, flex: 1, borderRadius: 12 }} />
+            <Skeleton style={{ height: 110, flex: 1, borderRadius: 12 }} />
+          </View>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Skeleton style={{ height: 110, flex: 1, borderRadius: 12 }} />
+            <Skeleton style={{ height: 110, flex: 1, borderRadius: 12 }} />
+          </View>
+          <Skeleton style={{ height: 200, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 260, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 280, width: '100%', borderRadius: 12 }} />
         </View>
       )}
 

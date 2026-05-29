@@ -41,6 +41,7 @@ import { supabase } from '../../src/lib/supabase'
 import { friendlyAuthMessage } from '../../src/lib/authErrors'
 import { NumericInput } from '../../src/components/NumericInput'
 import AnimateRise from '../../src/components/AnimateRise'
+import Skeleton from '../../src/components/Skeleton'
 import BodyCompPicker from '../../src/components/BodyCompPicker'
 import CoachInviteCodeCard from '../../src/components/CoachInviteCodeCard'
 import BillingTab from '../../src/components/BillingTab'
@@ -3009,6 +3010,31 @@ export default function EditProfile() {
   const chevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: chevronOpacityOverride.value }))
 
   const activeLabel = SETTINGS_TABS[currentIdx]?.label ?? 'Account'
+
+  // Skeleton — fires on the brief moment before `profile` from AuthContext
+  // resolves (sign-in handoff, deep-link cold-start, etc.). Simple stacked
+  // card layout — Settings tabs are heavy and varied, no point trying to
+  // mirror each tab's shape; a stacked placeholder communicates "this is
+  // a multi-card page that's loading."
+  if (!profile) {
+    return (
+      <ScrollView contentContainerStyle={s.scroll}>
+        <View style={s.container}>
+          <Skeleton style={{ height: 36, width: 36, borderRadius: 18 }} />
+          <View style={{ gap: 6 }}>
+            <Skeleton style={{ height: 22, width: 120, borderRadius: 6 }} />
+            <Skeleton style={{ height: 14, width: 280, borderRadius: 6 }} />
+          </View>
+          <Skeleton style={{ height: 48, width: '100%', borderRadius: 24 }} />
+          <Skeleton style={{ height: 160, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 200, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 180, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 160, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 140, width: '100%', borderRadius: 12 }} />
+        </View>
+      </ScrollView>
+    )
+  }
 
   return (
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>

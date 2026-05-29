@@ -31,6 +31,7 @@ import AnimateRise from '../../src/components/AnimateRise'
 import DeleteAction from '../../src/components/DeleteAction'
 import TickerNumber from '../../src/components/TickerNumber'
 import LineChart from '../../src/components/LineChart'
+import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── Helpers (1:1 with Bodyweight.jsx) ────────────────────────────────────────
@@ -88,7 +89,12 @@ export default function Bodyweight() {
   const [unit,   setUnit]   = useState<'lb' | 'kg'>(((profile?.weight_unit as 'lb' | 'kg') || 'lb'))
 
   const bwKey  = user ? `bodyweight:${user.id}` : null
-  const [logs, setLogs] = useState<BWLog[]>(() => (bwKey ? dataCache.get<BWLog[]>(bwKey) ?? [] : []))
+  const cachedLogs = bwKey ? dataCache.get<BWLog[]>(bwKey) : null
+  const [logs, setLogs] = useState<BWLog[]>(() => cachedLogs ?? [])
+  // Initial-load loading flag — skipped when we already have cached logs so
+  // returning users get instant paint. Flips false after the supabase fetch
+  // resolves the first time.
+  const [loading, setLoading] = useState<boolean>(!cachedLogs)
 
   // Sync log unit with profile preference when profile loads
   useEffect(() => {
@@ -106,6 +112,7 @@ export default function Bodyweight() {
         const rows: BWLog[] = (data as BWLog[] | null) ?? []
         setLogs(rows)
         if (bwKey) dataCache.set(bwKey, rows)
+        setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
@@ -218,6 +225,33 @@ export default function Bodyweight() {
   }, [logs, profile, user, preferredUnit])
 
   const showChart = chartData.length > 0
+
+  // Skeleton — first-paint placeholder when there's no cached log data yet.
+  // Heights approximate header + log form + 2x2 stats grid + chart + log list
+  // so the page structure is visible while the supabase fetch resolves.
+  if (loading) {
+    return (
+      <ScrollView contentContainerStyle={s.scroll}>
+        <View style={s.container}>
+          <View style={{ gap: 6 }}>
+            <Skeleton style={{ height: 22, width: 140, borderRadius: 6 }} />
+            <Skeleton style={{ height: 14, width: 280, borderRadius: 6 }} />
+          </View>
+          <Skeleton style={{ height: 140, width: '100%', borderRadius: 12 }} />
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Skeleton style={{ height: 100, flex: 1, borderRadius: 12 }} />
+            <Skeleton style={{ height: 100, flex: 1, borderRadius: 12 }} />
+          </View>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Skeleton style={{ height: 100, flex: 1, borderRadius: 12 }} />
+            <Skeleton style={{ height: 100, flex: 1, borderRadius: 12 }} />
+          </View>
+          <Skeleton style={{ height: 240, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 300, width: '100%', borderRadius: 12 }} />
+        </View>
+      </ScrollView>
+    )
+  }
 
   return (
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">

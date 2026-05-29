@@ -35,6 +35,7 @@ import { dataCache } from '../../src/lib/cache'
 import AnimateRise from '../../src/components/AnimateRise'
 import DeleteAction from '../../src/components/DeleteAction'
 import TickerNumber from '../../src/components/TickerNumber'
+import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── Volume helpers ───────────────────────────────────────────────────────────
@@ -256,7 +257,12 @@ export default function Hydration() {
   }, [])
 
   const cacheKey = user ? `hydration:${user.id}` : null
-  const [logs, setLogs] = useState<WaterLog[]>(() => (cacheKey ? dataCache.get<WaterLog[]>(cacheKey) ?? [] : []))
+  const cachedHydrationLogs = cacheKey ? dataCache.get<WaterLog[]>(cacheKey) : null
+  const [logs, setLogs] = useState<WaterLog[]>(() => cachedHydrationLogs ?? [])
+  // Initial-load loading flag — skipped when cached logs are already in
+  // hand so returning users get instant paint. Flips false after the
+  // supabase fetch resolves the first time.
+  const [loading, setLoading] = useState<boolean>(!cachedHydrationLogs)
 
   useEffect(() => {
     if (!user) return
@@ -270,6 +276,7 @@ export default function Hydration() {
         const rows = (data as WaterLog[] | null) ?? []
         setLogs(rows)
         if (cacheKey) dataCache.set(cacheKey, rows)
+        setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
@@ -372,6 +379,26 @@ export default function Hydration() {
         ? `Bodyweight × 50 mL/kg`
         : `Bodyweight × 0.67 oz/lb`)
     : `Default — log your weight for a personalized target`
+
+  // Skeleton — first-paint placeholder when there's no cached water log
+  // data yet. Heights approximate header + progress ring card + 7-day
+  // chart card + today's log card so the structure is visible while the
+  // supabase fetch resolves.
+  if (loading) {
+    return (
+      <ScrollView contentContainerStyle={s.scroll}>
+        <View style={s.container}>
+          <View style={{ gap: 6 }}>
+            <Skeleton style={{ height: 22, width: 140, borderRadius: 6 }} />
+            <Skeleton style={{ height: 14, width: 240, borderRadius: 6 }} />
+          </View>
+          <Skeleton style={{ height: 360, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 240, width: '100%', borderRadius: 12 }} />
+          <Skeleton style={{ height: 200, width: '100%', borderRadius: 12 }} />
+        </View>
+      </ScrollView>
+    )
+  }
 
   return (
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">

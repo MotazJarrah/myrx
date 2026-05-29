@@ -37,6 +37,7 @@ import TickerNumber from '../../src/components/TickerNumber'
 import AnimateRise from '../../src/components/AnimateRise'
 import InviteBanner from '../../src/components/InviteBanner'
 import CoachLostBanner from '../../src/components/CoachLostBanner'
+import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── Helpers (1:1 with Dashboard.jsx) ─────────────────────────────────────────
@@ -459,6 +460,10 @@ export default function Dashboard() {
   // non-admin/non-coach role downstream; we still fetch unconditionally
   // because the RPC is cheap and the gate may flip after this fetch.
   const [coachInfo, setCoachInfo]           = useState<CoachInfo | null>(cached?.coachInfo ?? null)
+  // Initial-load loading flag — only flips true the very first time the
+  // user opens the dashboard on this device (no cache yet). Subsequent
+  // visits paint immediately from cache while the focus-effect refetches.
+  const [loading, setLoading]               = useState<boolean>(!cached)
 
   // Re-fetch every time the dashboard tab gains focus (May 24 2026
   // bug fix). The previous `useEffect([user])` only ran on initial
@@ -569,6 +574,8 @@ export default function Dashboard() {
         weeklyKg:    weeklyKgVal,
         coachInfo:   coachVal,
       })
+
+      setLoading(false)
     })
   }, [user, cacheKey])
 
@@ -635,6 +642,18 @@ export default function Dashboard() {
     && !!coachInfo.full_name
     && profile?.is_superuser !== true
     && profile?.is_coach !== true
+
+  // Skeleton — first-paint placeholder when there's no cached data yet.
+  // Heights approximate the rendered cards (profile card ~280, recent
+  // activity card ~400) so the layout doesn't reflow when data lands.
+  if (loading) {
+    return (
+      <View style={d.container}>
+        <Skeleton style={{ height: 280, width: '100%', borderRadius: 12 }} />
+        <Skeleton style={{ height: 400, width: '100%', borderRadius: 12 }} />
+      </View>
+    )
+  }
 
   return (
     <View style={d.container}>

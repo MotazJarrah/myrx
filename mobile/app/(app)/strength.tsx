@@ -27,6 +27,7 @@ import MovementSearch from '../../src/components/MovementSearch'
 import PhantomWheel from '../../src/components/PhantomWheel'
 import AnimateRise from '../../src/components/AnimateRise'
 import UnitToggle from '../../src/components/UnitToggle'
+import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── Helpers (1:1 with Strength.jsx) ──────────────────────────────────────────
@@ -263,6 +264,9 @@ export default function Strength() {
   const [movements,    setMovements]    = useState<MoveBest[]>([])
   const [pendingQuery, setPendingQuery] = useState('')
   const [movementKey,  setMovementKey]  = useState(0)
+  // Initial-load loading flag — flips false after the first Supabase fetch
+  // of efforts completes. Drives the page-level skeleton.
+  const [loading,      setLoading]      = useState(true)
 
   // ── DB movements (cached) ──────────────────────────────────────────────────
   const dbMovements     = useMovements()
@@ -700,6 +704,7 @@ export default function Strength() {
           }
         })
         setMovements([...map.values()].sort((a, b) => a.name.localeCompare(b.name)))
+        setLoading(false)
       })
   }, [user, saved, dbMovements])
 
@@ -707,6 +712,22 @@ export default function Strength() {
     : isAssistedMachine ? 'Lower assistance = less help = harder. Goal: reach 0.'
     : isCarry           ? 'Log the weight carried and distance covered in metres.'
     : 'Enter any set to project your 1RM.'
+
+  // Skeleton — placeholder before the first efforts fetch resolves. Heights
+  // approximate header + log-form card + Your Movements list card so the
+  // structure is visible during the initial paint.
+  if (loading) {
+    return (
+      <View style={s.page}>
+        <View style={{ gap: 6 }}>
+          <Skeleton style={{ height: 22, width: 120, borderRadius: 6 }} />
+          <Skeleton style={{ height: 14, width: 240, borderRadius: 6 }} />
+        </View>
+        <Skeleton style={{ height: 220, width: '100%', borderRadius: 12 }} />
+        <Skeleton style={{ height: 320, width: '100%', borderRadius: 12 }} />
+      </View>
+    )
+  }
 
   return (
     <View style={s.page}>

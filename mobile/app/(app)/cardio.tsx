@@ -72,6 +72,7 @@ import MovementSearch from '../../src/components/MovementSearch'
 import PhantomWheel from '../../src/components/PhantomWheel'
 import AnimateRise from '../../src/components/AnimateRise'
 import UnitToggle from '../../src/components/UnitToggle'
+import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── Time helpers (1:1 with Cardio.jsx) ───────────────────────────────────────
@@ -180,6 +181,9 @@ export default function Cardio() {
   const [activities,   setActivities]   = useState<ActivityBest[]>([])
   const [pendingQuery, setPendingQuery] = useState('')
   const [movementKey,  setMovementKey]  = useState(0)
+  // Initial-load loading flag — flips false after the first Supabase fetch
+  // of efforts resolves. Drives the page-level skeleton.
+  const [loading,      setLoading]      = useState(true)
 
   // ── DB movements (cached) ──────────────────────────────────────────────────
   const dbMovements   = useMovements()
@@ -482,6 +486,7 @@ export default function Cardio() {
           }
         })
         setActivities([...map.values()].sort((a, b) => a.name.localeCompare(b.name)))
+        setLoading(false)
       })
   }, [user, saved, dbMovements])
 
@@ -668,6 +673,23 @@ export default function Cardio() {
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  // Skeleton — placeholder before the first cardio efforts fetch resolves.
+  // Heights approximate header + log-form card + Your Activities list card
+  // so the structure is visible during the initial paint.
+  if (loading) {
+    return (
+      <View style={s.page}>
+        <View style={{ gap: 6 }}>
+          <Skeleton style={{ height: 22, width: 100, borderRadius: 6 }} />
+          <Skeleton style={{ height: 14, width: 240, borderRadius: 6 }} />
+        </View>
+        <Skeleton style={{ height: 220, width: '100%', borderRadius: 12 }} />
+        <Skeleton style={{ height: 320, width: '100%', borderRadius: 12 }} />
+      </View>
+    )
+  }
+
   return (
     <View style={s.page}>
 
