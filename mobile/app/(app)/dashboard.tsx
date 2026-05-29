@@ -16,7 +16,7 @@
  * are direct ports of the web functions — same inputs, same outputs.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useFocusEffect } from 'expo-router'
 import {
   View, Text, Pressable, StyleSheet,
@@ -36,7 +36,7 @@ import DeleteAction from '../../src/components/DeleteAction'
 import TickerNumber from '../../src/components/TickerNumber'
 import AnimateRise from '../../src/components/AnimateRise'
 import InviteBanner from '../../src/components/InviteBanner'
-import CoachLostBanner from '../../src/components/CoachLostBanner'
+import CoachChangeBanner from '../../src/components/CoachChangeBanner'
 import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
@@ -584,6 +584,33 @@ export default function Dashboard() {
   // run on blur if we wanted to cancel an in-flight request.
   useFocusEffect(fetchDashboard)
 
+  // Realtime coach-info refresh (locked May 29 2026).
+  // AuthContext's realtime profile sub auto-refetches `profile` when
+  // admin's chip flips coach_id server-side. But the "Coached by [name]"
+  // badge on this page reads `coachInfo` (the resolved coach's name +
+  // avatar) which is fetched separately via get_coach_info — that fetch
+  // lives inside fetchDashboard, so it only fires on tab focus. Without
+  // this effect, an admin-driven coach swap would update `profile.coach_id`
+  // in real time (the chip would react) but the badge stayed showing the
+  // previous coach until the user blurred + refocused the dashboard.
+  // This effect re-runs the RPC every time coach_id changes, keeping the
+  // badge in sync with the live state.
+  const liveCoachId = (profile as any)?.coach_id ?? null
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    if (liveCoachId == null) {
+      // Self-managed — clear the badge entirely.
+      if (!cancelled) setCoachInfo(null)
+      return () => { cancelled = true }
+    }
+    supabase.rpc('get_coach_info').then(({ data }) => {
+      if (cancelled) return
+      setCoachInfo((data as CoachInfo | null) ?? null)
+    })
+    return () => { cancelled = true }
+  }, [user?.id, liveCoachId])
+
   // DeleteAction's tap-confirm (tap trash → red check → tap again) IS the
   // confirm step — no native Alert prompt needed. Web behaves the same way.
   async function handleDelete(item: AnyItem) {
@@ -667,13 +694,12 @@ export default function Dashboard() {
           invite detection" lock for the architecture. */}
       <InviteBanner />
 
-      {/* Coach-lost banner — fires when admin or cron anonymizes the
-          athlete's coach (coach_id flips to null + is_self_coached
-          flips to true via anonymize_account_now's UNLINK step). Shows
-          ONCE; user dismisses → coach_lost_banner_dismissed_at flag
-          stops it forever. See mobile/src/components/CoachLostBanner.tsx
-          for the eligibility logic. */}
-      <CoachLostBanner />
+      {/* Coach-change banner — unified notice for assigned / detached /
+          swapped coach events. Trigger on profiles.coach_id resets the
+          ack column on every change so a fresh banner fires automatically.
+          See mobile/src/components/CoachChangeBanner.tsx for the full
+          state machine (assigned vs lost vs fresh-signup-no-show). */}
+      <CoachChangeBanner />
 
       {/* ── Profile card ─────────────────────────────────────────────── */}
       {/* The card is wrapped in a positioning View so the edit pencil can

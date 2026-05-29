@@ -114,6 +114,18 @@ interface ProfileLite {
   is_superuser: boolean | null
   anonymized_at: string | null
   scheduled_for_deletion_at: string | null
+  // Coach attachment — drives the state-aware billing copy added
+  // May 29 2026. Self-managed athletes (coach_id NULL) see the full
+  // B2C billing UI; coach-attached athletes see a "covered by your
+  // coach" notice; admin-attached athletes see a "complimentary
+  // account" notice. Pulled directly from profiles so we don't have
+  // to plumb the chip state through props.
+  coach_id: string | null
+  b2c_subscription_tier: 'free' | 'corerx' | 'fullrx' | null
+}
+
+interface CoachInfo {
+  full_name: string | null
 }
 
 interface Props {
@@ -122,10 +134,16 @@ interface Props {
 
 // ── Main component ─────────────────────────────────────────────────────────
 export default function BillingTab({ userId }: Props) {
-  const [profile, setProfile] = useState<ProfileLite | null>(null)
-  const [events,  setEvents]  = useState<BillingEvent[]>([])
-  const [loading, setLoading] = useState(true)
-  const [err,     setErr]     = useState<string | null>(null)
+  const [profile,         setProfile]         = useState<ProfileLite | null>(null)
+  const [events,          setEvents]          = useState<BillingEvent[]>([])
+  const [loading,         setLoading]         = useState(true)
+  const [err,             setErr]             = useState<string | null>(null)
+  // Coach attachment metadata for the state-aware Current section.
+  // coachInfo is the linked coach's display info (null when not coach-
+  // attached). isAdminCoached is true only when coach_id points at the
+  // admin superuser — drives a different "complimentary account" copy.
+  const [coachInfo,       setCoachInfo]       = useState<CoachInfo | null>(null)
+  const [isAdminCoached,  setIsAdminCoached]  = useState(false)
 
   useEffect(() => {
     if (!userId) return
@@ -137,7 +155,7 @@ export default function BillingTab({ userId }: Props) {
       try {
         const [{ data: prof }, { data: evts, error: evtErr }] = await Promise.all([
           supabase.from('profiles')
-            .select('id, full_name, is_coach, is_superuser, anonymized_at, scheduled_for_deletion_at')
+            .select('id, full_name, is_coach, is_superuser, anonymized_at, scheduled_for_deletion_at, coach_id, b2c_subscription_tier')
             .eq('id', userId)
             .maybeSingle(),
           supabase.from('billing_events')
@@ -147,8 +165,35 @@ export default function BillingTab({ userId }: Props) {
         ])
         if (evtErr) throw evtErr
         if (cancelled) return
-        setProfile(prof as ProfileLite | null)
+        const profLite = prof as ProfileLite | null
+        setProfile(profLite)
         setEvents((evts as BillingEvent[]) || [])
+        // If they're coach-attached, resolve the coach's name for the
+        // covered-by-coach banner. Skip for admin-attached (the admin
+        // is "the MyRX team" in the user-facing copy, not an individual).
+        if (profLite?.coach_id) {
+          const { data: coach } = await supabase
+            .from('profiles')
+            .select('id, full_name, is_superuser')
+            .eq('id', profLite.coach_id)
+            .maybeSingle()
+          if (!cancelled) {
+            // Treat admin-coach as a special category (drives the
+            // complimentary-account copy instead of the covered-by-coach copy)
+            if (coach?.is_superuser) {
+              setCoachInfo({ full_name: null })  // signals admin path
+              setIsAdminCoached(true)
+            } else {
+              setCoachInfo({ full_name: coach?.full_name ?? null })
+              setIsAdminCoached(false)
+            }
+          }
+        } else {
+          if (!cancelled) {
+            setCoachInfo(null)
+            setIsAdminCoached(false)
+          }
+        }
         setLoading(false)
       } catch (e: any) {
         if (cancelled) return
@@ -192,17 +237,32 @@ export default function BillingTab({ userId }: Props) {
 
   return (
     <View style={s.container}>
-      <CurrentSection profile={profile} />
+      <CurrentSection
+        profile={profile}
+        coachInfo={coachInfo}
+        isAdminCoached={isAdminCoached}
+      />
       <TransactionsSection grouped={grouped} events={events} />
     </View>
   )
 }
 
 // ── Current section ─────────────────────────────────────────────────────────
-function CurrentSection({ profile }: { profile: ProfileLite | null }) {
-  // Anonymized branch — unreachable from athlete self-view (anonymized
-  // accounts can't sign in), but rendered defensively in case admin
-  // mobile-views ever lands. Mirrors web's anonymized header copy.
+// Branches off coach attachment state, picked in this order:
+//   1. anonymized_at        → terminal "account anonymized" copy
+//   2. coach_id is admin    → "complimentary account" copy
+//   3. coach_id is a coach  → "covered by [coach name]" copy
+//   4. coach_id is null     → self-managed (B2C surface lives here)
+// All branches still render the Transactions list below for history.
+function CurrentSection({
+  profile, coachInfo, isAdminCoached,
+}: {
+  profile:        ProfileLite | null
+  coachInfo:      CoachInfo | null
+  isAdminCoached: boolean
+}) {
+  // 1. Anonymized branch — unreachable from athlete self-view (anonymized
+  // accounts can't sign in) but rendered defensively for admin mobile-view.
   if (profile?.anonymized_at) {
     return (
       <View style={s.bannerAmber}>
@@ -221,9 +281,47 @@ function CurrentSection({ profile }: { profile: ProfileLite | null }) {
     )
   }
 
-  // Athlete user-side: no current sub / no B2C purchase yet (Phase 7
-  // ships these). Honest empty state with the coaching-voice 3-pillar
-  // pattern (acknowledge → mechanism → next step).
+  // 2. Admin-coached — complimentary account managed by the MyRX team.
+  if (profile?.coach_id && isAdminCoached) {
+    return (
+      <View style={s.currentCard}>
+        <View style={s.currentHeader}>
+          <CreditCard size={16} color={colors.mutedForeground} />
+          <Text style={s.currentEyebrow}>Current</Text>
+        </View>
+        <Text style={s.currentTitle}>Complimentary account</Text>
+        <Text style={s.currentBody}>
+          You have a complimentary MyRX account — the team manages your
+          plan and no payment is required. If anything changes about how
+          your account is managed, you'll see a notice on your dashboard.
+        </Text>
+      </View>
+    )
+  }
+
+  // 3. Coach-attached athlete — coach's subscription covers them.
+  if (profile?.coach_id) {
+    const coachName = coachInfo?.full_name || 'your coach'
+    return (
+      <View style={s.currentCard}>
+        <View style={s.currentHeader}>
+          <CreditCard size={16} color={colors.mutedForeground} />
+          <Text style={s.currentEyebrow}>Current</Text>
+        </View>
+        <Text style={s.currentTitle}>Covered by your coach</Text>
+        <Text style={s.currentBody}>
+          Your subscription is included in{' '}
+          <Text style={s.currentBodyEmphasis}>{coachName}</Text>'s coaching
+          plan — no payment required while they're coaching you. Any past
+          purchases you made on your own appear in the Transactions list
+          below.
+        </Text>
+      </View>
+    )
+  }
+
+  // 4. Self-managed athlete (default). B2C purchase / subscription UI
+  // lives here once Roadmap C ships.
   return (
     <View style={s.currentCard}>
       <View style={s.currentHeader}>
@@ -232,10 +330,9 @@ function CurrentSection({ profile }: { profile: ProfileLite | null }) {
       </View>
       <Text style={s.currentTitle}>No active subscription</Text>
       <Text style={s.currentBody}>
-        Your account is free today. If your coach is paying for your
-        access, their subscription covers you — no charges run on your
-        side. Any one-time purchases or premium tiers you add later will
-        appear here.
+        Your account is free today. When subscription tiers launch you'll
+        be able to upgrade here. Past purchases or refunds (if any)
+        appear in the Transactions list below.
       </Text>
     </View>
   )
@@ -371,6 +468,10 @@ const s = StyleSheet.create({
   currentTitle: {
     fontFamily: fonts.sans[600], fontSize: 16, color: colors.foreground,
     marginTop: 2,
+  },
+  currentBodyEmphasis: {
+    fontFamily: fonts.sans[600],
+    color: colors.foreground,
   },
   currentBody: {
     fontFamily: fonts.sans[400], fontSize: 13, lineHeight: 19,

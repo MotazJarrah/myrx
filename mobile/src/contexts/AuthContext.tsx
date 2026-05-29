@@ -150,12 +150,19 @@ interface Profile {
   b2c_subscription_tier?: 'free' | 'corerx' | 'fullrx' | null
   // Set to true the first time this profile's coach_id transitions from
   // null to non-null. Never unset — once an athlete has had a coach,
-  // they have always had a coach. Drives CoachLostBanner visibility so
+  // they have always had a coach. Drives CoachChangeBanner visibility so
   // it only fires for users who actually lost a coach, not fresh
   // self-managed signups whose (coach_id=null, is_self_coached=true)
   // state coincidentally matches the banner's other triggers.
   // Maintained by trg_mark_had_coach trigger on profiles. Added May 29 2026.
   previously_had_coach?: boolean | null
+  // Athlete's dismissal timestamp for the most recent "your coach
+  // changed" banner. Auto-cleared by trg_clear_coach_ack_on_change
+  // whenever coach_id transitions, so a new banner fires on every
+  // assignment / detach / swap. CoachChangeBanner reads this; NULL
+  // means there's an unacknowledged coach change to surface. Added
+  // May 29 2026 alongside the admin coaching chip.
+  coach_change_acknowledged_at?: string | null
   // Set by the WelcomeEndScreen "Open my dashboard" tap. The single
   // source of truth for "did this user finish the signup journey?" —
   // isProfileComplete (lib/profile.ts) gates dashboard access on this
