@@ -889,7 +889,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } catch { /* swallow */ }
         if (serverBody && typeof serverBody === 'object') return serverBody
-        return { success: false, code: 'attach_failed', error: error.message || 'Could not attach the invite.' }
+        return { success: false, code: 'attach_failed', error: error.message || "Couldn't attach the invite. Try again." }
       }
       // Success — refresh profile (new coach_id) + pending invites (banner removal).
       // Don't await — the caller wants the response promptly; refresh

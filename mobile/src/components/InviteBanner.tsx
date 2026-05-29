@@ -90,9 +90,9 @@ export default function InviteBanner() {
           </View>
 
           <View style={s.body}>
-            <Text style={s.eyebrow}>New invite</Text>
+            <Text style={s.eyebrow}>Coach invite</Text>
             <Text style={s.title} numberOfLines={2}>
-              {top.coach_full_name ? `${top.coach_full_name} invited you to MyRX` : 'Your coach invited you to MyRX'}
+              {top.coach_full_name ? `${top.coach_full_name} invited you to their roster` : 'A coach invited you'}
             </Text>
             {additional > 0 ? (
               <Text style={s.stack}>+ {additional} more pending</Text>

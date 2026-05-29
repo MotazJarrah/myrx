@@ -302,7 +302,7 @@ export default function AcceptInvite() {
         <TerminalCard
           Icon={AlertCircle}
           tone="destructive"
-          title="Couldn't Load This Invite"
+          title="Couldn't load this invite"
           body="Something went wrong on our end. Try again in a minute — if it keeps failing, ask your coach to send a fresh link."
           action={
             <Pressable
@@ -403,7 +403,12 @@ export default function AcceptInvite() {
         <View style={s.pendingHeader}>
           <Text style={s.pendingEyebrow}>You've Been Invited</Text>
           <Text style={s.pendingTitle}>
-            Accept Invite From {coachName}
+            {coachName} invited you to their roster
+          </Text>
+          <Text style={s.pendingSubtitle}>
+            {isSignedIn
+              ? `Accepting gives ${coachName} access to your training and turns on chat between you.`
+              : 'Create an account to accept.'}
           </Text>
         </View>
 
@@ -412,7 +417,7 @@ export default function AcceptInvite() {
         </View>
 
         <CoachMessage message={preview?.coach_message} />
-        <CoverageNote />
+        {isSignedIn ? <CoverageNote /> : null}
 
         {acceptResult ? (
           <AcceptResultPanel
@@ -434,7 +439,7 @@ export default function AcceptInvite() {
               <View style={s.errorBanner}>
                 <AlertCircle size={16} color={colors.destructive} />
                 <Text style={s.errorText}>
-                  We couldn't process your acceptance. Try again in a minute.
+                  Couldn't process your acceptance. Try again in a minute.
                 </Text>
               </View>
             ) : null}
@@ -533,10 +538,7 @@ function AcceptResultPanel({
           <View style={{ flex: 1 }}>
             <Text style={s.panelTitle}>Switch Coaches?</Text>
             <Text style={s.panelBody}>
-              You're currently coached by{' '}
-              <Text style={s.panelEmphasis}>{currentCoach}</Text>.
-              Switching means {currentCoach} loses access to your training data
-              going forward. Once you confirm, {coachName} becomes your active coach.
+              <Text style={s.panelEmphasis}>{currentCoach}</Text> is your current coach. Switching gives {coachName} access going forward — your training history stays with you, but {currentCoach} loses access from now on.
             </Text>
             <View style={s.panelBtnRow}>
               <Pressable
@@ -547,7 +549,7 @@ function AcceptResultPanel({
                 {accepting ? (
                   <ActivityIndicator size="small" color={colors.primaryForeground} />
                 ) : (
-                  <Text style={s.primaryBtnText}>Yes, Switch To {coachName}</Text>
+                  <Text style={s.primaryBtnText}>Switch to {coachName}</Text>
                 )}
               </Pressable>
               <Pressable
@@ -569,17 +571,16 @@ function AcceptResultPanel({
       <View style={[s.panel, s.panelSuccess]}>
         <CheckCircle2 size={36} color={colors.primary} style={{ alignSelf: 'center' }} />
         <Text style={[s.panelTitle, { textAlign: 'center', marginTop: 12 }]}>
-          You're Already Linked To {coachName}
+          You're already on {coachName}'s roster
         </Text>
         <Text style={[s.panelBody, { textAlign: 'center' }]}>
-          No need to accept again — your training data is already flowing to {coachName}.
           Head to your dashboard to keep training.
         </Text>
         <Pressable
           onPress={onGoToDashboard}
           style={[s.primaryBtn, { marginTop: 16, alignSelf: 'center' }]}
         >
-          <Text style={s.primaryBtnText}>Go To Dashboard</Text>
+          <Text style={s.primaryBtnText}>Go to dashboard</Text>
           <ArrowRight size={16} color={colors.primaryForeground} />
         </Pressable>
       </View>
@@ -883,6 +884,13 @@ const s = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.3,
     marginTop: 6,
+    textAlign: 'center',
+  },
+  pendingSubtitle: {
+    color: colors.mutedForeground,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 10,
     textAlign: 'center',
   },
 

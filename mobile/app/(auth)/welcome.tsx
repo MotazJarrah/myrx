@@ -167,15 +167,14 @@ function SlideHero() {
 
       <AnimateRise delay={120}>
         <Text style={s.headline}>
-          Your coach.{'\n'}
-          <Text style={s.headlineAccent}>Your data. Your results.</Text>
+          Your coach. Your data.{'\n'}
+          <Text style={s.headlineAccent}>Your next step.</Text>
         </Text>
       </AnimateRise>
 
       <AnimateRise delay={180}>
         <Text style={s.subheadline}>
-          Coaching, nutrition tracking, and behavioral science — together,
-          for real progress.
+          Coaching, training, and nutrition in one app — built around your next step.
         </Text>
       </AnimateRise>
     </View>
@@ -454,7 +453,7 @@ export default function Welcome() {
           style={s.primaryBtn}
           hitSlop={8}
         >
-          <Text style={s.primaryBtnText}>Start your journey</Text>
+          <Text style={s.primaryBtnText}>Create an account</Text>
         </Pressable>
         <Pressable
           onPress={() => go('/sign-in')}

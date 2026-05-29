@@ -143,7 +143,7 @@ export function BiometricLockGate({ children }: Props) {
     try {
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Unlock to continue',
-        cancelLabel: 'Use password instead',
+        cancelLabel: 'Use password',
       })
       if (result.success) {
         recordAuthSuccess()
@@ -163,12 +163,12 @@ export function BiometricLockGate({ children }: Props) {
       if (!silent) {
         const remaining = MAX_FAILURES - nextFailures
         setErrorMsg(
-          `Authentication failed. ${remaining} ${remaining === 1 ? 'attempt' : 'attempts'} left.`,
+          `Fingerprint didn't match. ${remaining} ${remaining === 1 ? 'try' : 'tries'} left before sign-out.`,
         )
       }
     } catch (err: any) {
       if (!silent) {
-        setErrorMsg(err?.message || 'Could not authenticate.')
+        setErrorMsg(err?.message || "Couldn't unlock with biometrics. Use your password instead.")
       }
     } finally {
       setBusy(false)
@@ -217,9 +217,9 @@ export function BiometricLockGate({ children }: Props) {
             ? <ActivityIndicator size="large" color={colors.primary} />
             : <Fingerprint size={48} color={colors.primary} />}
         </View>
-        <Text style={s.title}>App is locked</Text>
+        <Text style={s.title}>MyRX is locked</Text>
         <Text style={s.subtitle}>
-          {busy ? 'Authenticating…' : 'Authenticate to continue.'}
+          {busy ? 'Authenticating…' : 'Unlock with your fingerprint to continue.'}
         </Text>
         {errorMsg ? <Text style={s.error}>{errorMsg}</Text> : null}
         <Pressable
@@ -235,7 +235,7 @@ export function BiometricLockGate({ children }: Props) {
           disabled={busy}
           style={s.secondaryBtn}
         >
-          <Text style={s.secondaryBtnText}>Use password instead</Text>
+          <Text style={s.secondaryBtnText}>Use password</Text>
         </Pressable>
       </View>
     </View>

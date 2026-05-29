@@ -53,8 +53,8 @@ export function BarcodeScanner({ onScan, onClose }: Props) {
   // Auto-request on first mount if undetermined
   useEffect(() => {
     if (permission && !permission.granted && permission.canAskAgain) {
-      requestPermission().catch(e => {
-        setError(`Camera permission error: ${String(e)}`)
+      requestPermission().catch(() => {
+        setError("Couldn't open the camera. Allow camera access in Settings, then try again.")
       })
     }
   }, [permission, requestPermission])
@@ -62,7 +62,7 @@ export function BarcodeScanner({ onScan, onClose }: Props) {
   // Permission denied with no further prompt — show explainer
   useEffect(() => {
     if (permission && !permission.granted && !permission.canAskAgain) {
-      setError('Camera permission denied. Please allow camera access in system settings and try again.')
+      setError("Couldn't open the camera. Allow camera access in Settings, then try again.")
     }
   }, [permission])
 

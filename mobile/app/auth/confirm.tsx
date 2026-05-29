@@ -142,13 +142,12 @@ export default function AuthConfirm() {
           <>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={s.title}>Verifying your link</Text>
-            <Text style={s.subtitle}>Hold tight, this only takes a moment.</Text>
           </>
         )}
         {status.kind === 'error' && (
           <>
             <AlertCircle size={32} color={colors.destructive} />
-            <Text style={s.title}>Link can't be used</Text>
+            <Text style={s.title}>This link is no longer valid</Text>
             <Text style={s.subtitle}>{status.message}</Text>
             <Pressable
               style={s.button}

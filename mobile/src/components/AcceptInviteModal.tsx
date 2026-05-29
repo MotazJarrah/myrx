@@ -181,7 +181,7 @@ export default function AcceptInviteModal({ isOpen, onClose, invite, additionalC
             {phase === 'submitting' && (
               <View style={s.center}>
                 <ActivityIndicator size="large" color={palette.green[400]} />
-                <Text style={s.submittingText}>Setting up your coach connection...</Text>
+                <Text style={s.submittingText}>Connecting you to your coach…</Text>
               </View>
             )}
 
@@ -234,12 +234,12 @@ function ReviewView({
 
   if (isSwap) {
     headline = `Swap to ${coachName}?`
-    subline = `${coachName} replaces your current coach and will see your training data. Your FullRX plan stays fully covered.`
+    subline = `${coachName} replaces your current coach and will see your training data. Your MyRX subscription stays covered.`
     ctaLabel = 'Swap coaches'
   } else {
     headline = `Accept ${coachName}'s invite?`
-    subline = `${coachName} will see your training data and can program for you. You get the FullRX plan, fully covered.`
-    ctaLabel = 'Accept and start'
+    subline = `${coachName} will see your training data and can program for you. Your MyRX subscription is covered while they coach you.`
+    ctaLabel = 'Accept invite'
   }
   // isSelfCoached reserved for future use (e.g. preserve-plan
   // confirmation chip on the swap path); not surfaced in copy today.
@@ -279,7 +279,7 @@ function ReviewView({
       {additionalCount > 0 ? (
         <View style={s.additionalNote}>
           <Text style={s.additionalText}>
-            You also have {additionalCount} more pending {additionalCount === 1 ? 'invite' : 'invites'} from other coaches. Accept one to make a choice now; the others stay available.
+            {additionalCount} more {additionalCount === 1 ? 'coach' : 'coaches'} also invited you. Accepting this one leaves the others available — you can switch later.
           </Text>
         </View>
       ) : null}
@@ -287,7 +287,7 @@ function ReviewView({
       {/* CTA buttons */}
       <View style={s.buttonRow}>
         <Pressable onPress={onClose} style={[s.secondaryBtn, { flex: 1 }]}>
-          <Text style={s.secondaryBtnText}>Maybe later</Text>
+          <Text style={s.secondaryBtnText}>Not now</Text>
         </Pressable>
         <Pressable
           onPress={onAccept}
@@ -316,13 +316,13 @@ function SuccessView({
 
   if (result.already_attached) {
     headline = `Already on ${coachName}'s roster`
-    subline = `You're already training with this coach — nothing changed.`
+    subline = `You're already on ${coachName}'s roster — nothing to do.`
   } else if (wasSwap) {
     headline = `You're now training with ${coachName}`
-    subline = `${coachName} has full access to your training history. Your previous coach's access ended just now. Chat is enabled — they can message you right away.`
+    subline = `${coachName} has full access to your training history. Your previous coach's access ended. Chat is on — they can message you.`
   } else {
     headline = `You're now training with ${coachName}`
-    subline = `${coachName} has full access to your training history and can start programming for you. Chat is enabled — they can message you right away.`
+    subline = `${coachName} has full access to your training history and can start programming for you. Chat is on — they can message you.`
   }
 
   return (
@@ -350,54 +350,54 @@ function ErrorView({
   onClose: () => void
 }) {
   // Map server codes → friendly headline + retry behavior.
-  let headline = "Couldn't accept the invite"
-  let subline  = result.error || 'Something went wrong. Try again.'
+  let headline = "That didn't go through"
+  let subline  = result.error || 'Connection dropped before we could attach you. Tap Try again — your invite is still valid.'
   let allowRetry = true
 
   switch (result.code) {
     case 'cant_accept_as_coach':
       headline = "Coaches can't accept invites"
-      subline = "You're signed in as a Coach account. Sign in with a client account on a different device to accept this invite."
+      subline = "Coaches can't be on their own roster. Sign out and sign in with your athlete account to accept."
       allowRetry = false
       break
     case 'cant_accept_as_admin':
       headline = "Admins can't accept invites"
-      subline = "You're signed in as an Admin account. Invites only attach to client accounts."
+      subline = "Admin accounts don't get coached. Sign out and sign in with an athlete account to accept."
       allowRetry = false
       break
     case 'account_deactivated':
       headline = 'Your account is deactivated'
-      subline = 'Contact support to reactivate your account before accepting this invite.'
+      subline = 'Your account is within its 14-day reactivation window. Email team@myrxfit.com to reactivate before accepting this invite.'
       allowRetry = false
       break
     case 'email_mismatch':
       headline = "This invite isn't for this account"
-      subline = `This invite was sent to ${result.invitee_email}. Sign out and sign back in with that email, or ask your coach to send a fresh invite to your current email.`
+      subline = `Your coach sent this to ${result.invitee_email}. Either sign out and back in with that address, or ask your coach to resend to your current email.`
       allowRetry = false
       break
     case 'invite_expired':
       headline = 'This invite expired'
-      subline = `Your invite from ${invite.coach_full_name || 'your coach'} is past its 14-day window. Ask them to send a fresh one — your account is still ready.`
+      subline = `This invite passed its 14-day window. Ask ${invite.coach_full_name || 'your coach'} to resend — your account is ready to attach the moment they do.`
       allowRetry = false
       break
     case 'invite_revoked':
       headline = 'Your coach revoked this invite'
-      subline = 'Reach out if you still want to be added to their roster.'
+      subline = 'Message your coach if you still want to join their roster. They can send a fresh invite.'
       allowRetry = false
       break
     case 'invite_already_used':
       headline = 'Already used'
-      subline = "This invite has already been accepted. If that was you, you're already on your coach's roster — nothing else to do."
+      subline = "This invite was already accepted. If it was you, check your dashboard — you're on their roster."
       allowRetry = false
       break
     case 'invite_not_found':
-      headline = "We couldn't find that invite"
-      subline = "Double-check the invite code with your coach. They can resend if needed."
+      headline = "Invite not found"
+      subline = "That code doesn't match an active invite. Ask your coach to resend."
       allowRetry = false
       break
     case 'invalid_token_shape':
       headline = "That code doesn't look right"
-      subline = 'Make sure you copied the full code from the email. Coach codes are 64 characters of letters and numbers.'
+      subline = 'The code is 64 characters of letters and numbers. Copy the whole thing from your invite email.'
       allowRetry = false
       break
     default:

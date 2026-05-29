@@ -65,7 +65,7 @@ export default function CoachInviteCodeCard() {
     if (busy) return
     const token = extractInviteToken(input)
     if (!token) {
-      setResult({ success: false, code: 'missing_token', error: 'Paste the invite code first.' })
+      setResult({ success: false, code: 'missing_token', error: 'Paste the code from your email first.' })
       return
     }
     setBusy(true)
@@ -85,17 +85,17 @@ export default function CoachInviteCodeCard() {
         <View style={s.iconBadge}>
           <Sparkles size={14} color={palette.green[400]} />
         </View>
-        <Text style={s.cardLabel}>Have an invite code?</Text>
+        <Text style={s.cardLabel}>Paste an invite code</Text>
       </View>
 
       <Text style={s.helper}>
-        Paste the code your coach sent — it'll attach your account to their roster. Use this if you signed up with a different email than the one your coach invited.
+        If your coach invited a different email than the one you signed up with, paste the code from their email here. It attaches you to their roster.
       </Text>
 
       <TextInput
         value={input}
         onChangeText={(v) => { setInput(v); if (result) setResult(null) }}
-        placeholder="Paste your invite code or link"
+        placeholder="Paste the code or link from your email"
         placeholderTextColor={alpha(colors.foreground, 0.4)}
         autoCapitalize="none"
         autoCorrect={false}
@@ -112,7 +112,7 @@ export default function CoachInviteCodeCard() {
             <CheckCircle2 size={14} color={palette.green[400]} />
             <Text style={s.successText}>
               {result.already_attached
-                ? "You're already on this coach's roster."
+                ? "You're already on their roster."
                 : `Attached to ${result.coach_full_name || 'your coach'}.`}
             </Text>
           </View>
@@ -131,7 +131,7 @@ export default function CoachInviteCodeCard() {
       >
         {busy
           ? <ActivityIndicator size="small" color="#0a0a0a" />
-          : <Text style={s.submitBtnText}>Attach invite</Text>}
+          : <Text style={s.submitBtnText}>Attach to coach</Text>}
       </Pressable>
     </View>
   )

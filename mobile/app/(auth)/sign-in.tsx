@@ -314,11 +314,8 @@ export default function SignIn() {
                   in the header), so the title says "your account"
                   rather than repeating it in plain text. */}
               <View>
-                <Text style={s.eyebrow}>Welcome back</Text>
-                <Text style={s.title}>Sign in to your account</Text>
-                <Text style={s.subtitle}>
-                  Pick up where you left off.
-                </Text>
+                <Text style={s.eyebrow}>Sign in</Text>
+                <Text style={s.title}>Sign in to MyRX</Text>
               </View>
 
               <View style={s.card}>

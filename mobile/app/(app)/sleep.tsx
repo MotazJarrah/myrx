@@ -507,7 +507,7 @@ export default function SleepPage() {
         current:  null,
         target:   null,
         headline: 'No bedtime data yet',
-        action:   'Once your watch logs a night, we’ll compute your target bedtime from your typical wake time.',
+        action:   "Once you log a few nights, we'll compute your target bedtime from your typical wake time.",
         spark:    [],
       }
     }
@@ -569,7 +569,7 @@ export default function SleepPage() {
         current:  null,
         target:   30 * 60,
         headline: 'Log 3+ nights to see consistency',
-        action:   'Consistency needs at least three nights of data. Your watch will catch up after a few more sessions.',
+        action:   'Consistency needs at least three logged nights. Log a few more and this card lights up.',
         spark:    [],
       }
     }
@@ -612,7 +612,7 @@ export default function SleepPage() {
   // when nothing is off.
   const verdictText = useMemo(() => {
     if (sessions7.length === 0) {
-      return "We don't have any sleep data yet — connect a wearable below to start tracking."
+      return 'No nights logged yet. Once you log a few, your weekly verdict shows here.'
     }
     const avgSec = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
     const avgLabel = fmtHoursMinutes(avgSec)
@@ -673,7 +673,7 @@ export default function SleepPage() {
         <Text style={s.h1Sub}>
           {hasAnyData
             ? `Target ${fmtHoursOnly(targetHours)}  ·  ${sessions7.length} ${sessions7.length === 1 ? 'night' : 'nights'} logged this week`
-            : 'Track your sleep to start getting personalised guidance'}
+            : 'Sleep logging is coming. Log nights manually for now to see this page populate.'}
         </Text>
       </View>
 

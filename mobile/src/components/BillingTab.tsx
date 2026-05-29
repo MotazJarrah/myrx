@@ -197,7 +197,7 @@ export default function BillingTab({ userId }: Props) {
         setLoading(false)
       } catch (e: any) {
         if (cancelled) return
-        setErr(e?.message || 'Failed to load billing data')
+        setErr(e?.message || "Couldn't load your billing yet. Pull to refresh.")
         setLoading(false)
       }
     }
@@ -221,7 +221,7 @@ export default function BillingTab({ userId }: Props) {
     return (
       <View style={s.loadingCard}>
         <ActivityIndicator color={alpha(colors.mutedForeground, 0.5)} />
-        <Text style={s.loadingText}>Loading billing data…</Text>
+        <Text style={s.loadingText}>Loading your billing…</Text>
       </View>
     )
   }
@@ -272,9 +272,7 @@ function CurrentSection({
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.bannerTitle}>Account anonymized</Text>
           <Text style={s.bannerSubtitle}>
-            Anonymized on {formatDate(profile.anonymized_at)}. Personal
-            identifiers were wiped, but transaction records are retained
-            for tax compliance.
+            Anonymized on {formatDate(profile.anonymized_at)}. We removed personal identifiers but kept transaction records for tax compliance.
           </Text>
         </View>
       </View>
@@ -289,11 +287,9 @@ function CurrentSection({
           <CreditCard size={16} color={colors.mutedForeground} />
           <Text style={s.currentEyebrow}>Current</Text>
         </View>
-        <Text style={s.currentTitle}>Complimentary account</Text>
+        <Text style={s.currentTitle}>Complimentary access</Text>
         <Text style={s.currentBody}>
-          You have a complimentary MyRX account — the team manages your
-          plan and no payment is required. If anything changes about how
-          your account is managed, you'll see a notice on your dashboard.
+          The MyRX team manages your plan directly. No payment is required from you. If that ever changes, you'll see a notice on your dashboard.
         </Text>
       </View>
     )
@@ -308,13 +304,10 @@ function CurrentSection({
           <CreditCard size={16} color={colors.mutedForeground} />
           <Text style={s.currentEyebrow}>Current</Text>
         </View>
-        <Text style={s.currentTitle}>Covered by your coach</Text>
+        <Text style={s.currentTitle}>Covered while you're coached</Text>
         <Text style={s.currentBody}>
-          Your subscription is included in{' '}
-          <Text style={s.currentBodyEmphasis}>{coachName}</Text>'s coaching
-          plan — no payment required while they're coaching you. Any past
-          purchases you made on your own appear in the Transactions list
-          below.
+          Your MyRX subscription is covered while{' '}
+          <Text style={s.currentBodyEmphasis}>{coachName}</Text> is your coach. No payment is required from you. Past purchases you made on your own appear below.
         </Text>
       </View>
     )
@@ -328,11 +321,9 @@ function CurrentSection({
         <CreditCard size={16} color={colors.mutedForeground} />
         <Text style={s.currentEyebrow}>Current</Text>
       </View>
-      <Text style={s.currentTitle}>No active subscription</Text>
+      <Text style={s.currentTitle}>Free tier</Text>
       <Text style={s.currentBody}>
-        Your account is free today. When subscription tiers launch you'll
-        be able to upgrade here. Past purchases or refunds (if any)
-        appear in the Transactions list below.
+        You're on the free tier. Paid tiers unlock here when they launch. Past purchases or refunds appear below.
       </Text>
     </View>
   )
@@ -354,8 +345,7 @@ function TransactionsSection({
         <View style={s.txEmpty}>
           <Receipt size={24} color={alpha(colors.mutedForeground, 0.30)} />
           <Text style={s.txEmptyText}>
-            No transactions yet. New charges, refunds, and subscription
-            changes appear here automatically as Stripe sends webhooks.
+            No transactions yet. Charges, refunds, and subscription changes show up here automatically.
           </Text>
         </View>
       ) : (

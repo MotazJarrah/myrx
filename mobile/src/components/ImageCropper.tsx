@@ -244,7 +244,7 @@ export function ImageCropper({ uri, onApply, onCancel, applyLabel = 'Apply' }: P
       )
       onApply({ uri: out.uri, mime: 'image/jpeg' })
     } catch (e: any) {
-      setError(e?.message || 'Could not process that image.')
+      setError(e?.message || "Couldn't process that image. Try a different photo.")
     } finally {
       setBusy(false)
     }

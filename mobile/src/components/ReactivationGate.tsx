@@ -67,7 +67,7 @@ export default function ReactivationGate() {
       // experience the user spec'd.
       router.replace('/(app)/dashboard' as any)
     } catch (e: any) {
-      setErr(e?.message || 'Reactivation failed. Try again, or sign out and contact support.')
+      setErr(e?.message || "Couldn't reactivate. Try again, or sign out and email team@myrxfit.com.")
       setBusy(false)
     }
   }
