@@ -2941,20 +2941,41 @@ export default function EditProfile() {
     setTabHeights(prev => (prev[key] === h ? prev : { ...prev, [key]: h }))
   }
 
-  // Initial scrollTo to the active slot (Account = slot 0 by default).
-  // Runs once after slotWidth settles. animated:false so the page lands
-  // on the right slot without a visible auto-scroll.
-  const initialScrollDoneRef = useRef(false)
+  // Reactive ?tab=... → active tab + scroll-position sync. Handles two
+  // entry paths from the RadialNav upgrade modal's "Open Billing" CTA:
+  //
+  //   1. FRESH MOUNT (user not previously on /settings) — useState(initialTab)
+  //      sets activeTab = 'billing' on the first render. This effect then
+  //      scrolls the paged ScrollView to slot 4 once slotWidth settles.
+  //
+  //   2. ALREADY MOUNTED (user was browsing /settings/account, tapped the
+  //      RadialNav lock badge, hit "Open Billing" in the modal). router.push
+  //      to the SAME pathname with new params does NOT re-mount — so
+  //      useState(initialTab) wouldn't re-fire and activeTab would stay
+  //      'account'. This effect picks up the params change via the
+  //      useLocalSearchParams hook (which IS reactive), syncs activeTab,
+  //      and scrolls the carousel.
+  //
+  // Idempotent — scrolling to the current slot is a no-op. Replaces the
+  // earlier one-shot initialScrollDoneRef effect, which couldn't handle
+  // the already-mounted case AND would sometimes race with onLayout's
+  // slotWidth update and leave the carousel landed mid-slot.
+  //
+  // Note: navigateTab() handles user-initiated chevron/pill changes with
+  // animated:true scrolling for the slide feel; this effect uses
+  // animated:false because it's a programmatic deep-link landing, not
+  // a user interaction worth animating.
   useEffect(() => {
-    if (initialScrollDoneRef.current) return
     if (slotWidth <= 0) return
     if (!scrollRef.current) return
-    const idx = SETTINGS_TABS.findIndex(t => t.key === activeTab)
+    const t = params?.tab
+    if (typeof t !== 'string') return
+    const idx = SETTINGS_TABS.findIndex(d => d.key === t)
     if (idx < 0) return
+    if (t !== activeTab) setActiveTab(t as SettingsTabKey)
     scrollRef.current.scrollTo({ x: idx * slotWidth, animated: false })
-    initialScrollDoneRef.current = true
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slotWidth])
+  }, [params?.tab, slotWidth])
 
   const currentIdx = SETTINGS_TABS.findIndex(t => t.key === activeTab)
   const hasPrev    = currentIdx > 0
