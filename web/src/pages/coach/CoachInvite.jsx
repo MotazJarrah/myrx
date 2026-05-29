@@ -41,6 +41,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import AnimateRise from '../../components/AnimateRise'
+import { humanizeInvokeError, humanizeServerErrorAsync } from '../../lib/serverError'
 
 // ── Preset script (locked May 27 2026) ──────────────────────────────────────
 //
@@ -133,25 +134,38 @@ export default function CoachInvite() {
   const loadInvites = useCallback(async () => {
     if (!user?.id) return
     const nowIso = new Date().toISOString()
-    const [pendingRes, acceptedRes] = await Promise.all([
-      supabase
-        .from('coach_invites')
-        .select('id, invitee_email, coach_message, status, expires_at, created_at')
-        .eq('coach_id',   user.id)
-        .eq('status',     'pending')
-        .gt('expires_at', nowIso)
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('coach_invites')
-        .select('id, invitee_email, accepted_at, accepted_by')
-        .eq('coach_id', user.id)
-        .eq('status',   'accepted')
-        .order('accepted_at', { ascending: false })
-        .limit(10),
-    ])
-    setPending(pendingRes.data || [])
-    setAccepted(acceptedRes.data || [])
-    setListsLoading(false)
+    try {
+      const [pendingRes, acceptedRes] = await Promise.all([
+        supabase
+          .from('coach_invites')
+          .select('id, invitee_email, coach_message, status, expires_at, created_at')
+          .eq('coach_id',   user.id)
+          .eq('status',     'pending')
+          .gt('expires_at', nowIso)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('coach_invites')
+          .select('id, invitee_email, accepted_at, accepted_by')
+          .eq('coach_id', user.id)
+          .eq('status',   'accepted')
+          .order('accepted_at', { ascending: false })
+          .limit(10),
+      ])
+      // PostgREST surfaces query errors as `pendingRes.error` rather than a
+      // thrown exception. Humanize either side's failure rather than letting
+      // the lists silently render empty (the old `.data || []` pattern was
+      // swallowing real errors — see CLAUDE.md "Profiles + emails" scar).
+      if (pendingRes.error || acceptedRes.error) {
+        const fault = pendingRes.error || acceptedRes.error
+        setError(await humanizeServerErrorAsync(fault, "Couldn't load your invites. Refresh the page to try again."))
+      }
+      setPending(pendingRes.data || [])
+      setAccepted(acceptedRes.data || [])
+    } catch (err) {
+      setError(await humanizeServerErrorAsync(err, "Couldn't load your invites. Refresh the page to try again."))
+    } finally {
+      setListsLoading(false)
+    }
   }, [user?.id])
 
   // Initial load + realtime subscription so accepted invites surface live
@@ -203,12 +217,14 @@ export default function CoachInvite() {
         },
       })
 
-      if (fnError) {
-        setError(fnError.message || 'Something went wrong sending the invite. Try again in a moment.')
-        return
-      }
-      if (!data?.success) {
-        setError(data?.error || 'The invite did not go through. Try again in a moment.')
+      // Humanizer order: structured body.error from the edge function (already in
+      // coach voice per CLAUDE.md) takes precedence, then generic-pattern match
+      // on raw .message, then fallback. Wraps both fnError + body.success=false
+      // paths in one call so we never surface "Edge Function returned a non-2xx
+      // status code" or similar plumbing leakage to the user.
+      const msg = await humanizeInvokeError({ data, error: fnError })
+      if (msg) {
+        setError(msg)
         return
       }
 
@@ -228,7 +244,7 @@ export default function CoachInvite() {
       // time the success banner appears.
       await loadInvites()
     } catch (err) {
-      setError(err?.message || "Network blip — your invite didn't leave the building. Try again.")
+      setError(await humanizeServerErrorAsync(err, "Network blip — your invite didn't leave the building. Try again."))
     } finally {
       setSending(false)
     }
@@ -251,7 +267,7 @@ export default function CoachInvite() {
         .eq('coach_id', user.id)
 
       if (updateError) {
-        setError('Could not revoke that invite. Refresh the page and try again.')
+        setError(await humanizeServerErrorAsync(updateError, 'Could not revoke that invite. Refresh the page and try again.'))
         return
       }
       setPending(prev => prev.filter(p => p.id !== invite.id))
@@ -276,7 +292,7 @@ export default function CoachInvite() {
         .eq('coach_id', user.id)
 
       if (revokeErr) {
-        setError('Could not refresh that invite. Refresh the page and try again.')
+        setError(await humanizeServerErrorAsync(revokeErr, 'Could not refresh that invite. Refresh the page and try again.'))
         return
       }
 
@@ -287,8 +303,16 @@ export default function CoachInvite() {
         },
       })
 
-      if (fnError || !data?.success) {
-        setError(data?.error || fnError?.message || "The resend didn't go through. Try again in a moment.")
+      // Same humanizer pattern as the Send flow above — structured body.error
+      // wins, then generic pattern match, then fallback. Avoids the old
+      // "fnError?.message" path which leaked "Edge Function returned a non-2xx
+      // status code" when the server actually had something useful to say.
+      const msg = await humanizeInvokeError(
+        { data, error: fnError },
+        "The resend didn't go through. Try again in a moment.",
+      )
+      if (msg) {
+        setError(msg)
         return
       }
 

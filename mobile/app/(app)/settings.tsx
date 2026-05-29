@@ -98,7 +98,6 @@ import {
   getStatus       as samsungGetStatus,
   disconnect      as samsungDisconnect,
   syncRecent      as samsungSyncRecent,
-  syncSleep       as samsungSyncSleep,
   type Availability      as SamsungAvailability,
   type ConnectionStatus  as SamsungConnectionStatus,
 } from '../../src/lib/integrations/samsungHealth'
@@ -2328,7 +2327,7 @@ function ConnectTab() {
   const [samsungAvail,   setSamsungAvail]   = useState<SamsungAvailability>({ available: false, reason: 'loading' })
   const [samsungStatus,  setSamsungStatus]  = useState<SamsungConnectionStatus>({
     connected: false,
-    permissions: { heartRate: false, steps: false, exercise: false, sleep: false, bodyComposition: false },
+    permissions: { heartRate: false, steps: false, exercise: false, bodyComposition: false },
     connectedAt: null,
     lastSyncedAt: null,
   })
@@ -2498,22 +2497,17 @@ function ConnectTab() {
     setSamsungBusy('sync')
     setSamsungMessage(null)
     try {
-      // Pull HR + steps + workouts and sleep in parallel — the native bridge
-      // serialises Health Data Store reads internally anyway, but the JS
-      // Promise.all keeps the UI feedback cycle tight.
-      const [summary, sleepSummary] = await Promise.all([
-        samsungSyncRecent(7),
-        samsungSyncSleep(7),
-      ])
+      // Pull HR + steps + workouts. Sleep is athlete-input only on this
+      // app — no SDK read path. See CLAUDE.md "Wearable data" notes.
+      const summary = await samsungSyncRecent(7)
       await refreshSamsungState()
-      const issues = [...summary.errors, ...sleepSummary.errors]
-      if (issues.length > 0) {
+      if (summary.errors.length > 0) {
         setSamsungMessage(
-          `Synced with warnings: ${summary.hrSamples} HR samples, ${summary.stepSamples} step intervals, ${summary.workouts} workouts, ${sleepSummary.sessions} sleep session${sleepSummary.sessions === 1 ? '' : 's'}. Issues: ${issues.slice(0, 2).join('; ')}`,
+          `Synced with warnings: ${summary.hrSamples} HR samples, ${summary.stepSamples} step intervals, ${summary.workouts} workouts. Issues: ${summary.errors.slice(0, 2).join('; ')}`,
         )
       } else {
         setSamsungMessage(
-          `Synced ${summary.hrSamples} HR samples, ${summary.stepSamples} step intervals, ${summary.workouts} workout${summary.workouts === 1 ? '' : 's'}, and ${sleepSummary.sessions} sleep session${sleepSummary.sessions === 1 ? '' : 's'} (last 7 days).`,
+          `Synced ${summary.hrSamples} HR samples, ${summary.stepSamples} step intervals, ${summary.workouts} workout${summary.workouts === 1 ? '' : 's'} (last 7 days).`,
         )
       }
     } catch (e: unknown) {

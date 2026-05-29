@@ -375,6 +375,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // refetches keep the UI mounted (no skeleton flash, no form-state wipe).
   // Web's AuthContext has the equivalent subscription (see web/src/
   // contexts/AuthContext.jsx).
+  //
+  // Belt-and-suspenders catch-up fetches (locked May 29 2026):
+  //   • On channel SUBSCRIBED status — covers the case where the
+  //     WebSocket reconnected after Android Doze or background-network
+  //     eviction and missed events from the gap window.
+  //   • On AppState=active — covers the case where the channel hasn't
+  //     yet flipped to SUBSCRIBED but the app is foregrounded. Free
+  //     query, fires once per resume.
+  //
+  // Both safety nets came from the May 29 2026 chip-change banner test:
+  // admin flipped rasp_86's coach_id to admin-managed, the postgres
+  // trigger reset coach_change_acknowledged_at to NULL, but the
+  // mobile CoachChangeBanner stayed hidden because the realtime
+  // event never reached the device. Manual pull-to-refresh worked.
+  // The catch-up fetches reduce that gap from "until next manual
+  // refresh" to "within seconds of foreground".
   useEffect(() => {
     if (!user?.id) return
     const channel = supabase
@@ -384,8 +400,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
         () => { fetchProfile(user.id) },
       )
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
+      .subscribe((status) => {
+        // Whenever the channel (re)joins, do a one-shot catch-up fetch
+        // in case admin-driven UPDATEs landed while we were disconnected.
+        if (status === 'SUBSCRIBED') {
+          fetchProfile(user.id)
+        }
+      })
+
+    const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active') {
+        // Refresh on every foreground transition — orthogonal to the
+        // WebSocket. Cheap, idempotent.
+        fetchProfile(user.id)
+      }
+    })
+
+    return () => {
+      supabase.removeChannel(channel)
+      sub.remove()
+    }
   }, [user?.id, fetchProfile])
 
   // After a successful password sign-in, stash the password in two
@@ -783,6 +817,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })
 
     return () => { stop(); sub.remove() }
+  }, [user?.id, profile?.is_coach, profile?.is_superuser, fetchPendingInvites])
+
+  // Realtime: coach_invites — any INSERT / UPDATE / DELETE whose
+  // invitee_email matches the signed-in athlete's email re-runs
+  // fetchPendingInvites(), which re-queries the SECURITY DEFINER
+  // RPC and updates the banner state. So when a coach revokes an
+  // invite, the athlete's banner disappears within ~1 second. When a
+  // new invite for the athlete lands, the banner appears just as fast.
+  //
+  // Two layers prerequisite (migration coach_invites_realtime_for_athletes):
+  //   1. coach_invites is now in supabase_realtime publication.
+  //   2. A new "Invitees see invites addressed to their email" RLS
+  //      policy lets the athlete SELECT their own pending-invite
+  //      rows. Realtime applies RLS to event delivery — without the
+  //      SELECT policy the WebSocket frames are dropped.
+  //
+  // No filter on the channel sub itself — the RLS policy is the
+  // filter. Anyone else's invite rows wouldn't make it through
+  // realtime's RLS gate so we receive only rows we'd see on a manual
+  // SELECT.
+  //
+  // Coaches + admins skip this sub entirely (same gate as the polling
+  // mechanism above — they can't be the target of an invite).
+  useEffect(() => {
+    if (!user?.id) return
+    if (profile?.is_coach === true || profile?.is_superuser === true) return
+
+    const channel = supabase
+      .channel(`coach-invites-self-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'coach_invites' },
+        () => { fetchPendingInvites() },
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [user?.id, profile?.is_coach, profile?.is_superuser, fetchPendingInvites])
 
   // ── Attach an invite token to the current user ───────────────────────────

@@ -41,14 +41,12 @@ interface SamsungHealthNativeModule {
   readHeartRate(startMs: number, endMs: number): Promise<NativeHeartRateSample[]>
   readSteps(startMs: number, endMs: number): Promise<NativeStepSample[]>
   readWorkouts(startMs: number, endMs: number): Promise<NativeWorkout[]>
-  readSleep(startMs: number, endMs: number): Promise<NativeSleepSession[]>
 }
 
 export type PermissionStatus = {
   heartRate:       boolean
   steps:           boolean
   exercise:        boolean
-  sleep:           boolean
   bodyComposition: boolean
 }
 
@@ -69,33 +67,6 @@ type NativeStepSample = {
   steps:           Steps
   sourceRecordId:  string
   packageName:     string
-}
-
-type NativeSleepStage = {
-  stage:        'awake' | 'light' | 'rem' | 'deep'
-  startAt:      string
-  endAt:        string
-  durationSec:  number
-}
-
-type NativeSleepSession = {
-  sourceRecordId:  string
-  packageName:     string
-  startAt:         string
-  endAt:           string | null
-  durationSec:     number
-  efficiencyPct:   number | null
-  scoreSamsung:    number | null
-  /**
-   * Per-stage totals (seconds). 0 — never null — when Samsung didn't
-   * provide a stage breakdown for the session, so the JS dimension cards
-   * never have to handle null math.
-   */
-  awakeSec:        number
-  lightSec:        number
-  remSec:          number
-  deepSec:         number
-  stages:          NativeSleepStage[]
 }
 
 type NativeWorkout = {
@@ -148,14 +119,6 @@ export type SyncSummary = {
   hrSamples:        number
   stepSamples:      number
   workouts:         number
-  rangeStart:       string
-  rangeEnd:         string
-  errors:           string[]
-}
-
-export type SyncSleepSummary = {
-  sessions:         number  // upserted (or no-op'd) session rows
-  stages:           number  // inserted stage rows across all sessions in range
   rangeStart:       string
   rangeEnd:         string
   errors:           string[]
@@ -456,145 +419,12 @@ export async function syncRecent(daysBack: number = 7): Promise<SyncSummary> {
   }
 }
 
-/**
- * Pulls the last `daysBack` of sleep sessions from Samsung Health and upserts
- * into sleep_sessions + sleep_stages.
- *
- * Idempotent: re-running over the same window matches existing rows on
- * (user_id, source, source_record_id). Stages for any session we touch get
- * wiped + re-inserted (Samsung can revise stage detection on re-sync) — the
- * sleep_stages.session_id FK has ON DELETE CASCADE so we just delete then
- * insert; nothing dangles.
- *
- * Errors on individual sessions accumulate in `errors[]` rather than aborting
- * the whole sync, matching syncRecent's behaviour.
- */
-export async function syncSleep(daysBack: number = 7): Promise<SyncSleepSummary> {
-  const endMs   = Date.now()
-  const startMs = endMs - daysBack * 24 * 60 * 60 * 1000
-  const startIso = new Date(startMs).toISOString()
-  const endIso   = new Date(endMs).toISOString()
-
-  if (!native) {
-    return { sessions: 0, stages: 0, rangeStart: startIso, rangeEnd: endIso, errors: ['unsupported_platform'] }
-  }
-
-  const { data: userData } = await supabase.auth.getUser()
-  const userId = userData?.user?.id
-  if (!userId) {
-    return { sessions: 0, stages: 0, rangeStart: startIso, rangeEnd: endIso, errors: ['not_signed_in'] }
-  }
-
-  const errors: string[] = []
-
-  const sleep: NativeSleepSession[] = await native
-    .readSleep(startMs, endMs)
-    .catch((e) => {
-      errors.push(`sleep: ${errorMessage(e)}`)
-      return [] as NativeSleepSession[]
-    })
-
-  if (sleep.length === 0) {
-    return { sessions: 0, stages: 0, rangeStart: startIso, rangeEnd: endIso, errors }
-  }
-
-  // 1) Upsert sessions, returning their persisted ids so we can attach stages.
-  const sessionRows = sleep
-    .filter((s) => s.sourceRecordId && s.endAt && s.durationSec > 0)
-    .map((s) => ({
-      user_id:          userId,
-      source:           'samsung_health',
-      source_record_id: s.sourceRecordId,
-      start_at:         s.startAt,
-      end_at:           s.endAt!,
-      duration_s:       Math.round(s.durationSec),
-      efficiency_pct:   s.efficiencyPct,
-      awake_s:          s.awakeSec,
-      light_s:          s.lightSec,
-      rem_s:            s.remSec,
-      deep_s:           s.deepSec,
-      score_samsung:    s.scoreSamsung,
-      raw_meta:         { package_name: s.packageName },
-    }))
-
-  let sessionCount = 0
-  let stageCount   = 0
-  const sessionIdByRecord: Record<string, string> = {}
-
-  if (sessionRows.length > 0) {
-    const { data, error } = await supabase
-      .from('sleep_sessions')
-      .upsert(sessionRows, { onConflict: 'user_id,source,source_record_id' })
-      .select('id, source_record_id')
-    if (error) {
-      errors.push(`sleep_sessions_upsert: ${error.message}`)
-    } else {
-      sessionCount = data?.length ?? 0
-      for (const row of data ?? []) {
-        if (row.source_record_id) sessionIdByRecord[row.source_record_id] = row.id
-      }
-    }
-  }
-
-  // 2) Replace stages per session. Delete-then-insert is safer than trying to
-  //    diff (Samsung might return updated stage windows on re-sync).
-  const allStageRows: Array<{
-    session_id:  string
-    stage:       'awake' | 'light' | 'rem' | 'deep'
-    start_at:    string
-    end_at:      string
-    duration_s:  number
-  }> = []
-
-  for (const session of sleep) {
-    const sessionId = sessionIdByRecord[session.sourceRecordId]
-    if (!sessionId) continue
-    if (!session.stages || session.stages.length === 0) continue
-
-    // Wipe existing stages for this session before re-inserting.
-    const { error: delErr } = await supabase
-      .from('sleep_stages')
-      .delete()
-      .eq('session_id', sessionId)
-    if (delErr) {
-      errors.push(`sleep_stages_clear[${session.sourceRecordId}]: ${delErr.message}`)
-      continue
-    }
-
-    for (const st of session.stages) {
-      if (!st.startAt || !st.endAt || st.durationSec <= 0) continue
-      allStageRows.push({
-        session_id:  sessionId,
-        stage:       st.stage,
-        start_at:    st.startAt,
-        end_at:      st.endAt,
-        duration_s:  Math.round(st.durationSec),
-      })
-    }
-  }
-
-  if (allStageRows.length > 0) {
-    // 7-day worth of stages is typically a few hundred rows; one batch is fine.
-    // Keep the same 1000-row chunking convention used elsewhere for safety.
-    stageCount += await chunkedInsert('sleep_stages', allStageRows, errors)
-  }
-
-  // 3) Bump last_synced_at unconditionally so the UI shows progress even if
-  //    individual steps had warnings.
-  await supabase
-    .from('user_integrations')
-    .update({ last_synced_at: new Date().toISOString() })
-    .eq('user_id', userId)
-    .eq('platform', 'samsung_health')
-
-  return {
-    sessions:   sessionCount,
-    stages:     stageCount,
-    rangeStart: startIso,
-    rangeEnd:   endIso,
-    errors,
-  }
-}
+// Sleep is athlete-input only on this app (decided May 29 2026). The
+// Samsung Health Data SDK v1.1.0 fields needed for a stable read path
+// (sleepEfficiency / sleepScore) don't resolve against the pinned AAR,
+// so the entire syncSleep path was removed. If we ever revisit
+// wearable-sourced sleep, see CLAUDE.md "Wearable data — debugging
+// cheatsheet" point 2 for the decompile workflow.
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -602,12 +432,11 @@ const EMPTY_PERMISSIONS: PermissionStatus = {
   heartRate:       false,
   steps:           false,
   exercise:        false,
-  sleep:           false,
   bodyComposition: false,
 }
 
 function hasAnyPermission(p: PermissionStatus): boolean {
-  return p.heartRate || p.steps || p.exercise || p.sleep || p.bodyComposition
+  return p.heartRate || p.steps || p.exercise || p.bodyComposition
 }
 
 function errorMessage(e: unknown): string {
@@ -648,32 +477,6 @@ async function chunkedUpsert(
       .select('id')
     if (error) {
       errors.push(`${table}_upsert: ${error.message}`)
-    } else {
-      inserted += data?.length ?? 0
-    }
-  }
-  return inserted
-}
-
-/**
- * Plain chunked insert (no upsert / ON CONFLICT). Used by syncSleep for
- * sleep_stages where we delete-then-insert per session.
- */
-async function chunkedInsert(
-  table: string,
-  rows: Record<string, unknown>[],
-  errors: string[],
-): Promise<number> {
-  const CHUNK = 1000
-  let inserted = 0
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const slice = rows.slice(i, i + CHUNK)
-    const { data, error } = await supabase
-      .from(table)
-      .insert(slice)
-      .select('id')
-    if (error) {
-      errors.push(`${table}_insert: ${error.message}`)
     } else {
       inserted += data?.length ?? 0
     }

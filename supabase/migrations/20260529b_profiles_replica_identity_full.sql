@@ -1,0 +1,37 @@
+-- Issue 1 from May 29 2026 testing: when the admin used the
+-- AthleteCoachingChip on /admin/user/:id to flip an athlete's coach_id,
+-- the athlete's mobile dashboard did NOT show the CoachChangeBanner in
+-- real time. Manual pull-to-refresh OR a foreground transition made it
+-- appear. So the DB write succeeded, the trigger reset
+-- coach_change_acknowledged_at, the realtime publication had `profiles`,
+-- and the mobile client's profile-self channel was subscribed — yet the
+-- event never reached the device.
+--
+-- Root cause: `profiles` had REPLICA IDENTITY DEFAULT (only the PK in
+-- the WAL row image). Supabase Realtime's apply_rls authorization layer
+-- evaluates the table's SELECT policies against the WAL row to decide
+-- whether to deliver the event to a subscribed user. Three of the four
+-- SELECT policies on profiles reference non-PK columns (`coach_id` for
+-- "Coaches see their roster"; function-resolved columns for the
+-- superuser/admin gates). With sparse WAL rows, the authorization
+-- expression couldn't evaluate cleanly, and realtime conservatively
+-- dropped the UPDATE event silently.
+--
+-- Why pull-to-refresh + foreground transitions worked all along: both
+-- paths bypass realtime entirely and re-query via PostgREST, which
+-- evaluates RLS against live rows (not WAL images) using the user's
+-- JWT — so the existing "Users can view own profile" policy returns
+-- the fresh coach_id + reset coach_change_acknowledged_at without
+-- needing the WAL image.
+--
+-- Fix: include every column in the WAL row image. Cost is a small
+-- increase in WAL volume; profiles' update rate is modest enough that
+-- it's negligible. This is the documented Supabase fix for this exact
+-- "realtime UPDATE silently dropped on RLS-gated table" symptom.
+--
+-- Mobile-side catch-up fetches (in AuthContext.tsx: on channel
+-- SUBSCRIBED + on AppState=active) stay in place as belt-and-suspenders
+-- — they cover the case where the WebSocket reconnects after Android
+-- Doze and missed events during the gap.
+
+ALTER TABLE public.profiles REPLICA IDENTITY FULL;
