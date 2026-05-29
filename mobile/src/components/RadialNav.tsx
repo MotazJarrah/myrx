@@ -1,86 +1,108 @@
 /**
- * RadialNav — long-press "starburst" radial menu (May 24 2026, pass 4).
+ * RadialNav — long-press "starburst" radial menu (May 28 2026, tier-aware rebuild).
  *
- * Replaces the horizontal scrolling bottom tab bar entirely.
+ * Replaces the horizontal scrolling bottom tab bar entirely. The 7 athlete
+ * pages live in a half-circle starburst above a centre button.
  *
- * Centre = current page's icon (dynamic via usePathname). The DASHBOARD
- * icon swaps into the orbit slot of whichever page is currently open.
- * (When the user IS on Dashboard, no swap — orbit shows the 7 OTHER
- * pages in their static slots.)
+ * ── Tier gating (LOCKED) ────────────────────────────────────────────────
+ * Three athlete subscription tiers — gates which icons in the arc are
+ * unlocked vs. greyed-out + lock-badged:
  *
- * Interaction:
- *   • Tap (release < HOLD_MS, no menu open) → navigate to Dashboard.
- *     Skipped if user is already on Dashboard (prevents re-mount).
+ *   FREE   — Strength, Cardio (+ Dashboard via centre button).
+ *   COREX  — Free + Bodyweight, Calories, Heart.
+ *   FULLRX — CoreRX + Sleep, Hydration. All 7 unlocked.
+ *
+ * COACH-ATTACHED OVERRIDE: an athlete with a non-null coach_id gets FULL
+ * access regardless of b2c_subscription_tier — their coach is paying a
+ * subscription that effectively bundles them in. Superusers (admin
+ * accounts) also get full access. The tier resolver short-circuits in
+ * both cases.
+ *
+ * Locked-icon behaviour:
+ *   • Icon stays in its fixed slot position so the layout is identical
+ *     for every tier — locked icons just render greyed out with a small
+ *     padlock badge in the corner.
+ *   • Tap on locked icon → upgrade modal naming the required tier.
+ *   • Long-press hover scroll (drag finger over locked icon) does NOT
+ *     show the lime hover state — feels different so the user knows it
+ *     won't navigate.
+ *
+ * ── Layout (LOCKED — matches user's drawing, May 28 2026) ──────────────
+ *
+ *       sleep    heart                calories    hydration       ← outer ring
+ *                          bodyweight                              ← inner top
+ *               strength                  cardio                   ← inner sides
+ *                          dashboard                               ← centre button
+ *
+ * Geometry (unchanged from May 24 2026 pass 4 — same radii + angles,
+ * just remapped pages per the user's drawing):
+ *
+ *   Inner ring (3 items, 80px radius):
+ *     strength    @ 140°   bodyweight @ 90°    cardio    @ 40°
+ *   Outer ring (4 items, 165px radius):
+ *     sleep       @ 155°   heart      @ 110°   calories  @ 70°    hydration @ 25°
+ *
+ * Centre button = Dashboard. Tap → /dashboard. Long-press → bloom.
+ *
+ * Hidden pages (still routable, just not in the arc):
+ *   • mobility — kept for future, no entry point until UX is decided.
+ *   • history  — deleted entirely from the codebase May 28 2026.
+ *   • settings — reachable from Dashboard's gear icon.
+ *
+ * ── Interaction ────────────────────────────────────────────────────────
+ *   • Tap centre (release < OPEN_THRESHOLD) → navigate to Dashboard.
+ *     Skipped if already on Dashboard (prevents re-mount).
  *   • Long-press (>= HOLD_MS) → menu blooms.
- *   • Slide finger to orbit icon → that icon's ring + glyph turn LIME.
- *   • Release on lime icon → navigate to that page (skipped if it's
- *     the current page).
+ *   • Slide finger to UNLOCKED orbit icon → ring + glyph turn LIME.
+ *   • Release on unlocked + lime icon → navigate to that page.
+ *   • Release on LOCKED icon → open upgrade modal naming required tier.
  *   • Release in empty space → cancel.
  *
- * Positioning model (pass 4 lock):
- *   RadialNav root is `position: 'absolute'` anchored bottom:0 of the
- *   AppShell container — does NOT reserve flex space. ScrollView fills
- *   the entire shell height. Page content extends down to within 12px
- *   of the screen bottom; the dome scrim handles visual clearance
- *   around the floating button.
- *
- * Scrim model (dome):
- *   A solid dark circle (colors.background) positioned at button
- *   centre, bottom half clipped below screen. Scales from idle
- *   (DOME_IDLE_RADIUS, wraps button with ~6px padding) to full
- *   (DOME_MAX_RADIUS, covers the bloom area). In idle state the dome
- *   reads as a small half-circle around the button; in open state it
- *   blooms to cover the orbit zone.
- *
- * Colour scheme (pass 6 lock — every circle has the SAME chrome:
- * white ring + black bg. Only the glyph colour changes per state):
- *   • Dome: PURE BLACK (#000) — slightly darker than page bg
- *     (hsl(220, 12%, 6%)). Idle dome (DOME_IDLE_RADIUS=70) is a
- *     visible half-moon around the main button, matching the
- *     vertical mass of the old bottom nav bar.
- *   • Main button (always): WHITE 2px border, BLACK bg, GREEN glyph.
- *     When the menu is open and finger has moved off the button,
- *     glyph fades to WHITE (cancel hint — icon "blends" into the
- *     other dormant orbit icons).
- *   • Orbit icons IDLE: WHITE 1.5px border, BLACK bg, WHITE glyph.
- *   • Orbit icons HOVER: same border + bg, glyph fades to GREEN.
- *     Bg stays black throughout — only the glyph colour changes.
- *   • Spokes: lime at 0.30 opacity (guide weight only).
- *   • Labels: tiny white text under each orbit icon, fades in with
- *     the menu so the menu is self-documenting.
+ * Tap-detection bug fix (May 28 2026): the previous logic only treated a
+ * release as a "tap → dashboard" when `duration < HOLD_MS` (60ms). For
+ * releases between 60ms and the time the bloom passes 50% (~200ms total),
+ * NEITHER branch fired — nothing happened. Fix: if the menu never reached
+ * fully-open (`!wasOpen`), treat as tap regardless of duration. The user's
+ * intent is clear: they didn't hold long enough to commit to opening,
+ * they meant to tap.
  *
  * Worklet contract: every colour value used inside a useAnimatedStyle
  * callback is precomputed as a module-scope constant.
  */
 
-import React, { useRef } from 'react'
-import { View, StyleSheet, Dimensions } from 'react-native'
+import React, { useRef, useState, useCallback } from 'react'
+import {
+  View, Text, StyleSheet, Dimensions, Modal, Pressable,
+} from 'react-native'
 import { router, usePathname } from 'expo-router'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, {
   useSharedValue, useAnimatedStyle, useDerivedValue,
-  withTiming, runOnJS, useAnimatedProps,
-  interpolateColor, useAnimatedReaction,
+  withTiming, withDelay, runOnJS, useAnimatedProps,
+  interpolateColor, useAnimatedReaction, cancelAnimation,
 } from 'react-native-reanimated'
 import Svg, { Line } from 'react-native-svg'
 import {
-  LayoutDashboard, Dumbbell, Activity, Flower2, Weight, Flame,
-  Heart, History as HistoryIcon,
+  LayoutDashboard, Dumbbell, Activity, Weight, Flame,
+  Heart, Moon, Droplet, Lock, X as XIcon,
 } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
-import { colors } from '../theme'
+import { colors, alpha, palette, withAlpha } from '../theme'
+import { useAuth } from '../contexts/AuthContext'
 
 const AnimatedLine = Animated.createAnimatedComponent(Line)
 
 // ── Colour constants (worklet-safe) ─────────────────────────────────
-const COLOR_WHITE = '#ffffff'
-const COLOR_BLACK = '#000000'
-const COLOR_LIME  = colors.primary
+const COLOR_WHITE       = '#ffffff'
+const COLOR_BLACK       = '#000000'
+const COLOR_LIME        = colors.primary
+const COLOR_MUTED       = colors.mutedForeground
+const COLOR_BORDER_LOCK = withAlpha(palette.slate[400], 0.45)
 // Dome uses the app's own background colour (hsl(220, 12%, 6%)) so
 // it blends with the page where there's no card behind it, and shows
 // as a soft "dark window" only where it covers card content. Less
 // harsh than pure black against the existing dark theme.
-const COLOR_DOME  = colors.background
+const COLOR_DOME        = colors.background
 
 // ── Layout constants ────────────────────────────────────────────────
 const SCREEN_WIDTH       = Dimensions.get('window').width
@@ -113,8 +135,6 @@ const OUTER_SPOKE_SHRINK = 1 - ICON_RADIUS / OUTER_RING_RADIUS
 const _TOPMOST_ANGLE_RAD          = (70 * Math.PI) / 180
 const _TOPMOST_ORBIT_X            = OUTER_RING_RADIUS * Math.cos(_TOPMOST_ANGLE_RAD)
 const _TOPMOST_ORBIT_Y            = OUTER_RING_RADIUS * Math.sin(_TOPMOST_ANGLE_RAD)
-// Topmost icon TOP edge from page bottom (labels removed May 24
-// 2026 pass 8 — no label clearance needed in this calc anymore).
 const _TOPMOST_ICON_TOP_Y         = _TOPMOST_ORBIT_Y + ICON_RADIUS
 const _TOPMOST_DIST_FROM_PAGE_BTM = Math.sqrt(
   _TOPMOST_ORBIT_X * _TOPMOST_ORBIT_X +
@@ -128,49 +148,112 @@ const DOME_MAX_RADIUS   = Math.ceil(
 // than a circle, so it stretches horizontally under the main button
 // like a soft pedestal. The bloom morphs both axes to 1 (full circle)
 // when the menu opens.
-//   Y = 60 → idle dome top sits just 4px above the main button's
-//   top edge (button top at 56px above page bottom).
-//   X = 78 → idle moon ~1.3× wider than tall, subtle pedestal hug
-//   without spreading much beyond the button's footprint.
 const DOME_IDLE_RADIUS_Y = 60
 const DOME_IDLE_RADIUS_X = 78
 const DOME_IDLE_SCALE_Y  = DOME_IDLE_RADIUS_Y / DOME_MAX_RADIUS
 const DOME_IDLE_SCALE_X  = DOME_IDLE_RADIUS_X / DOME_MAX_RADIUS
 
+// ── Tier model ──────────────────────────────────────────────────────
+type Tier = 'free' | 'corerx' | 'fullrx'
+
+// Each tier subsumes the previous: corerx unlocks free's icons too.
+// The check `TIER_RANK[user] >= TIER_RANK[required]` is the single
+// source of truth for "can the user navigate to this page?".
+const TIER_RANK: Record<Tier, number> = {
+  free:   0,
+  corerx: 1,
+  fullrx: 2,
+}
+
+// Friendly tier name for the upgrade modal copy.
+const TIER_LABEL: Record<Tier, string> = {
+  free:   'Free',
+  corerx: 'CoreRX',
+  fullrx: 'FullRX',
+}
+
+// Resolve the effective tier for the current user. TWO paths grant
+// full access regardless of the b2c_subscription_tier column:
+//
+//   1. `is_superuser === true` — the admin themselves; they get everything.
+//   2. `coach_id != null` — the user is attached to a coach via the coach
+//      platform (either accepted a coach invite, OR was attached by the
+//      admin from the admin portal). The coach's subscription bundles
+//      them in.
+//
+// NULL b2c_subscription_tier is treated as 'free' as a defensive fallback
+// (the DB default returns 'free').
+//
+// IMPORTANT (locked May 29 2026): the explicit `coach_id` attachment is
+// the ONLY signal we trust for "this athlete is coached". An earlier
+// version of this resolver also granted fullrx when `chat_enabled = true`
+// (the legacy admin↔client chat flag) as a stand-in for "admin is
+// coaching them" — but that was wrong: an admin could turn on chat with
+// any user (for support, debugging, one-off conversations) without
+// intending to be their coach, and the user would suddenly see full
+// system access. We don't want legacy implicit couplings; the only way
+// to flag "the admin is coaching this user" is to formally attach
+// (set coach_id). The admin-portal "Attach as coach" UI is the future
+// home for that action — until it ships, the seed is done via direct
+// DB writes.
+function resolveTier(profile: {
+  b2c_subscription_tier?: 'free' | 'corerx' | 'fullrx' | null
+  coach_id?:              string | null
+  is_superuser?:          boolean
+}): Tier {
+  if (profile.is_superuser === true) return 'fullrx'
+  if (profile.coach_id)              return 'fullrx'
+  return (profile.b2c_subscription_tier as Tier | null) ?? 'free'
+}
+
 // ── Nav config ──────────────────────────────────────────────────────
 type NavItem = {
-  href:  string
-  label: string
-  Icon:  typeof LayoutDashboard
+  href:         string
+  label:        string
+  Icon:         typeof LayoutDashboard
+  // Minimum tier required to navigate. The icon is always shown; if
+  // resolveTier(profile) < tier, it renders greyed out + lock badge and
+  // taps open the upgrade modal.
+  tier:         Tier
 }
 
 const DASHBOARD_HREF = '/(app)/dashboard'
 
 const NAV_BY_HREF: Record<string, NavItem> = {
-  '/(app)/dashboard':  { href: '/(app)/dashboard',  label: 'Dashboard',  Icon: LayoutDashboard },
-  '/(app)/strength':   { href: '/(app)/strength',   label: 'Strength',   Icon: Dumbbell        },
-  '/(app)/cardio':     { href: '/(app)/cardio',     label: 'Cardio',     Icon: Activity        },
-  '/(app)/mobility':   { href: '/(app)/mobility',   label: 'Mobility',   Icon: Flower2         },
-  '/(app)/bodyweight': { href: '/(app)/bodyweight', label: 'Bodyweight', Icon: Weight          },
-  '/(app)/heart':      { href: '/(app)/heart',      label: 'Heart',      Icon: Heart           },
-  '/(app)/calories':   { href: '/(app)/calories',   label: 'Calories',   Icon: Flame           },
-  '/(app)/history':    { href: '/(app)/history',    label: 'History',    Icon: HistoryIcon     },
+  '/(app)/dashboard':  { href: '/(app)/dashboard',  label: 'Dashboard',  Icon: LayoutDashboard, tier: 'free'   },
+  '/(app)/strength':   { href: '/(app)/strength',   label: 'Strength',   Icon: Dumbbell,        tier: 'free'   },
+  '/(app)/cardio':     { href: '/(app)/cardio',     label: 'Cardio',     Icon: Activity,        tier: 'free'   },
+  '/(app)/bodyweight': { href: '/(app)/bodyweight', label: 'Bodyweight', Icon: Weight,          tier: 'corerx' },
+  '/(app)/heart':      { href: '/(app)/heart',      label: 'Heart',      Icon: Heart,           tier: 'corerx' },
+  '/(app)/calories':   { href: '/(app)/calories',   label: 'Calories',   Icon: Flame,           tier: 'corerx' },
+  '/(app)/sleep':      { href: '/(app)/sleep',      label: 'Sleep',      Icon: Moon,            tier: 'fullrx' },
+  '/(app)/hydration':  { href: '/(app)/hydration',  label: 'Hydration',  Icon: Droplet,         tier: 'fullrx' },
 }
 
-// Static slot order — left to right per spec:
-//   Inner ring (layer 2, 3 items): Strength · Mobility · Cardio
-//   Outer ring (layer 1, 4 items): Bodyweight · Heart · Calories · History
-// Angles measured CCW from horizontal-right.
+// Static slot layout — matches the user's drawn arrangement:
+//
+//       sleep    heart                calories    hydration       ← outer ring
+//                          bodyweight                              ← inner top
+//               strength                  cardio                   ← inner sides
+//                          dashboard                               ← centre button
+//
+// Angles measured CCW from horizontal-right; higher angle = farther left.
+//
+// Note that BOTH strength AND cardio are FREE — they sit in the inner ring
+// because they're the two pages every user can reach. Bodyweight sits at
+// the inner top (90°) as the prime CoreRX entry point. Outer ring
+// alternates locked tiers: sleep + hydration (fullrx) at the wings, heart
+// + calories (corerx) in the inner-outer slots.
 const INNER_RING: { href: string; angle: number }[] = [
-  { href: '/(app)/strength', angle: 140 },
-  { href: '/(app)/mobility', angle: 90  },
-  { href: '/(app)/cardio',   angle: 40  },
+  { href: '/(app)/strength',   angle: 140 },
+  { href: '/(app)/bodyweight', angle: 90  },
+  { href: '/(app)/cardio',     angle: 40  },
 ]
 const OUTER_RING: { href: string; angle: number }[] = [
-  { href: '/(app)/bodyweight', angle: 155 },
-  { href: '/(app)/heart',      angle: 110 },
-  { href: '/(app)/calories',   angle: 70  },
-  { href: '/(app)/history',    angle: 25  },
+  { href: '/(app)/sleep',     angle: 155 },
+  { href: '/(app)/heart',     angle: 110 },
+  { href: '/(app)/calories',  angle: 70  },
+  { href: '/(app)/hydration', angle: 25  },
 ]
 
 // Static slot positions (x, y, spoke endpoint) — independent of which
@@ -194,8 +277,10 @@ const SLOT_POSITIONS: SlotPosition[] = (() => {
   return out
 })()
 
-// Static base href per slot, matching SLOT_POSITIONS order.
-const BASE_SLOT_HREFS: string[] = [
+// Static href per slot, matching SLOT_POSITIONS order. No swap logic
+// anymore — Dashboard isn't in the arc, it's only reachable via the
+// centre button single-tap.
+const SLOT_HREFS: string[] = [
   ...INNER_RING.map(r => r.href),
   ...OUTER_RING.map(r => r.href),
 ]
@@ -204,26 +289,22 @@ function stripRouteGroups(p: string): string {
   return p.replace(/\/\([^)]+\)/g, '')
 }
 
-// Build the orbit href list for the current page. If the current page
-// is in any orbit slot, swap Dashboard into that slot. If the user is
-// already on Dashboard, no swap — orbit shows the 7 non-Dashboard pages
-// in their natural positions.
-function buildSlotHrefs(currentHref: string): string[] {
-  if (currentHref === DASHBOARD_HREF) return BASE_SLOT_HREFS
-  return BASE_SLOT_HREFS.map(h => h === currentHref ? DASHBOARD_HREF : h)
-}
-
-// ── Sub-component: orbiting icon with label ─────────────────────────
+// ── Sub-component: orbiting icon with optional lock badge ───────────
 function RadialIcon({
-  position, item, idx, openProgress, hoveredIdx,
+  position, item, idx, openProgress, hoveredIdx, locked,
 }: {
   position:     SlotPosition
   item:         NavItem
   idx:          number
   openProgress: ReturnType<typeof useSharedValue<number>>
   hoveredIdx:   ReturnType<typeof useSharedValue<number>>
+  locked:       boolean
 }) {
-  // Smooth 120ms hover transition.
+  // Smooth 120ms hover transition. Locked icons DON'T turn lime on
+  // hover — they reuse the same shared value path but the hover styles
+  // below render a muted "no-go" hover instead of the lime go-state,
+  // so the user feels the difference between an actionable icon and a
+  // gated one without breaking the gesture's recompute logic.
   const hoverProgress = useDerivedValue(() =>
     withTiming(hoveredIdx.value === idx ? 1 : 0, { duration: HOVER_DURATION_MS })
   )
@@ -242,32 +323,56 @@ function RadialIcon({
       opacity: p,
     }
   })
-  // On hover: BORDER + GLYPH turn lime. Bg stays dark (COLOR_DOME)
-  // throughout — the "circle" the user means is the ring/border,
-  // not the filled disc behind it.
-  const ringStyle = useAnimatedStyle(() => ({
-    borderColor: interpolateColor(
-      hoverProgress.value,
-      [0, 1],
-      [COLOR_WHITE, COLOR_LIME],
-    ),
-  }))
+
+  // Unlocked: white ring → lime ring on hover. Glyph: white → lime.
+  // Locked: muted slate ring stays the same on hover. Glyph stays muted.
+  // (Locked + hover doesn't visually invite — that's intentional.)
+  const ringStyle = useAnimatedStyle(() => {
+    if (locked) {
+      return { borderColor: COLOR_BORDER_LOCK }
+    }
+    return {
+      borderColor: interpolateColor(
+        hoverProgress.value,
+        [0, 1],
+        [COLOR_WHITE, COLOR_LIME],
+      ),
+    }
+  })
   const whiteGlyphStyle = useAnimatedStyle(() => ({
-    opacity: 1 - hoverProgress.value,
+    opacity: locked ? 0 : 1 - hoverProgress.value,
   }))
   const limeGlyphStyle = useAnimatedStyle(() => ({
-    opacity: hoverProgress.value,
+    opacity: locked ? 0 : hoverProgress.value,
   }))
-
+  // Locked glyph — single layer, muted colour, never animates.
+  // Rendered only when `locked` so unlocked icons don't pay for the
+  // extra View.
   return (
     <Animated.View style={[s.iconWrapper, wrapperStyle]} pointerEvents="none">
       <Animated.View style={[s.iconCircle, ringStyle]}>
-        <Animated.View style={[s.iconGlyphAbs, whiteGlyphStyle]}>
-          <item.Icon size={ICON_GLYPH_SIZE} color={COLOR_WHITE} strokeWidth={2} />
-        </Animated.View>
-        <Animated.View style={[s.iconGlyphAbs, limeGlyphStyle]}>
-          <item.Icon size={ICON_GLYPH_SIZE} color={COLOR_LIME} strokeWidth={2} />
-        </Animated.View>
+        {locked ? (
+          <View style={s.iconGlyphAbs}>
+            <item.Icon size={ICON_GLYPH_SIZE} color={COLOR_MUTED} strokeWidth={2} />
+          </View>
+        ) : (
+          <>
+            <Animated.View style={[s.iconGlyphAbs, whiteGlyphStyle]}>
+              <item.Icon size={ICON_GLYPH_SIZE} color={COLOR_WHITE} strokeWidth={2} />
+            </Animated.View>
+            <Animated.View style={[s.iconGlyphAbs, limeGlyphStyle]}>
+              <item.Icon size={ICON_GLYPH_SIZE} color={COLOR_LIME} strokeWidth={2} />
+            </Animated.View>
+          </>
+        )}
+        {locked && (
+          // Padlock badge in the bottom-right corner. Smaller than the
+          // main glyph; sits on a tiny rounded black plate so it stays
+          // legible over the muted icon behind it.
+          <View style={s.lockBadge}>
+            <Lock size={10} color={COLOR_WHITE} strokeWidth={2.5} />
+          </View>
+        )}
       </Animated.View>
     </Animated.View>
   )
@@ -302,31 +407,130 @@ function RadialSpoke({
   )
 }
 
+// ── Upgrade modal ──────────────────────────────────────────────────
+// Shown when the user releases a long-press on a locked icon. Names
+// the specific page they tried to reach and the tier that unlocks it,
+// in coach voice (not consumer-choice copy). NOT a paywall — just an
+// honest "here's where you are, here's what unlocks this, here's the
+// shortest path." The action button is "Got it" for now; wiring up
+// the actual upgrade flow lands with Roadmap C (B2C tiers — Apple
+// IAP + Google Play + Stripe web).
+// Names of the OTHER pages a tier unlocks (excludes the one the user
+// already tapped — otherwise the body text duplicates the tapped page's
+// name twice). Built from NAV_BY_HREF so it stays in sync if tier
+// assignments change.
+function tierCompanionLabels(tier: Tier, excludeHref: string): string[] {
+  const pages = Object.values(NAV_BY_HREF)
+    .filter(n => n.tier === tier && n.href !== excludeHref)
+    .map(n => n.label)
+  return pages
+}
+// Format a name list as English prose: ["A"] → "A", ["A","B"] → "A and B",
+// ["A","B","C"] → "A, B, and C" (Oxford comma — matches the coach voice
+// we use elsewhere in the app).
+function joinAnd(names: string[]): string {
+  if (names.length === 0) return ''
+  if (names.length === 1) return names[0]
+  if (names.length === 2) return `${names[0]} and ${names[1]}`
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
+}
+
+function UpgradeModal({
+  visible, item, requiredTier, currentTier, onClose,
+}: {
+  visible:       boolean
+  item:          NavItem | null
+  requiredTier:  Tier
+  currentTier:   Tier
+  onClose:       () => void
+}) {
+  if (!item) return null
+  const companions = tierCompanionLabels(requiredTier, item.href)
+  const companionPhrase = companions.length > 0
+    ? ` along with ${joinAnd(companions)}`
+    : ''
+  // Direct deep-link to Settings → Billing. Closes the modal first so
+  // the modal's Pressable doesn't intercept the back nav when the user
+  // returns; then routes to the settings route with ?tab=billing so the
+  // page lands on the upgrade tab instead of Account.
+  const openBilling = () => {
+    onClose()
+    router.push({ pathname: '/(app)/settings', params: { tab: 'billing' } } as any)
+  }
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <Pressable style={s.modalBackdrop} onPress={onClose}>
+        <Pressable style={s.modalCard} onPress={() => { /* swallow taps inside card */ }}>
+          <View style={s.modalHeader}>
+            <View style={s.modalIconPlate}>
+              <item.Icon size={22} color={COLOR_LIME} strokeWidth={2} />
+            </View>
+            <Text style={s.modalTitle}>
+              {item.label} is on {TIER_LABEL[requiredTier]}
+            </Text>
+            <Pressable onPress={onClose} hitSlop={12} style={s.modalClose}>
+              <XIcon size={18} color={COLOR_MUTED} />
+            </Pressable>
+          </View>
+          <Text style={s.modalBody}>
+            You're on the {TIER_LABEL[currentTier]} plan today. Upgrading to{' '}
+            {TIER_LABEL[requiredTier]} unlocks {item.label}{companionPhrase}.
+            Open Settings → Billing to upgrade when you're ready.
+          </Text>
+          {/* Two-button row — primary "Open Billing" deep-links to the
+              billing tab in one tap; secondary "Not now" dismisses. The
+              direct CTA is the whole point of this modal: don't make the
+              user hunt for the gear icon. */}
+          <View style={s.modalCtaRow}>
+            <Pressable style={s.modalCtaSecondary} onPress={onClose}>
+              <Text style={s.modalCtaSecondaryText}>Not now</Text>
+            </Pressable>
+            <Pressable style={s.modalCta} onPress={openBilling}>
+              <Text style={s.modalCtaText}>Open Billing</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  )
+}
+
 // ── Main component ─────────────────────────────────────────────────
 export default function RadialNav() {
   const pathname   = usePathname()
   const activePath = stripRouteGroups(pathname)
-  // The ICON shown on the centre button — falls back to Dashboard
-  // when the current route isn't one of our nav items (e.g. Profile
-  // / Settings, which lives at /(app)/profile and isn't in the orbit).
-  const currentHref = (() => {
-    const match = Object.keys(NAV_BY_HREF).find(
-      href => stripRouteGroups(href) === activePath,
-    )
-    return match ?? DASHBOARD_HREF
-  })()
-  const currentItem = NAV_BY_HREF[currentHref]
-  const slotHrefs   = buildSlotHrefs(currentHref)
+  const { profile } = useAuth()
 
-  // Keep latest slotHrefs + REAL active path in refs so worklet
-  // callbacks (via runOnJS) always see the live values. Critical:
-  // we store the ACTUAL pathname (not currentHref) for the nav-skip
-  // check — otherwise tapping the main button on Settings (which
-  // displays the Dashboard icon as fallback) would be misinterpreted
-  // as "already on Dashboard" and navigation would silently skip.
-  const slotHrefsRef   = useRef<string[]>(slotHrefs)
-  slotHrefsRef.current = slotHrefs
-  const activePathRef  = useRef<string>(activePath)
+  // The centre button always shows Dashboard. Earlier versions swapped
+  // the centre glyph to the current page; the simpler model is "centre
+  // = home (Dashboard)" — every page can be reached from the arc, and
+  // tapping centre always returns to the snapshot view.
+  const currentItem = NAV_BY_HREF[DASHBOARD_HREF]
+
+  // Resolve tier from profile. Defaults to 'free' if profile is missing
+  // (shouldn't happen in the (app) shell, but be defensive).
+  const userTier: Tier = profile ? resolveTier(profile as any) : 'free'
+
+  // Compute locked-flag map per slot. Memoised by the slot index (stable)
+  // + userTier (changes only on profile update). When userTier flips
+  // (e.g. realtime profile sync after admin upgrade), the icons re-render
+  // with the new lock state automatically.
+  const slotItems = SLOT_HREFS.map(href => NAV_BY_HREF[href]).filter(Boolean) as NavItem[]
+  const slotLocked = slotItems.map(item => TIER_RANK[userTier] < TIER_RANK[item.tier])
+
+  // Keep latest hrefs + lock flags + REAL active path in refs so worklet
+  // callbacks (via runOnJS) always see the live values.
+  const slotHrefsRef    = useRef<string[]>(SLOT_HREFS)
+  slotHrefsRef.current  = SLOT_HREFS
+  const slotLockedRef   = useRef<boolean[]>(slotLocked)
+  slotLockedRef.current = slotLocked
+  const activePathRef   = useRef<string>(activePath)
   activePathRef.current = activePath
 
   // SVG cy = where spokes converge = button centre (28px above root bottom).
@@ -338,48 +542,77 @@ export default function RadialNav() {
   const fingerY        = useSharedValue(0)
   const hoveredIdx     = useSharedValue(-1)
   const pressStartTime = useSharedValue(0)
+  // Bloom animation lives ENTIRELY on the UI thread (locked May 29
+  // 2026). The previous implementation used a JS-thread setTimeout to
+  // schedule the open animation; if the user released their finger in
+  // the ~60ms window between onBegin and the timer firing, the
+  // worklet's `runOnJS(cancelHoldTimer)` could lose the race against
+  // the JS-thread setTimeout queue under load — the timer fired
+  // anyway, animated openProgress to 1, and the menu latched open
+  // with no finger on it. Even a defensive isPressed-flag gate inside
+  // the timer callback wasn't enough because under heavy JS pressure
+  // the setTimeout fires LATER than expected (after both onEnd and
+  // its withTiming(0) have already executed), and at that point the
+  // withDelay+withTiming(1) chain wins as the most recently scheduled
+  // animation on openProgress.
+  //
+  // The real fix: schedule the open animation via Reanimated's
+  // withDelay() directly inside onBegin's worklet. Cancellation in
+  // onEnd / onFinalize is then a single line:
+  //     cancelAnimation(openProgress)
+  //     openProgress.value = withTiming(0, ...)
+  // The cancel happens on the UI thread synchronously with onEnd,
+  // there's no JS thread involvement, and the latest-write semantics
+  // are deterministic. No setTimeout, no ref, no race.
 
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Upgrade-modal state — shown when user releases on a locked icon.
+  const [modalItem, setModalItem] = useState<NavItem | null>(null)
 
   // ── Haptic helpers (JS-thread only — Haptics calls aren't worklet-safe) ──
-  // Soft impact on menu-open, selection tap on hover. No commit haptic
-  // on release per user lock — the visual transition (menu close +
-  // page navigation) is its own clear feedback.
   function hapticMenuOpen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {})
   }
   function hapticHover() {
     Haptics.selectionAsync().catch(() => {})
   }
+  function hapticLockedRelease() {
+    // Soft warning-style notification — distinct from the unlocked
+    // selection tap. User feels "you bumped into a wall" before the
+    // modal renders.
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {})
+  }
 
-  function startHoldTimer() {
-    if (longPressTimer.current) clearTimeout(longPressTimer.current)
-    longPressTimer.current = setTimeout(() => {
-      openProgress.value = withTiming(1, { duration: OPEN_DURATION_MS })
-      hapticMenuOpen()
-    }, HOLD_MS)
-  }
-  function cancelHoldTimer() {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current)
-      longPressTimer.current = null
-    }
-  }
+  // No JS-thread timers — open animation is scheduled directly on the
+  // UI thread via withDelay inside onBegin's worklet (see the gesture
+  // definition below). hapticMenuOpen is fired from a useAnimatedReaction
+  // that watches openProgress crossing the open threshold for the FIRST
+  // time per gesture, so the haptic only plays when the bloom actually
+  // commits — not when a quick release cancels it before bloom.
+
   // Skip navigation if we're already on the target page — prevents
   // "tap dashboard reloads dashboard" loops. Uses the ACTUAL pathname
-  // (not the fallback-to-Dashboard currentHref) so off-nav routes
-  // like /(app)/profile correctly navigate away on tap.
+  // so off-nav routes like /(app)/settings correctly navigate away on tap.
   function navigateToHref(href: string) {
     if (stripRouteGroups(href) === activePathRef.current) return
     router.replace(href as any)
   }
-  function navigateToSlot(idx: number) {
+  // Called on release-over-orbit-icon. Locked → open upgrade modal;
+  // unlocked → navigate.
+  const navigateToSlot = useCallback((idx: number) => {
     const href = slotHrefsRef.current[idx]
-    if (href) navigateToHref(href)
-  }
+    if (!href) return
+    const item = NAV_BY_HREF[href]
+    if (!item) return
+    if (slotLockedRef.current[idx]) {
+      hapticLockedRelease()
+      setModalItem(item)
+      return
+    }
+    navigateToHref(href)
+  }, [])
   // Tap-to-Dashboard variant with a Soft haptic — fires the haptic
   // ONLY when navigation will actually occur (skipped when already
-  // on Dashboard). Used by the quick-tap branch in onEnd.
+  // on Dashboard).
   function navigateToDashboardWithHaptic() {
     if (stripRouteGroups(DASHBOARD_HREF) === activePathRef.current) return
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {})
@@ -387,17 +620,25 @@ export default function RadialNav() {
   }
 
   // Fire a selection haptic whenever the hovered orbit icon changes
-  // to a new (non-empty) target. Watching the SharedValue from the UI
-  // thread keeps latency low; the haptic itself is JS-side via runOnJS.
+  // to a new (non-empty, non-locked) target. Locked icons fire NO
+  // haptic on hover — same "this isn't actionable" cue as the missing
+  // lime hover style.
   useAnimatedReaction(
     () => hoveredIdx.value,
     (curr, prev) => {
       if (curr !== prev && curr >= 0) {
-        runOnJS(hapticHover)()
+        // Read lock from JS-side ref via runOnJS so the worklet stays
+        // sync; this is fine because the reaction is already async to
+        // the user's frame.
+        runOnJS(maybeHoverHaptic)(curr)
       }
     },
     [],
   )
+  function maybeHoverHaptic(idx: number) {
+    if (slotLockedRef.current[idx]) return
+    hapticHover()
+  }
 
   const recomputeHovered = () => {
     'worklet'
@@ -421,7 +662,19 @@ export default function RadialNav() {
     .onBegin(() => {
       'worklet'
       pressStartTime.value = Date.now()
-      runOnJS(startHoldTimer)()
+      // Cancel any in-flight close from a previous tap before
+      // scheduling the new open. Without this, a rapid double-tap
+      // could land in a state where the previous close animation
+      // (withTiming(0, 160)) and the new open (withDelay(60, withTiming(1, 220)))
+      // race on the same SharedValue.
+      cancelAnimation(openProgress)
+      // Schedule the bloom on the UI thread. If onEnd / onFinalize
+      // fires before HOLD_MS elapses, they cancelAnimation + reset to
+      // 0 — same SharedValue, single source of truth, deterministic.
+      openProgress.value = withDelay(
+        HOLD_MS,
+        withTiming(1, { duration: OPEN_DURATION_MS }),
+      )
     })
     .onUpdate(e => {
       'worklet'
@@ -433,27 +686,55 @@ export default function RadialNav() {
     })
     .onEnd(() => {
       'worklet'
-      runOnJS(cancelHoldTimer)()
-      const wasOpen  = openProgress.value > 0.5
-      const idx      = hoveredIdx.value
-      const duration = Date.now() - pressStartTime.value
+      const wasOpen = openProgress.value > 0.5
+      const idx     = hoveredIdx.value
       if (wasOpen && idx >= 0) {
         runOnJS(navigateToSlot)(idx)
-      } else if (!wasOpen && duration < HOLD_MS) {
+      } else if (!wasOpen) {
+        // Tap (release before menu reached fully open). ANY sub-full-open
+        // release is treated as a tap → dashboard.
         runOnJS(navigateToDashboardWithHaptic)()
       }
+      // Cancel any in-flight bloom (whether the withDelay hasn't fired
+      // yet OR the withTiming is mid-animation) and animate back to 0.
+      cancelAnimation(openProgress)
       openProgress.value = withTiming(0, { duration: CLOSE_DURATION_MS })
       hoveredIdx.value   = -1
     })
     .onFinalize(() => {
       'worklet'
-      runOnJS(cancelHoldTimer)()
+      // onFinalize fires after onEnd (clean release) AND after
+      // onCancel/onFail (gesture lost to a parent scroll claim,
+      // navigation pre-empted the gesture, app backgrounded mid-press,
+      // etc.). For the cancel paths, onEnd never ran — we need to
+      // still tear down any in-flight bloom. Cheap to run on the
+      // success path too (cancel-on-a-completed-animation is a no-op
+      // and the reset-to-0 we issue here re-writes the same final
+      // value the onEnd's withTiming was already converging on).
+      cancelAnimation(openProgress)
+      if (openProgress.value > 0) {
+        openProgress.value = withTiming(0, { duration: CLOSE_DURATION_MS })
+        hoveredIdx.value   = -1
+      }
     })
 
+  // Haptic feedback when the bloom actually commits (crosses 0.5).
+  // Lives on the UI thread via useAnimatedReaction; only fires on
+  // upward crossings so a quick open→close doesn't double-tap the
+  // haptic. The reaction sees openProgress drift down past 0.5 on the
+  // close animation and intentionally does NOT fire — only the rising
+  // edge counts.
+  useAnimatedReaction(
+    () => openProgress.value > 0.5,
+    (open, prevOpen) => {
+      if (open && prevOpen === false) {
+        runOnJS(hapticMenuOpen)()
+      }
+    },
+    [],
+  )
+
   // Dome scale — idle ellipse (wider than tall) → full bloom circle.
-  // Both axes interpolate from their idle scale to 1 in sync, so the
-  // shape smoothly morphs from horizontal pedestal to full half-circle
-  // as the menu opens.
   const domeStyle = useAnimatedStyle(() => {
     const p = openProgress.value
     const scaleX = DOME_IDLE_SCALE_X + (1 - DOME_IDLE_SCALE_X) * p
@@ -477,11 +758,7 @@ export default function RadialNav() {
 
   return (
     <View style={s.root} pointerEvents="box-none">
-      {/* Dome clipper — overflow:hidden, anchored at page bottom
-          (= AppShell container bottom, above the SafeAreaView's
-          gesture-nav inset). Cleanly clips the dome's bottom half
-          at the page edge so it doesn't bleed into the system
-          gesture area below. */}
+      {/* Dome clipper. */}
       <View style={s.domeClipper} pointerEvents="none">
         <Animated.View style={[s.dome, domeStyle]} />
       </View>
@@ -505,7 +782,7 @@ export default function RadialNav() {
       <GestureDetector gesture={pan}>
         <View style={s.centerWrap}>
           {SLOT_POSITIONS.map((pos, i) => {
-            const href = slotHrefs[i]
+            const href = SLOT_HREFS[i]
             const item = NAV_BY_HREF[href]
             if (!item) return null
             return (
@@ -516,13 +793,13 @@ export default function RadialNav() {
                 idx={i}
                 openProgress={openProgress}
                 hoveredIdx={hoveredIdx}
+                locked={slotLocked[i]}
               />
             )
           })}
 
-          {/* Centre button — solid white disc, no border. Glyph =
-              current page icon, cross-fading lime↔white based on
-              finger position. */}
+          {/* Centre button — Dashboard glyph, cross-fades lime↔white
+              based on finger position once the menu is open. */}
           <View style={s.centerBtn}>
             <Animated.View style={[s.iconGlyphAbs, centerLimeStyle]}>
               <currentItem.Icon
@@ -541,15 +818,22 @@ export default function RadialNav() {
           </View>
         </View>
       </GestureDetector>
+
+      {/* Upgrade modal — rendered outside the gesture detector so its
+          backdrop tap doesn't fight with pan events. */}
+      <UpgradeModal
+        visible={modalItem !== null}
+        item={modalItem}
+        requiredTier={modalItem?.tier ?? 'free'}
+        currentTier={userTier}
+        onClose={() => setModalItem(null)}
+      />
     </View>
   )
 }
 
 const s = StyleSheet.create({
   // Root is ABSOLUTELY positioned — does not reserve flex space.
-  // ScrollView in AppShell fills the entire shell; page content
-  // extends down behind the button. The dome scrim provides the
-  // visual clearance around the button.
   root: {
     position: 'absolute',
     bottom: 0,
@@ -560,11 +844,7 @@ const s = StyleSheet.create({
     justifyContent: 'flex-end',
     overflow: 'visible',
   },
-  // Dome clipper — anchored at root bottom (= page bottom = AppShell
-  // container bottom, ABOVE the gesture-nav inset). Height matches
-  // DOME_MAX_RADIUS so the full bloom dome fits exactly. The
-  // overflow:hidden cleanly clips the dome's bottom half at the
-  // page edge so it never bleeds into the system gesture area.
+  // Dome clipper — anchored at root bottom (= page bottom).
   domeClipper: {
     position: 'absolute',
     bottom: 0,
@@ -573,11 +853,6 @@ const s = StyleSheet.create({
     height: DOME_MAX_RADIUS,
     overflow: 'hidden',
   },
-  // Dome — circle whose CENTRE is at the clipper's bottom edge
-  // (= page bottom). Bottom half of the circle extends below the
-  // clipper and gets clipped; top half is the visible half-moon.
-  // Scale-animated around the dome's centre, so the half-moon
-  // grows/shrinks while staying flat-bottomed at the page edge.
   dome: {
     position: 'absolute',
     bottom: -DOME_MAX_RADIUS,
@@ -588,14 +863,12 @@ const s = StyleSheet.create({
     backgroundColor: COLOR_DOME,
     opacity: 0.95,
   },
-  // Spoke layer — bottom: 0 anchors SVG cy at button centre.
   spokeLayer: {
     position: 'absolute',
     left: 0, right: 0,
     bottom: 0,
     overflow: 'visible',
   },
-  // Gesture target — sized to the button only.
   centerWrap: {
     width:  CENTER_BTN_SIZE,
     height: CENTER_BTN_SIZE,
@@ -604,10 +877,7 @@ const s = StyleSheet.create({
     position: 'relative',
     overflow: 'visible',
   },
-  // Centre button — APP-BG-colour disc at 100% opacity (matches the
-  // dome's bg colour so the button looks like it's "carved" from the
-  // same dark surface as the moon) + WHITE 2px ring. Glyphs cross-fade
-  // green↔white inside based on finger position.
+  // Centre button — APP-BG-colour disc + WHITE 2px ring.
   centerBtn: {
     width:  CENTER_BTN_SIZE,
     height: CENTER_BTN_SIZE,
@@ -623,15 +893,12 @@ const s = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  // Glyph layer — absolute fill so cross-fading glyph copies stack.
   iconGlyphAbs: {
     position: 'absolute',
     top: 0, left: 0, right: 0, bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Wrapper around orbit icon + label — both move together as the
-  // menu blooms. Sized to the icon (label overflows below visibly).
   iconWrapper: {
     position: 'absolute',
     left: (CENTER_BTN_SIZE - ICON_DIAM) / 2,
@@ -641,9 +908,6 @@ const s = StyleSheet.create({
     alignItems: 'center',
     overflow: 'visible',
   },
-  // Orbit icon — APP-BG-colour disc at 100% opacity (matches the
-  // dome bg) + WHITE 1.5px ring. Static chrome — only the glyph
-  // changes colour on hover (white → lime).
   iconCircle: {
     width:  ICON_DIAM,
     height: ICON_DIAM,
@@ -653,5 +917,110 @@ const s = StyleSheet.create({
     backgroundColor: COLOR_DOME,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Padlock badge — bottom-right corner of locked icon. 18×18 plate so
+  // the 10px lock glyph has 4px of padding all around. Sits at the
+  // bottom-right edge with a small offset so it overlaps the ring just
+  // a touch — reads as a sticker, not floating away from the icon.
+  lockBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: COLOR_BLACK,
+    borderWidth: 1.5,
+    borderColor: COLOR_DOME,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Upgrade modal ────────────────────────────────────────────────
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: alpha(COLOR_BLACK, 0.65),
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 18,
+    gap: 12,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  modalIconPlate: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: alpha(colors.primary, 0.12),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalTitle: {
+    flex: 1,
+    color: colors.foreground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  modalClose: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBody: {
+    color: colors.mutedForeground,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  // Two-button row layout — primary "Open Billing" takes the full free
+  // width via flex:1, secondary "Not now" sizes to its label and sits
+  // to the left as a quieter dismiss option (mirrors the Apple iOS
+  // alert convention where the destructive/primary action is on the
+  // right).
+  modalCtaRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'stretch',
+  },
+  modalCta: {
+    flex: 1,
+    backgroundColor: COLOR_LIME,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCtaText: {
+    color: colors.primaryForeground,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  // Secondary "Not now" — same height as the primary via paddingVertical,
+  // ghost-style chrome (no fill, no border) so the primary CTA is the
+  // visual centre of attention.
+  modalCtaSecondary: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalCtaSecondaryText: {
+    color: COLOR_MUTED,
+    fontSize: 14,
+    fontWeight: '600',
   },
 })

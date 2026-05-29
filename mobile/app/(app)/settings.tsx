@@ -1,8 +1,14 @@
 /**
- * EditProfile — port of MyRX/src/pages/EditProfile.jsx to React Native.
+ * Settings page — port of MyRX/src/pages/EditProfile.jsx to React Native.
  *
- * Reachable from Dashboard's edit-pencil button (`router.push('/(app)/profile')`).
- * Two tabs:
+ * Renamed from profile.tsx → settings.tsx on May 28 2026 because the page is
+ * the full Settings surface (Account / Preferences / Security / Connect /
+ * Billing tabs), not just profile editing — every other tabbed shell in the
+ * app calls this kind of page "Settings", and the Dashboard gear icon now
+ * routes here. The route is `/(app)/settings`.
+ *
+ * Reachable from Dashboard's gear button (`router.push('/(app)/settings')`).
+ * Two tabs (legacy comment — the live tab set is larger):
  *   1. Profile  — avatar + personal details (name, phone, DOB, gender, email)
  *   2. Settings — preferred units + current weight/height (auto-weighin on save)
  *
@@ -26,7 +32,7 @@ import Animated, {
   LinearTransition,
 } from 'react-native-reanimated'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker'
 import {
@@ -2894,7 +2900,20 @@ const SETTINGS_TABS: readonly SettingsTabDef[] = [
 
 export default function EditProfile() {
   const { user, profile } = useAuth()
-  const [activeTab, setActiveTab] = useState<SettingsTabKey>('account')
+  // Optional `?tab=billing` (or any other SettingsTabKey) deep-link — used
+  // by the RadialNav upgrade modal's "Open Billing" CTA so a tap on a
+  // locked tier icon lands the user directly on the upgrade tab instead
+  // of making them swipe through Account → Preferences → … → Billing.
+  // Falls back to 'account' when the param is missing or invalid.
+  const params = useLocalSearchParams<{ tab?: string }>()
+  const initialTab: SettingsTabKey = (() => {
+    const t = params?.tab
+    if (typeof t === 'string' && SETTINGS_TABS.some(d => d.key === t)) {
+      return t as SettingsTabKey
+    }
+    return 'account'
+  })()
+  const [activeTab, setActiveTab] = useState<SettingsTabKey>(initialTab)
 
   // ── Pattern 4 (CLAUDE.md) — pill swipe + paged ScrollView ──────────────
   // Same carousel mechanics used by BW assist tiers, Sled Work PUSH/PULL,

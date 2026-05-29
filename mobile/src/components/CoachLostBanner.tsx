@@ -6,18 +6,20 @@
  *   • profile.coach_id === null  (the coach link was cleared)
  *   • profile.is_self_coached === true  (anonymize_account_now flipped
  *     them to self-managed when their coach got wiped)
+ *   • profile.previously_had_coach === true  (user ACTUALLY had a
+ *     coach at some point — fresh self-managed signups don't match
+ *     this so the banner correctly stays hidden for them)
  *   • profile.coach_lost_banner_dismissed_at === null  (user hasn't
  *     dismissed it yet)
  *
- * Why only the combo: an athlete who's self-managed from day one
- * (signed up via the end-user flow with no coach) ALSO has coach_id=null
- * + is_self_coached=true. The banner is for the SPECIFIC case where they
- * USED to have a coach and lost them. We have no boolean column for
- * "ever had a coach" — the dismissed_at column doubles as the suppression
- * mechanism: if it's NULL the user might be a never-had-coach, but we'd
- * rather show the banner once and let them dismiss it than miss the
- * legit "you lost your coach" case. After dismissal it stays dismissed
- * forever (one-shot).
+ * The previously_had_coach flag (added May 29 2026) is the fix for an
+ * earlier bug where this banner fired on FRESH self-managed accounts
+ * whose state coincidentally matched (coach_id=null, is_self_coached=true).
+ * A DB trigger on profiles.coach_id flips the flag to true whenever
+ * coach_id transitions from null to non-null, and the flag never
+ * downgrades — once an athlete has had a coach, they have always had
+ * a coach. Backfilled at migration time for existing coach-attached
+ * profiles + any profile that appears in coach_invites.accepted_by.
  *
  * Dismiss writes profiles.coach_lost_banner_dismissed_at = now() via a
  * direct UPDATE — the user's RLS policy already permits self-updates
@@ -29,7 +31,7 @@
  * realistic next step. No marketing language, no "find a new coach
  * today!" CTA — that's a separate roadmap surface.
  *
- * Locked May 28 2026.
+ * Locked May 29 2026.
  */
 
 import { useState } from 'react'
@@ -44,17 +46,22 @@ export default function CoachLostBanner() {
   const [busy,   setBusy]   = useState(false)
   const [hidden, setHidden] = useState(false)
 
-  // Eligibility check — all three conditions, plus a defensive fallback
-  // for legacy profiles where coach_lost_banner_dismissed_at column might
-  // be missing (treat as not-yet-dismissed).
-  const coachId          = (profile as any)?.coach_id
-  const isSelfCoached    = (profile as any)?.is_self_coached === true
-  const alreadyDismissed = (profile as any)?.coach_lost_banner_dismissed_at != null
+  // Eligibility check — four conditions, plus a defensive fallback
+  // for legacy profiles where coach_lost_banner_dismissed_at or
+  // previously_had_coach columns might be missing (treat the dismiss
+  // flag as not-yet-dismissed, and the had-coach flag as false to err
+  // on the side of NOT showing the banner — better to miss a legit
+  // case than spam fresh signups with a confusing notice).
+  const coachId            = (profile as any)?.coach_id
+  const isSelfCoached      = (profile as any)?.is_self_coached === true
+  const previouslyHadCoach = (profile as any)?.previously_had_coach === true
+  const alreadyDismissed   = (profile as any)?.coach_lost_banner_dismissed_at != null
 
   if (hidden) return null
   if (!user?.id || !profile) return null
   if (coachId != null) return null
   if (!isSelfCoached) return null
+  if (!previouslyHadCoach) return null  // fresh signup — never had a coach
   if (alreadyDismissed) return null
 
   async function handleDismiss() {

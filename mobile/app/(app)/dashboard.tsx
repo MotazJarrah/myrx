@@ -22,10 +22,10 @@ import {
   View, Text, Pressable, StyleSheet,
 } from 'react-native'
 import { Image } from 'expo-image'
-import { Link, router } from 'expo-router'
+import { router } from 'expo-router'
 import {
   Dumbbell, Activity, Weight, Flower2, Flame,
-  ArrowRight, User, Settings as SettingsIcon,
+  User, Settings as SettingsIcon,
 } from 'lucide-react-native'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
 import { useAuth } from '../../src/contexts/AuthContext'
@@ -865,7 +865,7 @@ export default function Dashboard() {
             target page reads as Settings (Account / Preferences /
             Security / Connect tabs) rather than just profile editing. */}
         <Pressable
-          onPress={() => router.push('/(app)/profile' as any)}
+          onPress={() => router.push('/(app)/settings' as any)}
           style={d.editBtn}
           hitSlop={16}
           accessibilityLabel="Open settings"
@@ -876,15 +876,13 @@ export default function Dashboard() {
 
       {/* ── Recent activity card ─────────────────────────────────────── */}
       {/* DEV-BISECT step 5: Restored ActivityRow. */}
+      {/* "View all" link removed May 28 2026 — the History page was
+          deleted as redundant (every domain page now exposes its own
+          history view). Dashboard's recent activity stays as a quick
+          glance; deeper history lives on each tracking page. */}
       <AnimateRise delay={240} style={[d.card, { padding: 0 }]}>
         <View style={d.activityHeader}>
           <Text style={d.activityTitle}>Recent activity</Text>
-          <Link href={'/(app)/history' as any} asChild>
-            <Pressable style={d.viewAllBtn}>
-              <Text style={d.viewAllText}>View all </Text>
-              <ArrowRight size={12} color={colors.mutedForeground} />
-            </Pressable>
-          </Link>
         </View>
 
         <View style={d.activityList}>
@@ -1037,8 +1035,6 @@ const d = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
   activityTitle: { color: colors.foreground, fontSize: 14, fontWeight: '600' },
-  viewAllBtn:    { flexDirection: 'row', alignItems: 'center' },
-  viewAllText:   { color: colors.mutedForeground, fontSize: 12 },
 
   // Empty state — `px-5 py-10 text-center`
   emptyWrap:  { paddingHorizontal: 20, paddingVertical: 40, alignItems: 'center' },

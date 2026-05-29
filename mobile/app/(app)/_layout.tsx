@@ -12,14 +12,13 @@
  * Authenticated guard: redirects unauthenticated users to /(auth)/sign-in.
  */
 
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect } from 'react'
 import {
   View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator, Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Slot, Link, Redirect, usePathname, router } from 'expo-router'
+import { Slot, Redirect, usePathname, router } from 'expo-router'
 import {
-  LayoutDashboard, Dumbbell, Activity, Flower2, Weight, Flame, Heart, Moon, Droplet, History as HistoryIcon,
   LogOut, Lightbulb, MessageCircle,
 } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
@@ -34,33 +33,10 @@ import { isProfileComplete } from '../../src/lib/profile'
 import { shellScrollRef } from '../../src/lib/shellScroll'
 import { ChartTooltipProvider } from '../../src/lib/chartTooltipScope'
 
-// ── Nav config — mirrors `links` array in Navbar.jsx ─────────────────────────
-// Order rationale (locked May 28 2026 alongside Roadmap A — Hydration +
-// Sleep pages):
-//   Training surfaces    → Dashboard / Strength / Cardio / Mobility
-//   Body-state daily logs → Bodyweight
-//   Wearable readiness   → Heart / Sleep (recovery signals from the watch)
-//   Daily intake         → Hydration / Calories (what goes IN today)
-//   Archive              → History
-// Hydration sits right before Calories so the two "intake today" metrics
-// cluster visually — same way Heart + Sleep cluster as "readiness from the
-// watch". Older comment about Heart placement preserved below.
-//
-// Heart sits right after Bodyweight so the "recovery / body state" metrics
-// cluster together visually (weight → resting HR are conceptually related —
-// both daily readiness signals).
-const NAV_LINKS = [
-  { href: '/(app)/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
-  { href: '/(app)/strength',   label: 'Strength',   icon: Dumbbell        },
-  { href: '/(app)/cardio',     label: 'Cardio',     icon: Activity        },
-  { href: '/(app)/mobility',   label: 'Mobility',   icon: Flower2         },
-  { href: '/(app)/bodyweight', label: 'Bodyweight', icon: Weight          },
-  { href: '/(app)/heart',      label: 'Heart',      icon: Heart           },
-  { href: '/(app)/sleep',      label: 'Sleep',      icon: Moon            },
-  { href: '/(app)/hydration',  label: 'Hydration',  icon: Droplet         },
-  { href: '/(app)/calories',   label: 'Calories',   icon: Flame           },
-  { href: '/(app)/history',    label: 'History',    icon: HistoryIcon     },
-] as const
+// Nav config used to live here as NAV_LINKS + a horizontal-scrolling
+// BottomNav. RadialNav owns the entire bottom nav surface now — both
+// were removed May 28 2026 as dead code. The canonical "what pages exist
+// and which tier unlocks them" data is in mobile/src/components/RadialNav.tsx.
 
 // ── Logo ─────────────────────────────────────────────────────────────────────
 // Dark-theme full wordmark — matches web Navbar's `theme === 'dark' ?` branch.
@@ -113,41 +89,6 @@ function TopBar({
           <LogOut size={16} color={colors.destructive} />
         </Pressable>
       </View>
-    </View>
-  )
-}
-
-// ── Bottom nav (horizontal scroll, 7 items) ──────────────────────────────────
-// Note: expo-router's `usePathname()` strips route groups ("(app)") from the
-// pathname — so when you're on `app/(app)/dashboard.tsx` it returns
-// `/dashboard`, not `/(app)/dashboard`. The NAV_LINKS hrefs include the
-// group for routing, so we strip it before comparing.
-function stripRouteGroups(p: string): string {
-  return p.replace(/\/\([^)]+\)/g, '')
-}
-function BottomNav({ activePath }: { activePath: string }) {
-  return (
-    <View style={s.bottomNav}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={s.bottomNavContent}
-      >
-        {NAV_LINKS.map(({ href, label, icon: Icon }) => {
-          const cleanHref = stripRouteGroups(href)
-          const active = activePath === cleanHref || activePath.startsWith(cleanHref + '/')
-          return (
-            <Link key={href} href={href as any} asChild>
-              <Pressable style={s.navItem}>
-                <Icon size={24} color={active ? colors.primary : colors.mutedForeground} strokeWidth={2} />
-                <Text style={[s.navLabel, { color: active ? colors.primary : colors.mutedForeground }]}>
-                  {label}
-                </Text>
-              </Pressable>
-            </Link>
-          )
-        })}
-      </ScrollView>
     </View>
   )
 }
@@ -380,18 +321,4 @@ const s = StyleSheet.create({
   // above page bottom; +20 breathing room). Without this, items
   // near the bottom-centre get covered by the dome's footprint.
   scrollContent: { padding: 16, paddingBottom: 80 },
-
-  // Bottom nav — matches web's `border-t bg-background/95 overflow-x-auto`
-  bottomNav: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: alpha(colors.background, 0.95),
-  },
-  bottomNavContent: { paddingHorizontal: 4, paddingVertical: 6 },
-  navItem: {
-    paddingHorizontal: 12, paddingVertical: 8,
-    alignItems: 'center', gap: 4,
-    minWidth: 64,
-  },
-  navLabel: { fontSize: 11 },
 })

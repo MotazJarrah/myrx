@@ -138,6 +138,24 @@ interface Profile {
   // subscription (above) means the value updates in-place after a
   // successful invite acceptance — banner UI clears, confirmation shows.
   coach_id: string | null
+  // B2C athlete subscription tier — independent of coach attachment.
+  // 'free'   → Strength + Cardio unlocked (+ Dashboard via center button)
+  // 'corerx' → free + Bodyweight + Calories + Heart
+  // 'fullrx' → corerx + Sleep + Hydration
+  // RadialNav reads this to grey-out + lock-badge any icon above the user's
+  // tier. Coach-attached athletes (coach_id != null) get FULL access regardless
+  // of this value — the coach is paying for them. NULL is treated as 'free'
+  // client-side as a defensive fallback; the DB defaults to 'free'.
+  // Added May 28 2026 alongside the tier-aware RadialNav rebuild.
+  b2c_subscription_tier?: 'free' | 'corerx' | 'fullrx' | null
+  // Set to true the first time this profile's coach_id transitions from
+  // null to non-null. Never unset — once an athlete has had a coach,
+  // they have always had a coach. Drives CoachLostBanner visibility so
+  // it only fires for users who actually lost a coach, not fresh
+  // self-managed signups whose (coach_id=null, is_self_coached=true)
+  // state coincidentally matches the banner's other triggers.
+  // Maintained by trg_mark_had_coach trigger on profiles. Added May 29 2026.
+  previously_had_coach?: boolean | null
   // Set by the WelcomeEndScreen "Open my dashboard" tap. The single
   // source of truth for "did this user finish the signup journey?" —
   // isProfileComplete (lib/profile.ts) gates dashboard access on this

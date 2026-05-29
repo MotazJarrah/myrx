@@ -2171,7 +2171,7 @@ function PhoneScreenInner({ data, patch, next, goTo, mode }: ScreenProps) {
   const [error, setError] = useState('')
 
   // Country picker + local-format input — same UX as the profile-edit
-  // phone change flow (app/(app)/profile.tsx). The user explicitly
+  // phone change flow (app/(app)/settings.tsx). The user explicitly
   // wanted the full country list available here too (e.g. for non-US
   // numbers like Jordanian +962). Init from data.phone so a resumed
   // journey (e.g. user typed phone before bailing, came back) keeps
@@ -2545,8 +2545,19 @@ function PhotoScreen({ next, bumpCheckpoint }: ScreenProps) {
             </Text>
           </View>
           {error && <ErrorBox msg={error} />}
-          <PrimaryButton onPress={handleContinue} disabled={submitting} busy={submitting}>
-            {submitting ? 'Saving…' : (picked ? 'Use this photo' : (hasExistingAvatar ? 'Continue' : 'Continue'))}
+          {/* Continue is only valid when there's an actual photo to
+              commit — a newly-picked one OR an existing avatar the user
+              is keeping. With no photo to save, the path forward is
+              Skip, not Continue. Gating disables the button visually so
+              the user can't tap an action that has nothing to do.
+              Locked May 29 2026 — user reported the button was
+              clickable even though Skip was the intended path. */}
+          <PrimaryButton
+            onPress={handleContinue}
+            disabled={submitting || (!picked && !hasExistingAvatar)}
+            busy={submitting}
+          >
+            {submitting ? 'Saving…' : (picked ? 'Use this photo' : 'Continue')}
           </PrimaryButton>
           {!picked && !hasExistingAvatar && (
             <Pressable onPress={handleSkip} disabled={submitting}
@@ -3314,7 +3325,7 @@ export default function SignUpJourney() {
 // ── Styles ───────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   // Phone screen — country picker pill + local-format input.
-  // Mirrors app/(app)/profile.tsx so the change-phone UX is identical
+  // Mirrors app/(app)/settings.tsx so the change-phone UX is identical
   // to the edit-phone UX.
   phoneRow:        { marginTop: 24, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   phoneCountry:    { minWidth: 110 },

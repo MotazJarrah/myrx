@@ -8,7 +8,7 @@
  *
  * Privacy preferences (`share_online_status`, `share_last_seen`) live on
  * the user's `profiles` row instead, because the server (and the coach
- * admin panel) needs to read them — see `app/(app)/profile.tsx`'s
+ * admin panel) needs to read them — see `app/(app)/settings.tsx`'s
  * Settings tab and the `add_presence_and_privacy_to_profiles` migration.
  *
  * Storage key matches the web's `myrx_enter_to_send` so when chat is

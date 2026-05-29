@@ -11,7 +11,7 @@
  * (e.g. country with flag + dial code, or gender with just label).
  *
  * Used by:
- *   - app/(app)/profile.tsx — gender select, phone country code picker
+ *   - app/(app)/settings.tsx — gender select, phone country code picker
  */
 
 import { useMemo, useState, type ReactNode } from 'react'

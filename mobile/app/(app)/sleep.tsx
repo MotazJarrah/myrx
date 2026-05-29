@@ -697,7 +697,7 @@ export default function SleepPage() {
             Your watch hasn’t reported any sleep sessions to MyRX yet. Connect Samsung Health in Settings → Connect, then wear your watch overnight — your first night will appear here.
           </Text>
           <Pressable
-            onPress={() => router.push('/(app)/profile' as any)}
+            onPress={() => router.push('/(app)/settings' as any)}
             style={s.primaryBtn}
           >
             <Text style={s.primaryBtnText}>Open Connect</Text>
