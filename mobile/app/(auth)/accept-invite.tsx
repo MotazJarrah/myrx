@@ -144,7 +144,7 @@ function CoverageNote({ coachName }: { coachName?: string | null }) {
     <View style={s.coverageNote}>
       <Shield size={16} color={colors.primary} style={{ marginBottom: 6 }} />
       <Text style={s.coverageText}>
-        Your MyRX account is fully covered by {name}'s subscription. No payment from you.
+        Your MyRX subscription is covered by {name}. No payment is required from you.
       </Text>
     </View>
   )
