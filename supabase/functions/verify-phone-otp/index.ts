@@ -66,38 +66,38 @@ async function checkVerification(phone: string, code: string): Promise<{ ok: boo
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS })
-  if (req.method !== "POST")   return json(405, { error: "method_not_allowed" })
+  if (req.method !== "POST")   return json(405, { error: "Method not allowed.", code: "method_not_allowed" })
 
   const auth = req.headers.get("Authorization") ?? ""
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
     global: { headers: { Authorization: auth } },
   })
   const { data: userData, error: userErr } = await supabase.auth.getUser()
-  if (userErr || !userData?.user) return json(401, { error: "unauthorized" })
+  if (userErr || !userData?.user) return json(401, { error: "Sign in and try again.", code: "unauthorized" })
   const userId = userData.user.id
 
   let payload: { phone?: string; code?: string }
-  try { payload = await req.json() } catch { return json(400, { error: "bad_json" }) }
+  try { payload = await req.json() } catch { return json(400, { error: "We couldn't read that request. Try again.", code: "bad_json" }) }
 
   const phone = (payload.phone ?? "").trim()
   const code  = (payload.code  ?? "").trim()
-  if (!/^\+[1-9]\d{6,14}$/.test(phone)) return json(400, { error: "invalid_phone" })
-  if (!/^\d{4,8}$/.test(code))           return json(400, { error: "invalid_code" })
+  if (!/^\+[1-9]\d{6,14}$/.test(phone)) return json(400, { error: "That phone number isn't in the right format. Check it and try again.", code: "invalid_phone" })
+  if (!/^\d{4,8}$/.test(code))           return json(400, { error: "That code isn't the right length. Check it and try again.", code: "invalid_code" })
 
   const tw = await checkVerification(phone, code)
   if (!tw.ok) {
     console.error("Twilio Verify check failed:", tw.status, tw.body)
-    if (tw.status === 404) return json(404, { error: "no_active_code" })
+    if (tw.status === 404) return json(404, { error: "That code expired or was already used. Request a new one.", code: "no_active_code" })
     if (tw.body.includes("60202") || tw.body.includes("max check attempts")) {
-      return json(429, { error: "too_many_attempts" })
+      return json(429, { error: "Too many tries on this code. Wait a few minutes, then request a new one.", code: "too_many_attempts" })
     }
-    return json(500, { error: "verify_failed", twilio_status: tw.status })
+    return json(500, { error: "Couldn't verify the code right now. Try again in a moment.", code: "verify_failed", twilio_status: tw.status })
   }
 
   let parsed: { status?: string }
   try { parsed = JSON.parse(tw.body) } catch { parsed = {} }
   if (parsed.status !== "approved") {
-    return json(400, { error: "invalid_code" })
+    return json(400, { error: "That code didn't match. Check it and try again.", code: "invalid_code" })
   }
 
   // Code matched — write phone + verified-at atomically. Using upsert
@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
     )
   if (profErr) {
     console.error("set phone + phone_verified_at failed:", profErr)
-    return json(500, { error: "db_error", detail: profErr.message })
+    return json(500, { error: "Verified, but we couldn't save your phone. Try again.", code: "db_error", detail: profErr.message })
   }
 
   return json(200, { success: true, phone, verified_at: verifiedAt })

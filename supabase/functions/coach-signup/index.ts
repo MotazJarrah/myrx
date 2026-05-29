@@ -100,7 +100,7 @@ const VALID_INTERVALS = new Set(["monthly", "annual"])
 // ── Handler ────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS })
-  if (req.method !== "POST")    return json(405, { error: "method_not_allowed" })
+  if (req.method !== "POST")    return json(405, { error: "Method not allowed.", code: "method_not_allowed" })
 
   // verify_jwt is TRUE on this function, so Supabase has already
   // validated the JWT before we get here. We just need to extract
@@ -112,18 +112,18 @@ Deno.serve(async (req) => {
   const { data: { user }, error: userErr } = await userClient.auth.getUser()
   if (userErr || !user) {
     console.error("getUser failed:", userErr)
-    return json(401, { error: "not_authenticated" })
+    return json(401, { error: "Sign in and try again.", code: "not_authenticated" })
   }
 
   // Payload — minimal because most data was saved during the
   // standard auth flow. Just the tier + cadence the coach picked.
   let payload: any
-  try { payload = await req.json() } catch { return json(400, { error: "bad_json" }) }
+  try { payload = await req.json() } catch { return json(400, { error: "We couldn't read that request. Try again.", code: "bad_json" }) }
 
   const tier     = String(payload?.tier ?? "").trim().toLowerCase()
   const interval = String(payload?.interval ?? "").trim().toLowerCase()
-  if (!VALID_TIERS.has(tier))         return json(400, { error: "invalid_tier" })
-  if (!VALID_INTERVALS.has(interval)) return json(400, { error: "invalid_interval" })
+  if (!VALID_TIERS.has(tier))         return json(400, { error: "That subscription tier isn't valid. Refresh the page and try again.", code: "invalid_tier" })
+  if (!VALID_INTERVALS.has(interval)) return json(400, { error: "That billing interval isn't valid. Refresh the page and try again.", code: "invalid_interval" })
 
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
@@ -140,7 +140,7 @@ Deno.serve(async (req) => {
   if (existingProfile?.is_coach
       && existingProfile?.coach_subscription_status
       && !["trialing", null, "incomplete", "incomplete_expired", "canceled"].includes(existingProfile.coach_subscription_status)) {
-    return json(409, { error: "already_a_coach" })
+    return json(409, { error: "You're already a coach — sign in instead of going through signup.", code: "already_a_coach" })
   }
 
   // ── Step 2: Convert profile to coach + start trial ────────────────
@@ -169,7 +169,7 @@ Deno.serve(async (req) => {
 
   if (profileErr || !profile) {
     console.error("profile upsert failed:", profileErr)
-    return json(500, { error: "profile_update_failed", detail: profileErr?.message })
+    return json(500, { error: "Couldn't save your coach profile. Try again.", code: "profile_update_failed", detail: profileErr?.message })
   }
 
   // ── Step 3: Resolve the Stripe price by lookup_key ────────────────
@@ -187,7 +187,7 @@ Deno.serve(async (req) => {
     priceId = prices.data[0].id
   } catch (err) {
     console.error("Stripe price lookup failed:", err)
-    return json(500, { error: "stripe_price_lookup_failed", detail: String(err) })
+    return json(500, { error: "We couldn't load the tier pricing. Try again in a moment.", code: "stripe_price_lookup_failed", detail: String(err) })
   }
 
   // ── Step 4: Create the Stripe Customer ────────────────────────────
@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
     customerId = customer.id
   } catch (err) {
     console.error("Stripe customer create failed:", err)
-    return json(500, { error: "stripe_customer_create_failed", detail: String(err) })
+    return json(500, { error: "Couldn't set up your Stripe customer. Try again.", code: "stripe_customer_create_failed", detail: String(err) })
   }
 
   // ── Step 5: Create the Checkout Session ───────────────────────────
@@ -236,6 +236,6 @@ Deno.serve(async (req) => {
     // the frontend without needing to redo signup. Leaves an orphan
     // Stripe Customer (harmless; no charges without a subscription).
     console.error("Stripe checkout.sessions.create failed:", err)
-    return json(500, { error: "stripe_checkout_create_failed", detail: String(err) })
+    return json(500, { error: "Couldn't start the checkout session. Try again.", code: "stripe_checkout_create_failed", detail: String(err) })
   }
 })
