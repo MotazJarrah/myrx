@@ -54,6 +54,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import * as Linking from 'expo-linking'
+import { usePathname } from 'expo-router'
 
 import { useAuth, type PendingInvite } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -69,6 +70,15 @@ export default function InviteDeepLinkHost() {
   const { user } = useAuth()
   const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  // Suppress the modal when the user is already on a route that owns the
+  // accept-invite UI. Otherwise the deep link would render both the
+  // route's full-page UX AND a modal popover with the same content —
+  // confusing at best, double-attempt at worst. Two paths reach the
+  // page: /accept-invite (in-app navigation from sign-up) and
+  // /coach/accept-invite (Android App Link from the email).
+  const pathname = usePathname()
+  const onAcceptInviteRoute =
+    pathname === '/accept-invite' || pathname === '/coach/accept-invite'
 
   // Track which tokens we've already processed so the same URL firing
   // twice (cold start + warm start can both deliver it) doesn't pop the
@@ -141,8 +151,9 @@ export default function InviteDeepLinkHost() {
   }, [])
 
   // Parse a URL → branch on shape. Handles:
-  //   myrx://accept-invite?token=...                       → invite flow
-  //   https://myrxfit.com/coach/accept-invite?token=...    → invite flow
+  //   myrx://accept-invite?token=...                       → invite flow (modal)
+  //   myrx://coach/accept-invite?token=...                 → route owns it; skip
+  //   https://myrxfit.com/coach/accept-invite?token=...    → route owns it; skip
   //   myrx://auth/confirmed?type=signup                    → auth handoff
   const handleUrl = useCallback((url: string | null) => {
     if (!url) return
@@ -153,6 +164,19 @@ export default function InviteDeepLinkHost() {
       handleAuthConfirmation()
       return
     }
+    // The /coach/accept-invite URL — whether arriving as the custom-
+    // scheme form (myrx://coach/accept-invite?token=…) or the App-Link
+    // HTTPS form (https://myrxfit.com/coach/accept-invite?token=…) —
+    // is owned by app/coach/accept-invite.tsx (the expo-router screen).
+    // Don't also pop the modal here, otherwise the user sees the
+    // full-page UX AND the popover with identical content.
+    //
+    // The bare `myrx://accept-invite?token=…` shape (no `/coach`) still
+    // falls through to the modal — that's the in-app paste-code path
+    // and there's no expo-router screen for it.
+    if (/^myrx:\/\/coach\/accept-invite/i.test(url)) return
+    if (/^https?:\/\/myrxfit\.com\/coach\/accept-invite/i.test(url)) return
+
     const token = extractInviteToken(url)
     if (token) handleToken(token)
   }, [handleToken, handleAuthConfirmation])
@@ -174,10 +198,12 @@ export default function InviteDeepLinkHost() {
   // Only render the modal when:
   //   - A token was parsed
   //   - The user is signed in (the edge function requires JWT)
+  //   - We're NOT already on an accept-invite route (which owns the
+  //     full-page UX for the same flow — see usePathname guard above)
   // For a not-signed-in user with a deep-link token, the patient-invite
   // email-match path handles attachment once they sign in. We don't pop
   // a modal in that case to avoid confusing the sign-in flow.
-  if (!user || !pendingInvite) return null
+  if (!user || !pendingInvite || onAcceptInviteRoute) return null
 
   return (
     <AcceptInviteModal
