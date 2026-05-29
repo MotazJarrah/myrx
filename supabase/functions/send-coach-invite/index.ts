@@ -126,13 +126,13 @@ async function sendInviteEmail(args: {
   const html = `<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#0a0a0a;color:#e5e5e5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <div style="max-width:540px;margin:0 auto;padding:40px 24px;">
-    <h1 style="font-size:22px;font-weight:700;color:#fafafa;margin:0 0 8px;">
-      ${escapeHtml(args.coachName)} invited you to MyRX
-    </h1>
-    <p style="font-size:14px;color:#a3a3a3;margin:0 0 24px;">
-      Tap below to accept and start training. Your MyRX account is fully covered by your coach's subscription — no payment from you.
-    </p>
     ${personalLine}
+    <p style="font-size:14px;color:#a3a3a3;margin:0 0 12px;">
+      Tap below to accept and start training together.
+    </p>
+    <p style="font-size:13px;color:#737373;margin:0 0 24px;">
+      Your MyRX subscription is covered by your coach. No payment is required from you.
+    </p>
     <div style="margin:32px 0;">
       <a href="${args.acceptUrl}"
          style="display:inline-block;padding:14px 28px;background:#c4f047;color:#0a0a0a;text-decoration:none;border-radius:10px;font-weight:700;font-size:14px;">
@@ -140,21 +140,23 @@ async function sendInviteEmail(args: {
       </a>
     </div>
     <p style="font-size:12px;color:#737373;margin:24px 0 0;">
-      Or paste this link into your browser:<br/>
+      Button not working? Use this link instead:<br/>
       <span style="color:#a3a3a3;word-break:break-all;">${args.acceptUrl}</span>
     </p>
     <p style="font-size:11px;color:#525252;margin:32px 0 0;border-top:1px solid #262626;padding-top:16px;">
-      This invite expires in 14 days. If you didn't expect this, you can ignore the email.
+      This link expires in 14 days. Didn't expect this? Ignore the email — nothing happens.
     </p>
   </div>
 </body></html>`
 
   const text = `${args.coachName} invited you to MyRX.
 
-${args.coachMessage ? args.coachMessage + '\n\n' : ''}Tap to accept (no payment — covered by your coach):
+${args.coachMessage ? args.coachMessage + '\n\n' : ''}Tap to accept and start training together:
 ${args.acceptUrl}
 
-This invite expires in 14 days.`
+Your MyRX subscription is covered by your coach. No payment is required from you.
+
+This link expires in 14 days. Didn't expect this? Ignore the email — nothing happens.`
 
   const from = parseFromAddress(SENDGRID_FROM)
 
@@ -253,10 +255,10 @@ Deno.serve(async (req) => {
     return json(500, { success: false, error: "Couldn't load your profile. Try again.", code: "caller_profile_lookup_failed" })
   }
   if (!callerProfile) {
-    return json(403, { success: false, error: "Your profile is missing. Contact support.", code: "caller_profile_missing" })
+    return json(403, { success: false, error: "Your profile didn't load. Sign out, sign in again, and try once more — email team@myrxfit.com if it persists.", code: "caller_profile_missing" })
   }
   if (callerProfile.is_coach !== true) {
-    return json(403, { success: false, error: "Only Coach accounts can send invites.", code: "coach_required" })
+    return json(403, { success: false, error: "Only coach accounts can send invites.", code: "coach_required" })
   }
 
   // ── Step 3: parse + shape-check the body ──────────────────────────
@@ -269,12 +271,12 @@ Deno.serve(async (req) => {
     : null
 
   if (!rawEmail) {
-    return json(400, { success: false, error: "Add an email so we know where to send the invite.", code: "missing_email" })
+    return json(400, { success: false, error: "Add an email — that's where the invite goes.", code: "missing_email" })
   }
 
   const email = rawEmail.toLowerCase()
   if (!EMAIL_RE.test(email)) {
-    return json(400, { success: false, error: "That email doesn't look right. Double-check the spelling.", code: "invalid_email" })
+    return json(400, { success: false, error: "That email doesn't look right. Check the spelling.", code: "invalid_email" })
   }
 
   // ── Step 4: invitee-state matrix (email-only lookup) ───────────────
@@ -303,21 +305,21 @@ Deno.serve(async (req) => {
     if (existing.is_coach === true) {
       return json(400, {
         success: false,
-        error: "This email belongs to a Coach account. Coaches can't be invited as Clients.",
+        error: "This email belongs to a coach. Coaches can't be invited as clients.",
         code: "cant_invite_coach",
       })
     }
     if (existing.is_superuser === true) {
       return json(400, {
         success: false,
-        error: "This email belongs to an Admin account.",
+        error: "This email belongs to a MyRX admin.",
         code: "cant_invite_admin",
       })
     }
     if (existing.deactivated_at) {
       return json(400, {
         success: false,
-        error: "This account is deactivated. Contact support to reactivate it first.",
+        error: "This account is deactivated. They'll need to reactivate before you can invite them — team@myrxfit.com can help.",
         code: "account_deactivated",
       })
     }
