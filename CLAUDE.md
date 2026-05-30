@@ -4222,6 +4222,52 @@ Hard-won lessons from things that aren't obvious from the docs.
    UPDATE only evaluates the post-UPDATE row. Only upserts trigger
    the proposed-INSERT pre-check.
 
+## Android App Links (LOCKED — May 30 2026)
+
+`mobile/app.json` declares HTTPS path prefixes that Android should hand
+off from the browser into the MyRX app. **These prefixes MUST be narrow
+and match only the URLs the mobile app actually has a route for.**
+
+Current locked set:
+
+- `/auth/confirm` — Supabase post-signup verification redirect
+- `/auth/recovery` — Supabase post-password-reset redirect
+- `/coach/accept-invite` — coach invite acceptance flow
+
+What NOT to do:
+
+- ❌ `pathPrefix: "/auth"` — too broad. Matches `/auth?mode=signin`,
+  `/auth?mode=signup`, `/auth/legacy-foo`, anything Supabase or web
+  later adds under `/auth/*`. When web signs out via redirect to
+  `/auth?mode=signin`, Android pirates the URL into the mobile app
+  and Expo Router shows "Unmatched Route" because there's no `/auth`
+  route in mobile. This bit us May 30 2026 — user signed out on web
+  in their Android Chrome browser and got dumped into the mobile app
+  with the Unmatched Route screen.
+- ❌ `pathPrefix: "/"` or any root-level prefix — would intercept
+  EVERY myrxfit.com page.
+- ❌ Adding a prefix for a path that has no matching Expo Router
+  route in mobile.
+
+The rule: for every prefix in `intentFilters.data[].pathPrefix`,
+verify that `mobile/app/<path>.tsx` (or a parent `(group)/<path>.tsx`)
+exists and handles the deep link gracefully.
+
+Changing the prefix list requires a **native rebuild** — AndroidManifest
+is baked into the APK at build time. After editing `app.json`:
+
+```
+cd mobile && npx expo run:android
+```
+
+Reinstalls the dev-client APK with the new manifest. JS-only Fast Refresh
+won't pick up manifest changes.
+
+When iOS ships, the same rule applies to `associatedDomains` /
+`expo.ios.associatedDomains` — narrow path patterns, never `applinks:*`.
+
+---
+
 ## Browser / React scars
 
 Same theme: hard-won lessons from things that don't show up in any

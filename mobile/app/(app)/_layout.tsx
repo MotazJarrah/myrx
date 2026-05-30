@@ -24,7 +24,7 @@ import {
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import { uniqueChannelName } from '../../src/lib/realtime'
-import ChatSheet from '../../src/components/ChatSheet'
+import ChatHub from '../../src/components/ChatHub'
 import SuggestionSheet from '../../src/components/SuggestionSheet'
 import { BiometricLockGate } from '../../src/components/BiometricLockGate'
 import ReactivationGate from '../../src/components/ReactivationGate'
@@ -118,9 +118,16 @@ export default function AppShellLayout() {
     shellScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false })
   }, [pathname])
 
-  // Match web: chat enabled flag from profile
-  const chatEnabled = (profile as any)?.chat_enabled === true
-  const isAdmin     = (profile as any)?.is_superuser === true
+  // Chat v3 (May 30 2026): the chat button shows when EITHER condition
+  // applies — coach-client chat is unconditional (no flag, just the link),
+  // and admin chat is per-client gated by admin_chat_enabled. Phase 5 will
+  // also factor in unread admin messages + in-drawer grace for the
+  // graceful-disable flow; this gate is the foundation.
+  const chatEnabled = (
+    (profile as any)?.coach_id != null
+    || (profile as any)?.admin_chat_enabled === true
+  )
+  const isAdmin = (profile as any)?.is_superuser === true
 
   // ── Unread message subscription (mirrors web Navbar useEffect) ──────────────
   useEffect(() => {
@@ -262,7 +269,7 @@ export default function AppShellLayout() {
         </View>
 
         {/* Sheets — mount once at the shell so they persist across page navigations */}
-        <ChatSheet       isOpen={chatOpen}    onClose={() => setChatOpen(false)} />
+        <ChatHub         isOpen={chatOpen}    onClose={() => setChatOpen(false)} />
         <SuggestionSheet isOpen={suggestOpen} onClose={() => setSuggestOpen(false)} />
       </SafeAreaView>
     </BiometricLockGate>

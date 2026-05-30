@@ -159,7 +159,16 @@ export default function AthleteCoachingChip({
   function handleChipPick(targetState) {
     setChipOpen(false)
     setError('')
-    if (targetState === currentState) return // no-op
+    // Standard no-op when target == currentState — EXCEPT for the "limbo"
+    // self-managed case (coach_id IS NULL but is_self_coached = false). The
+    // resolver returns 'self' for both real-self and limbo-self, so an
+    // admin clicking "Self-managed" on a limbo user would otherwise no-op
+    // and the is_self_coached flag would stay false forever. By skipping
+    // the guard in that specific case, the RPC fires and explicitly sets
+    // is_self_coached = true, fully aligning the DB state with the chip
+    // display. Locked May 30 2026.
+    const isLimboSelf = currentState === 'self' && athleteProfile?.is_self_coached === false
+    if (targetState === currentState && !isLimboSelf) return
 
     // TO coach-managed → open search picker (no SWITCH gate; picking a
     // specific coach is the confirmation gesture)
@@ -271,33 +280,38 @@ export default function AthleteCoachingChip({
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-1">
-      {/* Tier picker */}
-      <div className="relative" ref={tierRef}>
-        <button
-          onClick={() => { setTierOpen(o => !o); setChipOpen(false) }}
-          disabled={busy}
-          className={`inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:border-primary/30 hover:text-foreground transition-colors ${busy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-          title="Athlete subscription tier (Free / CoreRX / FullRX)"
-        >
-          {TIER_META.find(t => t.key === currentTier)?.label ?? 'Free'}
-          <ChevronDown className="h-3 w-3" />
-        </button>
-        {tierOpen && (
-          <div className="absolute right-0 z-30 mt-1 min-w-[140px] rounded-md border border-border bg-card shadow-lg ring-1 ring-black/5">
-            {TIER_META.map(t => (
-              <button
-                key={t.key}
-                onClick={() => pickTier(t.key)}
-                disabled={busy}
-                className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-muted/30 transition-colors ${t.key === currentTier ? 'text-foreground' : 'text-muted-foreground'}`}
-              >
-                {t.label}
-                {t.key === currentTier && <Check className="h-3 w-3 text-primary" />}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Tier picker — only visible when athlete is self-coached. When
+          coach-managed or admin-managed, the relationship link itself
+          grants full access, so the b2c tier is irrelevant and showing
+          a picker would imply it has an effect (it doesn't). */}
+      {currentState === 'self' && (
+        <div className="relative" ref={tierRef}>
+          <button
+            onClick={() => { setTierOpen(o => !o); setChipOpen(false) }}
+            disabled={busy}
+            className={`inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:border-primary/30 hover:text-foreground transition-colors ${busy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            title="Athlete subscription tier (Free / CoreRX / FullRX)"
+          >
+            {TIER_META.find(t => t.key === currentTier)?.label ?? 'Free'}
+            <ChevronDown className="h-3 w-3" />
+          </button>
+          {tierOpen && (
+            <div className="absolute right-0 z-30 mt-1 min-w-[140px] rounded-md border border-border bg-card shadow-lg ring-1 ring-black/5">
+              {TIER_META.map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => pickTier(t.key)}
+                  disabled={busy}
+                  className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-muted/30 transition-colors ${t.key === currentTier ? 'text-foreground' : 'text-muted-foreground'}`}
+                >
+                  {t.label}
+                  {t.key === currentTier && <Check className="h-3 w-3 text-primary" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* State chip */}
       <div className="relative" ref={chipRef}>

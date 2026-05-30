@@ -186,7 +186,7 @@ function PresenceDot({ active }) {
 function TypingBubble() {
   return (
     <div className="flex justify-start py-0.5">
-      <div className="flex items-center gap-1 px-3 py-2.5 rounded-2xl rounded-tl-sm bg-muted">
+      <div className="flex items-center gap-1 px-3 py-2.5 rounded-2xl rounded-tl-sm bg-[hsl(220_14%_22%)]">
         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-typing-dot" style={{ animationDelay: '0ms'   }} />
         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-typing-dot" style={{ animationDelay: '150ms' }} />
         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-typing-dot" style={{ animationDelay: '300ms' }} />
@@ -280,10 +280,16 @@ export default function CoachMessages() {
       // them, via a SECURITY DEFINER RPC.
       let msgs = []
       if (rosterIds.length) {
+        // Chat v3 Phase 4 (May 30 2026): scope reads to THIS coach's thread.
+        // partner_id is the non-client party in the conversation — for coach
+        // messages it's the coach's own user.id. Without this filter, the
+        // coach would see admin↔client messages bleeding into their roster
+        // view when admin has chat enabled with one of their athletes.
         const { data: msgData, error: msgErr } = await supabase
           .from('messages')
           .select('*')
           .in('user_id', rosterIds)
+          .eq('partner_id', user.id)
           .is('deleted_at', null)
           .order('created_at', { ascending: true })
         if (msgErr) {
@@ -311,17 +317,16 @@ export default function CoachMessages() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
         const m = payload.new
         if (!rosterIdsRef.current.includes(m.user_id)) return
-        // Defensive — soft-deleted messages should never arrive as INSERTs,
-        // but if they do, ignore them so the UI doesn't briefly show a
-        // message that was deleted immediately.
+        // Chat v3 Phase 4 — drop admin↔client messages that aren't part of
+        // this coach's thread. partner_id holds the non-client party id.
+        if (m.partner_id !== user.id) return
         if (m.deleted_at) return
         setMessages(prev => prev.some(x => x.id === m.id) ? prev : [...prev, m])
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, payload => {
         const m = payload.new
         if (!rosterIdsRef.current.includes(m.user_id)) return
-        // Soft delete arrived — remove from local state so it disappears
-        // from UI immediately.
+        if (m.partner_id !== user.id) return
         if (m.deleted_at) {
           setMessages(prev => prev.filter(x => x.id !== m.id))
           return
@@ -401,7 +406,10 @@ export default function CoachMessages() {
   useEffect(() => {
     if (!selectedId || !user?.id) return
 
-    const channel = supabase.channel(`presence-chat-${selectedId}`, {
+    // Chat v3 Phase 4b — partner-kind suffix partitions presence so coach
+    // + admin chats for the same client never collide. Mobile counterpart
+    // joins `presence-chat-${user.id}-coach` for the same client.
+    const channel = supabase.channel(`presence-chat-${selectedId}-coach`, {
       config: { presence: { key: user.id } },
     })
     channel
@@ -516,10 +524,16 @@ export default function CoachMessages() {
   }, [body, selectedId])
 
   // ── Conversation list derivation ────────────────────────────────────────
+  //
+  // LOCKED May 30 2026 — iterate the ROSTER (users), not the messages list.
+  // Linked athletes ALWAYS appear in the coach's left sidebar even when there
+  // are zero messages with them, so the coach can initiate a chat from this
+  // page directly. Sort:
+  //   1. Clients WITH messages first, by last-message timestamp DESC
+  //   2. Clients WITHOUT messages second, alphabetical by name
+  // Empty `last`/`msgs` slots render with helper copy in the right pane
+  // ("No messages yet — start the conversation below.")
   const conversations = useMemo(() => {
-    const userMap = {}
-    users.forEach(u => { userMap[u.id] = u })
-
     const byUser = {}
     messages
       .filter(m => !m.is_suggestion && !m.deleted_at)
@@ -528,19 +542,57 @@ export default function CoachMessages() {
         byUser[m.user_id].push(m)
       })
 
-    return Object.entries(byUser)
-      .map(([uid, msgs]) => {
-        const u = userMap[uid]
-        if (!u) return null
-        const last   = msgs[msgs.length - 1]
-        const unread = msgs.filter(m => !m.from_admin && !m.read).length
-        return { uid, user: u, last, unread, msgs }
-      })
-      .filter(Boolean)
-      .sort((a, b) => new Date(b.last.created_at) - new Date(a.last.created_at))
+    const rows = users.map(u => {
+      const msgs   = byUser[u.id] || []
+      const last   = msgs.length ? msgs[msgs.length - 1] : null
+      const unread = msgs.filter(m => !m.from_admin && !m.read).length
+      return { uid: u.id, user: u, last, unread, msgs }
+    })
+
+    return rows.sort((a, b) => {
+      if (a.last && b.last) return new Date(b.last.created_at) - new Date(a.last.created_at)
+      if (a.last && !b.last) return -1
+      if (!a.last && b.last) return 1
+      const an = (a.user.full_name || '').toLowerCase()
+      const bn = (b.user.full_name || '').toLowerCase()
+      return an.localeCompare(bn)
+    })
   }, [users, messages])
 
-  // ── When a conversation is opened, mark client messages as read ─────────
+  // ── Deep-link handler: ?clientId=<id> auto-selects that conversation ───
+  // and focuses the composer so the coach can start typing immediately.
+  // Fired from "Message athlete" pills on the CoachClientDetail page.
+  // Only runs once on initial roster load — the URL is cleaned up after so
+  // a refresh doesn't re-trigger selection unexpectedly.
+  const deepLinkAppliedRef = useRef(false)
+  useEffect(() => {
+    if (deepLinkAppliedRef.current) return
+    if (loading || users.length === 0) return
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const target = params.get('clientId')
+      if (!target) { deepLinkAppliedRef.current = true; return }
+      const match = users.find(u => u.id === target)
+      if (match) {
+        setSelectedId(target)
+        // Focus composer after the right-pane mounts.
+        setTimeout(() => inputRef.current?.focus(), 200)
+      }
+      // Clean the URL whether we matched or not — prevents re-fire on
+      // tab return / refresh.
+      window.history.replaceState({}, '', window.location.pathname)
+    } catch { /* no-op */ }
+    deepLinkAppliedRef.current = true
+  }, [loading, users])
+
+  // ── Auto-mark client messages as read while their chat is OPEN ──────────
+  // Runs on conversation switch AND on every new message that lands while
+  // the conversation is active. Without `messages` in the deps, the badge
+  // count on the left-sidebar row would increment every time a new client
+  // message arrived even though the coach is literally looking at the
+  // chat — they'd have to leave the page and come back to clear it.
+  // The `!m.read` filter is the idempotency guard — already-read messages
+  // never get re-marked, so this is safe to run on every state tick.
   useEffect(() => {
     if (!selectedId) return
     const unreadIds = messages
@@ -551,7 +603,7 @@ export default function CoachMessages() {
       window.dispatchEvent(new CustomEvent('myrx_signal', { detail: { type: 'messages_read', count: unreadIds.length } }))
       supabase.from('messages').update({ read: true }).in('id', unreadIds).then(() => {})
     }
-  }, [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedId, messages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Scroll-to-bottom rule (locked May 28 2026) ─────────────────────────
   //   • New message sent or received → scroll (`messages` dep).
@@ -636,6 +688,10 @@ export default function CoachMessages() {
         user_id:       selectedId,
         from_admin:    true,
         sent_by:       user?.id ?? null,
+        // partner_id partitions the conversation thread. For coach->client
+        // messages, the partner (non-client party) is the coach themselves
+        // — i.e. the current user. See Phase 4 migration (May 30 2026).
+        partner_id:    user?.id ?? null,
         body:          trimmed,
         is_suggestion: false,
         read:          false,
@@ -718,29 +774,17 @@ export default function CoachMessages() {
       </div>
 
       {conversations.length === 0 ? (
-        // Empty state — coaching voice. Two flavours based on whether the
-        // coach has any roster at all.
+        // Empty state — only fires when the coach has no roster at all
+        // (post May 30 2026 conversation-list rewrite, every linked athlete
+        // appears here regardless of message history). Coaching voice.
         <div className="rounded-xl border border-border bg-card py-16 px-6 text-center">
           <MessageCircle className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-          {users.length > 0 ? (
-            <>
-              <p className="text-sm text-muted-foreground">No conversations yet with your clients.</p>
-              <p className="text-xs text-muted-foreground/70 mt-2 max-w-md mx-auto leading-relaxed">
-                Clients message you when they need a steer — a missed session, a question on form,
-                a check-in. Open the conversation when they reach out, or kick one off yourself
-                when you see something in their logs worth flagging.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-muted-foreground">You don't have any clients on your roster yet.</p>
-              <p className="text-xs text-muted-foreground/70 mt-2 max-w-md mx-auto leading-relaxed">
-                Coaching conversations land here once a client accepts your invite. Send your
-                first invite from the Invite Client page — clients appear in your roster
-                automatically once they sign up.
-              </p>
-            </>
-          )}
+          <p className="text-sm text-muted-foreground">You don't have any clients on your roster yet.</p>
+          <p className="text-xs text-muted-foreground/70 mt-2 max-w-md mx-auto leading-relaxed">
+            Coaching conversations land here once a client accepts your invite. Send your
+            first invite from the Invite Client page — clients appear in your roster
+            automatically once they sign up.
+          </p>
         </div>
       ) : (
         <div className="flex h-[calc(100dvh-220px)] min-h-[420px] overflow-hidden rounded-xl border border-border bg-card">
@@ -781,9 +825,13 @@ export default function CoachMessages() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{u.full_name || u.email}</p>
-                      <p className="truncate text-[11px] text-muted-foreground">{last.body}</p>
+                      <p className={`truncate text-[11px] text-muted-foreground ${last ? '' : 'italic'}`}>
+                        {last ? last.body : 'No messages yet'}
+                      </p>
                     </div>
-                    <span className="shrink-0 text-[10px] text-muted-foreground/60">{formatTime(last.created_at)}</span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                      {last ? formatTime(last.created_at) : ''}
+                    </span>
                   </button>
                 )
               })}
@@ -864,7 +912,7 @@ export default function CoachMessages() {
                             swipe
                             onDelete={() => handleDeleteMessage(msg.id)}
                             className="max-w-[75%] rounded-2xl rounded-tl-sm"
-                            bg="bg-muted"
+                            bg="bg-[hsl(220_14%_22%)]"
                           >
                             <div className="px-3.5 py-2.5 text-sm text-foreground">
                               <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>

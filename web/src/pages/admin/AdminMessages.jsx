@@ -141,7 +141,7 @@ function PresenceDot({ active }) {
 function TypingBubble() {
   return (
     <div className="flex justify-start py-0.5">
-      <div className="flex items-center gap-1 px-3 py-2.5 rounded-2xl rounded-tl-sm bg-muted">
+      <div className="flex items-center gap-1 px-3 py-2.5 rounded-2xl rounded-tl-sm bg-[hsl(220_14%_22%)]">
         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-typing-dot" style={{ animationDelay: '0ms'   }} />
         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-typing-dot" style={{ animationDelay: '150ms' }} />
         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-typing-dot" style={{ animationDelay: '300ms' }} />
@@ -212,41 +212,74 @@ function MessagesTab({
     }
   }, [selectedId])
 
-  // Conversation list from non-suggestion non-deleted messages — and only
-  // for clients in the `users` prop (which is already filtered to admin's
-  // direct clients by the parent).
+  // LOCKED May 30 2026 — iterate the MESSAGEABLE-USERS list (parent filter
+  // = !coach_id OR chat_enabled = true), not the messages array. Every
+  // messageable user appears in the sidebar even when there are zero
+  // messages with them, so the admin can initiate a chat directly from
+  // this page. Sort: users WITH messages first by last-activity DESC,
+  // then users WITHOUT messages alphabetical.
   const conversations = useMemo(() => {
-    const userMap = {}
-    users.forEach(u => { userMap[u.id] = u })
-
     const byUser = {}
     messages
       .filter(m => !m.is_suggestion && !m.deleted_at)
       .forEach(m => {
-        if (!userMap[m.user_id]) return // not in admin's direct roster — skip
         if (!byUser[m.user_id]) byUser[m.user_id] = []
         byUser[m.user_id].push(m)
       })
 
-    return Object.entries(byUser)
-      .map(([uid, msgs]) => {
-        const u = userMap[uid]
-        if (!u) return null
-        const last   = msgs[msgs.length - 1]
-        const unread = msgs.filter(m => !m.from_admin && !m.read).length
-        return { uid, user: u, last, unread, msgs }
-      })
-      .filter(Boolean)
-      .sort((a, b) => new Date(b.last.created_at) - new Date(a.last.created_at))
+    const rows = users.map(u => {
+      const msgs   = byUser[u.id] || []
+      const last   = msgs.length ? msgs[msgs.length - 1] : null
+      const unread = msgs.filter(m => !m.from_admin && !m.read).length
+      return { uid: u.id, user: u, last, unread, msgs }
+    })
+
+    return rows.sort((a, b) => {
+      if (a.last && b.last) return new Date(b.last.created_at) - new Date(a.last.created_at)
+      if (a.last && !b.last) return -1
+      if (!a.last && b.last) return 1
+      const an = (a.user.full_name || '').toLowerCase()
+      const bn = (b.user.full_name || '').toLowerCase()
+      return an.localeCompare(bn)
+    })
   }, [users, messages])
 
+  // ── Deep-link handler: ?userId=<id> auto-selects that conversation ───
+  // and focuses the composer. Fired from "Message athlete" / "Message coach"
+  // pills on AdminUserDetail. URL cleaned up after to prevent re-fire on
+  // refresh. Locked May 30 2026.
+  const deepLinkAppliedRef = useRef(false)
+  useEffect(() => {
+    if (deepLinkAppliedRef.current) return
+    if (users.length === 0) return
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const target = params.get('userId')
+      if (!target) { deepLinkAppliedRef.current = true; return }
+      const match = users.find(u => u.id === target)
+      if (match) {
+        setSelectedId(target)
+        setTimeout(() => inputRef.current?.focus(), 200)
+      }
+      window.history.replaceState({}, '', window.location.pathname)
+    } catch { /* no-op */ }
+    deepLinkAppliedRef.current = true
+  }, [users])
+
+  // Auto-mark client messages as read while their chat is OPEN. Runs on
+  // conversation switch AND on every new message that lands while the
+  // conversation is active. Without `messages` in the deps, the badge
+  // count on the left-sidebar row would increment every time a new client
+  // message arrived even though the admin is literally looking at the
+  // chat. The `!m.read` filter is the idempotency guard — already-read
+  // messages never get re-marked, so this is safe to run on every tick.
   useEffect(() => {
     if (!selectedId) return
     const unreadIds = messages
       .filter(m => m.user_id === selectedId && !m.from_admin && !m.read && !m.is_suggestion && !m.deleted_at)
       .map(m => m.id)
     if (unreadIds.length) onMarkRead(unreadIds)
-  }, [selectedId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedId, messages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Dedup + filter deleted at render
   const conversation = useMemo(() => {
@@ -306,6 +339,10 @@ function MessagesTab({
         user_id:       selectedId,
         from_admin:    true,
         sent_by:       adminUser?.id ?? null,
+        // partner_id partitions the conversation thread. For admin->client
+        // messages, the partner (non-client party) is the admin themselves
+        // — i.e. the current admin user. See Phase 4 migration (May 30 2026).
+        partner_id:    adminUser?.id ?? null,
         body:          trimmed,
         is_suggestion: false,
         read:          false,
@@ -364,11 +401,11 @@ function MessagesTab({
     return (
       <div className="rounded-xl border border-border bg-card py-16 text-center">
         <MessageCircle className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-        <p className="text-sm text-muted-foreground">No direct conversations yet</p>
+        <p className="text-sm text-muted-foreground">No clients you can chat with yet</p>
         <p className="text-xs text-muted-foreground/60 mt-1 max-w-md mx-auto leading-relaxed">
-          This page shows chats between you and clients you coach directly. Coach-attached
-          clients aren't shown here — their conversations are private to their coach. Use the
-          Exports page (sidebar → Exports) if you need a transcript for legal or safety review.
+          This page shows athletes you coach directly plus anyone whose <strong>Chat on</strong>{' '}
+          toggle you've enabled. Coach-only conversations stay private to their coach — use the
+          Exports page if you need a transcript for legal or safety review.
         </p>
       </div>
     )
@@ -407,9 +444,13 @@ function MessagesTab({
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{u.full_name || u.email}</p>
-                  <p className="truncate text-[11px] text-muted-foreground">{last.body}</p>
+                  <p className={`truncate text-[11px] text-muted-foreground ${last ? '' : 'italic'}`}>
+                    {last ? last.body : 'No messages yet'}
+                  </p>
                 </div>
-                <span className="shrink-0 text-[10px] text-muted-foreground/60">{formatTime(last.created_at)}</span>
+                <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                  {last ? formatTime(last.created_at) : ''}
+                </span>
               </button>
             )
           })}
@@ -486,7 +527,7 @@ function MessagesTab({
                         swipe
                         onDelete={() => onDeleteMessage(msg.id)}
                         className="max-w-[75%] rounded-2xl rounded-tl-sm"
-                        bg="bg-muted"
+                        bg="bg-[hsl(220_14%_22%)]"
                       >
                         <div className="px-3.5 py-2.5 text-sm text-foreground">
                           <p className="leading-relaxed whitespace-pre-wrap break-words">{msg.body}</p>
@@ -653,39 +694,69 @@ export default function AdminMessages() {
   const now = useNow()
   const presenceChannelRef = useRef(null)
 
-  // Admin's DIRECT clients — passed to Messages tab. Coach-attached
-  // clients are filtered OUT so the admin never sees those chats here.
-  // (The Exports page → Conversations tab can still pull them on demand.)
+  // Admin's MESSAGEABLE users — passed to Messages tab. Includes:
+  //   (a) Admin-LINKED athletes (coach_id = the signed-in admin's id).
+  //       Mirrors the coach rule: "linked athletes always appear in the
+  //       coach's messages window". Always shown regardless of toggle.
+  //   (b) Anyone where admin_chat_enabled = true. Admin can flip this on
+  //       for coaches, other-coach athletes, self-coached users, etc. to
+  //       open a support channel.
+  //
+  // Self-coached users (coach_id = null) NO LONGER appear automatically —
+  // they only show up if the admin explicitly enables chat with them.
+  // Locked May 30 2026 (Option A split): keys off admin_chat_enabled
+  // (admin-controlled) instead of chat_enabled (coach<->athlete only).
   const directUsers = useMemo(
-    () => allUsers.filter(u => !u.coach_id),
-    [allUsers]
+    () => allUsers.filter(u =>
+      u.coach_id === adminUser?.id ||
+      u.admin_chat_enabled === true
+    ),
+    [allUsers, adminUser?.id]
   )
 
   useEffect(() => {
+    // Need adminUser.id to scope the message read to the admin's thread
+    // (partner_id = adminUser.id). Without it the admin would see coach
+    // ↔ client messages bleeding into their view. Guard until auth is ready.
+    if (!adminUser?.id) return
     async function load() {
       const [usersRes, msgsRes] = await Promise.all([
         supabase.rpc('get_users_for_admin'),
-        // Soft-deleted messages are filtered out for everything except the
-        // Export tool, which uses a SECURITY DEFINER RPC.
+        // Chat v3 Phase 4 — scope to this admin's thread. partner_id is
+        // the non-client party in the conversation; for admin↔client it's
+        // the admin's own user.id. Soft-deleted rows are filtered out for
+        // everything except the Export tool (SECURITY DEFINER RPC).
         supabase
           .from('messages')
           .select('*')
+          .eq('partner_id', adminUser.id)
           .is('deleted_at', null)
           .order('created_at', { ascending: true }),
       ])
-      // The RPC doesn't return `coach_id`. We need it for the direct-clients
-      // filter, so fetch it separately. Cheap — single column from profiles.
+      // The RPC doesn't return `coach_id` or `admin_chat_enabled`. We need
+      // both for the messageable-users filter (line 666: coach_id = admin OR
+      // admin_chat_enabled = true), so fetch them separately. Cheap — two
+      // extra columns from profiles.
+      //
+      // admin_chat_enabled replaced chat_enabled here on May 30 2026 (Option
+      // A split). chat_enabled now exclusively gates coach<->athlete chat
+      // and is irrelevant to the admin's messages list.
       let coachIdById = {}
+      let adminChatEnabledById = {}
       if ((usersRes.data || []).length > 0) {
         const { data: coachLink } = await supabase
           .from('profiles')
-          .select('id, coach_id')
+          .select('id, coach_id, admin_chat_enabled')
           .in('id', usersRes.data.map(u => u.id))
-        ;(coachLink || []).forEach(r => { coachIdById[r.id] = r.coach_id || null })
+        ;(coachLink || []).forEach(r => {
+          coachIdById[r.id] = r.coach_id || null
+          adminChatEnabledById[r.id] = r.admin_chat_enabled === true
+        })
       }
       const enrichedUsers = (usersRes.data || []).map(u => ({
         ...u,
         coach_id: coachIdById[u.id] ?? null,
+        admin_chat_enabled: adminChatEnabledById[u.id] === true,
       }))
       setAllUsers(enrichedUsers)
       setMessages(msgsRes.data || [])
@@ -697,13 +768,16 @@ export default function AdminMessages() {
       .channel('admin-messages-all')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
         const m = payload.new
+        // Chat v3 Phase 4 — drop coach↔client messages that aren't part
+        // of this admin's thread. partner_id holds the non-client party id.
+        if (m.partner_id !== adminUser.id) return
         if (m.deleted_at) return
         setMessages(prev => prev.some(x => x.id === m.id) ? prev : [...prev, m])
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, payload => {
         const m = payload.new
+        if (m.partner_id !== adminUser.id) return
         if (m.deleted_at) {
-          // Soft delete arrived — remove from local state so it disappears from UI.
           setMessages(prev => prev.filter(x => x.id !== m.id))
         } else {
           setMessages(prev => prev.map(x => x.id === m.id ? m : x))
@@ -720,12 +794,15 @@ export default function AdminMessages() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [])
+  }, [adminUser?.id])
 
   // Presence channel for selected conversation (same shape as CoachMessages).
   useEffect(() => {
     if (!selectedId || !adminUser?.id) return
-    const channel = supabase.channel(`presence-chat-${selectedId}`, {
+    // Chat v3 Phase 4b — partner-kind suffix partitions presence so admin
+    // + coach chats for the same client never collide. Mobile counterpart
+    // joins `presence-chat-${user.id}-admin` for the same client.
+    const channel = supabase.channel(`presence-chat-${selectedId}-admin`, {
       config: { presence: { key: adminUser.id } },
     })
     channel

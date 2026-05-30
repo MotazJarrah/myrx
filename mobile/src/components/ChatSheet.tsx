@@ -42,7 +42,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight'
-import { X, Send, MessageCircle, Check } from 'lucide-react-native'
+import { X, Send, MessageCircle, Check, ChevronLeft } from 'lucide-react-native'
 import Animated, {
   SlideOutRight, SlideOutLeft, LinearTransition,
   useSharedValue, useAnimatedStyle, withRepeat, withTiming, withDelay, withSequence, Easing, runOnJS,
@@ -54,7 +54,7 @@ import { uniqueChannelName } from '../lib/realtime'
 import { useAuth } from '../contexts/AuthContext'
 import MessageActions from './MessageActions'
 import { getEnterToSend } from '../lib/chatPrefs'
-import { colors, alpha, palette } from '../theme'
+import { colors, alpha, palette, fonts } from '../theme'
 
 // (Removed May 28 2026 — ONLINE_WINDOW_MS) "Active now" used to fall back
 // to a 5-min last_seen_at window when the coach wasn't in the presence
@@ -181,6 +181,9 @@ interface Message {
   is_suggestion: boolean
   read: boolean
   created_at: string
+  // Conversation thread partition (Chat v3 Phase 4). Coach + admin threads
+  // for the same client share user_id but differ by partner_id.
+  partner_id?: string | null
   // Soft-delete columns (added May 28 2026) — when deleted_at is non-null,
   // the row is preserved in the DB for legal export but hidden from UI.
   deleted_at?: string | null
@@ -196,27 +199,63 @@ interface Message {
   edited_by?: string | null
 }
 
-interface CoachInfo {
-  full_name?: string | null
-  avatar_url?: string | null
-  last_seen_at?: string | null
-  share_online_status?: boolean
+// ChatPartner — the non-client party on one side of a conversation. Mobile
+// resolves this via get_chat_partners() RPC and ChatHub picks ONE active
+// partner before mounting ChatSheet. Shared shape exported for the wrapper.
+export interface ChatPartner {
+  kind: 'coach' | 'admin'
+  id: string
+  full_name: string | null
+  avatar_url: string | null
+  last_seen_at: string | null
+  share_online_status: boolean
+  share_last_seen: boolean
+  // Per-partner unread message count — Chat v3 (May 30 2026). Used by
+  // ChatHub to render a badge on each conversation-list row so the user
+  // knows which thread the global chat-button badge belongs to.
+  unread_count?: number
 }
 
 interface Props {
   isOpen: boolean
   onClose: () => void
+  // Chat v3 Phase 4b: required. ChatSheet no longer auto-fetches its
+  // counterparty — ChatHub does that and re-mounts ChatSheet for each
+  // partner when there are two active. One ChatSheet instance = one thread.
+  partner: ChatPartner
+  // Optional back arrow shown when ChatHub has a list view above this chat
+  // (the 2-partner case). When omitted, drag-down close is the only exit.
+  onBack?: () => void
+  // Chat v3 Phase 5 (May 30 2026): the other party has CLOSED this chat
+  // (admin toggled admin_chat_enabled off). The transcript stays mounted
+  // so the user can read remaining messages, but the send input is
+  // disabled and a banner appears above it explaining the state. Only
+  // way out is to close the drawer; once closed, ChatHub re-fetches
+  // partners and admin drops out (unless unread persists).
+  sendDisabled?: boolean
 }
 
-export default function ChatSheet({ isOpen, onClose }: Props) {
+export default function ChatSheet({ isOpen, onClose, partner, onBack, sendDisabled }: Props) {
   const { user } = useAuth()
   const [messages,    setMessages]    = useState<Message[]>([])
   const [body,        setBody]        = useState('')
   const [sending,     setSending]     = useState(false)
   const [enterToSend, setEnterToSend] = useState(true)
   const [editingId,   setEditingId]   = useState<string | null>(null)
-  const [coach,       setCoach]       = useState<CoachInfo>({})
   const [inputHeight, setInputHeight] = useState(40)
+
+  // Header chrome derived from the partner prop. Strip "Coach " prefix +
+  // first-name only — mirrors the web Coach<->client display convention.
+  const coach = useMemo(() => {
+    const raw = partner.full_name ?? ''
+    const firstName = raw.replace(/^coach\s+/i, '').trim().split(' ')[0] ?? ''
+    return {
+      full_name:           firstName,
+      avatar_url:          partner.avatar_url,
+      last_seen_at:        partner.last_seen_at,
+      share_online_status: partner.share_online_status,
+    }
+  }, [partner.full_name, partner.avatar_url, partner.last_seen_at, partner.share_online_status])
   // Live soft-keyboard height. The sheet shifts up by this amount via
   // `marginBottom: kbHeight` so the input bar at the bottom of the
   // sheet sits just above the keyboard — same physical layout as
@@ -255,6 +294,17 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
   const [adminLeftAt,  setAdminLeftAt]  = useState<number | null>(null)
   const presenceChannelRef = useRef<RealtimeChannel | null>(null)
 
+  // partner.id / partner.kind come from props (set by ChatHub). Local vars
+  // for ergonomic access throughout the component.
+  const partnerId   = partner.id
+  const partnerKind = partner.kind
+
+  // Live last_seen_at — the partner prop's value is captured at ChatHub
+  // fetch time and goes stale fast. Subscribing to the partner's profile
+  // row keeps "Last seen" subtitles fresh as their heartbeat fires
+  // (every 60s while their tab is visible).
+  const [livePartnerLastSeen, setLivePartnerLastSeen] = useState<string | null>(partner.last_seen_at ?? null)
+
   // ── Hydrate enterToSend pref each open ──────────────────────────────────
   useEffect(() => {
     if (isOpen) getEnterToSend().then(setEnterToSend)
@@ -276,21 +326,48 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
     return () => clearTimeout(t)
   }, [isOpen])
 
-  // ── Coach info (one-shot fetch on first open) ───────────────────────────
+  // Coach + partner info come from the partner prop now — no RPC fetches
+  // needed here. ChatHub resolves the partner before mounting ChatSheet.
+
+  // ── Live partner-profile sub for last_seen_at + share_* freshness ─────
+  // Subscribes to UPDATE events on the partner's profiles row so when
+  // their heartbeat writes last_seen_at (every 60s while their tab is
+  // visible), the "Last seen X" subtitle updates in place. Also re-reads
+  // the row on mount so the value is fresh on every drawer open (the
+  // partner prop carries a snapshot taken at ChatHub fetch time, which
+  // can be minutes stale on subsequent re-mounts).
   useEffect(() => {
     if (!isOpen) return
     let mounted = true
-    supabase.rpc('get_coach_info').then(({ data }) => {
-      if (!mounted || !data) return
-      const info = data as CoachInfo
-      // Strip "Coach " prefix from full_name and keep just the first name —
-      // matches web's identical transformation.
-      let name = info.full_name ?? ''
-      name = name.replace(/^coach\s+/i, '').trim().split(' ')[0] ?? ''
-      setCoach({ ...info, full_name: name })
-    })
-    return () => { mounted = false }
-  }, [isOpen])
+
+    supabase
+      .from('profiles')
+      .select('last_seen_at')
+      .eq('id', partner.id)
+      .single()
+      .then(({ data }) => {
+        if (mounted && data) setLivePartnerLastSeen(data.last_seen_at)
+      })
+
+    const ch = supabase
+      .channel(`partner-profile-${partner.id}-${partnerKind}`)
+      .on('postgres_changes', {
+        event:  'UPDATE',
+        schema: 'public',
+        table:  'profiles',
+        filter: `id=eq.${partner.id}`,
+      }, payload => {
+        if (!mounted) return
+        const next = (payload.new as { last_seen_at?: string | null }).last_seen_at ?? null
+        setLivePartnerLastSeen(next)
+      })
+      .subscribe()
+
+    return () => {
+      mounted = false
+      supabase.removeChannel(ch)
+    }
+  }, [isOpen, partner.id, partnerKind])
 
   // ── Load messages + subscribe to changes ────────────────────────────────
   useEffect(() => {
@@ -309,11 +386,15 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
     // window could leave one stuck unread (its fire-and-forget update
     // raced the badge subscription's recount and lost). Sweeping ALL
     // unread on every INSERT is race-proof.
+    // partner_id-scoped reads + writes (Chat v3 Phase 4b). Every query
+    // filters by partner.id so the coach thread and admin thread are
+    // strictly separated when both are active for the same client.
     async function markAllRead() {
       const { error } = await supabase
         .from('messages')
         .update({ read: true })
         .eq('user_id', user!.id)
+        .eq('partner_id', partnerId)
         .eq('from_admin', true)
         .eq('read', false)
         .is('deleted_at', null)
@@ -321,12 +402,11 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
     }
 
     async function load() {
-      // Skip soft-deleted messages — the Exports tool on admin
-      // side is the only place that reads them, via SECURITY DEFINER RPC.
       const { data } = await supabase
         .from('messages')
         .select('*')
         .eq('user_id', user!.id)
+        .eq('partner_id', partnerId)
         .eq('is_suggestion', false)
         .is('deleted_at', null)
         .order('created_at', { ascending: true })
@@ -335,6 +415,10 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
     }
     load()
 
+    // Supabase realtime postgres_changes only supports a SINGLE column
+    // equality filter at the wire level. We filter by user_id at the wire
+    // and then drop rows where partner_id != ours in the JS callback. Cheap
+    // — admin chat traffic for the same user is rare.
     const channel = supabase
       .channel(uniqueChannelName('chat-client', user.id))
       .on('postgres_changes', {
@@ -345,14 +429,9 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
       }, payload => {
         const newRow = payload.new as Message
         if (newRow.is_suggestion) return
-        if (newRow.deleted_at) return // defensive — never show soft-deleted
+        if (newRow.deleted_at) return
+        if (newRow.partner_id !== partnerId) return // other thread
         setMessages(prev => prev.some(m => m.id === newRow.id) ? prev : [...prev, newRow])
-        // If a fresh admin/coach message arrives while we're open,
-        // sweep all unread (not just newRow.id) so we don't miss any
-        // sibling messages that landed in the same realtime burst.
-        // Awaited via .then() so a console.warn surfaces on RLS / net
-        // failure — silent failures here are how stuck-unread badges
-        // happen.
         if (newRow.from_admin && !newRow.read) {
           markAllRead().catch(e => console.warn('[chat] insert-mark-read threw:', e?.message))
         }
@@ -365,8 +444,7 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
       }, payload => {
         const upd = payload.new as Message
         if (upd.is_suggestion) return
-        // Soft-delete arrived from anywhere (admin web, coach web, or this
-        // client's own swipe-delete) — drop from local state so UI hides it.
+        if (upd.partner_id !== partnerId) return
         if (upd.deleted_at) {
           setMessages(prev => prev.filter(m => m.id !== upd.id))
           return
@@ -379,6 +457,9 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
         table: 'messages',
         filter: `user_id=eq.${user.id}`,
       }, payload => {
+        // DELETE payloads only carry the row id, not partner_id. Cheap
+        // O(1) filter — if the id matches a row in our partner-scoped
+        // list, drop it; otherwise no-op (was the other thread's row).
         setMessages(prev => prev.filter(m => m.id !== (payload.old as { id: string }).id))
       })
       .subscribe()
@@ -395,20 +476,25 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
       // fine; the component is unmounting either way.
       markAllRead().catch(e => console.warn('[chat] close-sweep mark-read failed:', e?.message))
     }
-    // Depend on user?.id rather than the user object — AuthContext often
-    // re-renders with a new user reference even when the underlying ID is
-    // unchanged, which would tear down + recreate the channel and (in the
-    // small overlap window) deliver the same INSERT twice.
-  }, [isOpen, user?.id])
+    // Depend on partnerId too: when ChatHub re-mounts ChatSheet with a
+    // different partner, all the message state has to rebuild for that
+    // thread (different load + different subscription filter).
+  }, [isOpen, user?.id, partnerId])
 
   // ── Typing presence channel ────────────────────────────────────────────
-  // Both sides of the chat share `presence-chat-${user.id}`. Each side
-  // tracks its presence with a `from_admin` flag + a `typing` boolean.
-  // When the OTHER side flips its typing flag we update local state so
-  // the typing bubble appears/disappears.
+  // Both sides of the chat share `presence-chat-${user.id}-${partnerKind}`.
+  // The partnerKind suffix is required (Chat v3 Phase 4b, May 30 2026):
+  // without it, the coach's presence + typing broadcasts would land in
+  // the same channel as the admin's, and the client would see "Active now"
+  // / typing indicators from one party leak into the other party's chat.
+  //
+  // Web counterparts MUST join the same suffixed name — CoachMessages
+  // joins `presence-chat-${selectedId}-coach`, AdminMessages joins
+  // `presence-chat-${selectedId}-admin`. Bare `presence-chat-${userId}`
+  // is no longer used.
   useEffect(() => {
     if (!isOpen || !user) return
-    const channel = supabase.channel(uniqueChannelName('presence-chat', user.id), {
+    const channel = supabase.channel(`presence-chat-${user.id}-${partnerKind}`, {
       config: { presence: { key: user.id } },
     })
     // Channel splits responsibilities:
@@ -449,7 +535,7 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
       presenceChannelRef.current = null
       supabase.removeChannel(channel)
     }
-  }, [isOpen, user?.id])
+  }, [isOpen, user?.id, partnerKind])
 
   // ── User-side typing broadcast ─────────────────────────────────────────
   // 100 ms debounced 'typing' broadcast so rapid keystroke bursts coalesce
@@ -538,6 +624,11 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
   // ── Send / save ─────────────────────────────────────────────────────────
   const submit = useCallback(async () => {
     if (submittingRef.current) return
+    // Chat v3 Phase 5 guard: the other party has closed this chat. The
+    // input is disabled at the UI layer too, but this is the source of
+    // truth — even if a stale send fires (Enter-key intercept after the
+    // disable flip), it bails out before hitting the DB.
+    if (sendDisabled) return
     const trimmed = body.trim()
     if (!trimmed || !user) return
     submittingRef.current = true
@@ -569,13 +660,15 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
           .update({ body: trimmed, edited_at: editedAt, edited_by: user.id })
           .eq('id', wasEditing)
       } else {
-        // sent_by carries the athlete's own user_id so admin exports can
-        // attribute messages to a specific person if the athlete's account
-        // is ever transferred. Mirrors web's CoachMessages + AdminMessages.
+        // sent_by carries the athlete's own user_id (audit trail).
+        // partner_id partitions the conversation thread — see Phase 4
+        // migration. partner.id is always defined since the partner prop
+        // is required.
         await supabase.from('messages').insert({
           user_id:       user.id,
           from_admin:    false,
           sent_by:       user.id,
+          partner_id:    partner.id,
           body:          trimmed,
           is_suggestion: false,
           read:          false,
@@ -585,7 +678,7 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
       submittingRef.current = false
       setSending(false)
     }
-  }, [body, user, editingId])
+  }, [body, user, editingId, partner.id, sendDisabled])
 
   const handleEditStart = useCallback((m: Message) => {
     setEditingId(m.id)
@@ -650,9 +743,14 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
   }, [coach, adminPresent])
 
   // Last-seen subtitle source — adminLeftAt (this-session disconnect)
-  // wins over coach.last_seen_at so "Last seen just now" appears instantly
-  // when admin closes their tab.
-  const lastSeenTs = adminLeftAt ?? (coach.last_seen_at ? new Date(coach.last_seen_at).getTime() : null)
+  // wins over live last_seen_at so "Last seen just now" appears instantly
+  // when admin closes their tab. Live last_seen_at is refreshed by the
+  // partner-profile realtime sub below, so even across drawer close/open
+  // cycles the value reflects the partner's most recent heartbeat (which
+  // fires every 60s while their tab is visible).
+  const lastSeenTs = adminLeftAt ?? (livePartnerLastSeen
+    ? new Date(livePartnerLastSeen).getTime()
+    : (coach.last_seen_at ? new Date(coach.last_seen_at).getTime() : null))
 
   // ── Track scroll offset so we know if user is near the bottom ──────────
   // For inverted FlatList, contentOffset.y = 0 is the visual bottom (latest
@@ -743,7 +841,12 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
   }, [onClose, screenH, dragY])
 
   // ── Render ──────────────────────────────────────────────────────────────
-  const coachDisplayName = coach.full_name ? `Coach ${coach.full_name}` : 'Coach'
+  // Chat v3 Phase 4b — prefix depends on partner kind. Coach threads read
+  // "Coach Firstname"; admin threads read "Admin Firstname". Was hardcoded
+  // "Coach" prior to multi-partner support — labelled the admin partner
+  // as "Coach Taz" because the prefix wasn't kind-aware.
+  const partnerKindLabel  = partnerKind === 'admin' ? 'Admin' : 'Coach'
+  const coachDisplayName  = coach.full_name ? `${partnerKindLabel} ${coach.full_name}` : partnerKindLabel
 
   return (
     <Modal
@@ -866,6 +969,19 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
                   <View style={s.dragHandlePill} />
                 </View>
                 <View style={s.header}>
+                  {/* Back arrow — only rendered when ChatHub provides
+                      onBack (the 2-partner case where there's a list
+                      view above this chat). Tap returns to the chat
+                      list without dismissing the drawer. */}
+                  {onBack ? (
+                    <Pressable
+                      onPress={onBack}
+                      hitSlop={12}
+                      style={s.backBtn}
+                    >
+                      <ChevronLeft size={22} color={colors.foreground} />
+                    </Pressable>
+                  ) : null}
                   <View style={s.headerLeft}>
                     <View style={s.avatarWrap}>
                       {coach.avatar_url ? (
@@ -899,7 +1015,9 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
                 <View style={s.emptyIcon}>
                   <MessageCircle size={20} color={colors.mutedForeground} />
                 </View>
-                <Text style={s.emptyTitle}>Start a conversation with your coach</Text>
+                <Text style={s.emptyTitle}>
+                  Start a conversation with your {partnerKind === 'admin' ? 'admin' : 'coach'}
+                </Text>
                 <Text style={s.emptySub}>Ask questions, share updates, or request feedback</Text>
               </View>
             ) : (
@@ -1003,37 +1121,48 @@ export default function ChatSheet({ isOpen, onClose }: Props) {
               </View>
             ) : null}
 
+            {/* Chat-closed banner (Chat v3 Phase 5) — admin has toggled
+                chat off but the transcript is still visible because the
+                user is reading. Send is disabled; closing the drawer
+                drops the chat from the partner list on next open. */}
+            {sendDisabled ? (
+              <View style={s.closedBanner}>
+                <Text style={s.closedBannerText}>Conversation ended</Text>
+              </View>
+            ) : null}
+
             {/* Input bar — WhatsApp-style pill + separate circular send btn.
                 Floats at the bottom of the messages area with no top border
                 or "Enter to send" hint, so the pill reads as a free-standing
                 control above the keyboard. */}
             <View style={s.inputArea}>
-              <View style={s.inputPill}>
+              <View style={[s.inputPill, sendDisabled && s.inputPillDisabled]}>
                 <TextInput
                   ref={inputRef}
                   value={body}
                   onChangeText={handleChangeText}
                   onContentSizeChange={handleContentSizeChange}
                   multiline
-                  placeholder="Type a message…"
+                  editable={!sendDisabled}
+                  placeholder={sendDisabled ? 'Chat closed' : 'Type a message…'}
                   placeholderTextColor={alpha(colors.mutedForeground, 0.5)}
                   style={[s.input, { height: inputHeight }]}
                 />
               </View>
               <Pressable
                 onPress={submit}
-                disabled={!body.trim() || sending}
+                disabled={!body.trim() || sending || sendDisabled}
                 style={[
                   s.sendBtnBig,
-                  body.trim() && !sending ? s.sendBtnBigActive : s.sendBtnBigIdle,
+                  body.trim() && !sending && !sendDisabled ? s.sendBtnBigActive : s.sendBtnBigIdle,
                 ]}
               >
                 {sending ? (
                   <ActivityIndicator size="small" color={colors.primaryForeground} />
                 ) : editingId ? (
-                  <Check size={18} color={body.trim() ? colors.primaryForeground : alpha(colors.mutedForeground, 0.5)} />
+                  <Check size={18} color={body.trim() && !sendDisabled ? colors.primaryForeground : alpha(colors.mutedForeground, 0.5)} />
                 ) : (
-                  <Send size={18} color={body.trim() ? colors.primaryForeground : alpha(colors.mutedForeground, 0.5)} />
+                  <Send size={18} color={body.trim() && !sendDisabled ? colors.primaryForeground : alpha(colors.mutedForeground, 0.5)} />
                 )}
               </Pressable>
             </View>
@@ -1098,7 +1227,15 @@ const s = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 12,
     borderBottomWidth: 1, borderBottomColor: colors.border,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  // Back arrow (Chat v3 Phase 4b) — only renders when ChatHub passes
+  // onBack, i.e. the 2-partner case where a list view sits above this
+  // chat. Tap returns to the list without dismissing the drawer.
+  backBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+    marginRight: 4,
+  },
 
   // Avatar with online dot overlay
   avatarWrap: { position: 'relative' },
@@ -1191,11 +1328,13 @@ const s = StyleSheet.create({
     // itself — siblings-of-the-extension is what RN's stacking cares about.
   },
   bubbleTheirs: {
-    // Solid muted (no alpha) — matches web's `bg-muted` exactly.
-    // Was alpha 0.80, which let the red of the tucked-under delete extension
-    // bleed through the bubble background. Web is fully opaque, so the
-    // extension stays cleanly hidden behind the bubble.
-    backgroundColor: colors.muted,
+    // Chat-specific contrast — colors.muted (hsl 220 10% 12%) is only 2%
+    // lighter than the background (hsl 220 28% 10%) post brand-palette
+    // sweep, which made incoming bubbles nearly invisible. Use an explicit
+    // hsl(220 14% 22%) for a 12% lightness gap that reads as a definitive
+    // bubble while staying inside the brand hue family. Matches web's
+    // bg-[hsl(220_14%_22%)] in CoachMessages / AdminMessages / ChatDrawer.
+    backgroundColor: 'hsl(220, 14%, 22%)',
     borderRadius: 16,
     borderBottomLeftRadius: 4,
   },
@@ -1240,8 +1379,9 @@ const s = StyleSheet.create({
   typingBubble: {
     flexDirection: 'row', gap: 4,
     paddingHorizontal: 14, paddingVertical: 10,
-    // Solid muted (matches web's bg-muted + matches the new bubbleTheirs).
-    backgroundColor: colors.muted,
+    // Match bubbleTheirs exactly so the typing dots feel like a "ghost"
+    // version of the next incoming bubble (same chrome, no text yet).
+    backgroundColor: 'hsl(220, 14%, 22%)',
     borderRadius: 16,
     borderBottomLeftRadius: 4,  // matches coach bubble's tail
   },
@@ -1258,6 +1398,23 @@ const s = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: alpha(colors.primary, 0.20),
   },
   editingBannerText: { color: colors.foreground, fontSize: 12 },
+
+  // Closed-chat banner (Chat v3 Phase 5) — read-only state when the other
+  // party has toggled chat off but messages are still visible.
+  closedBanner: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    backgroundColor: alpha(colors.mutedForeground, 0.10),
+    borderTopWidth: 1, borderTopColor: alpha(colors.mutedForeground, 0.25),
+  },
+  closedBannerText: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    fontFamily: fonts.sans[500],
+    textAlign: 'center',
+  },
+  inputPillDisabled: {
+    opacity: 0.5,
+  },
 
   // Input area — WhatsApp-style: pill input + separate circular send button.
   // The pill is rounded full (radius matches half-height), padded for a chunky

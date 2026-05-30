@@ -128,9 +128,6 @@ interface Profile {
   last_seen_at: string | null
   share_online_status: boolean
   share_last_seen: boolean
-  // Whether chat with the coach is enabled for this user (admin-controlled
-  // — flips the chat icon visibility in the top bar).
-  chat_enabled: boolean
   // Coach attachment — when an athlete accepts a coach invite, this is set
   // to the coach's user id (which is also their profiles.id). NULL for
   // self-coached athletes, coaches, and admins. AcceptInviteModal reads

@@ -34,7 +34,12 @@
             {
               "scheme": "https",
               "host": "myrxfit.com",
-              "pathPrefix": "/auth"
+              "pathPrefix": "/auth/confirm"
+            },
+            {
+              "scheme": "https",
+              "host": "myrxfit.com",
+              "pathPrefix": "/auth/recovery"
             },
             {
               "scheme": "https",

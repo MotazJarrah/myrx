@@ -22,10 +22,22 @@
  * For now: a clean holding page that signals what's coming without
  * making any false promises.
  */
-import { Link } from 'wouter'
+import { Link, Redirect } from 'wouter'
 import { Smartphone } from 'lucide-react'
+import { useAuth } from '../contexts/AuthContext'
 
 export default function DownloadAppPlaceholder() {
+  // Coaches and admins must never see this athlete placeholder. They land
+  // here only via stale links, direct URL typing, or fallback redirects
+  // after stale sessions. Bounce them to their actual portal so a coach
+  // landing on /app doesn't see the "Download the MyRX app" pitch meant
+  // for athletes. Added May 30 2026 after Test Coach (motaz.j@prdxfit.com,
+  // elite tier) hit this page and reported they had no access. Athletes
+  // (no role flags) fall through to the placeholder JSX below.
+  const { profile } = useAuth()
+  if (profile?.is_superuser) return <Redirect to="/admin/overview" />
+  if (profile?.is_coach)     return <Redirect to="/coach/portal" />
+
   return (
     <div className="min-h-screen bg-background text-foreground flex items-center justify-center px-4">
       <div className="max-w-md w-full text-center space-y-6">

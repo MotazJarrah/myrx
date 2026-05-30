@@ -1,14 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link, useLocation } from 'wouter'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import {
   Dumbbell, Activity, Weight, Flame, History,
   LayoutDashboard, LogOut, Flower2, ShieldCheck,
-  MessageCircle, Lightbulb, Heart,
+  Lightbulb, Heart,
 } from 'lucide-react'
-import { supabase } from '../lib/supabase'
-import ChatDrawer from './ChatDrawer'
 import SuggestionDrawer from './SuggestionDrawer'
 
 const links = [
@@ -32,38 +30,17 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
   const { user, profile, signOut } = useAuth()
   const [location] = useLocation()
 
-  const [chatOpen,      setChatOpen]      = useState(false)
-  const [suggOpen,      setSuggOpen]      = useState(false)
-  const [unreadCount,   setUnreadCount]   = useState(0)
-
-  const chatEnabled = profile?.chat_enabled === true
+  const [suggOpen, setSuggOpen] = useState(false)
 
   const displayName = profile?.full_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || '?'
   const initial     = displayName[0]?.toUpperCase() ?? '?'
   const avatarUrl   = profile?.avatar_url
 
-  // ── Unread count ─────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!user || !chatEnabled) return
-
-    async function fetchUnread() {
-      const { count } = await supabase
-        .from('messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .eq('from_admin', true)
-        .eq('read', false)
-      setUnreadCount(count ?? 0)
-    }
-    fetchUnread()
-
-    const channel = supabase
-      .channel(`unread-client-${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `user_id=eq.${user.id}` }, () => fetchUnread())
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [user, chatEnabled])
+  // Chat button + drawer used to live here, gated on profile.chat_enabled.
+  // Removed during the chat v3 rebuild (May 30 2026, task #338). End-user
+  // web is a placeholder since the athlete web removal (task #202), and the
+  // chat UI lives on mobile end-user surfaces only. The Suggestion button
+  // stays for the rare admin-as-client view.
 
   return (
     <div className="min-h-dvh bg-background text-foreground">
@@ -137,21 +114,6 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
               <Lightbulb className="h-4 w-4" />
             </button>
           )}
-          {/* Chat button — only when chat_enabled */}
-          {chatEnabled && (
-            <button
-              onClick={() => setChatOpen(true)}
-              title="Chat with your coach"
-              className="relative flex h-9 w-9 items-center justify-center rounded-full border-2 border-primary text-primary bg-transparent hover:bg-primary/10 transition-colors"
-            >
-              <MessageCircle className="h-4 w-4" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[9px] font-bold text-destructive-foreground">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </button>
-          )}
           {isAdmin && onSwitchToAdminView && (
             <button
               onClick={onSwitchToAdminView}
@@ -210,28 +172,10 @@ export default function AppShell({ children, isAdmin = false, onSwitchToAdminVie
             <Lightbulb className="h-5 w-5" />
           </button>
         )}
-        {/* Chat button — only when chat_enabled */}
-        {chatEnabled && (
-          <button
-            onClick={() => setChatOpen(true)}
-            title="Chat with your coach"
-            className="relative flex h-12 w-12 items-center justify-center rounded-full border-2 border-primary text-primary bg-background shadow-lg hover:bg-primary/10 transition-colors"
-          >
-            {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
-                {unreadCount > 9 ? '9+' : unreadCount}
-              </span>
-            )}
-            <MessageCircle className="h-5 w-5" />
-          </button>
-        )}
       </div>
 
       {/* Drawers */}
       {!isAdmin && <SuggestionDrawer isOpen={suggOpen} onClose={() => setSuggOpen(false)} />}
-      {chatEnabled && (
-        <ChatDrawer isOpen={chatOpen} onClose={() => setChatOpen(false)} />
-      )}
     </div>
   )
 }

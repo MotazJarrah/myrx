@@ -136,7 +136,6 @@ export default function CoachClientDetail() {
   const [snapshotKey,   setSnapshotKey]   = useState(0)
   const [loading,       setLoading]       = useState(true)
   const [error,         setError]         = useState('')
-  const [togglingChat,  setTogglingChat]  = useState(false)
   const [togglingMgmt,  setTogglingMgmt]  = useState(false)
   const [mgmtError,     setMgmtError]     = useState('')
 
@@ -249,18 +248,6 @@ export default function CoachClientDetail() {
   }, [id, snapshotKey, coachProfile?.weight_unit])
 
   // ── Action handlers ────────────────────────────────────────────────────
-
-  async function toggleChat() {
-    if (togglingChat || !client) return
-    setTogglingChat(true)
-    const nextVal = !client.chat_enabled
-    const { error: err } = await supabase
-      .from('profiles')
-      .update({ chat_enabled: nextVal })
-      .eq('id', client.id)
-    if (!err) setClient(prev => ({ ...prev, chat_enabled: nextVal }))
-    setTogglingChat(false)
-  }
 
   async function toggleManaged() {
     if (togglingMgmt || !client) return
@@ -383,19 +370,20 @@ export default function CoachClientDetail() {
             )}
 
             <div className="flex flex-wrap items-center justify-end gap-1">
-              <button
-                onClick={toggleChat}
-                disabled={togglingChat}
-                title={client.chat_enabled ? 'Disable chat with this client' : 'Enable chat with this client'}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                  client.chat_enabled
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                    : 'border-border text-muted-foreground hover:border-border hover:text-muted-foreground'
-                } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <MessageCircle className="h-3 w-3" />
-                {client.chat_enabled ? 'Chat on' : 'Chat off'}
-              </button>
+              {/* Message athlete pill — deep-links to /coach/messages with this
+                  client pre-selected and the composer focused. Coach-client
+                  chat is unconditional under the v3 chat model (locked May 30
+                  2026), so this pill is always shown — no chat-on/off toggle
+                  exists on the coach side anymore. */}
+              <Link href={`/coach/messages?clientId=${client.id}`}>
+                <a
+                  title="Open chat with this client and start typing"
+                  className="inline-flex items-center gap-1 rounded-full bg-primary/15 border border-primary/40 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
+                >
+                  <MessageCircle className="h-3 w-3" />
+                  Message athlete
+                </a>
+              </Link>
 
               <button
                 onClick={toggleManaged}

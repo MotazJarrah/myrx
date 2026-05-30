@@ -700,12 +700,16 @@ export default function AdminUserDetail() {
   async function toggleChat() {
     if (togglingChat) return
     setTogglingChat(true)
-    const newVal = !profile.chat_enabled
+    // Writes admin_chat_enabled (Option A split, May 30 2026). The coach
+    // <-> athlete chat flag (chat_enabled) is separate — coaches manage it
+    // from their own CoachClientDetail page. Admin's chat surface is now
+    // fully decoupled from coach<->athlete chat state.
+    const newVal = !profile.admin_chat_enabled
     const { error } = await supabase
       .from('profiles')
-      .update({ chat_enabled: newVal })
+      .update({ admin_chat_enabled: newVal })
       .eq('id', id)
-    if (!error) setProfile(prev => ({ ...prev, chat_enabled: newVal }))
+    if (!error) setProfile(prev => ({ ...prev, admin_chat_enabled: newVal }))
     setTogglingChat(false)
   }
 
@@ -891,21 +895,45 @@ export default function AdminUserDetail() {
                 Hidden on anonymized accounts — the relationships no longer
                 exist (chat scrubbed of identity, plan ownership moot when
                 profile is wiped). Only the Deleted pill below remains. */}
-            {!profile.anonymized_at && (
-              <div className="flex flex-wrap items-center justify-end gap-1">
-                <button
-                  onClick={toggleChat}
-                  disabled={togglingChat}
-                  title={profile.chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
-                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                    profile.chat_enabled
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                      : 'border-border text-muted-foreground hover:border-border hover:text-muted-foreground'
-                  } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                >
-                  <MessageCircle className="h-3 w-3" />
-                  {profile.chat_enabled ? 'Chat on' : 'Chat off'}
-                </button>
+            {!profile.anonymized_at && (() => {
+              // Chat v3 (May 30 2026, Phase 3): when admin IS the coach for
+              // this athlete, chat is UNCONDITIONAL — no toggle, mirrors the
+              // coach-side rule that coach<->client chat is always on. For
+              // every other case (self-managed athlete, athlete coached by
+              // someone else, coach profile), admin can flip chat on/off
+              // per-client via admin_chat_enabled. The Message pill shows
+              // whenever admin has any active chat path with this user.
+              const isAdminTheCoach = profile.coach_id === adminUser?.id
+              const adminCanChat = isAdminTheCoach || profile.admin_chat_enabled === true
+              return (
+                <div className="flex flex-wrap items-center justify-end gap-1">
+                  {!isAdminTheCoach && (
+                    <button
+                      onClick={toggleChat}
+                      disabled={togglingChat}
+                      title={profile.admin_chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                        profile.admin_chat_enabled
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                          : 'border-border text-muted-foreground hover:border-border hover:text-muted-foreground'
+                      } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <MessageCircle className="h-3 w-3" />
+                      {profile.admin_chat_enabled ? 'Chat on' : 'Chat off'}
+                    </button>
+                  )}
+
+                  {adminCanChat && (
+                    <Link href={`/admin/messages?userId=${profile.id}`}>
+                      <a
+                        title="Open chat with this user and start typing"
+                        className="inline-flex items-center gap-1 rounded-full bg-primary/15 border border-primary/40 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
+                      >
+                        <MessageCircle className="h-3 w-3" />
+                        {profile.is_coach ? 'Message coach' : 'Message athlete'}
+                      </a>
+                    </Link>
+                  )}
 
                 {/* Coaching chip — interactive 3-state switcher (Self /
                     Coach / Admin-managed) + B2C tier picker. Replaces the
@@ -922,7 +950,8 @@ export default function AdminUserDetail() {
                   }
                 />
               </div>
-            )}
+              )
+            })()}
 
             {/* Row 3 — Account actions (Active/Inactive + Settings + Delete).
                 Less prominent than the relationship toggles — these are

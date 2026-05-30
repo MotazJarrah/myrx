@@ -130,7 +130,7 @@ export default function CoachInviteCodeCard() {
         style={[s.submitBtn, (busy || !input.trim()) && s.submitBtnDisabled]}
       >
         {busy
-          ? <ActivityIndicator size="small" color="#0a0a0a" />
+          ? <ActivityIndicator size="small" color={colors.background} />
           : <Text style={s.submitBtnText}>Attach to coach</Text>}
       </Pressable>
     </View>
@@ -230,6 +230,6 @@ const s = StyleSheet.create({
   submitBtnText: {
     fontFamily: fonts.sans[700],
     fontSize: 14,
-    color: '#0a0a0a',
+    color: colors.background,
   },
 })

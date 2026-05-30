@@ -200,8 +200,17 @@ function resolveTier(profile: {
   b2c_subscription_tier?: 'free' | 'corerx' | 'fullrx' | null
   coach_id?:              string | null
   is_superuser?:          boolean
+  is_coach?:              boolean
 }): Tier {
   if (profile.is_superuser === true) return 'fullrx'
+  // Coaches are humans who also work out — their paid coach subscription
+  // (starter / pro / elite) bundles in full personal-use access. They
+  // don't separately pay for a B2C tier, so b2c_subscription_tier is
+  // typically null. Without this branch, coaches fall through to 'free'
+  // and only Strength + Cardio + Dashboard unlock. Added May 30 2026
+  // after Test Coach (motaz.j@prdxfit.com, elite tier) appeared with
+  // 5 of 8 radial icons padlocked.
+  if (profile.is_coach === true)     return 'fullrx'
   if (profile.coach_id)              return 'fullrx'
   return (profile.b2c_subscription_tier as Tier | null) ?? 'free'
 }

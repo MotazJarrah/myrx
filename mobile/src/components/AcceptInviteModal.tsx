@@ -584,13 +584,13 @@ const s = StyleSheet.create({
   primaryBtnText: {
     fontFamily: fonts.sans[700],
     fontSize: 15,
-    color: '#0a0a0a',
+    color: colors.background,
   },
   swapBtnStyle: {
     backgroundColor: palette.amber[400],
   },
   swapBtnText: {
-    color: '#0a0a0a',
+    color: colors.background,
   },
   secondaryBtn: {
     backgroundColor: alpha(colors.input, 0.5),
