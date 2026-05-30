@@ -275,6 +275,29 @@ export async function syncRecent(daysBack: number = 7): Promise<SyncSummary> {
     return blankSummary(daysBack, ['not_signed_in'])
   }
 
+  // Cross-user bleed guard (May 30 2026, task #346).
+  // The native Samsung Health SDK reads from the device's Samsung Health
+  // app regardless of which Supabase user is signed in. If the user
+  // signs in as a DIFFERENT account on the same phone (e.g. Test Client
+  // on a device where the primary account granted Samsung Health), the
+  // sync would otherwise attribute HR / steps / workouts to that other
+  // user — polluting their dashboards with bleed-through data they
+  // never authorized. Only sync when this user has explicitly granted
+  // Samsung Health (their user_integrations row exists). When absent,
+  // return early without touching any read or write path.
+  const { data: integ, error: integErr } = await supabase
+    .from('user_integrations')
+    .select('user_id')
+    .eq('user_id', userId)
+    .eq('platform', 'samsung_health')
+    .maybeSingle()
+  if (integErr) {
+    return blankSummary(daysBack, [`integration_check: ${errorMessage(integErr)}`])
+  }
+  if (!integ) {
+    return blankSummary(daysBack, ['not_authorized_for_this_user'])
+  }
+
   const endMs   = Date.now()
   const startMs = endMs - daysBack * 24 * 60 * 60 * 1000
   const startIso = new Date(startMs).toISOString()
