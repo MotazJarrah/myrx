@@ -8,28 +8,41 @@
  */
 
 // ── Raw HSL strings (dark mode — matches web's .dark CSS class) ──────────────
+//
+// MyRX Brand Palette (LOCKED — May 29 2026, see branding/BRAND.md):
+//   MyRX Lime       #CAF240  hsl(73°, 87%, 60%)    — primary accent
+//   MyRX Dark       #121721  hsl(220°, 28%, 10%)   — background
+//   MyRX Surface    #171C26  hsl(220°, 24%, 12%)   — elevated surface
+//   MyRX Foreground #F4F3EF  hsl(60°, 5%, 96%)     — text on dark
+//
+// Neutrals on H=220 (blue) sit near-complementary to the lime (H=73,
+// yellow-green), ~147° apart on the color wheel — that hue separation
+// makes the lime POP against the dark surface. Saturation (28% BG /
+// 24% card) is the lever that makes the dark read as blue, not grey.
+// Pure black and pure white are banned on dark surfaces — always use
+// these tokens.
 const HSL = {
-  background:        'hsl(220, 12%, 6%)',
+  background:        'hsl(220, 28%, 10%)',
   foreground:        'hsl(60, 5%, 96%)',
   border:            'hsl(220, 8%, 16%)',
-  card:              'hsl(220, 12%, 8%)',
+  card:              'hsl(220, 24%, 12%)',
   cardForeground:    'hsl(60, 5%, 96%)',
-  sidebar:           'hsl(220, 12%, 7%)',
+  sidebar:           'hsl(220, 26%, 11%)',
   sidebarForeground: 'hsl(60, 5%, 96%)',
   sidebarBorder:     'hsl(220, 8%, 14%)',
-  sidebarPrimary:    'hsl(80, 95%, 55%)',
-  primary:           'hsl(80, 95%, 55%)',     // electric lime
-  primaryForeground: 'hsl(220, 14%, 6%)',
+  sidebarPrimary:    'hsl(73, 87%, 60%)',
+  primary:           'hsl(73, 87%, 60%)',     // MyRX Lime #CAF240 (LOCKED)
+  primaryForeground: 'hsl(220, 28%, 10%)',
   secondary:         'hsl(220, 10%, 14%)',
   secondaryForeground:'hsl(60, 5%, 96%)',
   muted:             'hsl(220, 10%, 12%)',
-  mutedForeground:   'hsl(220, 6%, 62%)',
+  mutedForeground:   'hsl(220, 5%, 62%)',
   accent:            'hsl(220, 10%, 16%)',
   accentForeground:  'hsl(60, 5%, 96%)',
   destructive:       'hsl(0, 72%, 58%)',
   destructiveForeground:'hsl(0, 0%, 98%)',
   input:             'hsl(220, 10%, 22%)',
-  ring:              'hsl(80, 95%, 55%)',
+  ring:              'hsl(73, 87%, 60%)',
 } as const
 
 /** Apply alpha to any hsl(...) token — returns hsla(...) string (RN-supported). */
@@ -44,6 +57,16 @@ export const colors = HSL
 // Hex values straight from Tailwind's default palette so `bg-blue-500/10` etc.
 // translate exactly. Use `alpha()` on these hexes via the `withAlpha()` helper.
 export const palette = {
+  // MyRX brand colors (locked — see branding/BRAND.md). Use these instead
+  // of palette.green/lime/emerald whenever a surface is brand-led (CTAs,
+  // accept flows, brand chrome). Semantic emerald (palette.emerald) stays
+  // for "save succeeded" / "data persisted" — different semantic.
+  myrx: {
+    lime:       '#CAF240',  // primary accent (LOCKED)
+    dark:       '#121721',  // background (LOCKED)
+    surface:    '#171C26',  // elevated surface (LOCKED)
+    foreground: '#F4F3EF',  // text on dark (LOCKED)
+  },
   blue:    { 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb' },
   amber:   { 300: '#fcd34d', 400: '#fbbf24', 500: '#f59e0b', 600: '#d97706' },
   emerald: { 300: '#6ee7b7', 400: '#34d399', 500: '#10b981' },

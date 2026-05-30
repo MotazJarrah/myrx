@@ -478,10 +478,15 @@ export default function HeartPage() {
         await fetchData()
         if (cancelled) return
         setLoading(false)
-        // Foreground sync of today's data. Don't block the initial render —
-        // if it surfaces new rows we re-fetch and the page reactively updates.
+        // Foreground sync covering the full 7-day display window. Earlier this
+        // was a 1-day sync ("today only is what changes most often"), which
+        // turned out to silently miss whole days for users who didn't open the
+        // tab daily — Samsung kept the data but our DB never got it because
+        // the sync window was tighter than the display window. Fixed May 29
+        // 2026: every focus now pulls 7 days so any historical gap in our DB
+        // self-heals on the next time the user opens Heart.
         try {
-          const summary = await samsungSyncRecent(1)
+          const summary = await samsungSyncRecent(7)
           if (cancelled) return
           if (summary.hrSamples > 0 || summary.stepSamples > 0 || summary.workouts > 0) {
             await fetchData()
@@ -504,11 +509,15 @@ export default function HeartPage() {
   }, [fetchData])
 
   // ── Manual "Sync now" button (mirrors the Connect tab's pattern) ──────────
+  // Pulls the full 7-day display window so the button does what the user
+  // expects: "refresh everything I can see." Previously this was 1 day
+  // which silently left historical gaps if the user had skipped the tab
+  // for a few days. (See useFocusEffect note above for the same bug fix.)
   const onManualSync = useCallback(async () => {
     if (syncBusy) return
     setSyncBusy(true)
     try {
-      await samsungSyncRecent(1)
+      await samsungSyncRecent(7)
       await fetchData()
     } finally {
       setSyncBusy(false)

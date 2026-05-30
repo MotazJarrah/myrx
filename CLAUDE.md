@@ -2283,6 +2283,77 @@ The single source of truth for what needs to be done when we flip from "ready to
 
 ---
 
+## Brand System (LOCKED — May 29 2026)
+
+**The canonical brand book is `branding/BRAND.md`** (with paired `BRAND.html` rendering layer and `BRAND.pdf` externally-shareable PDF). Every decision about visual identity, voice, logo usage, color, typography, or brand application traces back to that document. If CLAUDE.md and BRAND.md contradict on a brand topic, BRAND.md wins.
+
+### The 4 locked brand colors
+
+| Token | Hex | HSL | Role |
+|---|---|---|---|
+| **MyRX Lime** | `#CAF240` | `hsl(73°, 87%, 60%)` | Primary accent — CTAs, the "RX" letters, ANY green anywhere in the app |
+| **MyRX Dark** | `#121721` | `hsl(220°, 28%, 10%)` | Page background, icon background |
+| **MyRX Surface** | `#171C26` | `hsl(220°, 24%, 12%)` | Cards, sheets, drawers — sits 2% lighter than Dark |
+| **MyRX Foreground** | `#F4F3EF` | `hsl(60°, 5%, 96%)` | Text + iconography on dark surfaces |
+
+These live in code at:
+- **Web** — `web/src/index.css` (both `:root` light mode + `.dark` dark mode CSS variable blocks; every neutral on H=220 hue family)
+- **Mobile** — `mobile/src/theme.ts` (the `HSL` object + `palette.myrx.*` hex entries)
+
+### Why the dark is blue-tinted (locked May 29 2026 after green-tinted trial)
+
+Originally locked at green-tinted dark (H=150) so the dark would share a hue family with the lime accent. User feedback during sweep: "too green on green" — the lime and the dark dissolved into each other instead of standing out.
+
+Moved to blue-tinted dark (H=220) because H=220 sits ~147° from the lime (H=73) on the color wheel — close to complementary. The hue separation is what makes the lime POP against the surface instead of blending. Saturation 28% (BG) / 24% (card) was deliberately bumped from the more typical 12–18% range — at lower saturation, the H=220 dark reads as slate-grey instead of recognizable blue. The "blue on lime" pairing IS the brand signature; saturation enforces it.
+
+Past attempts during the iteration (do not re-litigate without explicit user request):
+- L=8% (deeper) → reads as grey because less light = less expressed color. Bad.
+- S=42% (more saturated at L=10%) → too aggressive, reads navy-corporate. Bad.
+- Final: `H=220, S=28%, L=10%` (BG) + `H=220, S=24%, L=12%` (card). User-approved.
+
+### Tagline
+
+**"Performance Lab"** — locked. Appears on the **Tag** logo variant (used for hero placements only — cover pages, marketing hero, presentation title slides). Never on app chrome, never in email signatures, never on social profile avatars. See BRAND.md Section IV "The Slogan Reservation."
+
+### Logo system — 8 variants
+
+Located at `branding/Logo/Final/`:
+- `Logo Tag White/Black.{png,svg}` — wordmark + "Performance Lab" tagline (hero placements only)
+- `Logo Clean White/Black.{png,svg}` — wordmark only, single-line (most contexts)
+- `Logo Block White/Black.{png,svg}` — wordmark in stacked square (tight square spaces)
+- `Logo Icon White/Black.{png,svg}` — square with safe-zone padding (favicon, app icon, avatars)
+
+Both PNG + SVG for each. "White" = light text for use on dark BG. "Black" = dark text for use on light BG. The "RX" letters are always lime regardless of variant. **App icon / favicon = `Logo Icon White` (locked)**. Do not crop the Icon variant — its padding is intentional and protected by the safe-zone rule.
+
+### Voice and tone
+
+Locked separately in CLAUDE.md under "Voice and Coaching Philosophy (LOCKED — May 24 2026)" and externally documented in BRAND.md Section III. Never overridden. Every user-facing string runs through the 3-pillar coach voice: **acknowledge state → explain biology → name realistic next step**.
+
+### Brand sync rule (cross-platform — MANDATORY)
+
+When updating brand colors or visual tokens:
+
+1. Update `web/src/index.css` light + dark mode blocks together
+2. Update `mobile/src/theme.ts` HSL object + `palette.myrx` hex entries together
+3. Bump the `--myrx-build` marker in `web/src/index.css` to force CSS hash rotation (cache-poisoning rule — see Browser/React scars section)
+4. Update `branding/BRAND.md` if hex values change, then regenerate `BRAND.html` + `BRAND.pdf` (Chrome headless print-to-PDF: `chrome --headless=new --disable-gpu --no-pdf-header-footer --print-to-pdf="branding/BRAND.pdf" "file:///.../branding/BRAND.html"`)
+5. Build + deploy web. Reload mobile.
+
+NEVER let web and mobile drift on brand colors. NEVER introduce a new green shade — every green in the system is `#CAF240`. Semantic emerald (`#10B981`) is for "save succeeded" / "data persisted" only — different semantic from brand lime.
+
+### Components reference
+
+- **Web Tailwind classes** (resolve via the CSS variables above): `bg-background`, `bg-card`, `text-foreground`, `text-muted-foreground`, `border-border`, `bg-primary`, `text-primary-foreground`, `bg-secondary`, `text-secondary-foreground`, `bg-accent`.
+- **Mobile imports** from `mobile/src/theme.ts`: `import { colors, palette, alpha, withAlpha } from '@/theme'` — use `colors.background`, `colors.primary`, `palette.myrx.lime`, `palette.myrx.dark`, etc.
+- **For HSL → HSLA alpha** (semi-transparent overlays): `alpha(colors.primary, 0.1)` produces `hsla(...)`.
+- **For hex → rgba alpha** on palette entries: `withAlpha(palette.myrx.lime, 0.18)` produces `rgba(...)`.
+
+### Past incident — color update gotcha (May 29 2026)
+
+If you update brand colors but only on one side (web OR mobile), the cross-platform-consistency rule is violated. Both surfaces MUST land together in the same turn. See task log #314 / #318 for the May 29 2026 sweep where the original cool-blue-tinted dark `#0D0F11` (HSL 220, 12%, 6%) was migrated via green-tinted dark `#131A17` (HSL 150, 15%, 9%) — rejected by user — and finally landed at the locked blue-tinted dark `#121721` (HSL 220, 28%, 10%) across both codebases simultaneously, along with primary going from HSL(80, 95%, 55%) → HSL(73, 87%, 60%) to match the locked `#CAF240` lime.
+
+---
+
 ## iOS reflection checklist (LOCKED — comprehensive sweep, May 26 2026)
 
 MyRX has been built Android-first since day one. The `mobile/` Expo project has a fully wired `mobile/android/` native folder; there is no `mobile/ios/` folder, no Apple Developer Program enrollment, no AASA file, no HealthKit integration. This section is the canonical, exhaustive list of every iOS-specific tackle that must happen before iOS launch — each item linked to where the Android equivalent already lives so the iOS reflection pass has a 1:1 reference. Treat it like the existing "Pre-launch checklist" — work through it top to bottom when the user opens the iOS launch chapter. Length target: terse list, no prose padding.
@@ -2929,16 +3000,16 @@ The user explicitly told us not to ask for the USB cable again once wireless adb
 
 **ALWAYS reconnect at session start (LOCKED, May 19 2026):** the wireless adb endpoint is sticky on the phone until reboot, but the laptop's adb daemon forgets paired WiFi devices when its own process restarts (laptop reboot, daemon kill, etc.). So at the start of every session — before touching anything mobile — run:
 ```powershell
-& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.226:5555
+& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.111:5555
 & "$env:ANDROID_HOME\platform-tools\adb.exe" devices    # should show the WiFi endpoint
 ```
-If `adb connect` returns `connected to 10.0.0.226:5555` and `adb devices` lists `10.0.0.226:5555  device`, you're set — no cable needed. If it returns `failed to connect` or the endpoint shows up as `offline`, the daemon's wireless mode dropped (phone reboot, etc.) — then ask the user to plug in USB ONCE so you can re-run the one-time setup below.
+If `adb connect` returns `connected to 10.0.0.111:5555` and `adb devices` lists `10.0.0.111:5555  device`, you're set — no cable needed. If it returns `failed to connect` or the endpoint shows up as `offline`, the daemon's wireless mode dropped (phone reboot, etc.) — then ask the user to plug in USB ONCE so you can re-run the one-time setup below.
 
 **One-time setup with the cable plugged in:**
 ```powershell
 & "$env:ANDROID_HOME\platform-tools\adb.exe" tcpip 5555
 Start-Sleep -Seconds 2
-& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.226:5555
+& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.111:5555
 & "$env:ANDROID_HOME\platform-tools\adb.exe" devices    # should show both endpoints
 ```
 
@@ -2951,7 +3022,7 @@ Start-Sleep -Seconds 2
 
 **Wireless adb does NOT enable Metro tunneling.** The `adb reverse` trick that lets the phone hit `http://localhost:8081` over USB has no WiFi equivalent. Once you're wireless, the dev client URL MUST be the laptop's LAN IP. If the LAN bundle stream stalls (the `Software caused connection abort` mid-multipart symptom we've hit), the fallback is to physically replug the cable, run `adb tcpip 5555` if you want to stay wireless after, then deep-link the dev client to localhost; OR fix the underlying WiFi flakiness (Windows TCP keepalive / firewall / power-save on the phone's wlan0 chip).
 
-**Do not ask the user to re-plug for diagnostics.** If `adb devices` shows the WiFi endpoint as `10.0.0.226:5555 device`, everything else works the same — `logcat`, `pidof`, `dumpsys`, `pm list packages`, `run-as <pkg>`, `cat shared_prefs/...` all run unchanged over WiFi. The only commands that fail are `adb reverse` and `adb push` to large files (slower but functional).
+**Do not ask the user to re-plug for diagnostics.** If `adb devices` shows the WiFi endpoint as `10.0.0.111:5555 device`, everything else works the same — `logcat`, `pidof`, `dumpsys`, `pm list packages`, `run-as <pkg>`, `cat shared_prefs/...` all run unchanged over WiFi. The only commands that fail are `adb reverse` and `adb push` to large files (slower but functional).
 
 **Reading a device-side error / red box without asking the user (LOCKED, May 19 2026):**
 
@@ -2960,7 +3031,7 @@ When the user says "I have an error showing" or similar, do NOT ask them to past
 ```powershell
 # 1. Take a screenshot via wireless ADB — the LogBox red-box / yellow-box
 #    overlay renders as part of the device UI, so it's captured.
-adb -s 10.0.0.226:5555 exec-out screencap -p > "C:/Users/motaz/myrx-error-screen.png"
+adb -s 10.0.0.111:5555 exec-out screencap -p > "C:/Users/motaz/myrx-error-screen.png"
 
 # 2. Read the PNG via Claude's Read tool (multimodal — reads images natively).
 #    The error message + call stack is visible in the screenshot.
@@ -3673,6 +3744,13 @@ Env vars are already set in the shell profile. No need to set them manually.
 
 > 🚫 **Netlify is GONE. Do not use it, reference it, or deploy to it under any circumstance.**
 > The Netlify account has been deleted. There is no `.netlify/` folder. The only valid deploy target is Cloudflare Pages via `wrangler`.
+
+> ⚙️ **Edge functions ALSO don't auto-deploy on git push** (LOCKED — May 29 2026).
+> Supabase edge functions (`supabase/functions/*/index.ts`) behave the same way as Cloudflare Pages: committing + pushing the file changes the repo but does NOT change what's running in production. Each function has its own version on the Supabase project and must be deployed explicitly via the `mcp__8dbdae5c-...__deploy_edge_function` MCP tool (or `supabase functions deploy <name>` from a properly-configured CLI).
+>
+> When you edit any `supabase/functions/*/index.ts`, treat deploy as the last step of the turn — same rule as the wrangler one above. Read the full file, call the deploy tool with the entire file content, verify the response says `status: ACTIVE` with a bumped `version` number.
+>
+> **Past incident (May 29 2026)**: voice-audit rewrites for `send-coach-invite`, `verify-phone-otp`, and `coach-signup` landed in three commits but never deployed for an unknown number of hours. Production still served the old banned phrasing ("fully covered by your coach's subscription") until the rules were caught visually in a test invite. Resolved by deploying all three via MCP. Don't repeat — agents that report "rewrote the function" but haven't called the deploy tool have not actually finished the work.
 
 ## Cloudflare Details
 - Account ID: `d42e96189bfa3cacb2aaab8231eb0097`

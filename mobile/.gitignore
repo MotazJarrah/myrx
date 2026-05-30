@@ -51,3 +51,11 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Samsung Health Data SDK — license forbids redistribution. The .aar must be
+# hand-downloaded once per clone from https://developer.samsung.com/health/data
+# and placed at mobile/plugins/samsung-sdk/. The withSamsungHealth.js config
+# plugin copies it into android/app/libs/ on every prebuild. The .kt source
+# files in the same folder ARE committed — only the binary AAR is excluded.
+plugins/samsung-sdk/*.aar
+lib/

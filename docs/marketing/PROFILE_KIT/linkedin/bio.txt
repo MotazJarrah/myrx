@@ -1,0 +1,50 @@
+═══════════════════════════════════════════════════════════════════════
+LINKEDIN BIO — FOUNDER-LED (Motaz Jarrah account)
+═══════════════════════════════════════════════════════════════════════
+
+HEADLINE (220 char limit) — 196 chars
+───────────────────────────────────────────────────────────────────────
+Building MyRX — Performance Lab. The algorithm picks each athlete's next weight, pace, and macro. The coach oversees. Independent strength + endurance coaches scale rosters past 30 without burning out.
+
+ABOUT SECTION (2,600 char limit) — 1,847 chars
+───────────────────────────────────────────────────────────────────────
+Most coaches still program by feel. The strongest ones spend hours each week recalculating loads, rewriting macro targets, and chasing client check-ins.
+
+That work doesn't scale. By client 25, the program quality drops or the coach burns out. Usually both.
+
+MyRX takes the calculation work off the coach. The algorithm reads the athlete's logged efforts and prescribes the next weight on every lift, the next pace on every interval, the next macro split for the next phase. The coach reviews, adjusts the parameters, and spends their time on the work that actually moves outcomes — message threads, intake reviews, the one client who needs a real conversation this week.
+
+A few specifics on what's under the hood:
+
+— Strength: Epley + Brzycki + Lombardi averaged, with rep-range-aware drops past 10 reps (Brzycki under-projects).
+— Cardio: Riegel pace projection across distances, Daniels' offsets for endurance / threshold / VO2 prescriptions.
+— Calories: Mifflin-St Jeor BMR, ACSM activity multipliers, plus a realism factor calibrated against actual loss/gain rates per body-fat band.
+— Concept2 ergs: watts derived from pace via Concept2's published formula. Air Bike: cal/min anchored zones with watts floors per zone.
+— Health Connect, Samsung Health, Apple HealthKit on the roadmap. Polar is live, Strava and Garmin in flight.
+
+This account is where I share what we're learning while building it — the methodology, the math, the trade-offs that come up when you try to replace ten years of coaching intuition with a model that explains itself.
+
+Coach platform: myrxfit.com/coach
+Athlete app: myrxfit.com
+
+Performance Lab.
+
+CHAR COUNT: 1,847 / 2,600
+
+───────────────────────────────────────────────────────────────────────
+NOTES
+───────────────────────────────────────────────────────────────────────
+- Headline 196 chars, 24 under the 220 limit; the buffer keeps it
+  readable on mobile where ~120 chars surface before truncation.
+- About first 200 chars (mobile fold): "Most coaches still program by
+  feel. The strongest ones spend hours each week recalculating loads,
+  rewriting macro targets, and chasing client check-ins."
+  → that's the hook above the "See more" tap.
+- 3-pillar shape: acknowledge (the calculation work is real and it
+  doesn't scale) → mechanism (algorithm reads logs and prescribes;
+  coach oversees) → next step (links to coach + athlete entry points).
+- "Performance Lab." closes — tagline-as-signature.
+- Lowercase "coach", "athlete", "client" throughout body.
+- No banned phrases. No urgency theater. No exclamation points.
+- "Building MyRX" frames Motaz as founder, not the brand itself —
+  matches CHANNEL_STRATEGY decision that LinkedIn is founder-led.

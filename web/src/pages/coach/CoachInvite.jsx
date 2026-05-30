@@ -61,9 +61,9 @@ import { humanizeInvokeError, humanizeServerErrorAsync } from '../../lib/serverE
 // The message slot is for setting context, not repeating instructions
 // the chrome already gives.
 const PRESET_MESSAGE =
-  "I'm running my coaching through MyRX now. You'll get an email with " +
-  "a one-tap accept link — once you're in, I see your training, your " +
-  "numbers, and we work the plan together."
+  "I'm running my coaching through MyRX now. Tap accept below — once " +
+  "you're in, I see your training, your numbers, and we work the plan " +
+  "together."
 
 // ── Relative time helpers ────────────────────────────────────────────────────
 

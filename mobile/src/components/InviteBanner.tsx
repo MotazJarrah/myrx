@@ -81,11 +81,11 @@ export default function InviteBanner() {
               <Image source={{ uri: top.coach_avatar_url }} style={s.avatar} />
             ) : (
               <View style={s.avatarFallback}>
-                <UserCircle2 size={28} color={palette.green[400]} />
+                <UserCircle2 size={28} color={palette.myrx.lime} />
               </View>
             )}
             <View style={s.sparkBadge}>
-              <Sparkles size={12} color={palette.green[400]} />
+              <Sparkles size={12} color={palette.myrx.lime} />
             </View>
           </View>
 
@@ -121,9 +121,9 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: withAlpha(palette.green[500], 0.12),
+    backgroundColor: withAlpha(palette.myrx.lime, 0.12),
     borderWidth: 1,
-    borderColor: withAlpha(palette.green[500], 0.35),
+    borderColor: withAlpha(palette.myrx.lime, 0.35),
     borderRadius: radius.xl,
     padding: 14,
     marginBottom: 12,
@@ -142,7 +142,7 @@ const s = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: withAlpha(palette.green[500], 0.18),
+    backgroundColor: withAlpha(palette.myrx.lime, 0.18),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -155,7 +155,7 @@ const s = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: colors.background,
     borderWidth: 1,
-    borderColor: withAlpha(palette.green[500], 0.4),
+    borderColor: withAlpha(palette.myrx.lime, 0.4),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -168,7 +168,7 @@ const s = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
-    color: palette.green[400],
+    color: palette.myrx.lime,
   },
   title: {
     fontFamily: fonts.sans[600],

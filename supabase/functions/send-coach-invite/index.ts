@@ -124,26 +124,29 @@ async function sendInviteEmail(args: {
     : ""
 
   const html = `<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#0a0a0a;color:#e5e5e5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+<html><body style="margin:0;padding:0;background:#121721;color:#F4F3EF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
   <div style="max-width:540px;margin:0 auto;padding:40px 24px;">
+    <div style="margin:0 0 32px;">
+      <img src="${SITE_URL}/email-logo.png" alt="MyRX" width="160" height="35" style="display:block;height:auto;border:0;outline:none;text-decoration:none;">
+    </div>
     ${personalLine}
-    <p style="font-size:14px;color:#a3a3a3;margin:0 0 12px;">
+    <p style="font-size:14px;color:#A8ADAA;margin:0 0 12px;">
       Tap below to accept and start training together.
     </p>
-    <p style="font-size:13px;color:#737373;margin:0 0 24px;">
+    <p style="font-size:13px;color:#6F7572;margin:0 0 24px;">
       Your MyRX subscription is covered by your coach. No payment is required from you.
     </p>
     <div style="margin:32px 0;">
       <a href="${args.acceptUrl}"
-         style="display:inline-block;padding:14px 28px;background:#c4f047;color:#0a0a0a;text-decoration:none;border-radius:10px;font-weight:700;font-size:14px;">
+         style="display:inline-block;padding:14px 28px;background:#CAF240;color:#121721;text-decoration:none;border-radius:10px;font-weight:700;font-size:14px;">
         Accept invite
       </a>
     </div>
-    <p style="font-size:12px;color:#737373;margin:24px 0 0;">
+    <p style="font-size:12px;color:#6F7572;margin:24px 0 0;">
       Button not working? Use this link instead:<br/>
-      <span style="color:#a3a3a3;word-break:break-all;">${args.acceptUrl}</span>
+      <span style="color:#A8ADAA;word-break:break-all;">${args.acceptUrl}</span>
     </p>
-    <p style="font-size:11px;color:#525252;margin:32px 0 0;border-top:1px solid #262626;padding-top:16px;">
+    <p style="font-size:11px;color:#525252;margin:32px 0 0;border-top:1px solid #2A332E;padding-top:16px;">
       This link expires in 14 days. Didn't expect this? Ignore the email — nothing happens.
     </p>
   </div>

@@ -1,0 +1,135 @@
+═══════════════════════════════════════════════════════════════════════
+YOUTUBE LAUNCH VIDEO — TITLE + DESCRIPTION + CHAPTERS
+═══════════════════════════════════════════════════════════════════════
+
+[FORMAT: Long-form, 8-12 minutes. Founder-hosted, brand channel.
+Title hashtag = 1 (#PerformanceLab). Description hashtags = 3-5 at
+the end. Chapters mandatory: 3+ markers required for the 11% watch-
+time uplift; chapter titles written as Google search queries so each
+indexes as a Google Key Moment.]
+
+───────────────────────────────────────────────────────────────────────
+VIDEO TITLE (100 char limit — 70 chars used, 30 headroom)
+───────────────────────────────────────────────────────────────────────
+
+How MyRX Picks Your Next Weight, Pace, and Macro #PerformanceLab
+
+───────────────────────────────────────────────────────────────────────
+THUMBNAIL TEXT (max 4-6 words, lime on dark)
+───────────────────────────────────────────────────────────────────────
+
+LINE 1: "Your next step."
+LINE 2: "Computed."
+
+(Founder face on the left third, thumbnail text on the right two-
+thirds. Lime LIME #CAF240 on DARK #131A17 background. No exclamation
+points. No "shocking", no "you won't believe", no clickbait framing.)
+
+───────────────────────────────────────────────────────────────────────
+VIDEO DESCRIPTION (5,000 char limit — 1,847 chars used)
+───────────────────────────────────────────────────────────────────────
+
+Most fitness apps log what you already did. MyRX picks what you do next.
+
+Your last set told us something. The algorithm reads it and writes the next prescription — the exact weight for your next set, the exact pace for your next interval, the exact macro target for your next meal. Not a generic plan. Not a template you adjust by feel. The next step, computed from your actual data.
+
+In this video, I walk through the four systems the platform runs:
+
+1. The strength algorithm — how Epley, Brzycki, and Lombardi projections combine to pick the next weight at any rep target.
+
+2. The cardio progression queue — how the polarized 80/20 rule prevents back-to-back hard days and keeps your endurance base intact.
+
+3. The calorie plan — how Mifflin-St Jeor, ACSM activity factors, and a realism factor produce a target you can actually hit.
+
+4. The coach overlay — how a coach oversees the prescription without programming from scratch.
+
+The free tier covers strength, cardio, and mobility. CoreRX adds bodyweight and calories for a one-time $39. FullRX adds heart rate, hydration, and sleep for $59 one-time. Coaches subscribe; their athletes train free.
+
+Chapters below. Each timestamp lands on one of the four systems.
+
+──────────────
+Get the app — myrxfit.com
+Become a coach — myrxfit.com/coach
+How MyRX picks your next step — myrxfit.com/how-it-works
+
+Performance Lab.
+──────────────
+
+CHAPTERS
+
+0:00 — What the next-step thesis means
+1:30 — How the strength algorithm picks your next weight
+4:00 — How the polarized cardio queue avoids back-to-back hard days
+6:45 — How the calorie plan adapts when the scale stops moving
+9:15 — How a coach oversees the prescription
+11:00 — How to get started
+
+#strengthcoach #hybridathlete #zone2training #onlinecoaching #PerformanceLab
+
+───────────────────────────────────────────────────────────────────────
+WHY EACH PIECE LANDS
+───────────────────────────────────────────────────────────────────────
+
+TITLE
+- 70 chars — under the 100 cap, displays full on mobile and desktop.
+- Contains the primary keyword phrase "next weight, pace, and macro".
+- Hashtag at end — #PerformanceLab appears ABOVE the title once the
+  video is published, clickable, indexable.
+- No clickbait. No "you won't believe". The promise IS the value.
+
+THUMBNAIL
+- 4 words across two lines. Lime on dark, brand-consistent.
+- Reads at thumbnail size (1280×720 → ~320×180 in feed).
+- Founder face on the left builds trust; text on the right delivers
+  the hook. Standard YouTube thumbnail composition.
+
+DESCRIPTION — FIRST 200 CHARS
+- "Most fitness apps log what you already did. MyRX picks what you
+  do next. Your last set told us something. The algorithm reads it
+  and writes the next prescription..."
+- Primary keyword "picks what you do next" lands in char 35-60.
+- Reads as a complete pitch even if the rest is collapsed.
+
+CHAPTERS
+- 6 chapters total — well above the 3-chapter threshold for the
+  11% watch-time uplift.
+- Each chapter title written as a Google search query
+  ("How the polarized cardio queue avoids back-to-back hard days")
+  so each indexes as a Google Key Moment.
+- 0:00 mandatory first marker — YouTube requirement.
+
+HASHTAGS
+- Title: 1 hashtag (#PerformanceLab) — the highest-intent niche.
+- Description: 5 hashtags at the end. Hits the optimal range per
+  the 2026 research (3-5 in description + 1 in title).
+- 1 niche broad: #strengthcoach
+- 2 exact-topic: #hybridathlete, #zone2training
+- 1 audience: #onlinecoaching (B2B coach segment)
+- 1 brand: #PerformanceLab
+
+VOICE
+- Three-pillar structure runs the description top to bottom:
+  - Acknowledge: "Most fitness apps log what you already did."
+  - Mechanism: the four-system breakdown.
+  - Next step: "Chapters below" + the link block.
+- No banned phrases. Verified clean.
+
+───────────────────────────────────────────────────────────────────────
+POSTING NOTES
+───────────────────────────────────────────────────────────────────────
+
+- Schedule: Tuesday or Thursday, 3-5 PM ET. Catches the after-work
+  watch window per the timing research.
+- Pin the video to the channel as the "Featured video" for 30 days.
+- Day 1 actions:
+  - Drop the watch URL in a LinkedIn post the same morning.
+  - Send to 5-10 coaches via DM with one line: "Walks through how
+    the next-step prescription works — feedback welcome."
+  - First comment: the link block (matches the description block).
+- Day 2-7 actions:
+  - Cut 3 Shorts from the long-form footage (1 per system).
+  - Each Short links back to the long-form in its description.
+  - Post Shorts mid-day, daily Tue-Thu.
+
+The long-form is the trust surface. The Shorts are the discovery
+surface. Both point at the same myrxfit.com conversion page.

@@ -10,60 +10,76 @@
    immutable; max-age=31536000). The :root rule below survives Tailwind's
    minification (comments don't) and changes the bundle content so the
    filename hash changes. Bump the date when forcing a CSS cache bust. */
-:root { --myrx-build: "2026-05-27T07-32"; }
+:root { --myrx-build: "2026-05-29T23-30-locked"; }
+
+/* ────────────────────────────────────────────────────────────────────────
+ * MyRX Brand Palette (LOCKED — May 29 2026, see branding/BRAND.md)
+ *
+ *   MyRX Lime       #CAF240  hsl(73°, 87%, 60%)    — primary accent
+ *   MyRX Dark       #121721  hsl(220°, 28%, 10%)   — background
+ *   MyRX Surface    #171C26  hsl(220°, 24%, 12%)   — elevated surface
+ *   MyRX Foreground #F4F3EF  hsl(60°, 5%, 96%)     — text on dark
+ *
+ * Neutrals on H=220 (blue) sit near-complementary to the lime (H=73,
+ * yellow-green), ~147° apart on the color wheel — that hue separation
+ * is what makes the lime POP against the dark surface instead of
+ * blending into the same family. Saturation (28% BG / 24% card) is the
+ * lever that makes the dark read as blue, not slate-grey. Pure black
+ * and pure white are banned on dark surfaces — always use these tokens.
+ * ─────────────────────────────────────────────────────────────────────── */
 
 /* LIGHT MODE */
 :root {
-  --background: 40 10% 98%;
+  --background: 60 5% 98%;
   --foreground: 220 14% 8%;
   --border: 220 10% 90%;
   --card: 0 0% 100%;
   --card-foreground: 220 14% 8%;
-  --sidebar: 220 12% 96%;
+  --sidebar: 220 8% 96%;
   --sidebar-foreground: 220 14% 8%;
   --sidebar-border: 220 10% 90%;
-  --sidebar-primary: 85 95% 40%;
-  --sidebar-primary-foreground: 220 14% 8%;
-  --primary: 85 95% 40%;
-  --primary-foreground: 220 14% 8%;
-  --secondary: 220 10% 93%;
+  --sidebar-primary: 73 87% 60%;
+  --sidebar-primary-foreground: 220 28% 10%;
+  --primary: 73 87% 60%;
+  --primary-foreground: 220 28% 10%;
+  --secondary: 220 8% 93%;
   --secondary-foreground: 220 14% 12%;
-  --muted: 220 10% 94%;
+  --muted: 220 8% 94%;
   --muted-foreground: 220 8% 42%;
-  --accent: 220 14% 92%;
+  --accent: 220 10% 92%;
   --accent-foreground: 220 14% 8%;
   --destructive: 0 72% 45%;
   --destructive-foreground: 0 0% 98%;
   --input: 220 10% 85%;
-  --ring: 85 95% 40%;
+  --ring: 73 87% 60%;
   --elevate-1: rgba(0, 0, 0, 0.03);
   --elevate-2: rgba(0, 0, 0, 0.07);
 }
 
-/* DARK MODE — carbon surfaces, electric-lime primary */
+/* DARK MODE (canonical) — slate-blue surface, lime primary */
 .dark {
-  --background: 220 12% 6%;
+  --background: 220 28% 10%;
   --foreground: 60 5% 96%;
   --border: 220 8% 16%;
-  --card: 220 12% 8%;
+  --card: 220 24% 12%;
   --card-foreground: 60 5% 96%;
-  --sidebar: 220 12% 7%;
+  --sidebar: 220 26% 11%;
   --sidebar-foreground: 60 5% 96%;
   --sidebar-border: 220 8% 14%;
-  --sidebar-primary: 80 95% 55%;
-  --sidebar-primary-foreground: 220 14% 6%;
-  --primary: 80 95% 55%;
-  --primary-foreground: 220 14% 6%;
+  --sidebar-primary: 73 87% 60%;
+  --sidebar-primary-foreground: 220 28% 10%;
+  --primary: 73 87% 60%;
+  --primary-foreground: 220 28% 10%;
   --secondary: 220 10% 14%;
   --secondary-foreground: 60 5% 96%;
   --muted: 220 10% 12%;
-  --muted-foreground: 220 6% 62%;
+  --muted-foreground: 220 5% 62%;
   --accent: 220 10% 16%;
   --accent-foreground: 60 5% 96%;
   --destructive: 0 72% 58%;
   --destructive-foreground: 0 0% 98%;
   --input: 220 10% 22%;
-  --ring: 80 95% 55%;
+  --ring: 73 87% 60%;
   --elevate-1: rgba(255, 255, 255, 0.035);
   --elevate-2: rgba(255, 255, 255, 0.08);
 }

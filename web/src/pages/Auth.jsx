@@ -19,10 +19,14 @@ function checkStrength(pw) {
 }
 
 function Logo() {
+  // Real wordmark per brand book ("Never render the brand name as JSX text").
   return (
-    <span className="text-lg font-bold" style={{ letterSpacing: '-0.02em' }}>
-      My<span className="text-primary">RX</span>
-    </span>
+    <img
+      src="/myrx-wordmark-dark.png?v=6-final"
+      alt="MyRX"
+      className="h-auto"
+      style={{ height: '20px', width: 'auto' }}
+    />
   )
 }
 

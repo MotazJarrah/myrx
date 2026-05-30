@@ -83,7 +83,7 @@ export default function CoachInviteCodeCard() {
     <View style={s.card}>
       <View style={s.headerRow}>
         <View style={s.iconBadge}>
-          <Sparkles size={14} color={palette.green[400]} />
+          <Sparkles size={14} color={palette.myrx.lime} />
         </View>
         <Text style={s.cardLabel}>Paste an invite code</Text>
       </View>
@@ -109,7 +109,7 @@ export default function CoachInviteCodeCard() {
       {result ? (
         result.success ? (
           <View style={s.successBanner}>
-            <CheckCircle2 size={14} color={palette.green[400]} />
+            <CheckCircle2 size={14} color={palette.myrx.lime} />
             <Text style={s.successText}>
               {result.already_attached
                 ? "You're already on their roster."
@@ -155,7 +155,7 @@ const s = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: withAlpha(palette.green[500], 0.15),
+    backgroundColor: withAlpha(palette.myrx.lime, 0.15),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -187,9 +187,9 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: withAlpha(palette.green[500], 0.12),
+    backgroundColor: withAlpha(palette.myrx.lime, 0.12),
     borderWidth: 1,
-    borderColor: withAlpha(palette.green[500], 0.35),
+    borderColor: withAlpha(palette.myrx.lime, 0.35),
     borderRadius: radius.md,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -198,7 +198,7 @@ const s = StyleSheet.create({
     flex: 1,
     fontFamily: fonts.sans[500],
     fontSize: 12,
-    color: palette.green[400],
+    color: palette.myrx.lime,
   },
   errorBanner: {
     flexDirection: 'row',
@@ -218,7 +218,7 @@ const s = StyleSheet.create({
     color: palette.amber[400],
   },
   submitBtn: {
-    backgroundColor: palette.green[500],
+    backgroundColor: palette.myrx.lime,
     paddingVertical: 12,
     borderRadius: radius.lg,
     alignItems: 'center',

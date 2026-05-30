@@ -39,10 +39,21 @@ const {
   withAppBuildGradle,
   withMainApplication,
   withGradleProperties,
+  withDangerousMod,
 } = require('@expo/config-plugins')
+const fs   = require('fs')
+const path = require('path')
 
 const SHEALTH_PACKAGE = 'com.sec.android.app.shealth'
 const SAMSUNG_MIN_SDK = 29
+
+// ── Source-of-truth locations under mobile/plugins/samsung-sdk/ ───────────────
+// These files survive `expo prebuild --clean` because they live OUTSIDE the
+// generated android/ folder. The plugin copies them into android/ every time
+// prebuild runs, so the Samsung Health integration is reproducible from source.
+const SAMSUNG_SDK_DIR = path.join(__dirname, 'samsung-sdk')
+const AAR_FILENAME    = 'samsung-health-data-api-1.1.0.aar'
+const KT_SOURCES      = ['SamsungHealthPackage.kt', 'SamsungHealthModule.kt']
 
 function withSamsungHealthManifest(config) {
   return withAndroidManifest(config, (cfg) => {
@@ -152,10 +163,76 @@ function withSamsungHealthMinSdk(config) {
   })
 }
 
+// ── Asset deployment (the May 29 2026 fix that closes the prebuild-wipe trap) ─
+// `expo prebuild --clean` regenerates android/ from scratch, wiping any files
+// not produced by the prebuild pipeline. Before this hook existed, the May 29
+// 2026 incident wiped the vendored AAR + the two Kotlin source files and broke
+// the build until they were restored manually.
+//
+// This dangerous-mod copies:
+//   1. samsung-health-data-api-1.1.0.aar → android/app/libs/
+//   2. SamsungHealthPackage.kt           → android/app/src/main/java/com/myrx/app/samsung/
+//   3. SamsungHealthModule.kt            → android/app/src/main/java/com/myrx/app/samsung/
+//
+// All three files live under mobile/plugins/samsung-sdk/ which is the
+// source-of-truth — edit there, not in the generated android/ copies.
+function withSamsungHealthAssets(config) {
+  return withDangerousMod(config, [
+    'android',
+    async (cfg) => {
+      const projectRoot = cfg.modRequest.projectRoot
+      const platformRoot = cfg.modRequest.platformProjectRoot
+      const libsDir = path.join(platformRoot, 'app', 'libs')
+      const ktDir = path.join(
+        platformRoot,
+        'app', 'src', 'main', 'java',
+        'com', 'myrx', 'app', 'samsung',
+      )
+
+      // Ensure source-of-truth folder exists. If not, fail loudly with a clear
+      // message rather than silently producing a broken build.
+      if (!fs.existsSync(SAMSUNG_SDK_DIR)) {
+        throw new Error(
+          `[withSamsungHealth] source-of-truth folder missing: ${SAMSUNG_SDK_DIR}\n` +
+          `Re-download the Samsung Health Data SDK (https://developer.samsung.com/health/data)\n` +
+          `and place the AAR + Kotlin sources at mobile/plugins/samsung-sdk/.`,
+        )
+      }
+
+      const aarSrc = path.join(SAMSUNG_SDK_DIR, AAR_FILENAME)
+      if (!fs.existsSync(aarSrc)) {
+        throw new Error(
+          `[withSamsungHealth] AAR missing at ${aarSrc} — Samsung license forbids ` +
+          `redistribution via git/Maven so the .aar must be hand-placed once per ` +
+          `clone. Drop it in mobile/plugins/samsung-sdk/ and re-run prebuild.`,
+        )
+      }
+
+      fs.mkdirSync(libsDir, { recursive: true })
+      fs.copyFileSync(aarSrc, path.join(libsDir, AAR_FILENAME))
+
+      fs.mkdirSync(ktDir, { recursive: true })
+      for (const fileName of KT_SOURCES) {
+        const src = path.join(SAMSUNG_SDK_DIR, fileName)
+        if (!fs.existsSync(src)) {
+          throw new Error(
+            `[withSamsungHealth] Kotlin source missing at ${src}. ` +
+            `Restore it from the most recent working build or git history.`,
+          )
+        }
+        fs.copyFileSync(src, path.join(ktDir, fileName))
+      }
+
+      return cfg
+    },
+  ])
+}
+
 module.exports = function withSamsungHealth(config) {
   config = withSamsungHealthManifest(config)
   config = withSamsungHealthGradle(config)
   config = withSamsungHealthMainApplication(config)
   config = withSamsungHealthMinSdk(config)
+  config = withSamsungHealthAssets(config)
   return config
 }

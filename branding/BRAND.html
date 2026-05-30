@@ -1,0 +1,1496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MyRX — Brand Book</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --lime: #CAF240;
+      --dark: #121721;
+      --surface: #171C26;
+      --surface-hi: #1F2724;
+      --fg: #F4F3EF;
+      --fg-muted: #A8ADAA;
+      --fg-dim: #6F7572;
+      --border: #2A332E;
+      --border-strong: #3A453D;
+    }
+
+    @page {
+      size: letter;
+      margin: 0;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--dark);
+      color: var(--fg);
+      font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 11pt;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Page container — every page section */
+    .page {
+      width: 8.5in;
+      min-height: 11in;
+      padding: 0.75in 0.85in 1in 0.85in;
+      page-break-after: always;
+      position: relative;
+      background: var(--dark);
+      overflow: hidden;
+    }
+    .page:last-child { page-break-after: auto; }
+
+    /* Footer on every page */
+    .page-footer {
+      position: absolute;
+      bottom: 0.45in;
+      left: 0.85in;
+      right: 0.85in;
+      display: flex;
+      justify-content: space-between;
+      font-size: 8.5pt;
+      color: var(--fg-dim);
+      font-family: 'Geist Mono', monospace;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding-top: 0.15in;
+      border-top: 1px solid var(--border);
+    }
+    .page-footer .brand { color: var(--fg-muted); }
+    .page-footer .num { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+
+    /* ============ COVER ============ */
+    .cover {
+      width: 8.5in;
+      height: 11in;
+      padding: 0;
+      page-break-after: always;
+      background: var(--dark);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .cover::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 4px;
+      background: var(--lime);
+    }
+    .cover-mark {
+      max-width: 5in;
+      width: 70%;
+      margin-bottom: 0.5in;
+    }
+    .cover-mark img { width: 100%; height: auto; display: block; }
+    .cover-meta {
+      position: absolute;
+      bottom: 0.85in;
+      left: 0.85in;
+      right: 0.85in;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      font-family: 'Geist Mono', monospace;
+      font-size: 9pt;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+    }
+    .cover-meta .label { color: var(--fg-dim); display: block; font-size: 7pt; margin-bottom: 4px; }
+    .cover-meta .value { color: var(--fg); font-size: 10pt; }
+    .cover-tagline {
+      font-family: 'Geist Mono', monospace;
+      color: var(--lime);
+      font-size: 11pt;
+      letter-spacing: 0.4em;
+      text-transform: uppercase;
+      margin-top: 0;
+    }
+
+    /* ============ TYPE ============ */
+    h1, h2, h3, h4 { font-family: 'Geist', sans-serif; color: var(--fg); margin: 0; line-height: 1.2; }
+    h1 {
+      font-size: 36pt;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.1in;
+    }
+    h1 .num {
+      display: block;
+      font-family: 'Geist Mono', monospace;
+      font-size: 10pt;
+      color: var(--lime);
+      letter-spacing: 0.3em;
+      font-weight: 500;
+      text-transform: uppercase;
+      margin-bottom: 0.15in;
+    }
+    h2 {
+      font-size: 20pt;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin-top: 0.4in;
+      margin-bottom: 0.12in;
+      padding-bottom: 0.08in;
+      border-bottom: 1px solid var(--border-strong);
+    }
+    h3 {
+      font-size: 13pt;
+      font-weight: 600;
+      margin-top: 0.28in;
+      margin-bottom: 0.08in;
+      color: var(--lime);
+    }
+    h4 {
+      font-size: 11pt;
+      font-weight: 600;
+      margin-top: 0.18in;
+      margin-bottom: 0.06in;
+      color: var(--fg);
+    }
+    p { margin: 0 0 0.14in 0; color: var(--fg); }
+    p.lead {
+      font-size: 13pt;
+      line-height: 1.55;
+      color: var(--fg);
+      margin-bottom: 0.25in;
+    }
+    p.kicker {
+      font-family: 'Geist Mono', monospace;
+      font-size: 8.5pt;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--lime);
+      margin-bottom: 0.1in;
+    }
+    strong { color: var(--fg); font-weight: 600; }
+    em { color: var(--fg-muted); font-style: italic; }
+    a { color: var(--lime); text-decoration: none; }
+
+    /* Lists */
+    ul, ol { margin: 0 0 0.18in 0; padding-left: 0.2in; color: var(--fg); }
+    li { margin-bottom: 0.06in; }
+    li::marker { color: var(--lime); }
+
+    /* Code / mono */
+    code {
+      font-family: 'Geist Mono', monospace;
+      font-size: 9.5pt;
+      background: var(--surface-hi);
+      color: var(--lime);
+      padding: 1px 5px;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    pre {
+      font-family: 'Geist Mono', monospace;
+      font-size: 9.5pt;
+      background: var(--surface);
+      color: var(--fg);
+      padding: 0.15in;
+      border-radius: 4px;
+      border-left: 3px solid var(--lime);
+      overflow: hidden;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.15in 0;
+      font-size: 10pt;
+    }
+    th, td {
+      padding: 0.08in 0.1in;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      font-family: 'Geist Mono', monospace;
+      font-size: 8.5pt;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--lime);
+      font-weight: 500;
+      border-bottom: 1px solid var(--border-strong);
+    }
+    td code { font-size: 9pt; }
+    table.compact td, table.compact th { padding: 0.06in 0.08in; }
+
+    /* ============ COMPONENTS ============ */
+
+    .pullquote {
+      font-family: 'Geist', sans-serif;
+      font-size: 15pt;
+      line-height: 1.4;
+      color: var(--fg);
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      padding: 0.2in 0.25in;
+      border-left: 3px solid var(--lime);
+      background: var(--surface);
+      margin: 0.2in 0;
+    }
+    .pullquote.lime {
+      color: var(--lime);
+      font-weight: 600;
+    }
+
+    .callout {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.18in 0.22in;
+      margin: 0.15in 0;
+    }
+    .callout-title {
+      font-family: 'Geist Mono', monospace;
+      font-size: 8pt;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--lime);
+      margin-bottom: 0.08in;
+    }
+    .callout p:last-child { margin-bottom: 0; }
+
+    /* Color swatch */
+    .swatch-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.15in;
+      margin: 0.2in 0;
+    }
+    .swatch {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .swatch-color {
+      height: 1.4in;
+      position: relative;
+    }
+    .swatch-color .name {
+      position: absolute;
+      bottom: 0.1in;
+      left: 0.12in;
+      right: 0.12in;
+      font-family: 'Geist', sans-serif;
+      font-size: 11pt;
+      font-weight: 600;
+    }
+    .swatch-meta {
+      padding: 0.1in 0.12in;
+      background: var(--surface);
+      font-family: 'Geist Mono', monospace;
+      font-size: 8.5pt;
+      color: var(--fg-muted);
+    }
+    .swatch-meta .hex { color: var(--lime); display: block; margin-bottom: 2px; font-size: 9pt; font-weight: 500; }
+
+    /* At-a-glance two-column */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.25in;
+      margin: 0.2in 0;
+    }
+    .three-col {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.18in;
+      margin: 0.2in 0;
+    }
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.15in 0.18in;
+    }
+    .stat-card .label {
+      font-family: 'Geist Mono', monospace;
+      font-size: 7.5pt;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      margin-bottom: 0.08in;
+    }
+    .stat-card .value {
+      font-family: 'Geist', sans-serif;
+      font-size: 14pt;
+      color: var(--fg);
+      font-weight: 600;
+      line-height: 1.25;
+    }
+
+    /* Banned vs Preferred two-column box */
+    .compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.15in;
+      margin: 0.15in 0;
+    }
+    .compare-cell {
+      padding: 0.13in 0.15in;
+      border-radius: 4px;
+      font-size: 10pt;
+      line-height: 1.45;
+    }
+    .compare-cell.banned {
+      background: rgba(239, 68, 68, 0.08);
+      border-left: 3px solid #EF4444;
+      color: var(--fg-muted);
+    }
+    .compare-cell.preferred {
+      background: rgba(202, 242, 64, 0.08);
+      border-left: 3px solid var(--lime);
+      color: var(--fg);
+    }
+    .compare-cell .tag {
+      font-family: 'Geist Mono', monospace;
+      font-size: 7.5pt;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      display: block;
+      margin-bottom: 0.06in;
+    }
+    .compare-cell.banned .tag { color: #EF4444; }
+    .compare-cell.preferred .tag { color: var(--lime); }
+
+    /* Logo display tiles */
+    .logo-tile {
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+    .logo-tile-frame {
+      height: 1.6in;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.2in;
+    }
+    .logo-tile-frame.dark { background: var(--dark); }
+    .logo-tile-frame.light { background: var(--fg); }
+    .logo-tile-frame img { max-height: 100%; max-width: 100%; object-fit: contain; }
+    .logo-tile-meta {
+      padding: 0.1in 0.12in;
+      background: var(--surface-hi);
+      font-family: 'Geist', sans-serif;
+      font-size: 9pt;
+      color: var(--fg);
+    }
+    .logo-tile-meta .filename {
+      font-family: 'Geist Mono', monospace;
+      font-size: 8pt;
+      color: var(--fg-muted);
+      display: block;
+      margin-top: 2px;
+    }
+
+    /* Section opener page (full-bleed) */
+    .section-opener {
+      width: 8.5in;
+      height: 11in;
+      background: var(--dark);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 0 0.85in;
+      page-break-after: always;
+      position: relative;
+    }
+    .section-opener .number {
+      font-family: 'Geist Mono', monospace;
+      color: var(--lime);
+      font-size: 10pt;
+      letter-spacing: 0.4em;
+      text-transform: uppercase;
+      margin-bottom: 0.2in;
+    }
+    .section-opener .title {
+      font-family: 'Geist', sans-serif;
+      font-size: 60pt;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      color: var(--fg);
+      margin-bottom: 0.3in;
+    }
+    .section-opener .description {
+      font-size: 14pt;
+      color: var(--fg-muted);
+      line-height: 1.55;
+      max-width: 5.5in;
+    }
+    .section-opener::after {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: var(--lime);
+    }
+
+    /* TOC */
+    .toc-list {
+      list-style: none;
+      padding: 0;
+      margin: 0.4in 0 0 0;
+    }
+    .toc-list li {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 0.12in 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12pt;
+    }
+    .toc-list .toc-num {
+      font-family: 'Geist Mono', monospace;
+      color: var(--lime);
+      font-size: 9pt;
+      letter-spacing: 0.2em;
+      margin-right: 0.18in;
+      min-width: 0.6in;
+    }
+    .toc-list .toc-title { flex: 1; color: var(--fg); }
+    .toc-list .toc-page {
+      font-family: 'Geist Mono', monospace;
+      color: var(--fg-muted);
+      font-size: 10pt;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Avoid bad breaks */
+    h1, h2, h3, h4 { page-break-after: avoid; }
+    table, .callout, .pullquote, .compare, .swatch-grid, .three-col, .two-col, .logo-tile { page-break-inside: avoid; }
+  </style>
+</head>
+<body>
+
+<!-- ============================================================
+     COVER PAGE
+============================================================ -->
+<div class="cover">
+  <div class="cover-mark">
+    <img src="Logo/Final/Logo Tag White.png" alt="MyRX — Performance Lab">
+  </div>
+  <div class="cover-meta">
+    <div>
+      <span class="label">Document</span>
+      <span class="value">Brand Book</span>
+    </div>
+    <div style="text-align: center;">
+      <span class="label">Version</span>
+      <span class="value">1.0</span>
+    </div>
+    <div style="text-align: right;">
+      <span class="label">Issued</span>
+      <span class="value">May 2026</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     FOREWORD
+============================================================ -->
+<div class="page">
+  <h1><span class="num">Foreword</span>This is the brand book.</h1>
+  <p class="lead">MyRX is a fitness coaching platform built on one principle: every person should know what their next step is, and why it matters. This document is how we keep that principle visible across every screen we ship, every email we send, every coach we onboard, every athlete we serve.</p>
+
+  <h3>Who this is for</h3>
+  <p><strong>The team building MyRX</strong> — engineers, designers, copywriters, contributors of every kind. This is the rulebook. Everything we ship runs through it.</p>
+  <p><strong>Coaches and partners</strong> — coaches subscribing to our platform, brand ambassadors, integration partners, and anyone presenting MyRX to clients of their own. The visual identity and voice rules below are the contract: when you put the MyRX mark on something, this is what it has to look and sound like.</p>
+  <p><strong>Investors and stakeholders</strong> — anyone evaluating MyRX from the outside. This document is what we mean when we say "this is who we are." The technical depth here isn't padding — it's evidence that the brand is operationalized, not aspirational.</p>
+
+  <div class="pullquote lime">This document is a contract with the future. The visual identity, voice, and brand directives locked here are not provisional.</div>
+
+  <p>We don't update these to chase trends. We update them when the brand grows up — when we add a new audience, a new domain, a new market — and we update them with the same rigor we used to lock them in the first place.</p>
+
+  <p>Read it once end-to-end. Then keep it bookmarked. Every decision you make on behalf of MyRX should be traceable to a rule on a page here.</p>
+
+  <p style="margin-top: 0.3in; color: var(--fg-muted); font-style: italic;">— The MyRX Team<br/>Ann Arbor, Michigan</p>
+
+  <div class="page-footer">
+    <span class="brand">MyRX · Performance Lab</span>
+    <span class="num">Foreword</span>
+  </div>
+</div>
+
+<!-- ============================================================
+     TABLE OF CONTENTS
+============================================================ -->
+<div class="page">
+  <h1><span class="num">Contents</span>What's inside.</h1>
+  <ul class="toc-list">
+    <li><span class="toc-num">I</span><span class="toc-title">Foundations — Mission, Vision, Values, Personality</span></li>
+    <li><span class="toc-num">II</span><span class="toc-title">Audience — The Two We Serve</span></li>
+    <li><span class="toc-num">III</span><span class="toc-title">Voice and Tone — The Coaching Philosophy</span></li>
+    <li><span class="toc-num">IV</span><span class="toc-title">Visual Identity — Logo, Color, Type, Motion</span></li>
+    <li><span class="toc-num">V</span><span class="toc-title">Application — How the Brand Shows Up</span></li>
+    <li><span class="toc-num">VI</span><span class="toc-title">Product Vocabulary — Locked Terms</span></li>
+    <li><span class="toc-num">VII</span><span class="toc-title">Guardrails — What We Never Do</span></li>
+    <li><span class="toc-num">VIII</span><span class="toc-title">Governance — Brand Ownership and Updates</span></li>
+  </ul>
+  <div class="page-footer">
+    <span class="brand">MyRX · Performance Lab</span>
+    <span class="num">Contents</span>
+  </div>
+</div>
+
+<!-- ============================================================
+     AT A GLANCE
+============================================================ -->
+<div class="page">
+  <h1><span class="num">At a Glance</span>The brand on one card.</h1>
+  <p class="lead">Everything below is expanded across the rest of the document. This card is the impatient reader's reference.</p>
+
+  <h3>Identity</h3>
+  <table class="compact">
+    <tr><td style="width: 1.5in; color: var(--fg-muted);">Name</td><td>MyRX</td></tr>
+    <tr><td style="color: var(--fg-muted);">Tagline</td><td>Performance Lab</td></tr>
+    <tr><td style="color: var(--fg-muted);">Mission</td><td>Help every person progress one step at a time across every domain that matters in their fitness.</td></tr>
+    <tr><td style="color: var(--fg-muted);">Vision</td><td>The default coaching layer for human performance, whether the coach is a person or the app itself.</td></tr>
+    <tr><td style="color: var(--fg-muted);">Founded</td><td>2026, Ann Arbor, Michigan</td></tr>
+    <tr><td style="color: var(--fg-muted);">Operating entity</td><td>Northern Princess LLC</td></tr>
+  </table>
+
+  <h3 style="margin-top: 0.3in;">Visual Foundation</h3>
+  <div class="swatch-grid">
+    <div class="swatch">
+      <div class="swatch-color" style="background: #CAF240;">
+        <span class="name" style="color: #121721;">MyRX Lime</span>
+      </div>
+      <div class="swatch-meta">
+        <span class="hex">#CAF240</span>
+        hsl(73°, 87%, 60%) · Primary accent
+      </div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #121721;">
+        <span class="name" style="color: #F4F3EF;">MyRX Dark</span>
+      </div>
+      <div class="swatch-meta">
+        <span class="hex">#121721</span>
+        hsl(220°, 28%, 10%) · Background
+      </div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #171C26;">
+        <span class="name" style="color: #F4F3EF;">MyRX Surface</span>
+      </div>
+      <div class="swatch-meta">
+        <span class="hex">#171C26</span>
+        hsl(220°, 24%, 12%) · Elevated surface
+      </div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #F4F3EF;">
+        <span class="name" style="color: #121721;">MyRX Foreground</span>
+      </div>
+      <div class="swatch-meta">
+        <span class="hex">#F4F3EF</span>
+        hsl(60°, 5%, 96%) · Text on dark
+      </div>
+    </div>
+  </div>
+
+  <h3>Typography</h3>
+  <p><strong>Geist</strong> — display + body. <strong>Geist Mono</strong> — numerics, data.</p>
+
+  <h3>Voice in one sentence</h3>
+  <div class="pullquote">We speak like a coach who knows your body, respects your reality, and names the one thing you can do this week to move forward.</div>
+
+  <div class="page-footer">
+    <span class="brand">MyRX · Performance Lab</span>
+    <span class="num">At a Glance</span>
+  </div>
+</div>
+
+<!-- ============================================================
+     SECTION I OPENER
+============================================================ -->
+<div class="section-opener">
+  <div class="number">Section I</div>
+  <div class="title">Foundations.</div>
+  <div class="description">Who we are, what we believe, how we operate. The non-negotiable ground that everything else stands on.</div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Mission</h2>
+  <div class="pullquote lime">MyRX helps every person progress one step at a time across every domain that matters in their fitness.</div>
+
+  <p>That sentence is the spine of the company. Each phrase carries weight:</p>
+
+  <ul>
+    <li><strong>"Every person"</strong> — not just gym-goers, not just athletes, not just the 1% who already know what they're doing. MyRX is designed for someone at their first workout and someone at their thousandth, with the same framework adapting to where they actually are.</li>
+    <li><strong>"Progress one step at a time"</strong> — we never overwhelm. The product surfaces ONE next action at a time, across every domain. The user always knows what's next, why it's the right next, and what it builds toward.</li>
+    <li><strong>"Every domain that matters"</strong> — strength, cardio, mobility, body composition, nutrition, recovery, hydration, sleep, and the habits that hold it all together. A coach helps with all of those, so MyRX has to too. Breadth is not bloat — it's the table-stakes for the audience we serve.</li>
+  </ul>
+
+  <p>The mission is not "help people lose weight." It's not "build the best workout tracker." It's not "be the Notion of fitness." Those are tactics, products, comparisons. MyRX is something specific: a coaching layer that meets every person where they are and points at the next step. That's what we do, and it's all we do.</p>
+
+  <h2>Vision</h2>
+  <p class="lead">One product, two audiences.</p>
+
+  <div class="two-col">
+    <div class="stat-card">
+      <div class="label">Audience A</div>
+      <div class="value">Coaches</div>
+      <p style="margin-top: 0.1in; font-size: 10pt; color: var(--fg-muted);">A complete admin platform to run their entire client roster.</p>
+    </div>
+    <div class="stat-card">
+      <div class="label">Audience B</div>
+      <div class="value">Self-Coached Athletes</div>
+      <p style="margin-top: 0.1in; font-size: 10pt; color: var(--fg-muted);">A coach-quality next-step experience without a human coach.</p>
+    </div>
+  </div>
+
+  <p>Both audiences use the same client-facing app. The coach version is the admin overlay on top of it; the self-coached version is the client UI minus the coach. <strong>There is one product, not two.</strong></p>
+
+  <p>The vision is to become the default coaching layer for human performance — the layer everyone in fitness ultimately operates on top of. When the world thinks "structured fitness coaching, in software form," they think MyRX, the same way they think Stripe for payments or Figma for design files.</p>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section I — Foundations</span></div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Revenue Model</h2>
+  <p>Two streams, both built on the same product.</p>
+
+  <h3>Stream A — Coach subscription (B2B2C)</h3>
+  <p>Coaches pay a monthly subscription for the admin portal. Their clients get the full client app at no cost as long as the coach's subscription is active. The coach gets every client's data, chat, progress dashboards, and the ability to message and program for the whole roster. This is our category-defining differentiator: no other consumer fitness app sells a coach overlay this complete.</p>
+
+  <h3>Stream B — App Store / Google Play (B2C direct)</h3>
+  <p>Free download with a limited free tier. Full features unlocked by either a recurring subscription or a one-time lifetime purchase. No coach involved — the app itself plays the coaching role through the "next step" framing built into every domain.</p>
+
+  <p>Both streams reinforce each other. The B2C tier proves the coaching framework works without a human in the loop. The B2B2C tier proves coaches will pay for what the product enables them to do at scale. Together they form a defensible position no single-audience competitor can attack from one side without losing the other.</p>
+
+  <h2>Values</h2>
+  <p>Five values that govern how we build and operate. Not posters — rules we make decisions against.</p>
+
+  <h3>1. Honest by default</h3>
+  <p>We never tell a user something is true when it isn't. If a calculation is a projection, we say so. If a prescription is an estimate, we say so. Trust is the moat. Once a user catches us being slick, the moat is gone.</p>
+
+  <h3>2. Coach voice, not consumer voice</h3>
+  <p>We speak like a coach who knows the user, not a marketer trying to convert them. Every word that touches a user runs through the 3-pillar coach-voice filter. No exceptions. The entire next section is devoted to this.</p>
+
+  <h3>3. Mechanism over authority</h3>
+  <p>When we explain WHY something works, we cite the underlying mechanism — glycogen depletion, motor-unit recruitment, lactate clearance, joint loading. Not "experts recommend" or "research shows." This treats the user as an adult and earns trust as a source of substance.</p>
+
+  <h3>4. The next step, not the master plan</h3>
+  <p>Long-term goals matter. But the only thing we put in front of the user is the next step they can take this week. Master plans induce paralysis; next steps induce momentum.</p>
+
+  <h3>5. Cross-platform identical, by default</h3>
+  <p>Web and mobile are one product, not two. A user on web in the morning and on mobile in the evening should see the same data, in the same shape, with the same voice. We don't allow surface drift.</p>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section I — Foundations</span></div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Brand Personality</h2>
+  <p>If MyRX were a person, what would they be like?</p>
+
+  <table>
+    <tr><td style="width: 1.6in;"><strong>Smart, not flashy</strong></td><td>MyRX knows the science cold and is willing to explain it, but never lectures. The smartest person in the room rarely needs to prove it.</td></tr>
+    <tr><td><strong>Direct, not blunt</strong></td><td>MyRX tells the user what they need to hear without softening it into mush, but also without bulldozing them. The truth is delivered with care, not with a hammer.</td></tr>
+    <tr><td><strong>Patient, not soft</strong></td><td>MyRX expects discipline over time but doesn't shame mistakes. A missed week isn't punished, it's accommodated.</td></tr>
+    <tr><td><strong>Curious, not dogmatic</strong></td><td>MyRX is grounded in evidence-based exercise science but stays open to where the science evolves. We're a Performance Lab, not a Performance Pulpit.</td></tr>
+    <tr><td><strong>Personal, not clinical</strong></td><td>MyRX talks to the user as a specific human with a specific body, not as a row in a database.</td></tr>
+  </table>
+
+  <div class="callout" style="margin-top: 0.3in;">
+    <div class="callout-title">Single-word descriptor</div>
+    <p style="font-size: 18pt; color: var(--lime); font-weight: 600; margin: 0;">trusted</p>
+    <div class="callout-title" style="margin-top: 0.15in;">Two-word descriptor</div>
+    <p style="font-size: 18pt; color: var(--lime); font-weight: 600; margin: 0;">clear-eyed</p>
+    <div class="callout-title" style="margin-top: 0.15in;">Three-word descriptor</div>
+    <p style="font-size: 18pt; color: var(--lime); font-weight: 600; margin: 0;">shows the math</p>
+  </div>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section I — Foundations</span></div>
+</div>
+
+<!-- ============================================================
+     SECTION II OPENER
+============================================================ -->
+<div class="section-opener">
+  <div class="number">Section II</div>
+  <div class="title">Audience.</div>
+  <div class="description">Two distinct audiences served by one product. Understanding both is essential to writing copy, designing surfaces, prioritizing features.</div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Audience A — Coaches</h2>
+  <p class="kicker">Primary · B2B2C engine</p>
+  <p>Coaches pay the subscription, bring their athletes onto the platform, and live in the admin portal every day. They are the audience whose retention matters most.</p>
+
+  <h3>Profile</h3>
+  <ul>
+    <li>Strength and conditioning coaches running independent practices or working inside a gym</li>
+    <li>Personal trainers operating remotely or in-person with rosters of 5–50 clients</li>
+    <li>CrossFit / functional fitness gym owners managing their members' programming</li>
+    <li>Sports performance coaches working with athletes across multiple sports</li>
+    <li>Online coaches whose entire practice runs through software</li>
+  </ul>
+
+  <h3>What they need</h3>
+  <ul>
+    <li>A complete admin platform — roster, programming, progress tracking, messaging, billing</li>
+    <li>Tools that make their existing coaching better, not tools that replace their judgment</li>
+    <li>A client-facing app that's good enough that clients actually use it (adherence is their livelihood)</li>
+    <li>White-label-grade polish — the app reflects on them, so it has to look professional</li>
+    <li>Honest, evidence-based defaults so they don't fight the product to do their job</li>
+  </ul>
+
+  <h3>What they don't need</h3>
+  <ul>
+    <li>"AI coaching" features that pretend to replace them. Coaches don't pay to be replaced.</li>
+    <li>Marketing-flavored gamification that makes their professional practice feel like a consumer app</li>
+    <li>Generic templated content that doesn't respect their specific methodology</li>
+  </ul>
+
+  <h3>How we treat them</h3>
+  <p>The admin portal is dense, fast, professional. No animations that delay actions. No marketing copy. Pure tool. We never communicate with their clients in our voice instead of theirs — the coach is the relationship; we are the infrastructure.</p>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section II — Audience</span></div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Audience B — Self-Coached Athletes</h2>
+  <p class="kicker">B2C direct · App Store, Play, Stripe Web</p>
+  <p>Individuals who buy the app directly without a coach. They're paying for a coach-quality experience without a human in the loop.</p>
+
+  <h3>Profile</h3>
+  <ul>
+    <li>Experienced lifters and runners who know what they're doing but want structured tracking and guidance</li>
+    <li>Athletes between coaches (post-college, between coaching contracts)</li>
+    <li>People who can't afford a personal coach but won't settle for a generic workout tracker</li>
+    <li>Data-driven athletes who want to understand WHY their programming works, not just follow it</li>
+    <li>People with a real performance goal — a race, a meet, a body composition target — who need a system</li>
+  </ul>
+
+  <h3>What they need</h3>
+  <ul>
+    <li>A product that treats them like an adult who can handle real information</li>
+    <li>The same depth a coach would provide, surfaced through the app's framework</li>
+    <li>Confidence the prescriptions are evidence-based, not marketing</li>
+    <li>A clean, fast surface they can use mid-workout without friction</li>
+  </ul>
+
+  <h3>What they don't need</h3>
+  <ul>
+    <li>A coach replacement (they've decided they don't want one)</li>
+    <li>Hand-holding or motivational copy</li>
+    <li>Social features that turn fitness into a competition</li>
+  </ul>
+
+  <h3>How we treat them</h3>
+  <p>The client app's coaching layer speaks directly to them in coach voice, with the same depth as if a real coach were behind it. The product never apologizes for being technical — if anything, we err toward more information, more rationale, more depth. We respect their time. No upsell modals, no nag screens, no dark patterns.</p>
+
+  <div class="pullquote">Both audiences use the same client-facing app. The coach's clients see exactly what the self-coached athlete sees. The coach gets an admin overlay — extra power, extra views, extra controls — but the underlying product is identical.</div>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section II — Audience</span></div>
+</div>
+
+<!-- ============================================================
+     SECTION III OPENER
+============================================================ -->
+<div class="section-opener">
+  <div class="number">Section III</div>
+  <div class="title">Voice & Tone.</div>
+  <div class="description">The most important section in this book. It overrides every other rule if they conflict.</div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">The Core Idea</h2>
+  <p>MyRX is a coach in software form. A real coach does not pick options off a menu and rate them like Yelp reviews. A real coach does not treat physiological adaptations like consumer preferences. A real coach does not lecture before listening. A real coach does not assume the user could "just" do something they currently can't.</p>
+
+  <p>A real coach DOES acknowledge where the user actually is, today. Explains why their body responds the way it does. Names a realistic next step that fits THIS user, THIS week. Trusts the user to make their own choices once they understand.</p>
+
+  <div class="pullquote lime">Every screen, every chip, every empty state, every error message, every onboarding line lands somewhere on this spectrum — and we're always moving toward the coach side.</div>
+
+  <h2>The 3-Pillar Rule</h2>
+  <p>Any user-facing string that touches a choice, a limit, a state, or a goal MUST do all three of these things, in order:</p>
+
+  <div class="three-col">
+    <div class="stat-card">
+      <div class="label">Pillar 1</div>
+      <div class="value" style="color: var(--lime);">Acknowledge</div>
+      <p style="margin-top: 0.1in; font-size: 9.5pt; color: var(--fg-muted);">Name the user's current state honestly. Their weight, body fat, training history, lifestyle, starting point. Acknowledgment first builds trust. Lecturing without acknowledgment is presumption.</p>
+    </div>
+    <div class="stat-card">
+      <div class="label">Pillar 2</div>
+      <div class="value" style="color: var(--lime);">Explain Biology</div>
+      <p style="margin-top: 0.1in; font-size: 9.5pt; color: var(--fg-muted);">Connect what their body is doing to why this matters. Cite mechanism — glycogen depletion, lean tissue cannibalization, NEAT compensation — not authority. Mechanism teaches. Authority deflects.</p>
+    </div>
+    <div class="stat-card">
+      <div class="label">Pillar 3</div>
+      <div class="value" style="color: var(--lime);">Name a Next Step</div>
+      <p style="margin-top: 0.1in; font-size: 9.5pt; color: var(--fg-muted);">Concrete, achievable in 1–4 weeks, accounting for where they actually are. Banned hedges: "consider," "you might want to," "eventually," "down the line."</p>
+    </div>
+  </div>
+
+  <h3>Where the rule applies</h3>
+  <p>Warning chips, empty states, locked features, goal banners, info pills, tile labels (where space allows), edit chips, onboarding copy, error messages, even "coming soon" placeholders. If a string touches a user, it runs through the filter.</p>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section III — Voice & Tone</span></div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Banned vs. Preferred</h2>
+  <p>The pattern: banned strings prescribe behavior. Preferred strings describe biology and offer a path.</p>
+
+  <div class="compare">
+    <div class="compare-cell banned">
+      <span class="tag">Banned</span>
+      Pick Very Active for accurate carb fueling — this preset is built for endurance athletes.
+    </div>
+    <div class="compare-cell preferred">
+      <span class="tag">Preferred</span>
+      Carb-fueled plans assume you're burning glycogen daily. Train consistently for a few weeks first, then we'll match the carbs to that work.
+    </div>
+  </div>
+
+  <div class="compare">
+    <div class="compare-cell banned">
+      <span class="tag">Banned</span>
+      High protein at this level is meant for cuts or recomposition — pair with weight training.
+    </div>
+    <div class="compare-cell preferred">
+      <span class="tag">Preferred</span>
+      Extra protein at your body fat has nowhere productive to go without a strength stimulus. Add 2–3 lift sessions a week — then protein becomes muscle-building instead of expensive maintenance.
+    </div>
+  </div>
+
+  <div class="compare">
+    <div class="compare-cell banned">
+      <span class="tag">Banned</span>
+      Choose a less aggressive pace.
+    </div>
+    <div class="compare-cell preferred">
+      <span class="tag">Preferred</span>
+      A 1% body-weight loss per week is the ceiling your body sustains without losing muscle. Lose Steady gets you there in 2 months without the metabolic backlash.
+    </div>
+  </div>
+
+  <div class="compare">
+    <div class="compare-cell banned">
+      <span class="tag">Banned</span>
+      Required field.
+    </div>
+    <div class="compare-cell preferred">
+      <span class="tag">Preferred</span>
+      We need your current weight to compute your daily calories. Log it in Bodyweight, then come back.
+    </div>
+  </div>
+
+  <div class="compare">
+    <div class="compare-cell banned">
+      <span class="tag">Banned</span>
+      Goal achieved!
+    </div>
+    <div class="compare-cell preferred">
+      <span class="tag">Preferred</span>
+      You hit your goal weight. Your body's adapted to this calorie level now — most people pick a new pace within a week to keep momentum.
+    </div>
+  </div>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section III — Voice & Tone</span></div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Three Voice Modes</h2>
+  <p>Every coach-voice surface hits all three registers simultaneously.</p>
+
+  <h3>A. Coach voice (the base)</h3>
+  <p>The 3-pillar rule. Every sentence runs through this filter.</p>
+
+  <h3>B. Progression voice</h3>
+  <p>Every advisory ends with a concrete next step achievable in 1–4 weeks, NOT a vague "consider doing X someday." Even "stay here for now and revisit when your body fat drops below 20%" is a concrete step — the user has a clear marker.</p>
+  <p><strong>Banned:</strong> "you should eventually," "down the line," "in the future you might want to."<br/>
+  <strong>Preferred:</strong> "right now, here's what works," "in 4 weeks, log your weight again — if you've dropped 4 lb, we'll tighten the deficit."</p>
+
+  <h3>C. Path voice</h3>
+  <p>The user is always on a NAMED path with a NEXT named milestone. We don't ask "what do you want to do?" — we say "based on where you are, you're on the [X] path. Next stop: [Y]."</p>
+  <p>Tier systems across the product (strength's adp zones, cardio's E/T/V zones, carry's BEGINNER → STRONGMAN, Rucking's GoRuck tiers) are all path-voice surfaces. Every domain should graduate to this.</p>
+
+  <h2>The Merged Template</h2>
+  <p>When writing any new user-facing string:</p>
+
+  <div class="pullquote lime">"You're starting from [acknowledged state]. Here's why your body does [observation]: [biology]. The next checkpoint on your path is [milestone] — most people get there in [timeframe] by [concrete action]."</div>
+
+  <p>Apply this template, then trim for tone. The structure should be invisible to the reader; the rhythm should feel like a coach talking.</p>
+
+  <h2>Voice Across Surfaces</h2>
+  <table class="compact">
+    <tr><td style="width: 1.6in;"><strong>In-app (mobile + web)</strong></td><td>Tight, declarative, no marketing flourishes. The user is mid-task; respect their attention.</td></tr>
+    <tr><td><strong>Email</strong></td><td>Slightly more expansive. Subject lines verb-first ("Confirm your email on MyRX," not "Welcome!"). Short paragraphs.</td></tr>
+    <tr><td><strong>SMS / OTP</strong></td><td>Stripped to facts. "Your MyRX verification code is: 123456." Nothing else.</td></tr>
+    <tr><td><strong>Social media</strong></td><td>Same coach voice, accommodating platform conventions. No "level up," no "game changer," no "fitness journey."</td></tr>
+    <tr><td><strong>Marketing pages</strong></td><td>Longer-form, more story-driven. Still coach voice. Earn trust the same way we earn it inside the app.</td></tr>
+    <tr><td><strong>Investor / partner</strong></td><td>Less coach voice, more business-voice — but clarity, honesty, and mechanism-over-authority still hold.</td></tr>
+  </table>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section III — Voice & Tone</span></div>
+</div>
+
+<!-- ============================================================
+     SECTION IV OPENER
+============================================================ -->
+<div class="section-opener">
+  <div class="number">Section IV</div>
+  <div class="title">Visual Identity.</div>
+  <div class="description">Logo, color, typography, iconography, motion. The visual contract every surface adheres to.</div>
+</div>
+
+<!-- LOGO SYSTEM -->
+<div class="page">
+  <h2 style="margin-top: 0;">Logo System</h2>
+  <p>Eight locked variants, paired across four use cases and two color contexts.</p>
+
+  <h3>The Four Types</h3>
+  <table>
+    <tr><th>Type</th><th>Form</th><th>Use case</th></tr>
+    <tr><td><strong>Tag</strong></td><td>Wordmark + "Performance Lab" tagline</td><td>Hero placements: cover pages, marketing hero, title slides, signage</td></tr>
+    <tr><td><strong>Clean</strong></td><td>Wordmark only, single-line treatment</td><td>Most contexts: headers, footers, email signatures, business cards</td></tr>
+    <tr><td><strong>Block</strong></td><td>Wordmark in stacked block treatment</td><td>Tight spaces where the wordmark reads as a block: square cards, social posts</td></tr>
+    <tr><td><strong>Icon</strong></td><td>Wordmark in square format with safe-zone padding</td><td>Favicons, app icons, profile photos, square avatars, system mark</td></tr>
+  </table>
+
+  <h3>Two Color Contexts</h3>
+  <p>Each type comes in two contrast variants:</p>
+  <ul>
+    <li><strong>Black</strong> — for use on light backgrounds. The "My" letters are MyRX Dark.</li>
+    <li><strong>White</strong> — for use on dark backgrounds. The "My" letters are MyRX Foreground.</li>
+  </ul>
+  <p>The "RX" letters are always MyRX Lime regardless of variant. The lime is the brand's signature — it never changes color.</p>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section IV — Visual Identity</span></div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Logo Variants</h2>
+  <div class="two-col">
+    <div class="logo-tile">
+      <div class="logo-tile-frame dark">
+        <img src="Logo/Final/Logo Tag White.png" alt="Logo Tag White">
+      </div>
+      <div class="logo-tile-meta">Tag White<span class="filename">Logo Tag White.png</span></div>
+    </div>
+    <div class="logo-tile">
+      <div class="logo-tile-frame light">
+        <img src="Logo/Final/Logo Tag Black.png" alt="Logo Tag Black">
+      </div>
+      <div class="logo-tile-meta">Tag Black<span class="filename">Logo Tag Black.png</span></div>
+    </div>
+    <div class="logo-tile">
+      <div class="logo-tile-frame dark">
+        <img src="Logo/Final/Logo Clean White.png" alt="Logo Clean White">
+      </div>
+      <div class="logo-tile-meta">Clean White<span class="filename">Logo Clean White.png</span></div>
+    </div>
+    <div class="logo-tile">
+      <div class="logo-tile-frame light">
+        <img src="Logo/Final/Logo Clean Black.png" alt="Logo Clean Black">
+      </div>
+      <div class="logo-tile-meta">Clean Black<span class="filename">Logo Clean Black.png</span></div>
+    </div>
+    <div class="logo-tile">
+      <div class="logo-tile-frame dark">
+        <img src="Logo/Final/Logo Block White.png" alt="Logo Block White">
+      </div>
+      <div class="logo-tile-meta">Block White<span class="filename">Logo Block White.png</span></div>
+    </div>
+    <div class="logo-tile">
+      <div class="logo-tile-frame light">
+        <img src="Logo/Final/Logo Block Black.png" alt="Logo Block Black">
+      </div>
+      <div class="logo-tile-meta">Block Black<span class="filename">Logo Block Black.png</span></div>
+    </div>
+    <div class="logo-tile">
+      <div class="logo-tile-frame dark">
+        <img src="Logo/Final/Logo Icon White.png" alt="Logo Icon White">
+      </div>
+      <div class="logo-tile-meta">Icon White<span class="filename">Logo Icon White.png · favicon + app icon</span></div>
+    </div>
+    <div class="logo-tile">
+      <div class="logo-tile-frame light">
+        <img src="Logo/Final/Logo Icon Black.png" alt="Logo Icon Black">
+      </div>
+      <div class="logo-tile-meta">Icon Black<span class="filename">Logo Icon Black.png</span></div>
+    </div>
+  </div>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section IV — Visual Identity</span></div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Choosing the Right Variant</h2>
+  <table class="compact">
+    <tr><th>Surface</th><th>Recommended variant</th></tr>
+    <tr><td>App icon (iOS, Android, web favicon)</td><td>Icon White (locked)</td></tr>
+    <tr><td>Web app top-left header</td><td>Clean White</td></tr>
+    <tr><td>Email signature</td><td>Clean White on dark, or Clean Black on light</td></tr>
+    <tr><td>Marketing site hero</td><td>Tag White</td></tr>
+    <tr><td>Cover slides (decks, brand book)</td><td>Tag White</td></tr>
+    <tr><td>Square social media post</td><td>Block White or Block Black per background</td></tr>
+    <tr><td>Profile photo (LinkedIn, Twitter, Instagram)</td><td>Icon White</td></tr>
+    <tr><td>Business card</td><td>Clean Black on white, Clean White on dark</td></tr>
+    <tr><td>Print materials</td><td>Whichever matches the background</td></tr>
+  </table>
+
+  <h3>Clear Space</h3>
+  <p>Minimum clear space around any logo equals the height of the "M" letter. Nothing else — no text, no graphics, no UI chrome — may enter that clear space.</p>
+  <p>The Icon variant has built-in safe-zone padding. The visible wordmark sits inside the inner ~72% of the canvas, leaving ~14% padding on each side. This matches iOS app icon guidelines and Android's adaptive icon safe zone. <strong>Do not crop the Icon variant.</strong></p>
+
+  <h3>Minimum Sizes</h3>
+  <table class="compact">
+    <tr><th>Variant</th><th>Minimum width</th></tr>
+    <tr><td>Tag</td><td>240 px (digital) · 50 mm (print)</td></tr>
+    <tr><td>Clean</td><td>160 px (digital) · 35 mm (print)</td></tr>
+    <tr><td>Block</td><td>80 px (digital) · 20 mm (print)</td></tr>
+    <tr><td>Icon</td><td>32 px (digital) · 10 mm (print)</td></tr>
+  </table>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section IV — Visual Identity</span></div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Logo Don'ts</h2>
+  <ul>
+    <li><strong>Stretch, skew, or rotate</strong> any logo variant. Always preserve aspect ratio.</li>
+    <li><strong>Recolor</strong> the wordmark. The four locked colors are non-negotiable. No gold, no rainbow, no seasonal versions.</li>
+    <li><strong>Add effects</strong> — no drop shadows, no glows, no gradients, no outlines around letters.</li>
+    <li><strong>Place on busy photos</strong> without a solid-color underlay. If background is photographic, place the logo inside a dark or light solid panel.</li>
+    <li><strong>Substitute typography.</strong> The wordmark is custom; don't recreate it in another typeface.</li>
+    <li><strong>Crop the Icon variant.</strong> Its padding is intentional and protected by the safe-zone rule.</li>
+    <li><strong>Mix variants</strong> in a single composition. One logo per surface.</li>
+    <li><strong>Render the brand name as plain text</strong> as a substitute for the wordmark. If the wordmark won't fit, redesign the layout.</li>
+  </ul>
+
+  <h3>One Wordmark Per Surface</h3>
+  <p>If a page has a centered wordmark in the body, the header must NOT also show a wordmark. If the header shows a wordmark, the body must NOT include another. One mark per surface. Always. This rule prevents the "branded-into-uselessness" feeling where the logo is repeated three times in one composition.</p>
+
+  <h3>The Slogan Reservation</h3>
+  <p>The <strong>Tag</strong> variant — wordmark + "Performance Lab" tagline — is reserved for hero placements only. It does not appear in the running app, in email signatures, on social profile avatars, or anywhere else where the wordmark needs to function as a quick identifier. The tagline is too long to read at small sizes, and overusing it dilutes its impact when it matters.</p>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section IV — Visual Identity</span></div>
+</div>
+
+<!-- COLOR SYSTEM -->
+<div class="page">
+  <h2 style="margin-top: 0;">Primary Brand Palette</h2>
+  <p>The four colors below are the foundation. Everything else in the visual system supports them.</p>
+
+  <div class="swatch-grid">
+    <div class="swatch">
+      <div class="swatch-color" style="background: #CAF240;">
+        <span class="name" style="color: #121721;">MyRX Lime</span>
+      </div>
+      <div class="swatch-meta">
+        <span class="hex">#CAF240 · rgb(202, 242, 64)</span>
+        hsl(73°, 87%, 60%) · Primary accent
+      </div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #121721;">
+        <span class="name" style="color: #F4F3EF;">MyRX Dark</span>
+      </div>
+      <div class="swatch-meta">
+        <span class="hex">#121721 · rgb(18, 23, 33)</span>
+        hsl(220°, 28%, 10%) · Background
+      </div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #171C26;">
+        <span class="name" style="color: #F4F3EF;">MyRX Surface</span>
+      </div>
+      <div class="swatch-meta">
+        <span class="hex">#171C26 · rgb(23, 28, 38)</span>
+        hsl(220°, 24%, 12%) · Elevated surface
+      </div>
+    </div>
+    <div class="swatch">
+      <div class="swatch-color" style="background: #F4F3EF;">
+        <span class="name" style="color: #121721;">MyRX Foreground</span>
+      </div>
+      <div class="swatch-meta">
+        <span class="hex">#F4F3EF · rgb(244, 243, 239)</span>
+        hsl(60°, 5%, 96%) · Text on dark
+      </div>
+    </div>
+  </div>
+
+  <h3>Why these specific values</h3>
+  <ul>
+    <li><strong>Lime is yellow-green (H=73)</strong> — closer to yellow than to true green. This is what makes it electric. A true green at H=120 reads as "ecology brand"; our lime reads as "performance."</li>
+    <li><strong>Dark is blue-tinted (H=220)</strong> at moderate saturation (28%) and very low lightness (10%). It looks like black at thumbnail size but reads as "intentional dark" against true black. The hue sits near-complementary to the lime (~147° apart on the color wheel), so the lime POPS against this dark instead of blending into the same family. Saturation is the lever that makes it read as blue vs slate-grey.</li>
+    <li><strong>Surface is the same hue family</strong> as Dark with +2% lightness and slightly lower saturation (24%). This produces the elevation hierarchy users expect (cards sit visibly above the background) without introducing a competing hue.</li>
+    <li><strong>Foreground is warm off-white</strong> (H=60 at very high lightness). Never pure white. Pure white is harsh on OLED screens and clashes against the cool dark backgrounds. Warm text on cool surface is the canonical high-contrast pattern.</li>
+  </ul>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section IV — Visual Identity</span></div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Secondary Domain Palette</h2>
+  <p>The product's training domains have their own accent colors. These help users orient quickly inside the app. They are not interchangeable with the brand palette.</p>
+
+  <table>
+    <tr><th>Domain</th><th>Token</th><th>Hex</th><th>Role</th></tr>
+    <tr><td>Strength</td><td>Strength Blue</td><td><code>#3B82F6</code></td><td>Strength training surfaces</td></tr>
+    <tr><td>Cardio</td><td>Cardio Amber</td><td><code>#F59E0B</code></td><td>Cardio training surfaces</td></tr>
+    <tr><td>Mobility</td><td>Mobility Teal</td><td><code>#14B8A6</code></td><td>Mobility / ROM tracking</td></tr>
+    <tr><td>Hydration</td><td>Hydration Sky</td><td><code>#0EA5E9</code></td><td>Hydration logging</td></tr>
+    <tr><td>Nutrition</td><td>Lime (shared with brand)</td><td><code>#CAF240</code></td><td>Nutrition is the domain closest to brand identity</td></tr>
+  </table>
+
+  <p>Domain colors are used <strong>only inside their own surfaces</strong>. They never appear in brand-level chrome (top bars, navigation, primary buttons outside their domain).</p>
+
+  <h2>Semantic Palette</h2>
+  <table>
+    <tr><th>Token</th><th>Hex</th><th>Role</th></tr>
+    <tr><td>Success</td><td><code>#10B981</code></td><td>Goal reached, save successful. Never confused with Lime — success emerald is bluer.</td></tr>
+    <tr><td>Warning</td><td><code>#F59E0B</code></td><td>Soft warnings, "heads up" advisories.</td></tr>
+    <tr><td>Destructive</td><td><code>#EF4444</code></td><td>Delete actions, hard errors. Use sparingly.</td></tr>
+    <tr><td>Info</td><td><code>#3B82F6</code></td><td>Neutral informational chrome.</td></tr>
+  </table>
+
+  <h2>Accessibility — Contrast Ratios</h2>
+  <p>All color pairings used in the product meet or exceed <strong>WCAG 2.1 Level AA</strong>.</p>
+  <table class="compact">
+    <tr><th>Pairing</th><th>Ratio</th><th>Rating</th></tr>
+    <tr><td>Foreground on Dark</td><td>17.2 : 1</td><td>AAA</td></tr>
+    <tr><td>Foreground on Surface</td><td>15.8 : 1</td><td>AAA</td></tr>
+    <tr><td>Lime on Dark</td><td>12.1 : 1</td><td>AAA</td></tr>
+    <tr><td>Muted on Dark</td><td>7.4 : 1</td><td>AAA (large) · AA (normal)</td></tr>
+    <tr><td>Dark on Lime (CTA buttons)</td><td>12.1 : 1</td><td>AAA</td></tr>
+  </table>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section IV — Visual Identity</span></div>
+</div>
+
+<!-- TYPOGRAPHY -->
+<div class="page">
+  <h2 style="margin-top: 0;">Typography</h2>
+  <div class="two-col">
+    <div class="stat-card">
+      <div class="label">Display + Body</div>
+      <div class="value" style="font-family: 'Geist', sans-serif; font-size: 28pt;">Geist</div>
+      <p style="margin-top: 0.1in; font-size: 10pt; color: var(--fg-muted);">Modern, neutral sans-serif designed by Vercel. Reads cleanly at every size. Not a "designer" typeface — does its job and gets out of the way.</p>
+    </div>
+    <div class="stat-card">
+      <div class="label">Numerics + Data</div>
+      <div class="value" style="font-family: 'Geist Mono', monospace; font-size: 28pt;">0123 lb</div>
+      <p style="margin-top: 0.1in; font-size: 10pt; color: var(--fg-muted);">Geist Mono provides tabular alignment for numbers. Digits line up by column so value changes feel like precise shifts, not sloppy reflows.</p>
+    </div>
+  </div>
+
+  <h3>Hierarchy</h3>
+  <table class="compact">
+    <tr><th>Level</th><th>Family</th><th>Weight</th><th>Mobile</th><th>Web</th></tr>
+    <tr><td>H1</td><td>Geist</td><td>700 Bold</td><td>28 px</td><td>32 px</td></tr>
+    <tr><td>H2</td><td>Geist</td><td>700 Bold</td><td>22 px</td><td>24 px</td></tr>
+    <tr><td>H3</td><td>Geist</td><td>600 SemiBold</td><td>18 px</td><td>20 px</td></tr>
+    <tr><td>Body</td><td>Geist</td><td>400 Regular</td><td>15 px</td><td>16 px</td></tr>
+    <tr><td>Small</td><td>Geist</td><td>400 Regular</td><td>13 px</td><td>14 px</td></tr>
+    <tr><td>Caption</td><td>Geist</td><td>400 Regular</td><td>11 px</td><td>12 px</td></tr>
+    <tr><td>Hero numbers</td><td>Geist Mono</td><td>700 Bold</td><td>30 px</td><td>36 px</td></tr>
+    <tr><td>Inline numbers</td><td>Geist Mono</td><td>500 Medium</td><td>inherit</td><td>inherit</td></tr>
+  </table>
+
+  <h3>Number Rules</h3>
+  <ul>
+    <li>Always pair Geist Mono with <code>tabular-nums</code> for column-aligned digits.</li>
+    <li>Hero numbers use the TickerNumber component for slot-machine roll animations on value change.</li>
+    <li>Never combine <code>fontFamily: Geist Mono</code> with explicit <code>fontWeight</code> on Android — encode weight in the family name itself.</li>
+    <li>Units (lb, kg, min, sec, %) render in Geist (sans), not Geist Mono. Numbers are mono; units are sans.</li>
+  </ul>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section IV — Visual Identity</span></div>
+</div>
+
+<!-- ICONOGRAPHY + MOTION -->
+<div class="page">
+  <h2 style="margin-top: 0;">Iconography</h2>
+  <p><strong>Lucide</strong> is the only icon library in the system. Stroke-based, never filled.</p>
+
+  <h3>Sizing Scale</h3>
+  <table class="compact">
+    <tr><th>Use</th><th>Size</th></tr>
+    <tr><td>Inline with body text</td><td>14 px</td></tr>
+    <tr><td>Default UI buttons</td><td>16 px</td></tr>
+    <tr><td>Navigation, prominent buttons</td><td>20 px</td></tr>
+    <tr><td>Hero / large icons</td><td>24 px or 32 px</td></tr>
+  </table>
+
+  <h3>Color Rules</h3>
+  <ul>
+    <li>Icons inherit the text color of their context by default.</li>
+    <li>Icons in domain surfaces take the domain accent (strength blue, cardio amber, etc.).</li>
+    <li>Brand icons (Lime) used sparingly — for primary CTAs and brand highlights only.</li>
+    <li>Never use emoji as substitutes for icons. Lucide only.</li>
+    <li>Never fill stroke-based icons. The thin-line style is part of the brand's aesthetic restraint.</li>
+  </ul>
+
+  <h2>Motion Principles</h2>
+  <p>Motion is restrained, purposeful, and never decorative. Every animation answers a question: "What is the user's eye doing right now, and what does it need to track?"</p>
+
+  <h3>The Seven Patterns</h3>
+  <ol>
+    <li><strong>Staggered Entrance Cascade</strong> — Cards slide in 0 / 250 / 500 ms. Page assembles in front of the user.</li>
+    <li><strong>Slot-Machine Numeric Ticker</strong> — Digits roll on value change. Used for progressive achievement, not for static labels.</li>
+    <li><strong>Pulsing Chevron</strong> — 1.5s cycle, telegraphs "swipe to navigate."</li>
+    <li><strong>Consolidated-Page Swipe</strong> — Whole-page slide with pill physically following finger. 220 px slide-off, 250 ms.</li>
+    <li><strong>Inline Expansion Panel</strong> — FadeInUp 200 ms / FadeOutUp 180 ms. Sibling LinearTransition prevents jumpy reflow.</li>
+    <li><strong>PhantomWheel Inertia + Cross-Fade</strong> — iOS-style numeric picker. 250 px/s release threshold, 0.993 deceleration.</li>
+    <li><strong>Save Button Feedback</strong> — "✓ Saved" hold for 1500 ms in the domain accent color.</li>
+  </ol>
+
+  <p><strong>Universal rules:</strong> Cubic-bezier <code>(0.16, 1, 0.3, 1)</code> is the standard entrance easing. 500 ms is the standard entrance duration. Nothing longer than 500 ms for interactive feedback. Never animate purely for decoration.</p>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section IV — Visual Identity</span></div>
+</div>
+
+<!-- ============================================================
+     SECTION V OPENER
+============================================================ -->
+<div class="section-opener">
+  <div class="number">Section V</div>
+  <div class="title">Application.</div>
+  <div class="description">How the brand shows up across product surfaces — mobile, web, admin, email, social, print.</div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Product Surfaces</h2>
+
+  <h3>Mobile App (primary surface)</h3>
+  <p>Where most users spend their time. Dark mode by default, cards on MyRX Surface with visible elevation, Lime CTAs for primary actions, domain accents for domain-specific chrome, Geist for everything, Geist Mono for numbers, Lucide icons throughout. Bottom nav with the full domain set.</p>
+
+  <h3>Web App (secondary surface, frozen)</h3>
+  <p>Shares the visual system 1:1 with mobile. Same colors, typography, iconography. As of mid-2026 the web surface is frozen for design and feature parity — mobile leads, web mirrors when necessary.</p>
+
+  <h3>Admin Portal (web-only)</h3>
+  <p>Coaches and platform admins use a separate <code>/admin</code> shell with the same visual system but denser layouts. The admin portal sacrifices animation polish for speed — coaches work in it for hours per day and need throughput.</p>
+
+  <h3>Email</h3>
+  <p>All transactional emails use the dark-mode palette. Background: MyRX Dark. Card: MyRX Surface. Primary CTA: Lime button with MyRX Dark text. Body: MyRX Foreground. System font stack as fallback for clients that can't load Geist reliably.</p>
+
+  <h3>Social Media</h3>
+  <p>Social profile assets use the locked brand palette. Profile picture is always <strong>Icon White</strong>. Cover banners use the wordmark with the tagline (Tag White) on a MyRX Dark background, with generous clear space. Post content follows the coach voice rules — no marketing-speak, no fitness clichés, no gamified language.</p>
+
+  <h3>Print</h3>
+  <p>For business cards, signage, print collateral, and merchandise: highest-resolution PNG or SVG, match Pantone or CMYK approximations as closely as the print process allows, maintain clear-space rules.</p>
+
+  <h2>Imagery</h2>
+  <h3>Style</h3>
+  <ul>
+    <li>Real athletes, not models. People who actually train, in actual training environments.</li>
+    <li>Honest lighting. Natural light, gym light, ambient. No glossy magazine retouching.</li>
+    <li>Mid-action over posed. The person is in the middle of a lift, run, stretch — not posing.</li>
+    <li>Variety of body types, ages, ethnicities. Fitness is universal; our imagery reflects that.</li>
+    <li>Equipment shown realistically. A barbell looks like a barbell, not a beauty shot.</li>
+  </ul>
+
+  <h3>What we avoid</h3>
+  <ul>
+    <li>Stock photos of "fit people in a gym." Read as fake immediately.</li>
+    <li>Before/after composites. Commodify body change in a way that contradicts coach voice.</li>
+    <li>Heavy color grading or filter overlays. Brand palette comes from chrome around the photo, not from the photo.</li>
+    <li>Sexualized imagery. Product is about performance, not appearance.</li>
+    <li>Models holding the product to camera. No "person smiling at phone" stock shots.</li>
+  </ul>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section V — Application</span></div>
+</div>
+
+<!-- ============================================================
+     SECTION VI OPENER
+============================================================ -->
+<div class="section-opener">
+  <div class="number">Section VI</div>
+  <div class="title">Vocabulary.</div>
+  <div class="description">Locked product terms. Copy across surfaces must use these exact words — no synonyms, no drift.</div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Training System</h2>
+  <table>
+    <tr><th style="width: 1.6in;">Term</th><th>Meaning</th></tr>
+    <tr><td><strong>adp zone</strong></td><td>Adaptation zone. Which adaptation a strength tile targets. Three values: <em>strength</em> (1–5 reps), <em>hypertrophy</em> (6–12 reps), <em>endurance</em> (13+ reps).</td></tr>
+    <tr><td><strong>rep range</strong></td><td>The specific rep count prescribed for a working set.</td></tr>
+    <tr><td><strong>eff curve</strong></td><td>Effort curve. The rep-max projection formula used by the system. Epley / Brzycki / Lombardi averaged.</td></tr>
+    <tr><td><strong>max attempt</strong></td><td>A milestone rep count on bodyweight movements. We do not use "max reps"; we use "max attempts."</td></tr>
+    <tr><td><strong>tier</strong></td><td>A proficiency level within a progression system. Strength tiers (BEGINNER → STRONGMAN). BW assist tiers (Full RX / Band / Knee / Band+Knee). Cardio zones (ENDURANCE / THRESHOLD / VO2 MAX).</td></tr>
+    <tr><td><strong>next step</strong></td><td>The single concrete action a user can take this week to progress on their current path. Every coaching surface surfaces exactly one.</td></tr>
+  </table>
+
+  <h2>Coaching Relationships</h2>
+  <table>
+    <tr><th style="width: 1.6in;">Term</th><th>Meaning</th></tr>
+    <tr><td><strong>coach</strong></td><td>A subscriber to the B2B2C arm — runs a roster of clients on MyRX. Lowercase in copy unless starting a sentence.</td></tr>
+    <tr><td><strong>athlete / client</strong></td><td>The end user. "Athlete" preferred in product copy; "client" only when emphasizing the coach-client relationship.</td></tr>
+    <tr><td><strong>admin</strong></td><td>A MyRX platform administrator. Distinct from "coach."</td></tr>
+    <tr><td><strong>self-coached</strong></td><td>A user who is not paired with a coach — they use MyRX directly via App Store / Play / Stripe Web.</td></tr>
+    <tr><td><strong>invite</strong></td><td>The act of a coach extending an offer to an athlete to join MyRX on their roster.</td></tr>
+    <tr><td><strong>accept</strong></td><td>The act of an athlete accepting a coach invite.</td></tr>
+    <tr><td><strong>swap</strong></td><td>When an athlete who is on one coach's roster accepts an invite from a different coach. The new relationship replaces the old.</td></tr>
+  </table>
+
+  <h2>Product Domains</h2>
+  <table>
+    <tr><th>Domain</th><th>What it covers</th></tr>
+    <tr><td>Strength</td><td>Resistance training. Barbell, dumbbell, kettlebell, machine, bodyweight, carry, isometric.</td></tr>
+    <tr><td>Cardio</td><td>Endurance training. Running, cycling, rowing, swimming, ergs, rucking, stair climbing.</td></tr>
+    <tr><td>Mobility</td><td>Range-of-motion tracking.</td></tr>
+    <tr><td>Bodyweight</td><td>Weight + goal + body composition tracking.</td></tr>
+    <tr><td>Calories / Nutrition</td><td>Food logging, macros, daily intake plan.</td></tr>
+    <tr><td>Heart</td><td>Resting + active HR via wearable integration.</td></tr>
+    <tr><td>Sleep</td><td>Sleep duration, quality, consistency.</td></tr>
+    <tr><td>Hydration</td><td>Water logging.</td></tr>
+    <tr><td>Habits</td><td>Daily habit tracking (planned).</td></tr>
+  </table>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section VI — Vocabulary</span></div>
+</div>
+
+<!-- ============================================================
+     SECTION VII OPENER
+============================================================ -->
+<div class="section-opener">
+  <div class="number">Section VII</div>
+  <div class="title">Guardrails.</div>
+  <div class="description">What we never do, in any context, without an explicit override. The lines that keep the brand from drifting.</div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Voice Guardrails</h2>
+  <ul>
+    <li><strong>Never use consumer-choice voice.</strong> "Pick X for Y" is banned. Use coach voice.</li>
+    <li><strong>Never use authority instead of mechanism.</strong> "Experts recommend" and "research shows" are not allowed.</li>
+    <li><strong>Never use vague future hedges.</strong> "Consider," "you might want to," "eventually," "down the line" — banned.</li>
+    <li><strong>Never use marketing clichés.</strong> "Transform your life," "fitness journey," "level up," "game changer," "unlock," "discover the secret," "before/after that will shock you" — all banned.</li>
+    <li><strong>Never gamify reality.</strong> No streaks that punish missed days. No badges for compliance. No leaderboards that compare athletes against each other.</li>
+    <li><strong>Never speak about the user's body in shame language.</strong> "Your problem areas," "trouble spots" — banned. Bodies are biological, not deficient.</li>
+  </ul>
+
+  <h2>Visual Guardrails</h2>
+  <ul>
+    <li><strong>Never use pure black (<code>#000000</code>) on dark surfaces.</strong> Always MyRX Dark (<code>#121721</code>).</li>
+    <li><strong>Never use pure white (<code>#FFFFFF</code>) on dark surfaces.</strong> Always MyRX Foreground (<code>#F4F3EF</code>).</li>
+    <li><strong>Never substitute brand colors with off-brand equivalents.</strong> No alternate lime shades, no different greens.</li>
+    <li><strong>Never use the lime as decorative chrome.</strong> Lime is for primary CTAs and brand highlights only.</li>
+    <li><strong>Never mix typefaces.</strong> Geist and Geist Mono only.</li>
+    <li><strong>Never use emojis as icon substitutes.</strong> Lucide icons only.</li>
+    <li><strong>Never stretch, recolor, or modify the logo.</strong> The eight locked variants are the only acceptable forms.</li>
+    <li><strong>Never crop the Icon variant.</strong> Its safe-zone padding is intentional.</li>
+  </ul>
+
+  <h2>Product Guardrails</h2>
+  <ul>
+    <li><strong>Never auto-create accounts on behalf of a user.</strong> Always require explicit signup.</li>
+    <li><strong>Never auto-enter financial information.</strong> Bank, credit card, account numbers must be entered by the user.</li>
+    <li><strong>Never delete a user's data without explicit confirmation.</strong> Deletions require multi-step opt-in.</li>
+    <li><strong>Never share user data with third parties without explicit consent.</strong> Privacy is a brand value, not a legal afterthought.</li>
+    <li><strong>Never claim coaching efficacy we can't substantiate.</strong> If a feature is in beta, say so. If a projection is an estimate, label it.</li>
+    <li><strong>Never use dark patterns.</strong> No nag screens, no manipulative upsells, no hidden cancel buttons.</li>
+  </ul>
+
+  <h2>Cross-Platform Guardrails</h2>
+  <ul>
+    <li><strong>Never let web and mobile drift.</strong> When a decision lands, it lands on both surfaces simultaneously.</li>
+    <li><strong>Never let admin surfaces diverge from end-user surfaces in look and feel.</strong> Admin is denser, but uses the same colors, typography, components.</li>
+    <li><strong>Never ship a brand-mark variant not listed in the logo system.</strong> If a new variant is needed, add it to the brand book first.</li>
+  </ul>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section VII — Guardrails</span></div>
+</div>
+
+<!-- ============================================================
+     SECTION VIII OPENER
+============================================================ -->
+<div class="section-opener">
+  <div class="number">Section VIII</div>
+  <div class="title">Governance.</div>
+  <div class="description">Who owns the brand, how to request assets, how to update this book.</div>
+</div>
+
+<div class="page">
+  <h2 style="margin-top: 0;">Asset Access</h2>
+  <p>All brand assets — logos, color tokens, typography files, this document — live in the repository under <code>branding/</code>.</p>
+  <p>Logos are at <code>branding/Logo/Final/</code> in both SVG and PNG formats, named consistently:</p>
+
+  <table class="compact">
+    <tr><td><code>Logo Tag White.png / .svg</code></td><td>Hero placements on dark</td></tr>
+    <tr><td><code>Logo Tag Black.png / .svg</code></td><td>Hero placements on light</td></tr>
+    <tr><td><code>Logo Clean White.png / .svg</code></td><td>Headers, footers on dark</td></tr>
+    <tr><td><code>Logo Clean Black.png / .svg</code></td><td>Headers, footers on light</td></tr>
+    <tr><td><code>Logo Block White.png / .svg</code></td><td>Square cards on dark</td></tr>
+    <tr><td><code>Logo Block Black.png / .svg</code></td><td>Square cards on light</td></tr>
+    <tr><td><code>Logo Icon White.png / .svg</code></td><td>App icon, favicon, avatars</td></tr>
+    <tr><td><code>Logo Icon Black.png / .svg</code></td><td>App icon, favicon, avatars (light)</td></tr>
+  </table>
+
+  <p>Coaches, partners, and ambassadors requesting brand assets should email <strong>team@myrxfit.com</strong> with the specific use case. We respond within two business days with the appropriate files and usage guidelines.</p>
+
+  <h2>Brand Misuse</h2>
+  <p>If you see MyRX branding being used incorrectly — by a competitor, a partner who has gone off-brand, a coach building their own marketing — report it to <strong>team@myrxfit.com</strong>. We take brand integrity seriously and will work with the parties involved to bring usage into compliance. We treat first-time mistakes as opportunities to educate; repeated or willful misuse may result in revocation of permission to use the brand.</p>
+
+  <h2>Brand Updates</h2>
+  <p>This document is versioned. Major updates (new audience, new domain, new visual identity) are released as a new version number (1.0 → 2.0). Minor updates (clarifications, additional examples, typo fixes) bump the patch (1.0 → 1.1).</p>
+
+  <p>When the brand book changes:</p>
+  <ol>
+    <li>The new version is committed to the repository</li>
+    <li><code>CLAUDE.md</code> is updated to point at the new version's path</li>
+    <li>All active surfaces are audited for compliance with the changes</li>
+    <li>An announcement goes out to coaches and partners with a summary</li>
+  </ol>
+
+  <p>The brand book is a contract with the future. We don't update it lightly.</p>
+
+  <h2>Authority</h2>
+  <p>The voice and tone rules in Section III, and the visual system in Section IV, are owned by the MyRX team and are non-delegable. They cannot be overridden by individual contributors, marketing partners, or external agencies without explicit team sign-off.</p>
+
+  <p>Color and typography tokens are locked at the code level (<code>web/src/index.css</code>, <code>mobile/src/theme.ts</code>). Changes require design review, migration plan, cross-platform sync, and <code>CLAUDE.md</code> update.</p>
+
+  <div class="page-footer"><span class="brand">MyRX · Performance Lab</span><span class="num">Section VIII — Governance</span></div>
+</div>
+
+<!-- ============================================================
+     CLOSING
+============================================================ -->
+<div class="page" style="display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 1in;">
+  <p class="kicker" style="margin-bottom: 0.3in;">Closing</p>
+  <div class="pullquote lime" style="border: none; background: transparent; padding: 0; font-size: 22pt; line-height: 1.4; max-width: 5.5in; text-align: center; margin: 0;">MyRX exists because every person deserves to know what their next step is. Not the master plan. Not the magazine-cover photo. The next step — and why it matters.</div>
+
+  <p style="margin-top: 0.5in; font-size: 12pt; color: var(--fg); max-width: 5in;">This brand book is how we keep that promise consistent across every screen we ship, every email we send, every coach we onboard, every athlete we serve. Read it. Reference it. Update it when it needs updating. And when in doubt, return to the spine:</p>
+
+  <p style="margin-top: 0.3in; font-family: 'Geist Mono', monospace; font-size: 11pt; color: var(--lime); letter-spacing: 0.15em; text-transform: uppercase;">acknowledge state → explain biology → name the next step</p>
+
+  <p style="margin-top: 0.4in; color: var(--fg-muted); font-style: italic;">Welcome to MyRX.</p>
+
+  <div style="margin-top: 0.6in; padding-top: 0.25in; border-top: 1px solid var(--border); width: 4in; text-align: center;">
+    <p style="margin: 0; color: var(--fg-muted); font-size: 10pt;">The Team<br/>team@myrxfit.com</p>
+    <p style="margin: 0.1in 0 0 0; color: var(--fg-dim); font-family: 'Geist Mono', monospace; font-size: 8pt; letter-spacing: 0.15em; text-transform: uppercase;">Ann Arbor · May 2026</p>
+  </div>
+</div>
+
+</body>
+</html>

@@ -180,7 +180,7 @@ export default function AcceptInviteModal({ isOpen, onClose, invite, additionalC
 
             {phase === 'submitting' && (
               <View style={s.center}>
-                <ActivityIndicator size="large" color={palette.green[400]} />
+                <ActivityIndicator size="large" color={palette.myrx.lime} />
                 <Text style={s.submittingText}>Connecting you to your coach…</Text>
               </View>
             )}
@@ -253,7 +253,7 @@ function ReviewView({
           <Image source={{ uri: invite.coach_avatar_url }} style={s.coachAvatar} />
         ) : (
           <View style={s.coachAvatarFallback}>
-            <UserCircle2 size={36} color={palette.green[400]} />
+            <UserCircle2 size={36} color={palette.myrx.lime} />
           </View>
         )}
         <View style={{ flex: 1 }}>
@@ -266,7 +266,7 @@ function ReviewView({
           </View>
         ) : (
           <View style={s.sparkBadge}>
-            <Sparkles size={14} color={palette.green[400]} />
+            <Sparkles size={14} color={palette.myrx.lime} />
           </View>
         )}
       </View>
@@ -328,7 +328,7 @@ function SuccessView({
   return (
     <>
       <View style={s.successIcon}>
-        <CheckCircle2 size={56} color={palette.green[400]} />
+        <CheckCircle2 size={56} color={palette.myrx.lime} />
       </View>
       <Text style={[s.headline, { textAlign: 'center' }]}>{headline}</Text>
       <Text style={[s.subline, { textAlign: 'center' }]}>{subline}</Text>
@@ -491,7 +491,7 @@ const s = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: withAlpha(palette.green[500], 0.18),
+    backgroundColor: withAlpha(palette.myrx.lime, 0.18),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -512,7 +512,7 @@ const s = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: withAlpha(palette.green[500], 0.15),
+    backgroundColor: withAlpha(palette.myrx.lime, 0.15),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -575,7 +575,7 @@ const s = StyleSheet.create({
     marginTop: 12,
   },
   primaryBtn: {
-    backgroundColor: palette.green[500],
+    backgroundColor: palette.myrx.lime,
     paddingVertical: 14,
     borderRadius: radius.lg,
     alignItems: 'center',

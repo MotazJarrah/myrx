@@ -74,3 +74,13 @@ docs/plan_wizard_strings_*.xlsx
 
 # Excel/Word lock files (~$filename.xlsx) — created automatically while open, deleted on close.
 ~$*
+
+# Samsung Health Data SDK download (license forbids redistribution).
+# The .aar that ships into the build lives under mobile/plugins/samsung-sdk/
+# and is gitignored by mobile/.gitignore; this /lib root folder is where
+# the SDK zip is staged after download from developer.samsung.com.
+/lib/
+
+# Icon-source backups created automatically by mobile/assets/rebuild-icons.py
+# when it overwrites the published icons. Local rollback aid only.
+mobile/assets/icon-source-backup/

@@ -4,9 +4,8 @@
  * Direct mirror of AdminShell.jsx (admin portal). Same sidebar/drawer/
  * footer layout, same active-state styling, same mobile drawer pattern.
  * Coach-specific changes:
- *   • Logo: "MyRX Coach" (with "Coach" in primary lime), icon = LayoutDashboard
- *     (admin uses ShieldCheck — coaches don't need the security-shield
- *     metaphor).
+ *   • Logo: Real MyRX wordmark image (Logo Clean White, per brand book)
+ *     + "Coach" lime sub-label. NEVER text-rendered — brand rule.
  *   • Nav items: coach surfaces (Dashboard / Clients / Invite / Messages /
  *     Briefing / Adjustments). The 8 Phase-4 surfaces map onto these slots.
  *   • Footer: same avatar + name → /coach/profile + sign-out pattern as
@@ -39,13 +38,20 @@ const NAV = [
 ]
 
 function Logo() {
+  // Real wordmark per brand book ("Never render the brand name as JSX text").
+  // myrx-wordmark-dark.png = Logo Clean White (light text for dark surface).
+  // "Coach" stays as a lime sub-label since we don't have a "MyRX Coach"
+  // combined variant.
   return (
     <div className="flex items-center gap-2">
-      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
-        <LayoutDashboard className="h-4 w-4 text-primary-foreground" />
-      </div>
-      <span className="text-base font-bold tracking-tight">
-        MyRX <span className="text-primary">Coach</span>
+      <img
+        src="/myrx-wordmark-dark.png?v=6-final"
+        alt="MyRX"
+        className="h-5 w-auto"
+        style={{ height: '22px' }}
+      />
+      <span className="text-base font-semibold tracking-tight text-primary">
+        Coach
       </span>
     </div>
   )

@@ -4,7 +4,7 @@ import { Dumbbell, Activity, Weight, Flame, ArrowRight, Zap, LineChart, Lock } f
 
 function Logo() {
   const { theme } = useTheme()
-  const src = theme === 'dark' ? '/logo-dark.png?v=5' : '/logo-light.png?v=5'
+  const src = theme === 'dark' ? '/logo-dark.png?v=6-final' : '/logo-light.png?v=6-final'
   return (
     <img src={src} alt="MyRX" className="h-9 w-auto object-contain" />
   )

@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0a0a0a"
+      "backgroundColor": "#121721"
     },
     "ios": {
       "supportsTablet": false,
@@ -20,7 +20,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0a0a0a"
+        "backgroundColor": "#121721"
       },
       "package": "com.myrx.app",
       "versionCode": 1,
@@ -70,17 +70,21 @@
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
-          "color": "#84cc16"
+          "color": "#CAF240"
         }
       ],
       "react-native-health-connect",
       "./plugins/withHealthConnectPermissions",
       "./plugins/withSamsungHealth",
+      "./plugins/withForceCompileSdk",
       [
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 29
+            "minSdkVersion": 29,
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "buildToolsVersion": "35.0.0"
           }
         }
       ]
