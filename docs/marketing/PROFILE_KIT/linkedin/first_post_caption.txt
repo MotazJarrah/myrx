@@ -1,0 +1,98 @@
+═══════════════════════════════════════════════════════════════════════
+LINKEDIN — FIRST POST (LAUNCH)
+═══════════════════════════════════════════════════════════════════════
+
+Format: Founder-led long-form text post (LinkedIn favors text + 1 image
+        carousel for launch posts; the 3,000-char ceiling is the
+        practical limit). Pair with first_post_image.png as a single
+        in-post image so the post auto-promotes to feed visibility.
+
+Hook design: First 210 chars sit above the "See more" fold. The hook
+             is a contrarian one-liner (top-performing 2026 framework
+             per usevisuals + LinkBoost research). Hook ends with a
+             line break before the body to maximize read-through.
+
+Length: 1,378 chars / 3,000 limit. Optimal for 2026 LinkedIn — long
+        enough to demonstrate depth, short enough to read in one scroll.
+
+Hashtags: 3 total per LinkedIn 2026 best practice (algorithm rewards
+          niche professional tags; 3 is the sweet spot).
+
+───────────────────────────────────────────────────────────────────────
+CAPTION
+───────────────────────────────────────────────────────────────────────
+
+Most coaches still pick the next weight by feel.
+
+The strongest ones spend two hours on a Sunday recalculating loads, rewriting macro splits, and reading the same chat threads three times trying to figure out who needs what next.
+
+I've watched that work eat ten-year careers. By client 25, the program quality drops or the coach quits. Usually both.
+
+So I started building MyRX.
+
+The algorithm reads the athlete's logged efforts and prescribes:
+— the next weight on every lift (Epley + Brzycki + Lombardi averaged, with rep-range-aware drops past 10)
+— the next pace on every interval (Riegel projection across distances, Daniels' offsets for endurance / threshold / VO2)
+— the next macro split for the next phase (Mifflin-St Jeor + ACSM activity multipliers + a realism factor calibrated against actual loss rates per body-fat band)
+
+The coach doesn't program. The coach oversees.
+
+You see your roster's next-step state at a glance, adjust the parameters that drive it (calorie pace, weight goal, macro preset, fat-level band), and spend the time you used to lose to spreadsheets on the work that actually moves outcomes — the message thread, the intake review, the one client who needs a real conversation this week.
+
+That's the bet. The algorithm carries the math. The coach carries the relationship.
+
+I'll be sharing what we're learning while we build it — the methodology, the math, the trade-offs that come up when you try to replace ten years of coaching intuition with a model that explains itself.
+
+Coach platform's at myrxfit.com/coach. Athlete app's at myrxfit.com.
+
+Performance Lab.
+
+#strengthcoach #onlinecoaching #myrxfit
+
+───────────────────────────────────────────────────────────────────────
+CHAR COUNT: 1,378 / 3,000
+HOOK ABOVE THE FOLD (first 210 chars):
+"Most coaches still pick the next weight by feel.
+
+The strongest ones spend two hours on a Sunday recalculating loads, rewriting macro splits, and reading the same chat threads three times trying to figure out who needs what next."
+                                                                  ↑ 207 chars
+───────────────────────────────────────────────────────────────────────
+
+3-PILLAR STRUCTURE AUDIT
+───────────────────────────────────────────────────────────────────────
+1. ACKNOWLEDGE STATE — "Most coaches still pick the next weight by
+   feel. The strongest ones spend two hours on a Sunday recalculating
+   loads…" Meets the coach where they actually are on a Sunday night.
+
+2. EXPLAIN MECHANISM — The three bullet block (Epley + Brzycki +
+   Lombardi, Riegel + Daniels', Mifflin-St Jeor + ACSM + realism
+   factor). Names the math. Doesn't gesture at it.
+
+3. NAME NEXT STEP — "Coach platform's at myrxfit.com/coach. Athlete
+   app's at myrxfit.com." Two URLs, no CTA pressure. The reader picks.
+
+VOICE AUDIT
+───────────────────────────────────────────────────────────────────────
+- Lowercase "coach", "athlete", "client" throughout.
+- "Performance Lab." closes — tagline-as-signature.
+- No banned phrases: no "transform," no "level up," no "crush,"
+  no "journey," no urgency, no exclamation points on platform copy.
+- Direct address used sparingly ("You see your roster's next-step
+  state at a glance…") — the reader is the coach.
+- Em-dashes for thought breaks. No filler hedges.
+- Closes calm. No "let me know what you think!" or "drop a comment."
+
+HASHTAG STRATEGY (per docs/marketing/_research/hashtags.md)
+───────────────────────────────────────────────────────────────────────
+- #strengthcoach    → niche broad, coach-targeted, mid-volume
+- #onlinecoaching   → audience tag (B2B coach segment)
+- #myrxfit          → brand tag, claimed early to compound over years
+
+Skipped: #nextstepcoaching (claim later when first carousel runs).
+Skipped: any generic high-volume tag (#fitness, #gym) — useless for
+         discovery per 2026 research.
+
+POSTING WINDOW
+───────────────────────────────────────────────────────────────────────
+Per timing.md research: Tue-Thu 10-11 AM ET, Tuesday strongest single
+day for tech / software vertical. Launch on a Tuesday at 10 AM ET.

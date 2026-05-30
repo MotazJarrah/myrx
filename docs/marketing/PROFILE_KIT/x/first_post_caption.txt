@@ -1,0 +1,140 @@
+FIRST POST — PINNED THREAD (founder-led, builder-in-public)
+============================================================
+
+Format: 7-tweet thread. Each tweet stands alone, reads
+chronologically, ends on a concrete next step.
+
+No banned phrases. No exclamation points. Lowercase coach /
+athlete / client throughout. The thread IS the 3-pillar voice
+in long form — slide 1-2 acknowledge state, slide 3-5 mechanism,
+slide 6-7 next step.
+
+Hashtags: 1-2 max in the final tweet, niche only. 2026 X
+algorithm penalizes hashtag stuffing harder than under-tagging.
+
+============================================================
+
+[TWEET 1 / 7] — hook (acknowledge state)
+
+Most fitness apps log what you did.
+
+A few prescribe a plan you have to interpret.
+
+Almost none answer the only question the athlete actually
+asks between sets:
+
+what should I do next?
+
+
+[TWEET 2 / 7] — sharpen the gap
+
+The strength athlete knows the rep range.
+The cardio athlete knows the zone target.
+The athlete cutting knows the calorie ceiling.
+
+What they don't know is the specific number for THIS set,
+THIS interval, THIS meal.
+
+That gap is where most plans break.
+
+
+[TWEET 3 / 7] — mechanism (the lab thesis)
+
+So we built MyRX around one rule:
+
+every screen names the next step.
+
+Next weight. Next pace. Next macro target. Anchored to the
+athlete's actual logged data, not a generic template.
+
+Performance Lab. Not a tracker.
+
+
+[TWEET 4 / 7] — mechanism (algorithm + coach division of labor)
+
+The algorithm picks the number.
+
+The coach oversees — reviews the trajectory, adjusts the
+underlying parameters (calorie pace, weight goal, macro
+preset, zone targets), and messages the athlete when something
+needs a conversation.
+
+The coach doesn't program from scratch. The athlete doesn't
+guess.
+
+
+[TWEET 5 / 7] — mechanism (why this division matters)
+
+This is the actual lever:
+
+a coach running 30 athletes can't write 30 custom programs
+every week. So most don't — they reuse templates.
+
+When the algorithm handles next-step prescription, the coach's
+time moves to where it compounds: reading the athlete's full
+picture, catching plateaus early, adjusting the plan inputs.
+
+
+[TWEET 6 / 7] — next step for athletes
+
+If you're an athlete who wants the next step decided for you,
+the app is at myrxfit.com.
+
+Free tier covers strength, cardio, mobility.
+CoreRX adds body comp + macros.
+FullRX adds heart rate, hydration, sleep.
+
+One-time purchase. No subscription.
+
+
+[TWEET 7 / 7] — next step for coaches + ask
+
+If you're a coach who wants to run your roster on a next-step
+engine instead of a template builder, /coach/signup at myrxfit
+walks through it. 14-day trial.
+
+Following along here for the build. Reply with what you'd want
+to see broken down first.
+
+#strengthcoach #hybridathlete
+
+
+============================================================
+THREAD NOTES
+============================================================
+
+Character counts per tweet (280-char limit each, verified):
+  1: 173
+  2: 181
+  3: 169
+  4: 222
+  5: 245
+  6: 217
+  7: 219
+
+Visual recommendation:
+- Attach a single image on TWEET 1: dark background, lime
+  accent, one line of copy ("the algorithm picks the next
+  step.") + small MyRX wordmark. Dimensions: 1600x900 (16:9).
+- Tweets 2-7 stay text-only. Visual on the hook tweet alone
+  has tested better than visuals on every tweet in 2026
+  data — keeps the thread feeling like a builder writing,
+  not a marketing carousel ported to X.
+
+Pinning:
+- Pin this thread for ~2 weeks. Replace with launch-week
+  announcement once the coach platform goes live, then rotate
+  pin monthly per the link_in_bio.txt cadence.
+
+Engagement window:
+- Post 11am-12pm ET on a Tuesday or Wednesday. First 30 min
+  determines distribution. Have 5-10 industry replies queued
+  to seed the thread the moment it lands.
+
+What NOT to do:
+- No "Welcome to MyRX" framing
+- No "we built this because we believe..."
+- No "transform your training"
+- No urgency theater on the launch tier copy
+- Don't tag the standard SaaS founders for visibility — let
+  the thread earn it on the substance

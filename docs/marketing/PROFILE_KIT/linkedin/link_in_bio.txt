@@ -1,0 +1,74 @@
+═══════════════════════════════════════════════════════════════════════
+LINKEDIN — LINK STRATEGY
+═══════════════════════════════════════════════════════════════════════
+
+LinkedIn personal profiles support:
+- Up to 3 website links in the Contact Info section (each with a custom label)
+- 1 "Featured" link at the top of the profile (post, doc, or external URL)
+- Unlimited links inside posts and the About section
+
+Below is the recommended link slate.
+
+───────────────────────────────────────────────────────────────────────
+PRIMARY: CONTACT INFO LINKS (3 slots)
+───────────────────────────────────────────────────────────────────────
+
+Slot 1 — Label: "Coach Platform"
+URL: https://myrxfit.com/coach
+Why: Highest-intent destination for the LinkedIn audience. Independent
+     coaches researching MyRX land here, see pricing + how the algorithm
+     handles their roster, and start a trial.
+
+Slot 2 — Label: "Athlete App"
+URL: https://myrxfit.com
+Why: Coaches evaluating the platform want to see the athlete-facing
+     surface their clients will use. This is the secondary landing.
+
+Slot 3 — Label: "How MyRX Picks Your Next Step"
+URL: https://myrxfit.com/about/how-it-works
+Why: The methodology page. Sends the evidence-based reader to the math
+     before the pricing. Highest-trust entry for the Stronger by Science
+     / Galpin / Nuckols-axis coach.
+
+───────────────────────────────────────────────────────────────────────
+FEATURED LINK (1 slot, top-of-profile pinned post or external URL)
+───────────────────────────────────────────────────────────────────────
+
+Default: pin the launch post (see first_post_caption.txt).
+After 30 days: rotate to the highest-performing carousel.
+After 90 days: pin a LinkedIn-native article or a YouTube long-form
+              that the coach audience has watched in volume.
+
+The Featured slot rotates; the Contact Info links stay static.
+
+───────────────────────────────────────────────────────────────────────
+INSIDE THE ABOUT SECTION
+───────────────────────────────────────────────────────────────────────
+
+The About already closes with two plain-text URLs:
+- myrxfit.com/coach
+- myrxfit.com
+
+LinkedIn doesn't hyperlink these automatically. That's fine — readers
+who reach the bottom of the About are high-intent and will type.
+
+───────────────────────────────────────────────────────────────────────
+WHY NO LINKTREE
+───────────────────────────────────────────────────────────────────────
+
+LinkedIn's three-link slot system replaces the need for a Linktree-style
+aggregator on this platform. Linktree fits Instagram (1 bio link) and
+TikTok (1 bio link) where the single-link cap forces aggregation. On
+LinkedIn, sending coaches to a third-party redirect adds a step without
+adding signal — the platform already supports labeled multi-link
+contact info.
+
+If a Linktree is ever added (for cross-platform consistency), the four
+links it would carry are:
+1. Coach Platform → myrxfit.com/coach
+2. Athlete App → myrxfit.com
+3. How MyRX picks your next step → myrxfit.com/about/how-it-works
+4. Latest from MyRX on YouTube → youtube.com/@teammyrx
+
+Voice on every label stays coach-led — no "click here," no "check this
+out," no emojis.

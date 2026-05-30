@@ -1,0 +1,109 @@
+═══════════════════════════════════════════════════════════════════════
+YOUTUBE CHANNEL LINKS
+═══════════════════════════════════════════════════════════════════════
+
+YouTube supports up to 5 visible links on the channel banner overlay
+plus unlimited links inside the About-tab description. The banner
+links are what 90% of viewers see — order them by intent.
+
+───────────────────────────────────────────────────────────────────────
+BANNER LINKS (channel header overlay — up to 5)
+───────────────────────────────────────────────────────────────────────
+
+Order matters. The first link is the primary CTA, displayed largest.
+
+1. myrxfit.com
+   Display title: Get the app
+   → The athlete-side conversion surface. Free tier covers strength,
+     cardio, mobility; CoreRX and FullRX one-time upgrades sit
+     behind one CTA. Mobile-first landing that detects platform and
+     serves the right store link.
+
+2. myrxfit.com/coach
+   Display title: Become a coach
+   → The B2B conversion surface. 14-day trial, three tier prices
+     ($19 / $39 / $99 per month), client invite flow walkthrough.
+
+3. myrxfit.com/how-it-works
+   Display title: How MyRX picks your next step
+   → The methodology page. The science behind the algorithm — Epley
+     and Brzycki for strength projections, Daniels and Seiler for
+     cardio zones, Mifflin-St Jeor for calorie targets. The page a
+     coach reads before signing up.
+
+4. myrxfit.com/pricing
+   Display title: Pricing
+   → Both pricing tables (athlete and coach) on one page.
+
+5. linkedin.com/in/motazjarrah
+   Display title: Founder on LinkedIn
+   → The builder-in-public surface. Coaches researching the company
+     check the founder's LinkedIn before paying $99/month — give
+     them the link.
+
+───────────────────────────────────────────────────────────────────────
+ABOUT-TAB LINK BLOCK (unlimited; lives under the channel description)
+───────────────────────────────────────────────────────────────────────
+
+This block mirrors the banner links and adds the secondary surfaces
+(X, Instagram, email). Drop into the About-tab links field as one
+URL per line.
+
+Get the app           https://myrxfit.com
+Become a coach        https://myrxfit.com/coach
+How MyRX picks your next step   https://myrxfit.com/how-it-works
+Pricing               https://myrxfit.com/pricing
+Founder on LinkedIn   https://linkedin.com/in/motazjarrah
+Founder on X          https://x.com/motazjarrah
+Instagram             https://instagram.com/teammyrx
+Email                 team@myrxfit.com
+
+───────────────────────────────────────────────────────────────────────
+VIDEO DESCRIPTION LINK BLOCK (paste at the bottom of every video)
+───────────────────────────────────────────────────────────────────────
+
+YouTube indexes the first 200 chars of a video description AND
+treats the link block as a navigational signal. Keep the block
+identical across every video so the algorithm reads it as channel-
+level metadata, not video-specific.
+
+──────────────
+Get the app — myrxfit.com
+Become a coach — myrxfit.com/coach
+How MyRX picks your next step — myrxfit.com/how-it-works
+
+Performance Lab.
+──────────────
+
+───────────────────────────────────────────────────────────────────────
+LINK STRATEGY NOTES
+───────────────────────────────────────────────────────────────────────
+
+- No Linktree. YouTube's native 5-link banner replaces it. Linktree
+  adds a third-party hop that breaks channel coherence and fragments
+  analytics across two domains.
+
+- Rotate link 1 (the primary CTA) for major drops:
+  - Long-form video launch → swap link 1 to the YouTube watch URL
+    for 7 days, then back to myrxfit.com.
+  - Coach pricing change → swap link 1 to /coach/pricing for the
+    launch week.
+  - Always return to myrxfit.com within 14 days. The primary slot
+    is a conversion surface, not a content surface.
+
+- The "Founder on LinkedIn" slot is permanent. It serves the high-
+  intent coach segment that researches the company before signing up.
+
+───────────────────────────────────────────────────────────────────────
+VOICE-RULE COMPLIANCE ON LINK LABELS
+───────────────────────────────────────────────────────────────────────
+
+Every label names what's on the other side. Verb-first where there's
+an action, plain noun where it's reference content. No exclamation
+points. No "Click here", "Learn more", "Sign up now", "Join us".
+
+Banned label patterns avoided:
+- "Click here", "Learn more", "Tap to download"
+- "Sign up now!", "Join the journey", "Unlock your potential"
+- "Welcome to MyRX", "Discover", "Find out"
+- Emoji-leading labels ("🔥 Get the app", "👉 Coach signup")

@@ -1,0 +1,71 @@
+═══════════════════════════════════════════════════════════════════════
+YOUTUBE CHANNEL DESCRIPTION — BRAND-LED (@teammyrx)
+═══════════════════════════════════════════════════════════════════════
+
+CHANNEL NAME (100 char limit) — 21 chars
+───────────────────────────────────────────────────────────────────────
+
+MyRX — Performance Lab
+
+───────────────────────────────────────────────────────────────────────
+ABOUT / CHANNEL DESCRIPTION (1,000 char limit) — 968 chars
+───────────────────────────────────────────────────────────────────────
+
+MyRX is a coaching platform built on one idea: every athlete should know their next step.
+
+The algorithm reads your training data and writes the next prescription — the exact weight for your next set, the exact pace for your next interval, the exact macro target for your next meal. Not a generic plan. Not a template. The next step, computed from what you actually did.
+
+If you train with a coach, they oversee the prescription. They watch trends, catch plateaus, and adjust the parameters when your goal shifts. They don't program from scratch — they oversee what the system already prescribed.
+
+If you train alone, the algorithm coaches you directly.
+
+This channel breaks the system down piece by piece. How the strength algorithm picks the next weight. How the polarized cardio queue avoids back-to-back hard days. How the macro plan adapts when the scale stops moving.
+
+The app: myrxfit.com
+The coach platform: myrxfit.com/coach
+
+Performance Lab.
+
+───────────────────────────────────────────────────────────────────────
+CHARACTER USAGE
+───────────────────────────────────────────────────────────────────────
+
+Channel name: 21 / 100 chars (79 chars headroom)
+Description: 968 / 1,000 chars (32 chars headroom)
+
+The description sits under the 1,000-char cap with room to add one
+link line (e.g., an X handle, a Beehiiv newsletter) once those
+surfaces exist. Don't pad — the current copy already runs the full
+3-pillar structure across four paragraphs.
+
+───────────────────────────────────────────────────────────────────────
+VOICE-RULE COMPLIANCE
+───────────────────────────────────────────────────────────────────────
+
+Three-pillar coach voice:
+- Acknowledge state: "every athlete should know their next step"
+- Mechanism: "the algorithm reads your training data and writes the
+  next prescription — the exact weight, pace, macro"
+- Next step: "The app: myrxfit.com / The coach platform: myrxfit.com/coach"
+
+Seven rules:
+1. Channel coherence — YouTube reader is a coach or athlete researching
+   the platform; copy gives them both paths.
+2. No redundancy — channel name says "Performance Lab", description
+   explains the system. No restating.
+3. Coach leads, doesn't pay — "they don't program from scratch — they
+   oversee what the system already prescribed". Coach as leader.
+4. No marketing — zero exclamation points, zero "transform", zero
+   "level up". Plain factual coach voice.
+5. No security platitudes — N/A on a channel description.
+6. Direct address — "you", "your training data", "your next set".
+7. No filler hedges — zero "consider", "feel free", "down the line".
+
+Formatting:
+- Lowercase "coach" and "athlete" throughout body.
+- Brand mid-sentence, verb-first where the action lands ("The app:
+  myrxfit.com" — verb-first imperative for the next step).
+- No emojis.
+- Em-dash used twice for thought breaks.
+
+Banned phrases — none present. Confirmed clean.

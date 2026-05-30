@@ -1,0 +1,95 @@
+[FORMAT: 4:5 portrait carousel, 6 slides. Primary keyword in line 1
+to clear the 125-char "more" cutoff. Sends-optimized — written so a
+coach can send it to another coach, or an athlete to a training
+partner, with the headline already doing the explaining.]
+
+────────────────────────────────────────────────────────────
+
+Most fitness apps log what you already did. MyRX picks what you do next.
+
+Your last set told us something. The algorithm reads it and writes the
+next prescription — the exact weight, the exact pace, the exact macro
+target for the next session. Not a generic plan. Not a template you
+adjust by feel. The next step, computed from your actual data.
+
+Your coach oversees the prescription. They see every session, every
+trend, every plateau, and they adjust the parameters when your goal
+shifts. They don't program from scratch. They oversee what the system
+already prescribed — which is the part of coaching that compounds.
+
+If you train without a coach, the algorithm coaches you directly. The
+free tier covers strength, cardio, and mobility — pick it up, log your
+first session, see what your next step is.
+
+If you coach athletes, the trial runs 14 days. Invite your roster, watch
+the prescriptions land, and decide.
+
+This is what we're building. Follow along — every post here breaks down
+one piece of the system: how the strength algorithm picks the next
+weight, how the polarized cardio queue avoids back-to-back hard days,
+how the macro plan adapts when the scale stops moving.
+
+The app: myrxfit.com
+The coach platform: myrxfit.com/coach
+
+Performance Lab.
+
+#strengthcoach #hybridathlete #zone2training #progressiveoverload #myrxfit
+
+────────────────────────────────────────────────────────────
+
+CHARACTER COUNT: ~1,420 (well under IG's 2,200 caption cap)
+HASHTAG COUNT: 5 (Instagram's December 2025 enforced cap)
+FIRST 125 CHARS: "Most fitness apps log what you already did. MyRX picks
+what you do next. Your last set told us something. The al"
+PRIMARY KEYWORD: "next step" + "algorithm picks" (lands before the cutoff)
+
+CAROUSEL SLIDE OUTLINE (paired with this caption)
+=================================================
+
+Slide 1 — Hook (1080×1350, lime headline on dark)
+   "Most fitness apps log what you already did."
+   Bottom: "Swipe →"
+
+Slide 2 — The gap
+   "Logging is a journal. Coaching is a prescription."
+   Sub: "MyRX writes the prescription."
+
+Slide 3 — The mechanism (the system)
+   "Every session feeds the algorithm.
+    The algorithm writes the next one."
+   Sub: visualization — set logged → arrow → next weight prescribed
+
+Slide 4 — The coach layer
+   "Your coach oversees.
+    They don't program. They adjust the parameters."
+   Sub: side-by-side — coach view of an athlete's next session
+
+Slide 5 — The two paths
+   "Athletes: free tier covers strength, cardio, mobility."
+   "Coaches: 14-day trial. Invite your roster."
+
+Slide 6 — CTA (Performance Lab. wordmark + handle)
+   "myrxfit.com"
+   "@teammyrx"
+   "Performance Lab."
+
+ALT TEXT (for slide 1 — the hook image)
+========================================
+
+"Black-and-lime headline graphic reading 'Most fitness apps log what
+you already did' over the MyRX wordmark, introducing the launch of
+MyRX — a fitness platform where an algorithm prescribes the next
+weight, pace, and macro from your training data while a coach
+oversees the prescription."
+
+POSTING NOTES
+=============
+
+- Schedule: Tuesday or Wednesday, 6-8am OR 5-7pm (fitness vertical peak).
+- Pin to profile for 14 days as the launch anchor.
+- First comment: drop the link "myrxfit.com" + a one-line restatement
+  ("Algorithm picks your next weight, pace, macro. Coach oversees.")
+  to catch users who skip the caption.
+- Send to 5-10 coaches in DMs the day it posts. Don't ask for shares —
+  ask for honest reactions. Replies become the comment thread engine.

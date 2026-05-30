@@ -1,0 +1,67 @@
+PRIMARY BIO LINK
+================
+
+myrxfit.com
+
+This is a single-link setup. Instagram's bio supports one clickable link
+and the homepage already routes the two audiences correctly — athletes
+land on the app download, coaches land on the coach signup CTA.
+
+A Linktree-style page is NOT recommended at launch. Reasons:
+- Adds a tap between the bio click and the conversion surface.
+- Fragments analytics across two domains.
+- Linktree pages don't carry the brand voice — landing on a third-party
+  link aggregator after a polished IG profile breaks channel coherence.
+- myrxfit.com already handles both audiences with the same coach-led
+  voice. No reason to route through a list.
+
+Revisit Linktree (or a self-hosted /links page on myrxfit.com) once
+there are 5+ destinations worth surfacing at once (app, coach signup,
+latest YouTube, newsletter signup, podcast, community). At launch,
+the homepage IS the link.
+
+WHEN TO ROTATE THE LINK
+=======================
+
+Keep myrxfit.com as the default. Rotate temporarily for:
+- New YouTube long-form drop → swap to the video URL for 48 hours, then back.
+- Newsletter launch → swap to the subscribe page for 7 days.
+- Coach pricing reveal → swap to /coach/pricing for the launch week.
+
+Always return to myrxfit.com within 14 days. The link is a conversion
+surface, not a content surface.
+
+IF A LINKTREE-STYLE PAGE IS BUILT LATER
+========================================
+
+Use these labels and order. Each label follows the seven voice rules —
+verb-first, no filler, lowercase "coach" and "athlete" in body copy.
+
+1. Get the app — iOS and Android
+   → app.myrxfit.com (or store badges)
+
+2. Become a coach — start a free trial
+   → myrxfit.com/coach/signup
+
+3. How MyRX picks your next step
+   → myrxfit.com/how-it-works
+
+4. Latest from the channel
+   → youtube.com/@teammyrx
+
+5. Pricing — athletes and coaches
+   → myrxfit.com/pricing
+
+6. Read the science behind the algorithm
+   → myrxfit.com/methodology
+
+DO NOT use labels like:
+- "Click here"
+- "Learn more"
+- "Sign up now!"
+- "Join the journey"
+- "Welcome to MyRX"
+- "Unlock your potential"
+
+Every label names what's on the other side. Verb first when there's an
+action, plain noun when it's reference content. No exclamation points.

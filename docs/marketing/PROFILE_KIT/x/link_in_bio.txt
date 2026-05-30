@@ -1,0 +1,32 @@
+PRIMARY LINK (X allows 1 native clickable URL in profile)
+=========================================================
+
+myrxfit.com
+
+Why direct, not Linktree:
+X's profile shows ONE clickable URL above the bio. A direct
+domain reads as a real product; a Linktree wrapper reads as a
+side project. Founder-led account, direct link, no aggregator.
+
+The bio already names the three audiences (athletes, coaches,
+mechanism-minded readers) — myrxfit.com routes all three:
+- Athletes land on the download CTA
+- Coaches see the /coach/signup path in the nav
+- Skeptics get the methodology surfaced via the landing copy
+
+If a campaign ever needs multi-destination routing (launch
+day, podcast episode, specific feature drop), use a pinned
+post for the extra links — not the profile URL slot.
+
+PINNED-POST LINK PATTERN (for campaign moments)
+-----------------------------------------------
+The pinned post is the second-most-clicked surface on an X
+profile. Use it to surface campaign-specific destinations
+without diluting the bio URL:
+
+- Launch week: pinned thread with myrxfit.com/coach/signup
+- After a long-form YouTube ships: pinned link to the video
+- After a feature lands: pinned thread breaking down the
+  mechanism + how to try it
+
+Rotate the pin monthly. Keep the bio URL stable.
