@@ -41,12 +41,18 @@ interface SamsungHealthNativeModule {
   readHeartRate(startMs: number, endMs: number): Promise<NativeHeartRateSample[]>
   readSteps(startMs: number, endMs: number): Promise<NativeStepSample[]>
   readWorkouts(startMs: number, endMs: number): Promise<NativeWorkout[]>
+  readSleep(startMs: number, endMs: number): Promise<NativeSleepSession[]>
 }
 
 export type PermissionStatus = {
   heartRate:       boolean
   steps:           boolean
   exercise:        boolean
+  // Sleep added May 31 2026 (Sleep page Phase 3). Native module now
+  // requests DataTypes.SLEEP alongside the other 4. Older APK builds
+  // that don't yet have the rebuilt native module will return false
+  // here, which the UI treats as "sleep not granted" gracefully.
+  sleep:           boolean
   bodyComposition: boolean
 }
 
@@ -67,6 +73,22 @@ type NativeStepSample = {
   steps:           Steps
   sourceRecordId:  string
   packageName:     string
+}
+
+type NativeSleepStage = {
+  type:    'awake' | 'light' | 'rem' | 'deep'
+  startAt: string  // ISO8601
+  endAt:   string  // ISO8601
+}
+
+type NativeSleepSession = {
+  sourceRecordId: string
+  packageName:    string
+  startAt:        string
+  endAt:          string | null
+  durationS:      number
+  scoreNative:    number | null  // Samsung's own 0-100 score; not surfaced in UI
+  stages:         NativeSleepStage[]  // empty array for phone-only sessions
 }
 
 type NativeWorkout = {
@@ -119,6 +141,8 @@ export type SyncSummary = {
   hrSamples:        number
   stepSamples:      number
   workouts:         number
+  sleepSessions:    number
+  sleepStages:      number
   rangeStart:       string
   rangeEnd:         string
   errors:           string[]
@@ -260,12 +284,14 @@ export async function disconnect(): Promise<{ status: 'ok'; tipRevokeInSamsungHe
 export async function syncRecent(daysBack: number = 7): Promise<SyncSummary> {
   if (!native) {
     return {
-      hrSamples:   0,
-      stepSamples: 0,
-      workouts:    0,
-      rangeStart:  new Date().toISOString(),
-      rangeEnd:    new Date().toISOString(),
-      errors:      ['unsupported_platform'],
+      hrSamples:     0,
+      stepSamples:   0,
+      workouts:      0,
+      sleepSessions: 0,
+      sleepStages:   0,
+      rangeStart:    new Date().toISOString(),
+      rangeEnd:      new Date().toISOString(),
+      errors:        ['unsupported_platform'],
     }
   }
 
@@ -304,9 +330,11 @@ export async function syncRecent(daysBack: number = 7): Promise<SyncSummary> {
   const endIso   = new Date(endMs).toISOString()
 
   const errors: string[] = []
-  let hrCount   = 0
-  let stepCount = 0
-  let woCount   = 0
+  let hrCount     = 0
+  let stepCount   = 0
+  let woCount     = 0
+  let sleepSessCount  = 0
+  let sleepStageCount = 0
 
   // 1) Workouts FIRST so HR samples can be linked back to them by ts overlap.
   const workouts: NativeWorkout[] = await native
@@ -425,7 +453,125 @@ export async function syncRecent(daysBack: number = 7): Promise<SyncSummary> {
     )
   }
 
-  // 4) Update last_synced_at unconditionally so the UI shows progress even on partial failure.
+  // 4) Sleep sessions + stages (May 31 2026 — Sleep page Phase 3).
+  //
+  // Each native session becomes one sleep_sessions row. If the session
+  // carries stages (worn-watch case), each stage block becomes one
+  // sleep_stages row keyed by the session's id. Phone-only sessions
+  // (Samsung's accelerometer-only detection without a watch) arrive
+  // with stages: [] — we still write the parent session so the user
+  // gets Total / Schedule / Consistency on the Sleep page; the UI
+  // shows an empty-state for Deep/REM when stages are missing.
+  //
+  // Defensive: if the user is on an older APK that doesn't yet have
+  // the rebuilt native readSleep method, native.readSleep is undefined
+  // and we skip the section cleanly without breaking the rest of sync.
+  if (typeof (native as any).readSleep === 'function') {
+    const sleep: NativeSleepSession[] = await native
+      .readSleep(startMs, endMs)
+      .catch((e) => {
+        errors.push(`sleep: ${errorMessage(e)}`)
+        return [] as NativeSleepSession[]
+      })
+
+    if (sleep.length > 0) {
+      const sessionRows = sleep
+        .filter((s) => s.sourceRecordId && s.startAt && s.endAt && s.durationS > 0)
+        .map((s) => {
+          // Aggregate per-stage seconds for the session-level summary
+          let awakeS = 0, lightS = 0, remS = 0, deepS = 0
+          let anyStage = false
+          for (const st of s.stages) {
+            anyStage = true
+            const start = Date.parse(st.startAt)
+            const end   = Date.parse(st.endAt)
+            const dur   = Number.isFinite(start) && Number.isFinite(end)
+              ? Math.max(0, Math.floor((end - start) / 1000))
+              : 0
+            if (st.type === 'awake') awakeS += dur
+            else if (st.type === 'light') lightS += dur
+            else if (st.type === 'rem')   remS   += dur
+            else if (st.type === 'deep')  deepS  += dur
+          }
+          return {
+            user_id:          userId,
+            source:           'samsung_health',
+            source_record_id: s.sourceRecordId,
+            start_at:         s.startAt,
+            end_at:           s.endAt,
+            duration_s:       s.durationS,
+            efficiency_pct:   null,  // Samsung's SDK doesn't expose efficiency stably
+            awake_s:          anyStage ? awakeS : null,
+            light_s:          anyStage ? lightS : null,
+            rem_s:            anyStage ? remS   : null,
+            deep_s:           anyStage ? deepS  : null,
+            score_native:     s.scoreNative,
+            raw_meta:         { package_name: s.packageName },
+          }
+        })
+
+      if (sessionRows.length > 0) {
+        const { data: insertedSessions, error: sessErr } = await supabase
+          .from('sleep_sessions')
+          .upsert(sessionRows, { onConflict: 'user_id,source,source_record_id' })
+          .select('id, source_record_id')
+        if (sessErr) {
+          errors.push(`sleep_sessions_upsert: ${sessErr.message}`)
+        } else {
+          sleepSessCount = insertedSessions?.length ?? sessionRows.length
+
+          // Build (session_record_id → session_id) map so we can write the
+          // per-stage rows next.
+          const sessIdByRecord: Record<string, string> = {}
+          for (const row of insertedSessions ?? []) {
+            if (row.source_record_id) sessIdByRecord[row.source_record_id] = row.id
+          }
+
+          // Wipe existing stages for any session we just upserted, then
+          // re-insert. Stages don't have their own (source, source_record_id)
+          // — the parent session's id is the only key — so the cleanest
+          // idempotent path is delete-then-insert keyed on session_id.
+          const sessIds = Object.values(sessIdByRecord)
+          if (sessIds.length > 0) {
+            await supabase
+              .from('sleep_stages')
+              .delete()
+              .in('session_id', sessIds)
+          }
+
+          const stageRows: Array<Record<string, unknown>> = []
+          for (const s of sleep) {
+            const sessionId = sessIdByRecord[s.sourceRecordId]
+            if (!sessionId) continue
+            for (const st of s.stages) {
+              const start = Date.parse(st.startAt)
+              const end   = Date.parse(st.endAt)
+              if (!Number.isFinite(start) || !Number.isFinite(end)) continue
+              const dur = Math.max(0, Math.floor((end - start) / 1000))
+              if (dur <= 0) continue
+              stageRows.push({
+                session_id: sessionId,
+                stage:      st.type,
+                start_at:   st.startAt,
+                end_at:     st.endAt,
+                duration_s: dur,
+              })
+            }
+          }
+          if (stageRows.length > 0) {
+            sleepStageCount = await chunkedUpsert(
+              'sleep_stages',
+              stageRows,
+              'session_id,start_at',  // no formal unique constraint; OK because we deleted first
+              errors,
+            )
+          }
+        }
+      }
+    }
+  }
+
+  // 5) Update last_synced_at unconditionally so the UI shows progress even on partial failure.
   await supabase
     .from('user_integrations')
     .update({ last_synced_at: new Date().toISOString() })
@@ -433,21 +579,16 @@ export async function syncRecent(daysBack: number = 7): Promise<SyncSummary> {
     .eq('platform', 'samsung_health')
 
   return {
-    hrSamples:   hrCount,
-    stepSamples: stepCount,
-    workouts:    woCount,
-    rangeStart:  startIso,
-    rangeEnd:    endIso,
+    hrSamples:     hrCount,
+    stepSamples:   stepCount,
+    workouts:      woCount,
+    sleepSessions: sleepSessCount,
+    sleepStages:   sleepStageCount,
+    rangeStart:    startIso,
+    rangeEnd:      endIso,
     errors,
   }
 }
-
-// Sleep is athlete-input only on this app (decided May 29 2026). The
-// Samsung Health Data SDK v1.1.0 fields needed for a stable read path
-// (sleepEfficiency / sleepScore) don't resolve against the pinned AAR,
-// so the entire syncSleep path was removed. If we ever revisit
-// wearable-sourced sleep, see CLAUDE.md "Wearable data — debugging
-// cheatsheet" point 2 for the decompile workflow.
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -455,11 +596,12 @@ const EMPTY_PERMISSIONS: PermissionStatus = {
   heartRate:       false,
   steps:           false,
   exercise:        false,
+  sleep:           false,
   bodyComposition: false,
 }
 
 function hasAnyPermission(p: PermissionStatus): boolean {
-  return p.heartRate || p.steps || p.exercise || p.bodyComposition
+  return p.heartRate || p.steps || p.exercise || p.sleep || p.bodyComposition
 }
 
 function errorMessage(e: unknown): string {
@@ -471,11 +613,13 @@ function blankSummary(daysBack: number, errors: string[]): SyncSummary {
   const endMs   = Date.now()
   const startMs = endMs - daysBack * 24 * 60 * 60 * 1000
   return {
-    hrSamples:   0,
-    stepSamples: 0,
-    workouts:    0,
-    rangeStart:  new Date(startMs).toISOString(),
-    rangeEnd:    new Date(endMs).toISOString(),
+    hrSamples:     0,
+    stepSamples:   0,
+    workouts:      0,
+    sleepSessions: 0,
+    sleepStages:   0,
+    rangeStart:    new Date(startMs).toISOString(),
+    rangeEnd:      new Date(endMs).toISOString(),
     errors,
   }
 }

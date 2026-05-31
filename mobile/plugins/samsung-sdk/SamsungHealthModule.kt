@@ -58,6 +58,7 @@ import com.samsung.android.sdk.health.data.data.HealthDataPoint
 import com.samsung.android.sdk.health.data.data.entries.ExerciseLog
 import com.samsung.android.sdk.health.data.data.entries.ExerciseSession
 import com.samsung.android.sdk.health.data.data.entries.HeartRate
+import com.samsung.android.sdk.health.data.data.entries.SleepSession
 import com.samsung.android.sdk.health.data.permission.AccessType
 import com.samsung.android.sdk.health.data.permission.Permission
 import com.samsung.android.sdk.health.data.request.DataType
@@ -386,12 +387,94 @@ class SamsungHealthModule(
         }
     }
 
+    // ── 7. readSleep ──────────────────────────────────────────────────────
+    //
+    // SLEEP follows the same shape as EXERCISE: each HealthDataPoint
+    // contains a list of SleepSession objects via SESSIONS field. Each
+    // SleepSession has metadata (start/end/duration) plus an optional
+    // list of SleepStage blocks (AWAKE/LIGHT/REM/DEEP).
+    //
+    // Phone-only sleep tracking (Samsung Health's accelerometer-based
+    // detection without a worn watch) produces SleepSessions WITHOUT
+    // stages — the stages list is empty or null. Worn-watch sessions
+    // produce stages from the HR sensor. We emit both shapes; the TS
+    // layer handles the null-stages case by writing only the parent
+    // sleep_sessions row and skipping sleep_stages.
+
+    @ReactMethod
+    fun readSleep(startMs: Double, endMs: Double, promise: Promise) {
+        val s = store
+        if (s == null) {
+            promise.resolve(Arguments.createArray())
+            return
+        }
+        executor.execute {
+            try {
+                val filter = timeFilterFrom(startMs.toLong(), endMs.toLong())
+                val out = Arguments.createArray()
+                var pageToken: String? = null
+                var pagesPulled = 0
+                do {
+                    val builder = DataTypes.SLEEP.readDataRequestBuilder
+                    builder.setLocalTimeFilter(filter)
+                    builder.setPageSize(1000)
+                    if (pageToken != null) builder.setPageToken(pageToken)
+                    val req = builder.build()
+                    val response = s.readDataAsync(req).get()
+                    for (point in response.dataList) {
+                        val sessions: List<SleepSession>? = try {
+                            point.getValue(DataType.SleepType.SESSIONS)
+                        } catch (_: Throwable) { null }
+                        val score: Int? = try {
+                            point.getValue(DataType.SleepType.SLEEP_SCORE)?.toInt()
+                        } catch (_: Throwable) { null }
+                        val parentUid = point.uid ?: ""
+                        val appId     = point.dataSource?.appId ?: ""
+                        for ((idx, sess) in (sessions ?: emptyList()).withIndex()) {
+                            val map = Arguments.createMap()
+                            map.putString("sourceRecordId",
+                                if (sessions != null && sessions.size > 1) "$parentUid:$idx" else parentUid)
+                            map.putString("packageName", appId)
+                            map.putString("startAt",     isoFromInstant(sess.startTime))
+                            map.putString("endAt",       sess.endTime?.let { isoFromInstant(it) })
+                            map.putDouble("durationS",   sess.duration?.seconds?.toDouble() ?: 0.0)
+                            if (score != null) map.putInt("scoreNative", score) else map.putNull("scoreNative")
+
+                            // Stages — DEFERRED. The Samsung Data SDK v1.1.0
+                            // exposes `sess.stages` as List<SleepSession.SleepStage>,
+                            // but the stage's property names (type / stageType /
+                            // stage) don't resolve against the pinned AAR without
+                            // a decompile pass (CLAUDE.md "Wearable data —
+                            // debugging cheatsheet" point 2). For v1 we emit
+                            // sessions with empty stages — the UI treats this
+                            // as phone-only data, which still populates Total +
+                            // Schedule + Consistency dimensions. Deep + REM
+                            // cards show their empty state until we wire stages.
+                            map.putArray("stages", Arguments.createArray())
+                            out.pushMap(map)
+                        }
+                    }
+                    pageToken = response.pageToken
+                    pagesPulled += 1
+                } while (pageToken != null && pagesPulled < 50)
+                promise.resolve(out)
+            } catch (e: Throwable) {
+                promise.reject("sleep_read_error", e.message ?: e.javaClass.simpleName, e)
+            }
+        }
+    }
+
+    // canonSleepStage helper removed — sleep stages are deferred to a
+    // future iteration (requires Samsung AAR decompile to find correct
+    // property name). When stages return, restore this function.
+
     // ── Helpers ───────────────────────────────────────────────────────────
 
     private fun requiredPermissions(): Set<Permission> = setOf(
         Permission.of(DataTypes.HEART_RATE,       AccessType.READ),
         Permission.of(DataTypes.STEPS,            AccessType.READ),
         Permission.of(DataTypes.EXERCISE,         AccessType.READ),
+        Permission.of(DataTypes.SLEEP,            AccessType.READ),
         Permission.of(DataTypes.BODY_COMPOSITION, AccessType.READ),
     )
 
@@ -400,6 +483,7 @@ class SamsungHealthModule(
         map.putBoolean("heartRate",       granted.any { it.dataType == DataTypes.HEART_RATE })
         map.putBoolean("steps",           granted.any { it.dataType == DataTypes.STEPS })
         map.putBoolean("exercise",        granted.any { it.dataType == DataTypes.EXERCISE })
+        map.putBoolean("sleep",           granted.any { it.dataType == DataTypes.SLEEP })
         map.putBoolean("bodyComposition", granted.any { it.dataType == DataTypes.BODY_COMPOSITION })
         return map
     }
@@ -409,6 +493,7 @@ class SamsungHealthModule(
         map.putBoolean("heartRate", false)
         map.putBoolean("steps", false)
         map.putBoolean("exercise", false)
+        map.putBoolean("sleep", false)
         map.putBoolean("bodyComposition", false)
         return map
     }

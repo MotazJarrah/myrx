@@ -2327,7 +2327,7 @@ function ConnectTab() {
   const [samsungAvail,   setSamsungAvail]   = useState<SamsungAvailability>({ available: false, reason: 'loading' })
   const [samsungStatus,  setSamsungStatus]  = useState<SamsungConnectionStatus>({
     connected: false,
-    permissions: { heartRate: false, steps: false, exercise: false, bodyComposition: false },
+    permissions: { heartRate: false, steps: false, exercise: false, sleep: false, bodyComposition: false },
     connectedAt: null,
     lastSyncedAt: null,
   })
