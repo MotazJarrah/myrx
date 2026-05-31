@@ -537,7 +537,7 @@ export default function SleepPage() {
     const avgSec = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
     const avgLabel = fmtHoursMinutes(avgSec)
     if (verdict.offCount === 0) {
-      return `Sleep is averaging ${avgLabel} — on track across all ${verdict.knownCount} dimensions. Keep your rhythm steady.`
+      return `Sleep is averaging ${avgLabel} — on track. Keep your rhythm steady.`
     }
     const items: Array<{ name: string; status: Status }> = [
       { name: 'total sleep', status: totalDim.status },
@@ -546,9 +546,8 @@ export default function SleepPage() {
       { name: 'schedule',    status: scheduleDim.status },
     ]
     const lead = items.find(i => i.status === 'fail') ?? items.find(i => i.status === 'warn')
-    const offStr = `${verdict.offCount} of ${verdict.knownCount} dimensions need attention`
-    if (!lead) return `Sleep is averaging ${avgLabel} — ${offStr}.`
-    return `Sleep is averaging ${avgLabel} — ${offStr}, starting with ${lead.name}.`
+    if (!lead) return `Sleep is averaging ${avgLabel}.`
+    return `Sleep is averaging ${avgLabel} — start with ${lead.name}.`
   }, [sessions7, verdict, totalDim, deepDim, remDim, scheduleDim])
 
   // ── Sleep Clock data ───────────────────────────────────────────────────────
