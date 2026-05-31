@@ -35,7 +35,6 @@ import React, { useState, useMemo } from 'react'
 import { View, Text, StyleSheet } from 'react-native'
 import Svg, { Circle, Path, Line, G } from 'react-native-svg'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import { runOnJS } from 'react-native-reanimated'
 import { colors, palette, withAlpha, fonts } from '../theme'
 
 export interface SleepClockNight {
@@ -241,23 +240,24 @@ export default function SleepClock({
     return bestIdx
   }
 
+  // .runOnJS(true) runs the callbacks on the JS thread, so we can close over
+  // `rings` / `avg` / `indexFromDistance` (regular JS) without worklet hell.
+  // The math here is trivially cheap (a sqrt + a small linear scan) — no need
+  // for UI-thread frame-perfect sync.
   const gesture = Gesture.Pan()
     .minDistance(0)
+    .runOnJS(true)
     .onBegin(e => {
-      'worklet'
       const dx   = e.x - cx
       const dy   = e.y - cy
       const dist = Math.sqrt(dx * dx + dy * dy)
-      const idx  = indexFromDistance(dist)
-      runOnJS(setActiveIdx)(idx)
+      setActiveIdx(indexFromDistance(dist))
     })
     .onUpdate(e => {
-      'worklet'
       const dx   = e.x - cx
       const dy   = e.y - cy
       const dist = Math.sqrt(dx * dx + dy * dy)
-      const idx  = indexFromDistance(dist)
-      runOnJS(setActiveIdx)(idx)
+      setActiveIdx(indexFromDistance(dist))
     })
 
   // Resolve center-card content based on what's active.
