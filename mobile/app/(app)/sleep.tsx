@@ -108,9 +108,23 @@ interface DimensionResult {
 
 /**
  * Total sleep status — based on minutes off target.
- *   |delta| ≤ 30 min → ok
- *   |delta| ≤ 90 min → warn
- *   else            → fail
+ *
+ * Thresholds grounded in chronic sleep-restriction dose-response data:
+ *   - Belenky et al. 2003 (Sleep): 7h time-in-bed (≈30 min short of 7.5h
+ *     adult target) showed reduced PVT response speed but no significant
+ *     lapse increase — boundary between functional and degraded.
+ *   - Van Dongen et al. 2003 (Sleep): chronic 6h sleep over 14 nights
+ *     ( ≈60 min short) produced significant cumulative cognitive deficits.
+ *     Chronic 4h sleep (≈180 min short) approached the cognitive deficit
+ *     of total sleep deprivation.
+ *
+ * Mapped to OK/WARN/FAIL:
+ *   |delta| ≤ 30 min → ok    (within Belenky's "still mostly functional")
+ *   |delta| ≤ 90 min → warn  (Van Dongen 6h-chronic cumulative deficits)
+ *   else            → fail   (approaching Van Dongen 4h-chronic territory)
+ *
+ * Symmetric (absolute value) because Li 2022 U-curve shows over-sleeping
+ * harms cognition too — the +90 min FAIL band catches 9h+ on a 7h target.
  */
 function classifyTotal(actualS: number, targetS: number): Status {
   const offMin = Math.abs(actualS - targetS) / 60
@@ -121,39 +135,62 @@ function classifyTotal(actualS: number, targetS: number): Status {
 
 /**
  * Deep / REM sleep status — based on minutes short of target.
- * Only the short-direction matters; if user gets MORE than target,
- * that's fine. So we don't penalize over-target values.
- *   short ≤ 15 min → ok
- *   short ≤ 30 min → warn
- *   else          → fail
+ *
+ * Threshold grounded in MCI vs. cognitively-normal comparisons:
+ *   - Yu et al. 2024 (PMC): MCI patients had ~4.3% LESS deep sleep than
+ *     cognitively-normal controls. On a 7h night, 4.3% ≈ 18 minutes.
+ *     So a 15-min deep deficit sits right at the MCI-distinguishing edge;
+ *     >30 min is well into MCI-associated territory.
+ *
+ * Only the short-direction matters; getting MORE than target is fine.
  */
 function classifyStage(actualS: number, targetS: number): Status {
   if (actualS >= targetS) return 'ok'  // at-or-above target
   const shortMin = (targetS - actualS) / 60
-  if (shortMin <= 15) return 'ok'
-  if (shortMin <= 30) return 'warn'
-  return 'fail'
+  if (shortMin <= 15) return 'ok'      // within MCI-distinguishing edge
+  if (shortMin <= 30) return 'warn'    // approaching MCI deficit territory
+  return 'fail'                         // well past MCI-distinguishing deficit
 }
 
 /**
  * Bedtime status — minutes late vs the target bedtime.
- * Going to bed EARLIER than target is fine (= ok).
- *   late ≤ 15 min → ok
- *   late ≤ 45 min → warn
- *   else        → fail
+ *
+ * Threshold grounded in the social-jetlag literature:
+ *   - Wittmann et al. 2006 (Chronobiology International): coined "social
+ *     jetlag" as ≥1h offset between work-day and free-day sleep midpoints,
+ *     associated with BMI, smoking, cardiometabolic markers.
+ *   - Roenneberg et al. 2012: each 1h of social jetlag → ~33% increase in
+ *     overweight risk.
+ *
+ * Mapped to OK/WARN/FAIL on a single bedtime drift:
+ *   late ≤ 15 min → ok    (within natural day-to-day variation)
+ *   late ≤ 60 min → warn  (drift toward but below social-jetlag threshold)
+ *   else        → fail   (≥1h late = clinically meaningful misalignment)
+ *
+ * Going to bed EARLIER than target is fine.
  */
 function classifyBedtime(actualOffsetS: number, targetOffsetS: number): Status {
   const lateMin = (actualOffsetS - targetOffsetS) / 60
-  if (lateMin <= 15) return 'ok'  // early or on time = ok
-  if (lateMin <= 45) return 'warn'
+  if (lateMin <= 15) return 'ok'
+  if (lateMin <= 60) return 'warn'     // social-jetlag boundary (Wittmann 2006)
   return 'fail'
 }
 
 /**
  * Consistency status — std-dev of bedtime offsets across the week.
- *   ≤ 30 min stddev → ok
- *   ≤ 60 min stddev → warn
- *   else           → fail
+ *
+ * Thresholds grounded in sleep-regularity actigraphy research:
+ *   - Lunsford-Avery et al. 2018 (Scientific Reports): bedtime SD ≤30 min
+ *     classified as "regular sleeper"; >60 min strongly associated with
+ *     glucose intolerance, BMI, depression.
+ *   - Windred et al. 2024 (Sleep): UK Biobank N≈88k, sleep-regularity
+ *     index (SRI) showed 20-48% lower all-cause mortality in top-4
+ *     quintiles vs least-regular quintile — confirming the dose-response
+ *     of bedtime variability on hard health outcomes.
+ *
+ *   ≤ 30 min stddev → ok    (Lunsford-Avery "regular sleeper")
+ *   ≤ 60 min stddev → warn  (between regular and irregular thresholds)
+ *   else           → fail   (Lunsford-Avery clinically irregular zone)
  */
 function classifyConsistency(sdSeconds: number): Status {
   const sdMin = sdSeconds / 60
@@ -748,7 +785,7 @@ export default function SleepPage() {
               detail pages (Riegel · Daniels' · Seiler, Epley · Brzycki ·
               Lombardi, etc.). Sources behind every target value above. */}
           <Text style={s.attribution}>
-            AASM 2016 · NSF 2015 · Li 2022 Nature Aging · age-banded targets
+            AASM · NSF · Li 2022 · Belenky · Van Dongen · Wittmann · Windred — age-banded targets, dose-response thresholds
           </Text>
         </AnimateRise>
       )}
