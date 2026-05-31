@@ -240,12 +240,21 @@ export default function SleepClock({
     return bestIdx
   }
 
-  // .runOnJS(true) runs the callbacks on the JS thread, so we can close over
-  // `rings` / `avg` / `indexFromDistance` (regular JS) without worklet hell.
-  // The math here is trivially cheap (a sqrt + a small linear scan) — no need
-  // for UI-thread frame-perfect sync.
+  // Gesture rules:
+  //  - onBegin fires on ANY initial touch (before activation). We set the
+  //    active ring there so a simple tap immediately registers.
+  //  - .activeOffsetX([-3, 3]) means the pan only ACTIVATES if the user
+  //    drags ≥3px horizontally. That's enough to claim the gesture for
+  //    scrub-mode without stealing all single-finger touches.
+  //  - .failOffsetY([-8, 8]) means if the user drags ≥8px VERTICALLY first,
+  //    the pan FAILS and the parent ScrollView takes over — page scrolls
+  //    normally. The onBegin's setActiveIdx already fired, so the touch
+  //    isn't wasted.
+  //  - .runOnJS(true) avoids worklet hell — math is trivial (sqrt + 7-row
+  //    linear scan), no UI-thread sync needed.
   const gesture = Gesture.Pan()
-    .minDistance(0)
+    .activeOffsetX([-3, 3])
+    .failOffsetY([-8, 8])
     .runOnJS(true)
     .onBegin(e => {
       const dx   = e.x - cx
@@ -260,8 +269,10 @@ export default function SleepClock({
       setActiveIdx(indexFromDistance(dist))
     })
 
-  // Resolve center-card content based on what's active.
-  const centerCard = (() => {
+  // Resolve readout content based on what's active. Rendered in a row
+  // beneath the clock (the inner ring's center hole is too small for
+  // multi-line text once 5+ nights are loaded).
+  const readoutCard = (() => {
     if (activeIdx === AVG_IDX && avg) {
       return {
         title: 'Typical sleep',
@@ -377,16 +388,21 @@ export default function SleepClock({
             )
           })}
 
-          {/* Center label */}
-          <View style={s.center} pointerEvents="none">
-            <Text style={s.centerLabel}>{centerCard.title}</Text>
-            {centerCard.time ? (
-              <Text style={s.centerTime}>{centerCard.time}</Text>
-            ) : null}
-            <Text style={s.centerHint}>{centerCard.sub}</Text>
-          </View>
         </View>
       </GestureDetector>
+
+      {/* Active-ring readout sits BELOW the clock instead of inside it,
+          because with 7 rings the inner hole shrinks to ~80px diameter
+          which can't fit "Sat / 1:49 AM – 9:20 AM / 7h 30m" without
+          overlapping the innermost ring. The dedicated row below has
+          unlimited horizontal room and won't clip on small phones. */}
+      <View style={s.readout}>
+        <Text style={s.readoutTitle}>{readoutCard.title}</Text>
+        {readoutCard.time ? (
+          <Text style={s.readoutTime}>{readoutCard.time}</Text>
+        ) : null}
+        <Text style={s.readoutSub}>{readoutCard.sub}</Text>
+      </View>
     </View>
   )
 }
@@ -427,34 +443,29 @@ const s = StyleSheet.create({
     fontFamily: fonts.mono[700],
     fontSize:   13,
   },
-  center: {
-    position:       'absolute',
-    left:           0,
-    right:          0,
-    top:            0,
-    bottom:         0,
-    alignItems:     'center',
-    justifyContent: 'center',
-    gap:            2,
-    paddingHorizontal: 32,
+  readout: {
+    marginTop:  10,
+    alignItems: 'center',
+    gap:        2,
+    paddingHorizontal: 16,
   },
-  centerLabel: {
+  readoutTitle: {
     color:      colors.foreground,
     fontSize:   13,
     fontWeight: '600',
     textAlign:  'center',
   },
-  centerTime: {
+  readoutTime: {
     color:      palette.myrx.lime,
-    fontSize:   14,
-    fontWeight: '700',
+    fontSize:   15,
     fontFamily: fonts.mono[700],
     textAlign:  'center',
   },
-  centerHint: {
+  readoutSub: {
     color:    colors.mutedForeground,
-    fontSize: 10,
-    opacity:  0.7,
+    fontSize: 11,
+    opacity:  0.85,
     textAlign: 'center',
+    fontFamily: fonts.mono[500],
   },
 })
