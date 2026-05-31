@@ -629,11 +629,36 @@ export default function SleepPage() {
   }, [sessions7, sparkWindow, targetSecs, targetHours])
 
   // ── Verdict ────────────────────────────────────────────────────────────────
+  //
+  // The banner names the dim the user should focus on first AND uses that
+  // dim's status color so the colour matches the dim card's pill. Picking
+  // the lead by worst-status-first (FAIL before WARN) guarantees the banner
+  // always points at the most severe item. Color tracks lead.status (NOT
+  // the old off-count threshold which could turn the banner red even when
+  // the named item was only amber).
 
-  const verdict = useMemo(
-    () => computeVerdict([totalDim.status, deepDim.status, remDim.status, scheduleDim.status]),
-    [totalDim, deepDim, remDim, scheduleDim],
-  )
+  const lead = useMemo(() => {
+    const items: Array<{ name: string; status: Status }> = [
+      { name: 'total sleep', status: totalDim.status },
+      { name: 'deep sleep',  status: deepDim.status },
+      { name: 'REM sleep',   status: remDim.status },
+      { name: 'schedule',    status: scheduleDim.status },
+    ]
+    return items.find(i => i.status === 'fail')
+        ?? items.find(i => i.status === 'warn')
+        ?? null
+  }, [totalDim, deepDim, remDim, scheduleDim])
+
+  const verdict = useMemo(() => {
+    const statuses = [totalDim.status, deepDim.status, remDim.status, scheduleDim.status]
+    const known    = statuses.filter(s => s !== 'unknown')
+    const offCount = known.filter(s => s === 'warn' || s === 'fail').length
+    // Color tracks the LEAD item's status — when banner says "start with X"
+    // its colour matches X's dim-card pill. Falls back to emerald when no
+    // lead exists (all OK or no data).
+    const color = lead ? statusColor(lead.status) : palette.emerald[400]
+    return { color, offCount, knownCount: known.length }
+  }, [totalDim, deepDim, remDim, scheduleDim, lead])
 
   const verdictText = useMemo(() => {
     if (sessions7.length === 0) {
@@ -641,19 +666,11 @@ export default function SleepPage() {
     }
     const avgSec = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
     const avgLabel = fmtHoursMinutes(avgSec)
-    if (verdict.offCount === 0) {
+    if (verdict.offCount === 0 || !lead) {
       return `Sleep is averaging ${avgLabel} — on track. Keep your rhythm steady.`
     }
-    const items: Array<{ name: string; status: Status }> = [
-      { name: 'total sleep', status: totalDim.status },
-      { name: 'deep sleep',  status: deepDim.status },
-      { name: 'REM sleep',   status: remDim.status },
-      { name: 'schedule',    status: scheduleDim.status },
-    ]
-    const lead = items.find(i => i.status === 'fail') ?? items.find(i => i.status === 'warn')
-    if (!lead) return `Sleep is averaging ${avgLabel}.`
     return `Sleep is averaging ${avgLabel} — start with ${lead.name}.`
-  }, [sessions7, verdict, totalDim, deepDim, remDim, scheduleDim])
+  }, [sessions7, verdict, lead])
 
   // ── Sleep Clock data ───────────────────────────────────────────────────────
 
