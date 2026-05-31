@@ -505,7 +505,7 @@ export async function syncRecent(daysBack: number = 7): Promise<SyncSummary> {
             light_s:          anyStage ? lightS : null,
             rem_s:            anyStage ? remS   : null,
             deep_s:           anyStage ? deepS  : null,
-            score_native:     s.scoreNative,
+            score_samsung:    s.scoreNative,
             raw_meta:         { package_name: s.packageName },
           }
         })
