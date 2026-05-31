@@ -185,22 +185,38 @@ function estimateAge(birthdate: string | null | undefined): number | null {
   let age = today.getFullYear() - dob.getFullYear()
   const md = today.getMonth() - dob.getMonth()
   if (md < 0 || (md === 0 && today.getDate() < dob.getDate())) age -= 1
-  if (age < 5 || age > 120) return null
+  if (age < 0 || age > 120) return null
   return age
 }
 
 /**
- * Target sleep duration in HOURS, age-adjusted per locked product spec.
- *   Teens (13-17)  → 9.0 h
- *   Adults (18-64) → 7.5 h
- *   65+            → 7.5 h
- *   Fallback       → 7.5 h
+ * Target sleep duration in HOURS, age-banded per published consensus.
+ *
+ * Sources:
+ *   - AASM Paruthi et al. 2016 (Journal of Clinical Sleep Medicine)
+ *     covers 4 months to 18 years (range midpoints used as targets).
+ *   - NSF Hirshkowitz et al. 2015 (Sleep Health) handles newborns
+ *     (0-3 months) which AASM excluded, and provides the 18+ baseline.
+ *   - Li et al. 2022 (Nature Aging) — UK Biobank cohort N≈500k aged
+ *     38-73 — establishes 7h as the cognitive + mental-health optimum
+ *     for adults, refining NSF's 7-9h range to a more precise center.
+ *
+ * Band edges chosen so each year-of-age has exactly one assigned target.
+ * Young-adult value (18-25) sits at the upper end of NSF's range because
+ * the brain is still maturing until ~25; Li's cohort started at 38 so
+ * the 7h optimum doesn't strictly apply to younger adults yet.
  */
 function targetHoursForAge(birthdate: string | null | undefined): number {
   const age = estimateAge(birthdate)
-  if (age == null) return 7.5
-  if (age >= 13 && age <= 17) return 9.0
-  return 7.5
+  if (age == null) return 7.0  // unknown age → use the adult optimum (Li 2022)
+  if (age <= 0)    return 15.0 // 0-3 months   — NSF 2015 (range 14-17h)
+  if (age <= 1)    return 13.0 // 4-11 months  — AASM 2016 (range 12-16h)
+  if (age <= 2)    return 12.0 // 1-2 years    — AASM 2016 (range 11-14h)
+  if (age <= 5)    return 11.0 // 3-5 years    — AASM 2016 (range 10-13h)
+  if (age <= 12)   return 10.0 // 6-12 years   — AASM 2016 (range 9-12h)
+  if (age <= 17)   return 9.0  // 13-17 years  — AASM 2016 (range 8-10h)
+  if (age <= 25)   return 7.5  // 18-25 years  — NSF 2015 (range 7-9h)
+  return 7.0                    // 26+ years    — Li 2022 Nature Aging
 }
 
 function fmtHoursMinutes(s: number | null): string {
@@ -542,14 +558,18 @@ export default function SleepPage() {
 
     const lateMin = (avgBed - targetBed) / 60
     let action: string
+    // Headline insight from 2025 UK Biobank study (BMC Public Health):
+    // sleep CONSISTENCY reduces mental-disorder risk MORE than hitting an
+    // exact target duration. So when consistency is the lever that's off,
+    // we name it as the highest-impact change.
     if (status === 'ok') {
       action = `Your bedtime averages ${currentBedLabel}, holding steady within ${sessions7.length >= 3 ? `±${Math.round(sdMin)} minutes` : 'range'} — aligned with your ${wakeLabel} wake time.`
     } else if (bedStatus !== 'ok' && consistencyStatus === 'fail') {
-      action = `Bedtime averages ${currentBedLabel} (${fmtMin(Math.abs(lateMin))} ${lateMin > 0 ? 'late' : 'early'}) AND varies ±${Math.round(sdMin)} minutes. Pick one bedtime, hold it within a 30-minute window — your circadian rhythm learns fastest from a stable schedule.`
+      action = `Bedtime averages ${currentBedLabel} (${fmtMin(Math.abs(lateMin))} ${lateMin > 0 ? 'late' : 'early'}) AND varies ±${Math.round(sdMin)} minutes. Holding one bedtime within a 30-minute window matters more than hitting exact target hours — recent research (UK Biobank, 2025) shows consistency reduces mental-health risk above any single duration target.`
     } else if (bedStatus !== 'ok') {
       action = `Bedtime averages ${currentBedLabel}. Shifting to ${targetBedLabel} (${fmtMin(Math.abs(lateMin))} ${lateMin > 0 ? 'earlier' : 'later'}) aligns with your ${wakeLabel} wake time and your ${fmtHoursOnly(targetHours)} duration target.`
     } else {
-      action = `Bedtime is on target but varies by ±${Math.round(sdMin)} minutes night-to-night. Holding it within a 30-minute window helps your body lock its melatonin release time.`
+      action = `Bedtime is on target but varies by ±${Math.round(sdMin)} minutes night-to-night. Recent research shows consistency reduces mental-health risk MORE than absolute duration — hold bedtime within a 30-minute window for biggest gains.`
     }
 
     // Spark values inverted so UP = went to bed earlier (better). Each value
@@ -724,6 +744,12 @@ export default function SleepPage() {
             label="REM sleep"
             dim={remDim}
           />
+          {/* Science attribution — same line treatment as cardio/strength
+              detail pages (Riegel · Daniels' · Seiler, Epley · Brzycki ·
+              Lombardi, etc.). Sources behind every target value above. */}
+          <Text style={s.attribution}>
+            AASM 2016 · NSF 2015 · Li 2022 Nature Aging · age-banded targets
+          </Text>
         </AnimateRise>
       )}
 
@@ -1007,6 +1033,18 @@ const s = StyleSheet.create({
     textTransform: 'uppercase',
   },
   dimRowHeadFill: { flex: 1 },
+
+  // Science attribution — mirrors cardio/strength's `tinyText` row.
+  attribution: {
+    color:        colors.mutedForeground,
+    fontSize:     11,
+    lineHeight:   16,
+    marginTop:    16,
+    paddingTop:   12,
+    borderTopWidth: 1,
+    borderTopColor: alpha(colors.border, 0.4),
+    textAlign:    'center',
+  },
   dimPill: {
     minWidth:        18,
     height:          18,
