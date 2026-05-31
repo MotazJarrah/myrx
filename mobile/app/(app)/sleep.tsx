@@ -1020,29 +1020,48 @@ export default function SleepPage() {
             <View style={s.verdictHead}>
               <Moon size={16} color={verdict.color} />
               <Text style={[s.verdictBadge, { color: verdict.color }]}>HOW TO IMPROVE YOUR SLEEP</Text>
-              <View style={{ flex: 1 }} />
-              {/* "How we compute" info pill — same Pattern 5 inline-panel
-                  treatment used on every detail page (CLAUDE.md). Tap to
-                  expand a short explanation of how the numbers were
-                  derived; tap again to collapse. */}
+            </View>
+            <Text style={s.verdictText}>{verdictText}</Text>
+            {/* Sleep-targets info pill — same design pattern as strength's
+                adp-zone pill: the LABEL itself is the tappable chip, sits
+                on its own line under the banner text. Tap → expansion
+                panel below with labeled sections, NO repeated title. */}
+            <View style={s.pillRow}>
               <Pressable
                 onPress={() => setHowOpen(o => !o)}
                 hitSlop={8}
-                style={s.howButton}
+                style={[s.targetsPill, {
+                  borderColor: withAlpha(verdict.color, 0.55),
+                  backgroundColor: withAlpha(verdict.color, 0.12),
+                }]}
               >
-                <Info size={14} color={verdict.color} />
+                <Text style={[s.targetsPillText, { color: verdict.color }]}>
+                  Sleep targets
+                </Text>
+                <Info size={12} color={verdict.color} />
               </Pressable>
             </View>
-            <Text style={s.verdictText}>{verdictText}</Text>
             {howOpen && (
               <Animated.View
                 entering={FadeInUp.duration(200)}
                 exiting={FadeOutUp.duration(180)}
                 style={[s.howPanel, { borderLeftColor: verdict.color }]}
               >
-                <Text style={s.howTitle}>Improve sleep</Text>
                 <Text style={s.howBody}>
-                  A steady wake time matters more than a steady bedtime. Shift sleep in small 15-minute weekly steps — big jumps don't stick. Time your caffeine, alcohol and screens to your actual bedtime, not generic clock times. A cool dark bedroom and morning sunlight cover the rest.
+                  <Text style={s.howBold}>Target: </Text>
+                  {fmtHoursOnly(targetHours)} based on your age (AASM, NSF, Li 2022).
+                  {'\n'}
+                  <Text style={s.howBold}>Your averages: </Text>
+                  bedtime {fmtClock12(avgBedHour)}, wake {fmtClock12(avgWakeHour)}, total {fmtHoursMinutes(sessions7.reduce((a, s) => a + s.duration_s, 0) / Math.max(1, sessions7.length))} — from the last 7 nights.
+                  {'\n'}
+                  <Text style={s.howBold}>This week's nudge: </Text>
+                  ±15 min toward your target. Small weekly shifts stick; large jumps don't.
+                  {'\n'}
+                  <Text style={s.howBold}>Cue timings: </Text>
+                  caffeine, alcohol, meals and screen cutoffs are calculated from your bedtime ({fmtClock12(avgBedHour)}), not generic clock times.
+                  {'\n'}
+                  <Text style={s.howBold}>Wake-time first: </Text>
+                  A steady wake time matters more than a steady bedtime.
                 </Text>
               </Animated.View>
             )}
@@ -1380,27 +1399,34 @@ const s = StyleSheet.create({
     padding:         14,
     gap:             8,
   },
-  howButton: {
-    width: 24, height: 24,
-    alignItems:     'center',
-    justifyContent: 'center',
+  // Sleep-targets pill — mirrors strength's adp-zone pill design.
+  // Sits on its own row under the banner text; tappable; the label is
+  // the trigger (no separate Info button).
+  pillRow: {
+    marginTop:    10,
+    flexDirection: 'row',
+  },
+  targetsPill: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           6,
+    paddingHorizontal: 10,
+    paddingVertical:    5,
     borderRadius:   12,
+    borderWidth:    1,
+  },
+  targetsPillText: {
+    fontSize:     12,
+    fontWeight:   '700',
+    letterSpacing: 0.3,
   },
   howPanel: {
-    marginTop:      12,
+    marginTop:      10,
     paddingLeft:    12,
     paddingVertical: 10,
     paddingRight:   4,
     borderLeftWidth: 2,
     gap:            6,
-  },
-  howTitle: {
-    color:        colors.foreground,
-    fontSize:     12,
-    fontWeight:   '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 4,
   },
   howBody: {
     color:      colors.mutedForeground,
