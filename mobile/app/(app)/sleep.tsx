@@ -41,7 +41,7 @@ import { useFocusEffect } from 'expo-router'
 import {
   Moon, Clock, Activity, BedDouble, Brain,
 } from 'lucide-react-native'
-import Svg, { Path, Line as SvgLine, Circle } from 'react-native-svg'
+import Svg, { Path, Line as SvgLine } from 'react-native-svg'
 
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
@@ -699,31 +699,31 @@ export default function SleepPage() {
         </AnimateRise>
       )}
 
-      {/* ── 2×2 dimension grid ───────────────────────────────────────────── */}
+      {/* ── Unified dimension breakdown (single card, 4 stacked rows) ───── */}
       {!loading && hasAnyData && (
-        <AnimateRise delay={300}>
-          <View style={s.dimGrid}>
-            <DimensionCard
-              icon={<Clock size={14} color={statusColor(totalDim.status)} />}
-              label="Total sleep"
-              dim={totalDim}
-            />
-            <DimensionCard
-              icon={<BedDouble size={14} color={statusColor(scheduleDim.status)} />}
-              label="Schedule"
-              dim={scheduleDim}
-            />
-            <DimensionCard
-              icon={<Activity size={14} color={statusColor(deepDim.status)} />}
-              label="Deep sleep"
-              dim={deepDim}
-            />
-            <DimensionCard
-              icon={<Brain size={14} color={statusColor(remDim.status)} />}
-              label="REM sleep"
-              dim={remDim}
-            />
-          </View>
+        <AnimateRise delay={300} style={s.card}>
+          <Text style={s.cardLabel}>Dimension breakdown</Text>
+          <DimensionRow
+            icon={<Clock size={14} color={statusColor(totalDim.status)} />}
+            label="Total sleep"
+            dim={totalDim}
+            isFirst
+          />
+          <DimensionRow
+            icon={<BedDouble size={14} color={statusColor(scheduleDim.status)} />}
+            label="Schedule"
+            dim={scheduleDim}
+          />
+          <DimensionRow
+            icon={<Activity size={14} color={statusColor(deepDim.status)} />}
+            label="Deep sleep"
+            dim={deepDim}
+          />
+          <DimensionRow
+            icon={<Brain size={14} color={statusColor(remDim.status)} />}
+            label="REM sleep"
+            dim={remDim}
+          />
         </AnimateRise>
       )}
 
@@ -773,22 +773,29 @@ export default function SleepPage() {
   )
 }
 
-// ── DimensionCard ────────────────────────────────────────────────────────────
+// ── DimensionRow ─────────────────────────────────────────────────────────────
+//
+// One row inside the unified Dimension Breakdown card. Replaces the previous
+// 2×2 grid of standalone cards (which forced narrow ~150px sparklines and
+// duplicated chrome four times). All four metrics now stack vertically inside
+// a single parent card — sparklines get full row width, status colors share
+// a visual rhythm, no per-card borders compete for the user's eye.
 
-function DimensionCard({
-  icon, label, dim,
+function DimensionRow({
+  icon, label, dim, isFirst,
 }: {
-  icon:  React.ReactNode
-  label: string
-  dim:   DimensionResult
+  icon:    React.ReactNode
+  label:   string
+  dim:     DimensionResult
+  isFirst?: boolean
 }) {
   const color = statusColor(dim.status)
   return (
-    <View style={[s.dimCard, { borderColor: withAlpha(color, 0.25) }]}>
-      <View style={s.dimHead}>
+    <View style={[s.dimRow, isFirst && s.dimRowFirst]}>
+      <View style={s.dimRowHead}>
         {icon}
-        <Text style={s.dimLabel}>{label}</Text>
-        <View style={s.dimStatusFill} />
+        <Text style={s.dimRowLabel}>{label}</Text>
+        <View style={s.dimRowHeadFill} />
         <View style={[s.dimPill, { borderColor: withAlpha(color, 0.55), backgroundColor: withAlpha(color, 0.12) }]}>
           <Text style={[s.dimPillText, { color }]}>{statusGlyph(dim.status)}</Text>
         </View>
@@ -798,7 +805,8 @@ function DimensionCard({
         values={dim.spark}
         accent={color}
         target={dim.sparkTarget}
-        endStatus={dim.lastNightStatus}
+        width={300}
+        height={30}
       />
       <Text style={s.dimAction}>{dim.action}</Text>
     </View>
@@ -808,16 +816,14 @@ function DimensionCard({
 // ── SparkLine ────────────────────────────────────────────────────────────────
 
 function SparkLine({
-  values, accent, width = 120, height = 24, target, endStatus,
+  values, accent, width = 120, height = 24, target,
 }: {
-  values:    (number | null)[]
-  accent:    string
-  width?:    number
-  height?:   number
+  values:  (number | null)[]
+  accent:  string
+  width?:  number
+  height?: number
   /** Y value of the dashed reference line. Null = no target line. */
-  target?:   number | null
-  /** Status of the last data point — drives the end-of-line dot color. */
-  endStatus?: Status | null
+  target?: number | null
 }) {
   const valid = values
     .map((v, i) => v == null ? null : { x: i, v })
@@ -850,13 +856,6 @@ function SparkLine({
     lastWasNull = false
   }
 
-  // End-of-line dot: position at the last valid data point, color by last
-  // night's status (not the dim's 7-night status — those can disagree).
-  const lastPoint = valid[valid.length - 1]
-  const endDotCx = lastPoint ? tx(lastPoint.x) : null
-  const endDotCy = lastPoint ? ty(lastPoint.v) : null
-  const endDotColor = endStatus ? statusColor(endStatus) : accent
-
   // Target line: dashed horizontal, slightly dimmed accent color.
   const targetY = target != null ? ty(target) : null
 
@@ -872,15 +871,7 @@ function SparkLine({
             fill="none"
           />
         )}
-        <Path d={segments.join(' ')} stroke={accent} strokeWidth={1.5} fill="none" />
-        {endDotCx != null && endDotCy != null && (
-          <Circle
-            cx={endDotCx}
-            cy={endDotCy}
-            r={2.5}
-            fill={endDotColor}
-          />
-        )}
+        <Path d={segments.join(' ')} stroke={accent} strokeWidth={1.75} fill="none" />
       </Svg>
     </View>
   )
@@ -989,33 +980,33 @@ const s = StyleSheet.create({
     lineHeight: 20,
   },
 
-  dimGrid: {
-    flexDirection: 'row',
-    flexWrap:      'wrap',
-    gap:           10,
+  // Unified dimension breakdown — one row per metric inside a single card.
+  dimRow: {
+    paddingTop:    14,
+    marginTop:     14,
+    borderTopWidth: 1,
+    borderTopColor: alpha(colors.border, 0.5),
+    gap:           8,
   },
-  dimCard: {
-    flexGrow:        1,
-    flexBasis:       '46%',
-    backgroundColor: alpha(colors.card, 0.5),
-    borderWidth:     1,
-    borderRadius:    12,
-    padding:         12,
-    gap:             6,
+  dimRowFirst: {
+    // First row sits flush against the card label — no top border.
+    paddingTop:     0,
+    marginTop:      6,
+    borderTopWidth: 0,
   },
-  dimHead: {
+  dimRowHead: {
     flexDirection: 'row',
     alignItems:    'center',
-    gap:           5,
+    gap:           6,
   },
-  dimLabel: {
+  dimRowLabel: {
     color:    colors.mutedForeground,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
-  dimStatusFill: { flex: 1 },
+  dimRowHeadFill: { flex: 1 },
   dimPill: {
     minWidth:        18,
     height:          18,
