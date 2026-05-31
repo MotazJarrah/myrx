@@ -456,13 +456,15 @@ export default function SleepPage() {
     const diffMin = Math.round((targetSecs - avg) / 60)
     const headline = `${fmtHoursMinutes(avg)} → ${fmtHoursOnly(targetHours)}`
 
+    // Concise per-dim action — one sentence, just "what to do". The broader
+    // coaching narrative lives in the top banner (verdictText).
     let action: string
     if (status === 'ok') {
-      action = `Averaging ${fmtHoursMinutes(avg)} — within ${fmtMin(Math.abs(diffMin))} of your ${fmtHoursOnly(targetHours)} target. Keep your bedtime steady and your body banks this duration consistently.`
+      action = `Hold this rhythm.`
     } else if (avg < targetSecs) {
-      action = `Averaging ${fmtHoursMinutes(avg)} — ${fmtMin(Math.abs(diffMin))} short of your ${fmtHoursOnly(targetHours)} target. Going to bed ${fmtMin(Math.abs(diffMin))} earlier each night closes the gap; the circadian rhythm adapts in about two weeks.`
+      action = `Go to bed ${fmtMin(Math.abs(diffMin))} earlier each night.`
     } else {
-      action = `Averaging ${fmtHoursMinutes(avg)} — ${fmtMin(Math.abs(diffMin))} above target. Not harmful, but check whether the extra time reflects fatigue or recovery from a hard week.`
+      action = `Cap sleep near ${fmtHoursOnly(targetHours)} — oversleeping signals recovery debt.`
     }
     const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
@@ -494,13 +496,14 @@ export default function SleepPage() {
     const shortMin = Math.round((DEEP_TARGET_S - avg) / 60)
     const headline = `${fmtHoursMinutes(avg)} → 90 min`
 
+    // Concise per-dim action — one sentence, just "what to do".
     let action: string
     if (status === 'ok') {
-      action = `Averaging ${fmtHoursMinutes(avg)} of deep sleep — meeting the 90-minute physical-recovery target. Deep is when your body rebuilds muscle and releases growth hormone.`
+      action = `On target — your body's repair window is covered.`
     } else if (shortMin > 0) {
-      action = `Averaging ${fmtHoursMinutes(avg)} — ${fmtMin(shortMin)} short of the 90-minute target. Deep responds to a cool bedroom (≤67°F) and avoiding heavy meals or alcohol within 3 hours of bed.`
+      action = `Cool the bedroom to ≤67°F and skip heavy meals within 3 hours of bed.`
     } else {
-      action = `Averaging ${fmtHoursMinutes(avg)} — at target.`
+      action = `At target.`
     }
     const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
@@ -534,13 +537,14 @@ export default function SleepPage() {
     const shortMin = Math.round((REM_TARGET_S - avg) / 60)
     const headline = `${fmtHoursMinutes(avg)} → 90 min`
 
+    // Concise per-dim action — one sentence, just "what to do".
     let action: string
     if (status === 'ok') {
-      action = `Averaging ${fmtHoursMinutes(avg)} of REM — meeting the 90-minute target. REM is when memory consolidates and emotional processing happens.`
+      action = `On target — memory + mood consolidation covered.`
     } else if (shortMin > 0) {
-      action = `Averaging ${fmtHoursMinutes(avg)} — ${fmtMin(shortMin)} short of the 90-minute target. Alcohol within 3 hours of bed is the single biggest REM-suppressor; that's usually the first lever to pull.`
+      action = `Skip alcohol within 3 hours of bed — it's the biggest REM suppressor.`
     } else {
-      action = `Averaging ${fmtHoursMinutes(avg)} — at target.`
+      action = `At target.`
     }
     const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
@@ -598,19 +602,17 @@ export default function SleepPage() {
       : `${currentBedLabel} · ±${Math.round(sdMin)}m`
 
     const lateMin = (avgBed - targetBed) / 60
+    // Concise per-dim action — one sentence, just "what to do". The
+    // UK-Biobank 2025 consistency narrative lives in the top banner now.
     let action: string
-    // Headline insight from 2025 UK Biobank study (BMC Public Health):
-    // sleep CONSISTENCY reduces mental-disorder risk MORE than hitting an
-    // exact target duration. So when consistency is the lever that's off,
-    // we name it as the highest-impact change.
     if (status === 'ok') {
-      action = `Your bedtime averages ${currentBedLabel}, holding steady within ${sessions7.length >= 3 ? `±${Math.round(sdMin)} minutes` : 'range'} — aligned with your ${wakeLabel} wake time.`
+      action = `On target — your circadian rhythm is locked in.`
     } else if (bedStatus !== 'ok' && consistencyStatus === 'fail') {
-      action = `Bedtime averages ${currentBedLabel} (${fmtMin(Math.abs(lateMin))} ${lateMin > 0 ? 'late' : 'early'}) AND varies ±${Math.round(sdMin)} minutes. Holding one bedtime within a 30-minute window matters more than hitting exact target hours — recent research (UK Biobank, 2025) shows consistency reduces mental-health risk above any single duration target.`
+      action = `Pick one bedtime within a 30-min window and hold for 2 weeks.`
     } else if (bedStatus !== 'ok') {
-      action = `Bedtime averages ${currentBedLabel}. Shifting to ${targetBedLabel} (${fmtMin(Math.abs(lateMin))} ${lateMin > 0 ? 'earlier' : 'later'}) aligns with your ${wakeLabel} wake time and your ${fmtHoursOnly(targetHours)} duration target.`
+      action = `Shift bedtime to ${targetBedLabel} (${fmtMin(Math.abs(lateMin))} ${lateMin > 0 ? 'earlier' : 'later'}).`
     } else {
-      action = `Bedtime is on target but varies by ±${Math.round(sdMin)} minutes night-to-night. Recent research shows consistency reduces mental-health risk MORE than absolute duration — hold bedtime within a 30-minute window for biggest gains.`
+      action = `Hold bedtime within a 30-min window.`
     }
 
     // Spark values inverted so UP = went to bed earlier (better). Each value
@@ -660,17 +662,59 @@ export default function SleepPage() {
     return { color, offCount, knownCount: known.length }
   }, [totalDim, deepDim, remDim, scheduleDim, lead])
 
+  // Consolidated coaching cue — covers all four dims in one paragraph.
+  // Per-dim cards keep ONLY a concise "what to do" line. This banner is
+  // the integrative narrative: state, lead item, action, and (when 2+
+  // dims are off) why one fix often cascades into the others.
   const verdictText = useMemo(() => {
     if (sessions7.length === 0) {
       return 'No nights tracked yet. Once data starts landing, your weekly verdict shows here.'
     }
-    const avgSec = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
+    const avgSec   = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
     const avgLabel = fmtHoursMinutes(avgSec)
     if (verdict.offCount === 0 || !lead) {
-      return `Sleep is averaging ${avgLabel} — on track. Keep your rhythm steady.`
+      return `Sleep is averaging ${avgLabel} — on track across the board. Hold your bedtime steady; consistency banks more than chasing extra hours.`
     }
-    return `Sleep is averaging ${avgLabel} — start with ${lead.name}.`
-  }, [sessions7, verdict, lead])
+
+    // Compose three parts: state (avg + lead), action (concrete fix for
+    // lead), and follow-up (why fixing this often pulls the others back
+    // into range). Follow-up only appears when 2+ dims are off.
+    const offCount = verdict.offCount
+    const dimsOffOther = offCount - 1
+    let action: string
+    let followUp = ''
+
+    // Lead-specific action sentence.
+    if (lead.name === 'total sleep') {
+      const diffMin = Math.round((targetSecs - (totalDim.current ?? 0)) / 60)
+      action = (totalDim.current ?? 0) < targetSecs
+        ? `Go to bed ${fmtMin(Math.abs(diffMin))} earlier — the circadian rhythm adapts in about two weeks.`
+        : `Cap sleep near ${fmtHoursOnly(targetHours)} — oversleeping signals fatigue or recovery debt.`
+    } else if (lead.name === 'schedule') {
+      action = `Hold one bedtime within a 30-min window — recent research (UK Biobank, 2025) shows consistency lowers mental-health risk more than hitting exact target hours.`
+    } else if (lead.name === 'deep sleep') {
+      action = `Cool your bedroom to ≤67°F and skip heavy meals or alcohol within 3 hours of bed — both directly support deep-stage recovery.`
+    } else {
+      // REM sleep
+      action = `Skip alcohol within 3 hours of bed — it's the single biggest REM suppressor.`
+    }
+
+    // Follow-up — only when ≥2 dims are off. Schedule is the universal
+    // multiplier so call it out unless the lead IS schedule.
+    if (dimsOffOther >= 1) {
+      if (lead.name === 'schedule') {
+        followUp = ` Once your schedule stabilizes, total and stage time usually follow.`
+      } else if (scheduleDim.status === 'fail' || scheduleDim.status === 'warn') {
+        followUp = ` Bedtime consistency is the multiplier — fixing it pulls the other ${dimsOffOther === 1 ? 'dim' : 'dims'} along.`
+      } else if (totalDim.status === 'fail' || totalDim.status === 'warn') {
+        followUp = ` More total sleep typically lifts deep and REM proportionally.`
+      } else {
+        followUp = ` ${dimsOffOther === 1 ? 'One more dim is' : `${dimsOffOther} more dims are`} off — see the cards below for specific fixes.`
+      }
+    }
+
+    return `Sleep is averaging ${avgLabel}. Start with ${lead.name}: ${action}${followUp}`
+  }, [sessions7, verdict, lead, totalDim, scheduleDim, targetSecs, targetHours])
 
   // ── Sleep Clock data ───────────────────────────────────────────────────────
 
