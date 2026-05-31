@@ -347,6 +347,136 @@ function computeVerdict(statuses: Status[]) {
 const DEEP_TARGET_S = 90 * 60   // 90 min adult target
 const REM_TARGET_S  = 90 * 60   // 90 min adult target
 
+// ── CBT-I micro-target — Spielman 1987 Sleep Restriction Therapy ────────────
+//
+// Behavioural-sleep-medicine protocol: the circadian rhythm adapts to bedtime
+// shifts in ~15-min weekly increments. Bigger jumps don't stick (acute
+// circadian misalignment). Our coaching surface uses this for the "this week
+// aim for X" line: we offer the user a 15-min nudge toward the age-banded
+// target, capped so we never overshoot.
+//
+// Reference: Spielman, A. J. et al. (1987). 'A behavioral perspective on
+// insomnia treatment.' Psychiatric Clinics of North America, 10(4), 541-553.
+// Reinforced as CBT-I gold-standard by Edinger 2021 AASM clinical guideline.
+const MICRO_TARGET_STEP_SEC = 15 * 60  // 15 min weekly increment
+
+interface MicroTarget {
+  /** Next week's target sleep duration in seconds. */
+  microTargetSec: number
+  /** Signed delta from current avg (positive = need more sleep). */
+  deltaMin:       number
+  /** 'increase' = need more, 'decrease' = need less, 'hold' = at target. */
+  direction:      'increase' | 'decrease' | 'hold'
+  /** True when this week's nudge would actually reach the age target. */
+  reachesTarget:  boolean
+}
+
+function computeMicroTarget(avgSec: number, targetSec: number): MicroTarget {
+  const gap = targetSec - avgSec  // positive → need more sleep
+  // Inside ±15-min window of target → already on it; no nudge this week.
+  if (Math.abs(gap) <= MICRO_TARGET_STEP_SEC) {
+    return {
+      microTargetSec: targetSec,
+      deltaMin:       Math.round(gap / 60),
+      direction:      'hold',
+      reachesTarget:  true,
+    }
+  }
+  const step = gap > 0 ? MICRO_TARGET_STEP_SEC : -MICRO_TARGET_STEP_SEC
+  const next = avgSec + step
+  // Clamp so we never overshoot the target in either direction.
+  const microTargetSec = gap > 0 ? Math.min(next, targetSec) : Math.max(next, targetSec)
+  return {
+    microTargetSec,
+    deltaMin:       Math.round((microTargetSec - avgSec) / 60),
+    direction:      gap > 0 ? 'increase' : 'decrease',
+    reachesTarget:  microTargetSec === targetSec,
+  }
+}
+
+// ── Bedtime-anchored hygiene cue registry ───────────────────────────────────
+//
+// Every cue references the user's ACTUAL average bedtime / wake time computed
+// from logs — not a generic clock time. So a user with a 2 AM bedtime gets
+// "no caffeine after 8 PM" instead of the useless "no caffeine after 2 PM".
+//
+// Each cue text is paired with the published-study mechanism in one sentence
+// so the user reads WHY the cue exists, not just "do this".
+//
+// Sources for each cue:
+//   - caffeine 6h cutoff:    Drake et al. 2013 (J Clin Sleep Med) — 6h
+//                             caffeine before bed still disrupts sleep onset.
+//   - alcohol 3h cutoff:     Roehrs & Roth 2001 — alcohol's #1 sleep effect
+//                             is REM suppression, especially the first half.
+//   - heavy meals 3h cutoff: Park et al. 2020 — late meals delay deep stage.
+//   - screens dim 60min:     Burgess 2013 — light suppresses melatonin onset.
+//   - screens off 30min:     Burgess 2013 — phasic blue-light triggers wake.
+//   - morning sunlight:      Wright et al. 2013, Khalsa 2003 — strongest
+//                             circadian phase anchor; within 30 min of wake.
+//   - bedroom temp ≤67°F:    Okamoto-Mizuno 2012 — thermoregulation drop
+//                             triggers deep-stage entry.
+//   - wake anchor:           Czeisler 1999 — wake time is the DOMINANT
+//                             zeitgeber (stronger than bedtime).
+//   - REM tail protection:   Carskadon & Dement — REM cycles lengthen across
+//                             the night; the last 90 min is mostly REM.
+type CueId =
+  | 'caffeine' | 'alcohol' | 'meals'
+  | 'screens_dim' | 'screens_off' | 'sunlight'
+  | 'temp' | 'wake_anchor' | 'rem_tail'
+
+/** Hour-of-day decimal → 12h clock string like "8:00 PM". */
+function fmtClock12(h: number): string {
+  const wrapped = ((h % 24) + 24) % 24
+  const hr      = Math.floor(wrapped)
+  const min     = Math.floor((wrapped - hr) * 60)
+  const period  = hr < 12 ? 'AM' : 'PM'
+  const h12     = ((hr + 11) % 12) + 1
+  return min === 0
+    ? `${h12} ${period}`
+    : `${h12}:${String(min).padStart(2, '0')} ${period}`
+}
+
+function makeCue(id: CueId, avgBedHour: number, avgWakeHour: number): string {
+  // Helper: shift a decimal-hour value by H hours and format. Bed-1h means
+  // "1 hour before bedtime". Wraps correctly across midnight.
+  const shift = (base: number, deltaHours: number) =>
+    fmtClock12(((base + deltaHours) % 24 + 24) % 24)
+  const bed   = avgBedHour
+  const wake  = avgWakeHour
+  switch (id) {
+    case 'caffeine':
+      return `No caffeine after ${shift(bed, -6)} — caffeine has a 6-hour half-life and disrupts sleep onset even when you don't feel wired.`
+    case 'alcohol':
+      return `No alcohol after ${shift(bed, -3)} — alcohol within 3 hours of bed suppresses REM more than any other dietary factor.`
+    case 'meals':
+      return `No heavy meals after ${shift(bed, -3)} — late digestion delays deep-stage entry by raising core temperature.`
+    case 'screens_dim':
+      return `Dim screens by ${shift(bed, -1)} — bright light within an hour of bed suppresses melatonin.`
+    case 'screens_off':
+      return `Screens off by ${shift(bed, -0.5)} — blue light delays sleep onset more than ambient room light.`
+    case 'sunlight':
+      return `Get 10+ min of sunlight by ${shift(wake, 0.5)} — light within 30 min of wake is your strongest circadian anchor.`
+    case 'temp':
+      return `Cool the bedroom to ≤67°F before bed — your body's core-temp drop triggers deep-stage entry.`
+    case 'wake_anchor':
+      return `Hold your alarm at ${fmtClock12(wake)} — wake time is your dominant circadian anchor (stronger than bedtime).`
+    case 'rem_tail':
+      return `Protect your last 90 minutes of sleep — most of your nightly REM happens in that window.`
+  }
+}
+
+/**
+ * Pick a primary or alternate cue based on the calendar week, so a user
+ * who's chronically off on the same dim doesn't read the same advice for
+ * weeks in a row. Week parity flips every 7 days.
+ */
+function weekParity(): 0 | 1 {
+  // Math.floor(Date.now() / WEEK_MS) is monotonic + globally consistent.
+  // Stable inside a single render but flips at the weekly boundary.
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+  return (Math.floor(Date.now() / WEEK_MS) % 2) as 0 | 1
+}
+
 export default function SleepPage() {
   const { profile } = useAuth()
 
@@ -436,6 +566,33 @@ export default function SleepPage() {
       .sort((a, b) => (a.start_at < b.start_at ? -1 : 1))
   }, [sessions30])
 
+  // Computed avg bedtime + wake time (decimal hours, local TZ). Used by
+  // both the Schedule dim AND the bedtime-anchored cue registry. Derived
+  // from logs — no settings input required. When the user has no nights
+  // yet, falls back to 0 (caller checks sessions7.length before using).
+  const avgBedHour = useMemo(() => {
+    if (sessions7.length === 0) return 0
+    const offsets = sessions7.map(s => bedtimeOffsetSeconds(s.start_at))
+    return offsets.reduce((a, b) => a + b, 0) / offsets.length / 3600
+  }, [sessions7])
+  const avgWakeHour = useMemo(() => {
+    if (sessions7.length === 0) return 0
+    const offsets = sessions7.map(s => wakeOffsetSeconds(s.end_at))
+    return offsets.reduce((a, b) => a + b, 0) / offsets.length / 3600
+  }, [sessions7])
+
+  // CBT-I weekly micro-target — shipped to the banner as "this week aim for X".
+  // Computed against the AGE-BANDED target, not user input. Captures whether
+  // user needs more sleep, less sleep, or is already on track.
+  const microTarget = useMemo(() => {
+    if (sessions7.length === 0) return null
+    const avg = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
+    return computeMicroTarget(avg, targetSecs)
+  }, [sessions7, targetSecs])
+
+  // Week parity for cue rotation. Stable within a render, flips weekly.
+  const cueWeek = useMemo(() => weekParity(), [])
+
   // ── Dimension 1: Total sleep ───────────────────────────────────────────────
 
   const totalDim: DimensionResult = useMemo(() => {
@@ -457,14 +614,16 @@ export default function SleepPage() {
     const headline = `${fmtHoursMinutes(avg)} → ${fmtHoursOnly(targetHours)}`
 
     // Concise per-dim action — one sentence, just "what to do". The broader
-    // coaching narrative lives in the top banner (verdictText).
+    // coaching narrative lives in the top banner (verdictText). Cue rotates
+    // between primary (sunlight anchor) and alternate (wake anchor) weekly
+    // so chronically-short users don't read the same line every week.
     let action: string
     if (status === 'ok') {
-      action = `Hold this rhythm.`
-    } else if (avg < targetSecs) {
-      action = `Go to bed ${fmtMin(Math.abs(diffMin))} earlier each night.`
+      action = `Hold this rhythm — the age-banded ${fmtHoursOnly(targetHours)} target is met.`
     } else {
-      action = `Cap sleep near ${fmtHoursOnly(targetHours)} — oversleeping signals recovery debt.`
+      action = cueWeek === 0
+        ? makeCue('sunlight', avgBedHour, avgWakeHour)
+        : makeCue('wake_anchor', avgBedHour, avgWakeHour)
     }
     const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
@@ -496,12 +655,16 @@ export default function SleepPage() {
     const shortMin = Math.round((DEEP_TARGET_S - avg) / 60)
     const headline = `${fmtHoursMinutes(avg)} → 90 min`
 
-    // Concise per-dim action — one sentence, just "what to do".
+    // Concise per-dim action — one sentence, just "what to do". Cue rotates
+    // weekly between primary (temp) and alternate (meals) so chronically-
+    // deep-short users see variation. Both cues are bedtime-anchored.
     let action: string
     if (status === 'ok') {
       action = `On target — your body's repair window is covered.`
     } else if (shortMin > 0) {
-      action = `Cool the bedroom to ≤67°F and skip heavy meals within 3 hours of bed.`
+      action = cueWeek === 0
+        ? makeCue('temp',  avgBedHour, avgWakeHour)
+        : makeCue('meals', avgBedHour, avgWakeHour)
     } else {
       action = `At target.`
     }
@@ -537,12 +700,15 @@ export default function SleepPage() {
     const shortMin = Math.round((REM_TARGET_S - avg) / 60)
     const headline = `${fmtHoursMinutes(avg)} → 90 min`
 
-    // Concise per-dim action — one sentence, just "what to do".
+    // Cue rotates weekly between primary (alcohol cutoff) and alternate
+    // (REM-tail protection) so users see different angles.
     let action: string
     if (status === 'ok') {
       action = `On target — memory + mood consolidation covered.`
     } else if (shortMin > 0) {
-      action = `Skip alcohol within 3 hours of bed — it's the biggest REM suppressor.`
+      action = cueWeek === 0
+        ? makeCue('alcohol',  avgBedHour, avgWakeHour)
+        : makeCue('rem_tail', avgBedHour, avgWakeHour)
     } else {
       action = `At target.`
     }
@@ -602,17 +768,22 @@ export default function SleepPage() {
       : `${currentBedLabel} · ±${Math.round(sdMin)}m`
 
     const lateMin = (avgBed - targetBed) / 60
-    // Concise per-dim action — one sentence, just "what to do". The
-    // UK-Biobank 2025 consistency narrative lives in the top banner now.
+    // Schedule's PRIMARY lever is the wake anchor (Czeisler — wake is the
+    // dominant zeitgeber). All variants of "off" lead with that. Specific
+    // bedtime offset still surfaces when the user is significantly late,
+    // but the wake-anchor framing comes first.
     let action: string
     if (status === 'ok') {
       action = `On target — your circadian rhythm is locked in.`
     } else if (bedStatus !== 'ok' && consistencyStatus === 'fail') {
-      action = `Pick one bedtime within a 30-min window and hold for 2 weeks.`
+      // Both off — wake-anchor is the highest-leverage fix.
+      action = makeCue('wake_anchor', avgBedHour, avgWakeHour)
     } else if (bedStatus !== 'ok') {
-      action = `Shift bedtime to ${targetBedLabel} (${fmtMin(Math.abs(lateMin))} ${lateMin > 0 ? 'earlier' : 'later'}).`
+      // Bedtime drift only — name the actual time AND the wake anchor.
+      action = `Shift bedtime to ${targetBedLabel} (${fmtMin(Math.abs(lateMin))} ${lateMin > 0 ? 'earlier' : 'later'}) — and hold ${fmtClock12(avgWakeHour)} as your alarm anchor.`
     } else {
-      action = `Hold bedtime within a 30-min window.`
+      // Consistency only — pure wake-anchor framing.
+      action = makeCue('wake_anchor', avgBedHour, avgWakeHour)
     }
 
     // Spark values inverted so UP = went to bed earlier (better). Each value
@@ -662,59 +833,97 @@ export default function SleepPage() {
     return { color, offCount, knownCount: known.length }
   }, [totalDim, deepDim, remDim, scheduleDim, lead])
 
-  // Consolidated coaching cue — covers all four dims in one paragraph.
+  // Consolidated coaching cue — woven from three pieces:
+  //
+  //   1. STATE — current avg + age-banded target.
+  //   2. MICRO-TARGET — CBT-I 15-min weekly nudge ("this week aim for X").
+  //   3. LEVER — concrete action keyed off lead-dim status. Distinguishes
+  //      "sleep more" (move wake later or pull bedtime earlier) vs
+  //      "sleep earlier" (bedtime is the specific gap). Always anchors
+  //      on the wake time as the dominant zeitgeber (Czeisler).
+  //
+  // When 2+ dims are off, a brief cascade sentence explains why fixing
+  // the lead usually pulls the others along.
+  //
   // Per-dim cards keep ONLY a concise "what to do" line. This banner is
-  // the integrative narrative: state, lead item, action, and (when 2+
-  // dims are off) why one fix often cascades into the others.
+  // the integrative narrative.
   const verdictText = useMemo(() => {
     if (sessions7.length === 0) {
       return 'No nights tracked yet. Once data starts landing, your weekly verdict shows here.'
     }
     const avgSec   = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
     const avgLabel = fmtHoursMinutes(avgSec)
+
+    // All-on-track → simple hold message.
     if (verdict.offCount === 0 || !lead) {
-      return `Sleep is averaging ${avgLabel} — on track across the board. Hold your bedtime steady; consistency banks more than chasing extra hours.`
+      return `Sleep is averaging ${avgLabel} — on track across the board. Hold ${fmtClock12(avgWakeHour)} as your alarm and let bedtime follow.`
     }
 
-    // Compose three parts: state (avg + lead), action (concrete fix for
-    // lead), and follow-up (why fixing this often pulls the others back
-    // into range). Follow-up only appears when 2+ dims are off.
-    const offCount = verdict.offCount
-    const dimsOffOther = offCount - 1
-    let action: string
-    let followUp = ''
+    // --- 1. STATE ----------------------------------------------------------
+    const stateLine = `Sleep is averaging ${avgLabel}.`
 
-    // Lead-specific action sentence.
+    // --- 2. MICRO-TARGET --------------------------------------------------
+    // Only show when total sleep is off-target AND a non-trivial nudge
+    // exists. Otherwise the micro-target line just confuses (e.g. user
+    // hitting target but bedtime drifts — micro-target says "hold" which
+    // doesn't help the schedule discussion).
+    let microLine = ''
+    if (microTarget && microTarget.direction !== 'hold') {
+      const nextLabel = fmtHoursMinutes(microTarget.microTargetSec)
+      const sign      = microTarget.deltaMin > 0 ? '+' : ''
+      microLine = ` This week, aim for ${nextLabel} (${sign}${microTarget.deltaMin} min) — your circadian rhythm adapts in 15-min weekly steps.`
+    }
+
+    // --- 3. LEVER --------------------------------------------------------
+    // Wake time = the dominant zeitgeber. Every lever sentence anchors on it.
+    let leverLine = ''
     if (lead.name === 'total sleep') {
-      const diffMin = Math.round((targetSecs - (totalDim.current ?? 0)) / 60)
-      action = (totalDim.current ?? 0) < targetSecs
-        ? `Go to bed ${fmtMin(Math.abs(diffMin))} earlier — the circadian rhythm adapts in about two weeks.`
-        : `Cap sleep near ${fmtHoursOnly(targetHours)} — oversleeping signals fatigue or recovery debt.`
+      const totalCur = totalDim.current ?? 0
+      if (totalCur < targetSecs) {
+        // Determine the lever. If bedtime is at-or-before the target
+        // bedtime (avgWake - target_duration), the user is already going
+        // to bed early enough — needs to wake later OR extend total via
+        // additional bedtime shift. Otherwise, pull bedtime earlier.
+        const targetBedHour     = ((avgWakeHour - targetHours) % 24 + 24) % 24
+        const bedtimeAlreadyEarly = Math.abs(((avgBedHour - targetBedHour + 24) % 24) - 12) > 11.7
+          ? false  // wrap edge case — treat as not-early to avoid weird math
+          : avgBedHour <= targetBedHour || avgBedHour > 18  // 6 PM-midnight bedtimes count as "before target"
+        if (bedtimeAlreadyEarly) {
+          leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your wake target — or extend it later if your schedule allows. Bedtime is already on track.`
+        } else {
+          // Pull bedtime to: wake - microTarget (this week's smaller nudge)
+          const microSec = microTarget?.microTargetSec ?? targetSecs
+          const newBedHour = ((avgWakeHour - microSec / 3600) % 24 + 24) % 24
+          leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your alarm anchor (wake time is your strongest circadian zeitgeber) and pull bedtime to ${fmtClock12(newBedHour)}.`
+        }
+      } else {
+        // Over-target — cap by holding wake, drifting bedtime later.
+        leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your alarm and let bedtime drift later — oversleeping past the age-banded ${fmtHoursOnly(targetHours)} target signals recovery debt or misaligned rhythm.`
+      }
     } else if (lead.name === 'schedule') {
-      action = `Hold one bedtime within a 30-min window — recent research (UK Biobank, 2025) shows consistency lowers mental-health risk more than hitting exact target hours.`
+      leverLine = ` ${makeCue('wake_anchor', avgBedHour, avgWakeHour)}`
     } else if (lead.name === 'deep sleep') {
-      action = `Cool your bedroom to ≤67°F and skip heavy meals or alcohol within 3 hours of bed — both directly support deep-stage recovery.`
+      leverLine = ` ${cueWeek === 0 ? makeCue('temp', avgBedHour, avgWakeHour) : makeCue('meals', avgBedHour, avgWakeHour)}`
     } else {
-      // REM sleep
-      action = `Skip alcohol within 3 hours of bed — it's the single biggest REM suppressor.`
+      // REM
+      leverLine = ` ${cueWeek === 0 ? makeCue('alcohol', avgBedHour, avgWakeHour) : makeCue('rem_tail', avgBedHour, avgWakeHour)}`
     }
 
-    // Follow-up — only when ≥2 dims are off. Schedule is the universal
-    // multiplier so call it out unless the lead IS schedule.
+    // --- CASCADE (only when 2+ dims off) ---------------------------------
+    let cascadeLine = ''
+    const dimsOffOther = verdict.offCount - 1
     if (dimsOffOther >= 1) {
       if (lead.name === 'schedule') {
-        followUp = ` Once your schedule stabilizes, total and stage time usually follow.`
+        cascadeLine = ' Once your wake anchor holds, total and stage time usually follow.'
       } else if (scheduleDim.status === 'fail' || scheduleDim.status === 'warn') {
-        followUp = ` Bedtime consistency is the multiplier — fixing it pulls the other ${dimsOffOther === 1 ? 'dim' : 'dims'} along.`
+        cascadeLine = ` Locking your wake time also fixes the other ${dimsOffOther === 1 ? 'dim that is' : 'dims that are'} off.`
       } else if (totalDim.status === 'fail' || totalDim.status === 'warn') {
-        followUp = ` More total sleep typically lifts deep and REM proportionally.`
-      } else {
-        followUp = ` ${dimsOffOther === 1 ? 'One more dim is' : `${dimsOffOther} more dims are`} off — see the cards below for specific fixes.`
+        cascadeLine = ' Adding total sleep typically lifts deep + REM proportionally.'
       }
     }
 
-    return `Sleep is averaging ${avgLabel}. Start with ${lead.name}: ${action}${followUp}`
-  }, [sessions7, verdict, lead, totalDim, scheduleDim, targetSecs, targetHours])
+    return `${stateLine}${microLine}${leverLine}${cascadeLine}`
+  }, [sessions7, verdict, lead, totalDim, scheduleDim, targetSecs, targetHours, avgBedHour, avgWakeHour, microTarget, cueWeek])
 
   // ── Sleep Clock data ───────────────────────────────────────────────────────
 
@@ -866,7 +1075,7 @@ export default function SleepPage() {
               detail pages (Riegel · Daniels' · Seiler, Epley · Brzycki ·
               Lombardi, etc.). Sources behind every target value above. */}
           <Text style={s.attribution}>
-            AASM · NSF · Li 2022 · Belenky · Van Dongen · Wittmann · Windred — age-banded targets, dose-response thresholds
+            AASM · NSF · Li 2022 · Belenky · Van Dongen · Wittmann · Windred · Spielman · Czeisler · Wright · Roehrs · Okamoto-Mizuno · Burgess · Drake · Park — age-banded targets, dose-response thresholds, CBT-I micro-targeting, bedtime-anchored hygiene cues
           </Text>
         </AnimateRise>
       )}
