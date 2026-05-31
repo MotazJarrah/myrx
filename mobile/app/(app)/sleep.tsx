@@ -1062,7 +1062,7 @@ export default function SleepPage() {
               >
                 <Text style={s.howBody}>
                   <Text style={s.howBold}>Target: </Text>
-                  {fmtHoursOnly(targetHours)} based on your age (AASM, NSF, Li 2022).
+                  {fmtHoursOnly(targetHours)} based on your age.
                   {'\n'}
                   <Text style={s.howBold}>Your averages: </Text>
                   bedtime {fmtClock12(avgBedHour)}, wake {fmtClock12(avgWakeHour)}, total {fmtHoursMinutes(sessions7.reduce((a, s) => a + s.duration_s, 0) / Math.max(1, sessions7.length))} — from the last 7 nights.
