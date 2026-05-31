@@ -41,7 +41,7 @@ import { useFocusEffect } from 'expo-router'
 import {
   Moon, Clock, Activity, BedDouble, Brain,
 } from 'lucide-react-native'
-import Svg, { Path, Line as SvgLine } from 'react-native-svg'
+import Svg, { Path, Line as SvgLine, Circle } from 'react-native-svg'
 
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
@@ -88,6 +88,20 @@ interface DimensionResult {
   headline: string
   action:   string
   spark:    (number | null)[]
+  /**
+   * Y value of the target reference line drawn across the sparkline.
+   * For Total/Deep/REM this equals `target` (spark values are in the same
+   * units as target). For Schedule this is 0 because the spark values are
+   * pre-normalized to "seconds earlier than target bedtime" so up = good.
+   * Null = no target line drawn.
+   */
+  sparkTarget: number | null
+  /**
+   * Status of the most recent night, computed per-dim using the same
+   * classifier as the dim itself. Drives the end-of-line dot color so the
+   * user sees "where am I right now" at a glance. Null = no recent data.
+   */
+  lastNightStatus: Status | null
 }
 
 // ── Time-based classifiers (locked May 31 2026) ──────────────────────────────
@@ -376,6 +390,8 @@ export default function SleepPage() {
         headline: `Target ${fmtHoursOnly(targetHours)}`,
         action:   "Once a few nights are tracked, your average sleep duration shows here with a status against your age-adjusted target.",
         spark:    [],
+        sparkTarget: null,
+        lastNightStatus: null,
       }
     }
     const avg = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
@@ -391,9 +407,12 @@ export default function SleepPage() {
     } else {
       action = `Averaging ${fmtHoursMinutes(avg)} — ${fmtMin(Math.abs(diffMin))} above target. Not harmful, but check whether the extra time reflects fatigue or recovery from a hard week.`
     }
+    const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
       status, current: avg, target: targetSecs, headline, action,
       spark: sparkWindow.map(s => s.duration_s),
+      sparkTarget: targetSecs,
+      lastNightStatus: lastNight ? classifyTotal(lastNight.duration_s, targetSecs) : null,
     }
   }, [sessions7, sparkWindow, targetSecs, targetHours])
 
@@ -409,6 +428,8 @@ export default function SleepPage() {
         headline: `Target 90 min`,
         action:   "Deep sleep needs a worn watch to measure. Wear yours overnight (with Sleep Focus on) and the deep stage shows up here.",
         spark:    [],
+        sparkTarget: null,
+        lastNightStatus: null,
       }
     }
     const avg = sessionsWithStages.reduce((a, s) => a + (s.deep_s ?? 0), 0) / sessionsWithStages.length
@@ -424,9 +445,14 @@ export default function SleepPage() {
     } else {
       action = `Averaging ${fmtHoursMinutes(avg)} — at target.`
     }
+    const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
       status, current: avg, target: DEEP_TARGET_S, headline, action,
       spark: sparkWindow.map(s => s.deep_s),
+      sparkTarget: DEEP_TARGET_S,
+      lastNightStatus: lastNight && lastNight.deep_s != null && lastNight.deep_s > 0
+        ? classifyStage(lastNight.deep_s, DEEP_TARGET_S)
+        : null,
     }
   }, [sessions7, sparkWindow])
 
@@ -442,6 +468,8 @@ export default function SleepPage() {
         headline: `Target 90 min`,
         action:   "REM sleep needs a worn watch to measure. Wear yours overnight and the REM stage shows up here.",
         spark:    [],
+        sparkTarget: null,
+        lastNightStatus: null,
       }
     }
     const avg = sessionsWithStages.reduce((a, s) => a + (s.rem_s ?? 0), 0) / sessionsWithStages.length
@@ -457,9 +485,14 @@ export default function SleepPage() {
     } else {
       action = `Averaging ${fmtHoursMinutes(avg)} — at target.`
     }
+    const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
       status, current: avg, target: REM_TARGET_S, headline, action,
       spark: sparkWindow.map(s => s.rem_s),
+      sparkTarget: REM_TARGET_S,
+      lastNightStatus: lastNight && lastNight.rem_s != null && lastNight.rem_s > 0
+        ? classifyStage(lastNight.rem_s, REM_TARGET_S)
+        : null,
     }
   }, [sessions7, sparkWindow])
 
@@ -474,6 +507,8 @@ export default function SleepPage() {
         headline: 'No data yet',
         action:   "Once you log a few nights, your bedtime + consistency show up here together as your schedule grade.",
         spark:    [],
+        sparkTarget: null,
+        lastNightStatus: null,
       }
     }
 
@@ -517,9 +552,18 @@ export default function SleepPage() {
       action = `Bedtime is on target but varies by ±${Math.round(sdMin)} minutes night-to-night. Holding it within a 30-minute window helps your body lock its melatonin release time.`
     }
 
+    // Spark values inverted so UP = went to bed earlier (better). Each value
+    // is "seconds earlier than target bedtime". The sparkTarget line is at 0
+    // (= exactly on target). Positive = early, negative = late.
+    const lastNight = sparkWindow[sparkWindow.length - 1]
+    const lastNightBedStatus = lastNight
+      ? classifyBedtime(bedtimeOffsetSeconds(lastNight.start_at), targetBed)
+      : null
     return {
       status, current: avgBed, target: targetBed, headline, action,
-      spark: sparkWindow.map(s => bedtimeOffsetSeconds(s.start_at)),
+      spark: sparkWindow.map(s => targetBed - bedtimeOffsetSeconds(s.start_at)),
+      sparkTarget: 0,
+      lastNightStatus: lastNightBedStatus,
     }
   }, [sessions7, sparkWindow, targetSecs, targetHours])
 
@@ -750,7 +794,12 @@ function DimensionCard({
         </View>
       </View>
       <Text style={s.dimHeadline}>{dim.headline}</Text>
-      <SparkLine values={dim.spark} accent={color} />
+      <SparkLine
+        values={dim.spark}
+        accent={color}
+        target={dim.sparkTarget}
+        endStatus={dim.lastNightStatus}
+      />
       <Text style={s.dimAction}>{dim.action}</Text>
     </View>
   )
@@ -759,12 +808,16 @@ function DimensionCard({
 // ── SparkLine ────────────────────────────────────────────────────────────────
 
 function SparkLine({
-  values, accent, width = 120, height = 24,
+  values, accent, width = 120, height = 24, target, endStatus,
 }: {
-  values: (number | null)[]
-  accent: string
-  width?:  number
-  height?: number
+  values:    (number | null)[]
+  accent:    string
+  width?:    number
+  height?:   number
+  /** Y value of the dashed reference line. Null = no target line. */
+  target?:   number | null
+  /** Status of the last data point — drives the end-of-line dot color. */
+  endStatus?: Status | null
 }) {
   const valid = values
     .map((v, i) => v == null ? null : { x: i, v })
@@ -772,16 +825,21 @@ function SparkLine({
   if (valid.length < 2) {
     return <View style={{ width, height, opacity: 0.4 }} />
   }
-  const xs   = valid.map(p => p.x)
   const vs   = valid.map(p => p.v)
   const xMin = 0
   const xMax = values.length - 1
-  const yMin = Math.min(...vs)
-  const yMax = Math.max(...vs)
+  // Expand the y-range to include the target line so it always renders
+  // inside the spark frame even when every recent night is below (or
+  // above) target.
+  const dataMin = Math.min(...vs)
+  const dataMax = Math.max(...vs)
+  const yMin = target != null ? Math.min(dataMin, target) : dataMin
+  const yMax = target != null ? Math.max(dataMax, target) : dataMax
   const yRange = Math.max(1e-6, yMax - yMin)
   function tx(x: number) { return (x - xMin) / Math.max(1, xMax - xMin) * width }
   function ty(v: number) { return height - 2 - ((v - yMin) / yRange) * (height - 4) }
 
+  // Build the data line.
   const segments: string[] = []
   let lastWasNull = true
   for (let i = 0; i < values.length; i++) {
@@ -791,10 +849,38 @@ function SparkLine({
     segments.push(`${cmd}${tx(i).toFixed(1)},${ty(v).toFixed(1)}`)
     lastWasNull = false
   }
+
+  // End-of-line dot: position at the last valid data point, color by last
+  // night's status (not the dim's 7-night status — those can disagree).
+  const lastPoint = valid[valid.length - 1]
+  const endDotCx = lastPoint ? tx(lastPoint.x) : null
+  const endDotCy = lastPoint ? ty(lastPoint.v) : null
+  const endDotColor = endStatus ? statusColor(endStatus) : accent
+
+  // Target line: dashed horizontal, slightly dimmed accent color.
+  const targetY = target != null ? ty(target) : null
+
   return (
     <View style={{ height, marginVertical: 2 }}>
       <Svg width={width} height={height}>
+        {targetY != null && (
+          <Path
+            d={`M0,${targetY.toFixed(1)} L${width},${targetY.toFixed(1)}`}
+            stroke={withAlpha(accent, 0.45)}
+            strokeWidth={1}
+            strokeDasharray="3,3"
+            fill="none"
+          />
+        )}
         <Path d={segments.join(' ')} stroke={accent} strokeWidth={1.5} fill="none" />
+        {endDotCx != null && endDotCy != null && (
+          <Circle
+            cx={endDotCx}
+            cy={endDotCy}
+            r={2.5}
+            fill={endDotColor}
+          />
+        )}
       </Svg>
     </View>
   )
