@@ -31,7 +31,7 @@
  * bedtime + wake times).
  */
 
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { View, Text, StyleSheet } from 'react-native'
 import Svg, { Circle, Path, Line, G } from 'react-native-svg'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
@@ -48,11 +48,32 @@ export interface SleepClockNight {
   isMostRecent: boolean
 }
 
+/** Resolved readout for the currently selected ring (or default fallback). */
+export interface SleepClockReadout {
+  /** Day name — e.g. 'Sat', or 'Typical' for the average band. */
+  title:    string
+  /** Time range — e.g. '1:30 AM – 7:30 AM'. */
+  time:     string
+  /** Duration sub-label — e.g. '7h 30m'. Empty string when n/a. */
+  sub:      string
+  /** True when the active selection IS the average band, not a ring. */
+  isAverage: boolean
+}
+
 interface Props {
   /** Most recent first (index 0 = tonight). Up to 7 nights. */
-  nights:           SleepClockNight[]
+  nights:        SleepClockNight[]
   /** Outer diameter in pixels. */
-  size?:            number
+  size?:         number
+  /** Date format for the center label: 'mdy' = MM/DD, 'dmy' = DD/MM. */
+  dateFormat?:   'mdy' | 'dmy'
+  /**
+   * Called every time the active selection changes. Parent uses this to
+   * mirror the selection into its own below-clock readout so the bottom
+   * row always shows the day's stats. Called with null only briefly
+   * during the first paint (before useEffect fires).
+   */
+  onActiveChange?: (readout: SleepClockReadout | null) => void
 }
 
 // -- Special sentinel for the "average" band, which is selectable too.
@@ -135,11 +156,21 @@ function circularMeanHours(hours: number[]): number | null {
   return ((meanH % 24) + 24) % 24
 }
 
+/** Default selected ring is the most-recent night (idx 0). Drag-outside
+ *  resets the selection back to 0 (not null) so the readout + center
+ *  label always show something. AVG_IDX is only entered by tapping the
+ *  outer indigo band; it doesn't survive across mount/data changes. */
+const DEFAULT_IDX = 0
+
 export default function SleepClock({
   nights,
   size = 320,
+  dateFormat = 'mdy',
+  onActiveChange,
 }: Props) {
-  const [activeIdx, setActiveIdx] = useState<number | null>(null)
+  // Active selection: always a valid value, never null. Defaults to most
+  // recent night (idx 0). Touching outside the rings snaps back to 0.
+  const [activeIdx, setActiveIdx] = useState<number>(DEFAULT_IDX)
 
   const cx = size / 2
   const cy = size / 2
@@ -170,6 +201,12 @@ export default function SleepClock({
       const wakeAngle  = hourToAngle(wakeHour)
       const path       = arcPath(cx, cy, r, bedAngle, wakeAngle, ringThickness)
       const durationMs = new Date(n.endAt).getTime() - new Date(n.startAt).getTime()
+      // Date label for the center of the clock — derived from the BEDTIME
+      // (start_at). Format follows user preference. Day name on the first
+      // line, date below it.
+      const startDate  = new Date(n.startAt)
+      const dayName    = startDate.toLocaleDateString([], { weekday: 'short' })
+      const dateLabel  = fmtShortDate(startDate, dateFormat)
       return {
         idx:         i,
         label:       n.label,
@@ -179,9 +216,11 @@ export default function SleepClock({
         bedHour,
         wakeHour,
         durationMs,
+        dayName,
+        dateLabel,
       }
     })
-  }, [nights, outerR, cx, cy])
+  }, [nights, outerR, cx, cy, dateFormat])
 
   // Average sleep window — circular mean across all logged nights.
   const avg = useMemo(() => {
@@ -252,6 +291,16 @@ export default function SleepClock({
   //    isn't wasted.
   //  - .runOnJS(true) avoids worklet hell — math is trivial (sqrt + 7-row
   //    linear scan), no UI-thread sync needed.
+  // null from indexFromDistance means "touched outside the ring area"
+  // (center hole or beyond the labels) — per spec, that resets selection
+  // back to the most-recent day. Average band is selectable only if it
+  // exists (avg != null).
+  function resolveSelection(dist: number): number {
+    const raw = indexFromDistance(dist)
+    if (raw == null) return DEFAULT_IDX  // outside the rings → snap to most-recent
+    return raw                            // ring idx or AVG_IDX
+  }
+
   const gesture = Gesture.Pan()
     .activeOffsetX([-3, 3])
     .failOffsetY([-8, 8])
@@ -260,35 +309,65 @@ export default function SleepClock({
       const dx   = e.x - cx
       const dy   = e.y - cy
       const dist = Math.sqrt(dx * dx + dy * dy)
-      setActiveIdx(indexFromDistance(dist))
+      setActiveIdx(resolveSelection(dist))
     })
     .onUpdate(e => {
       const dx   = e.x - cx
       const dy   = e.y - cy
       const dist = Math.sqrt(dx * dx + dy * dy)
-      setActiveIdx(indexFromDistance(dist))
+      setActiveIdx(resolveSelection(dist))
     })
 
-  // Readout below the clock — populated only when the user is interacting.
-  // When nothing is active we render nothing rather than narrating "drag a
-  // finger" — the interaction is obvious from the rings.
-  const readoutCard = (() => {
+  // Readout always resolves to a value — never null. If the user hasn't
+  // interacted yet (or dragged off the rings), activeIdx is DEFAULT_IDX
+  // (= 0 = most-recent night) and the readout shows that night's data.
+  // The center label inside the clock and the parent-mirrored readout
+  // below the clock both consume this.
+  const readoutCard: SleepClockReadout | null = (() => {
     if (activeIdx === AVG_IDX && avg) {
+      // Range across the whole 7-night window. Endpoints in user's
+      // preferred date format.
+      const oldest = nights[nights.length - 1]
+      const newest = nights[0]
+      const rangeLabel = oldest && newest
+        ? `${fmtShortDate(new Date(oldest.startAt), dateFormat)} – ${fmtShortDate(new Date(newest.startAt), dateFormat)}`
+        : ''
       return {
-        title: 'Typical',
-        time:  `${fmtClock(avg.bedHour)} – ${fmtClock(avg.wakeHour)}`,
-        sub:   '',
+        title:     'Typical',
+        time:      `${fmtClock(avg.bedHour)} – ${fmtClock(avg.wakeHour)}`,
+        sub:       rangeLabel,
+        isAverage: true,
       }
     }
-    if (activeIdx != null && activeIdx >= 0 && rings[activeIdx]) {
-      const r = rings[activeIdx]
-      return {
-        title: r.label,
-        time:  `${fmtClock(r.bedHour)} – ${fmtClock(r.wakeHour)}`,
-        sub:   fmtDurMs(r.durationMs),
-      }
+    const idx = activeIdx >= 0 && rings[activeIdx] ? activeIdx : DEFAULT_IDX
+    const r   = rings[idx]
+    if (!r) return null  // no data at all
+    return {
+      title:     r.label,
+      time:      `${fmtClock(r.bedHour)} – ${fmtClock(r.wakeHour)}`,
+      sub:       fmtDurMs(r.durationMs),
+      isAverage: false,
     }
-    return null
+  })()
+
+  // Mirror selection up to the parent so the page can render its own
+  // below-the-card readout from the same source of truth.
+  useEffect(() => {
+    if (onActiveChange) onActiveChange(readoutCard)
+  }, [readoutCard?.title, readoutCard?.time, readoutCard?.sub, readoutCard?.isAverage])
+
+  // Center label content — what shows inside the clock hole. Same source
+  // as the bottom readout. For ring selections we show day + date; for
+  // the Typical band we show "Typical" + the date range.
+  const centerCard = (() => {
+    if (!readoutCard) return null
+    if (readoutCard.isAverage) {
+      return { line1: 'Typical', line2: readoutCard.sub }
+    }
+    const idx = activeIdx >= 0 && rings[activeIdx] ? activeIdx : DEFAULT_IDX
+    const r   = rings[idx]
+    if (!r) return null
+    return { line1: r.dayName, line2: r.dateLabel }
   })()
 
   return (
@@ -363,6 +442,26 @@ export default function SleepClock({
             )}
           </Svg>
 
+          {/* Center label — day name + date (or 'Typical' + range) for the
+              currently selected ring. Sits in the empty hole inside the
+              innermost ring. Renders nothing if there's no data at all. */}
+          {centerCard && (
+            <View
+              pointerEvents="none"
+              style={[s.centerLabel, {
+                left:   cx - 80,
+                top:    cy - 26,
+                width:  160,
+                height: 52,
+              }]}
+            >
+              <Text style={s.centerLine1}>{centerCard.line1}</Text>
+              {centerCard.line2 ? (
+                <Text style={s.centerLine2}>{centerCard.line2}</Text>
+              ) : null}
+            </View>
+          )}
+
           {/* Hour numerals — all 12, absolutely positioned. */}
           {hourNumerals.map(m => {
             const isCardinal = m.h === 12 || m.h === 3 || m.h === 6 || m.h === 9
@@ -386,19 +485,10 @@ export default function SleepClock({
 
         </View>
       </GestureDetector>
-
-      {/* Active-ring readout sits BELOW the clock (the inner ring's center
-          hole is too small for multi-line text once 5+ nights are loaded).
-          Rendered ONLY when something is selected — otherwise empty space. */}
-      {readoutCard && (
-        <View style={s.readout}>
-          <Text style={s.readoutTitle}>{readoutCard.title}</Text>
-          <Text style={s.readoutTime}>{readoutCard.time}</Text>
-          {readoutCard.sub ? (
-            <Text style={s.readoutSub}>{readoutCard.sub}</Text>
-          ) : null}
-        </View>
-      )}
+      {/* The below-clock readout is now rendered by the PARENT (sleep.tsx)
+          via the onActiveChange callback. The center-of-clock label above
+          remains owned by this component since it's geometrically tied
+          to the clock's inner hole. */}
     </View>
   )
 }
@@ -421,6 +511,13 @@ function fmtDurMs(ms: number): string {
   return `${h}h ${m}m`
 }
 
+/** Short date formatter — MM/DD (imperial) or DD/MM (metric). */
+function fmtShortDate(d: Date, format: 'mdy' | 'dmy'): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return format === 'dmy' ? `${day}/${m}` : `${m}/${day}`
+}
+
 const s = StyleSheet.create({
   wrap: {
     alignItems:     'center',
@@ -439,29 +536,23 @@ const s = StyleSheet.create({
     fontFamily: fonts.mono[700],
     fontSize:   13,
   },
-  readout: {
-    marginTop:  10,
-    alignItems: 'center',
-    gap:        2,
-    paddingHorizontal: 16,
+  // Center label — day name + date inside the clock's inner hole.
+  centerLabel: {
+    position:       'absolute',
+    alignItems:     'center',
+    justifyContent: 'center',
+    gap:            2,
   },
-  readoutTitle: {
+  centerLine1: {
     color:      colors.foreground,
+    fontSize:   16,
+    fontWeight: '700',
+    textAlign:  'center',
+  },
+  centerLine2: {
+    color:      colors.mutedForeground,
     fontSize:   13,
-    fontWeight: '600',
+    fontFamily: fonts.mono[600],
     textAlign:  'center',
-  },
-  readoutTime: {
-    color:      palette.myrx.lime,
-    fontSize:   15,
-    fontFamily: fonts.mono[700],
-    textAlign:  'center',
-  },
-  readoutSub: {
-    color:    colors.mutedForeground,
-    fontSize: 11,
-    opacity:  0.85,
-    textAlign: 'center',
-    fontFamily: fonts.mono[500],
   },
 })

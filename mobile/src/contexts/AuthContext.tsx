@@ -117,6 +117,10 @@ interface Profile {
   // Defaults to 'oz' for new profiles; CHECK constraint allows 'oz' | 'mL'.
   // Added May 28 2026 alongside the Hydration page (Roadmap A).
   fluid_unit?: 'oz' | 'mL' | null
+  // Short-date format — 'mdy' = MM/DD (imperial / US), 'dmy' = DD/MM
+  // (metric / international). Used by date-displaying surfaces like the
+  // Sleep Clock center label. Defaults to 'mdy' to match imperial default.
+  date_format?: 'mdy' | 'dmy' | null
   current_weight: number | null
   current_height: number | null
   // Nutrition plan

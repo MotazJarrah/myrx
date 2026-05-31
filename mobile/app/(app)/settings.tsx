@@ -1285,6 +1285,13 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
   // pools are 50m worldwide). Defaults to 'm' to match international
   // convention. May 17 2026 — see Swimming detail card spec in CLAUDE.md.
   const [swimUnit,     setSwimUnit]     = useState<string>(((profile as any)?.swim_unit as string | undefined) ?? 'm')
+  // Short-date format — 'mdy' = MM/DD (imperial), 'dmy' = DD/MM (metric).
+  // Used by date-displaying surfaces like the Sleep Clock center label.
+  // Persists via the same 'misc fields' update batch as swim_unit (not in
+  // the upsert_profile RPC parameter list).
+  const [dateFormat,   setDateFormat]   = useState<'mdy' | 'dmy'>(
+    (profile?.date_format as 'mdy' | 'dmy' | null | undefined) ?? 'mdy',
+  )
 
   const initHeight = heightToDisplay(profile?.current_height, profile?.height_unit ?? 'imperial')
   const [currentWeight, setCurrentWeight] = useState<string>(
@@ -1486,6 +1493,7 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
         .update({
           meal_slots_default:  mealSlots,
           swim_unit:           swimUnit,
+          date_format:         dateFormat,
           // body_fat_band added May 24 2026 — third Body stats field
           // alongside weight + height. Same column used by the wizard's
           // first step. Realtime subscription on profiles will push the
@@ -1570,6 +1578,18 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
           <View style={s.unitGrid}>
             <UnitCard selected={swimUnit === 'yd'} onPress={() => setSwimUnit('yd')} label="yd" sub="Yards" />
             <UnitCard selected={swimUnit === 'm'}  onPress={() => setSwimUnit('m')}  label="m"  sub="Meters" />
+          </View>
+        </View>
+
+        {/* Short-date format — affects how dates render across surfaces
+            like the Sleep Clock center label. Imperial = MM/DD (US),
+            Metric = DD/MM (international). Left/right order matches the
+            imperial-left / metric-right convention of the rows above. */}
+        <View style={s.field}>
+          <Text style={s.label}>Date format</Text>
+          <View style={s.unitGrid}>
+            <UnitCard selected={dateFormat === 'mdy'} onPress={() => setDateFormat('mdy')} label="MM/DD" sub="Imperial" />
+            <UnitCard selected={dateFormat === 'dmy'} onPress={() => setDateFormat('dmy')} label="DD/MM" sub="Metric" />
           </View>
         </View>
       </AnimateRise>

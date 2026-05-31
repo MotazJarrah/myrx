@@ -47,7 +47,7 @@ import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import AnimateRise from '../../src/components/AnimateRise'
 import TickerNumber from '../../src/components/TickerNumber'
-import SleepClock, { type SleepClockNight } from '../../src/components/SleepClock'
+import SleepClock, { type SleepClockNight, type SleepClockReadout } from '../../src/components/SleepClock'
 import Hypnogram, {
   type HypnogramSegment, type SleepStage,
 } from '../../src/components/Hypnogram'
@@ -355,6 +355,10 @@ export default function SleepPage() {
   const [sessions7,  setSessions7]  = useState<SleepSessionRow[]>([])
   const [sessions30, setSessions30] = useState<SleepSessionRow[]>([])
   const [latestStages, setLatestStages] = useState<SleepStageRow[]>([])
+  // SleepClock pushes its currently-selected ring (day + time + duration)
+  // up here via onActiveChange. We re-render this in a row directly under
+  // the clock so the user always sees the selected day's details.
+  const [clockReadout, setClockReadout] = useState<SleepClockReadout | null>(null)
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -752,7 +756,23 @@ export default function SleepPage() {
           <SleepClock
             nights={clockNights}
             size={320}
+            dateFormat={(profile?.date_format as 'mdy' | 'dmy' | undefined) ?? 'mdy'}
+            onActiveChange={setClockReadout}
           />
+          {/* Always-visible readout below the clock — shows the selected
+              day's details. Defaults to the most-recent day per the
+              SleepClock's default selection. Empty space rendered when
+              there's no data at all (shouldn't happen here since the
+              parent already gates on hasAnyData). */}
+          {clockReadout && (
+            <View style={s.clockReadout}>
+              <Text style={s.clockReadoutTitle}>{clockReadout.title}</Text>
+              <Text style={s.clockReadoutTime}>{clockReadout.time}</Text>
+              {clockReadout.sub ? (
+                <Text style={s.clockReadoutSub}>{clockReadout.sub}</Text>
+              ) : null}
+            </View>
+          )}
         </AnimateRise>
       )}
 
@@ -1013,6 +1033,38 @@ const s = StyleSheet.create({
     gap:             12,
   },
   cardLabel: { color: colors.foreground, fontSize: 14, fontWeight: '600' },
+
+  // Selected-day readout below the SleepClock — mirrors the in-clock
+  // center label with full time-range + duration. Always rendered when
+  // a day is selected (SleepClock defaults to most-recent).
+  clockReadout: {
+    marginTop:         12,
+    paddingTop:        12,
+    borderTopWidth:    1,
+    borderTopColor:    alpha(colors.border, 0.4),
+    alignItems:        'center',
+    gap:               3,
+    paddingHorizontal: 16,
+  },
+  clockReadoutTitle: {
+    color:      colors.foreground,
+    fontSize:   14,
+    fontWeight: '700',
+    textAlign:  'center',
+  },
+  clockReadoutTime: {
+    color:      palette.myrx.lime,
+    fontSize:   16,
+    fontFamily: fonts.mono[700],
+    textAlign:  'center',
+  },
+  clockReadoutSub: {
+    color:     colors.mutedForeground,
+    fontSize:  12,
+    fontFamily: fonts.mono[500],
+    opacity:    0.85,
+    textAlign: 'center',
+  },
   cardSub:   { color: colors.mutedForeground, fontSize: 12, marginTop: -6 },
 
   emptyTitle: { color: colors.foreground, fontSize: 16, fontWeight: '600' },
