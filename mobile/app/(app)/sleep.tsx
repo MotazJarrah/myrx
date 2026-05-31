@@ -649,11 +649,6 @@ export default function SleepPage() {
       {!loading && hasAnyData && (
         <AnimateRise delay={150} style={s.card}>
           <Text style={s.cardLabel}>Last 7 nights</Text>
-          <Text style={s.cardSub}>
-            Each ring is one night. Aligned arcs = consistent schedule. Drag a finger across the
-            rings to see bedtime + wake for each night. The outer purple band is your typical
-            sleep window across the week.
-          </Text>
           <SleepClock
             nights={clockNights}
             size={320}

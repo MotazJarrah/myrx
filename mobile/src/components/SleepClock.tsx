@@ -269,15 +269,15 @@ export default function SleepClock({
       setActiveIdx(indexFromDistance(dist))
     })
 
-  // Resolve readout content based on what's active. Rendered in a row
-  // beneath the clock (the inner ring's center hole is too small for
-  // multi-line text once 5+ nights are loaded).
+  // Readout below the clock — populated only when the user is interacting.
+  // When nothing is active we render nothing rather than narrating "drag a
+  // finger" — the interaction is obvious from the rings.
   const readoutCard = (() => {
     if (activeIdx === AVG_IDX && avg) {
       return {
-        title: 'Typical sleep',
+        title: 'Typical',
         time:  `${fmtClock(avg.bedHour)} – ${fmtClock(avg.wakeHour)}`,
-        sub:   'circular mean of 7 nights',
+        sub:   '',
       }
     }
     if (activeIdx != null && activeIdx >= 0 && rings[activeIdx]) {
@@ -288,11 +288,7 @@ export default function SleepClock({
         sub:   fmtDurMs(r.durationMs),
       }
     }
-    return {
-      title: 'Last 7 nights',
-      time:  '',
-      sub:   'drag a finger across',
-    }
+    return null
   })()
 
   return (
@@ -391,18 +387,18 @@ export default function SleepClock({
         </View>
       </GestureDetector>
 
-      {/* Active-ring readout sits BELOW the clock instead of inside it,
-          because with 7 rings the inner hole shrinks to ~80px diameter
-          which can't fit "Sat / 1:49 AM – 9:20 AM / 7h 30m" without
-          overlapping the innermost ring. The dedicated row below has
-          unlimited horizontal room and won't clip on small phones. */}
-      <View style={s.readout}>
-        <Text style={s.readoutTitle}>{readoutCard.title}</Text>
-        {readoutCard.time ? (
+      {/* Active-ring readout sits BELOW the clock (the inner ring's center
+          hole is too small for multi-line text once 5+ nights are loaded).
+          Rendered ONLY when something is selected — otherwise empty space. */}
+      {readoutCard && (
+        <View style={s.readout}>
+          <Text style={s.readoutTitle}>{readoutCard.title}</Text>
           <Text style={s.readoutTime}>{readoutCard.time}</Text>
-        ) : null}
-        <Text style={s.readoutSub}>{readoutCard.sub}</Text>
-      </View>
+          {readoutCard.sub ? (
+            <Text style={s.readoutSub}>{readoutCard.sub}</Text>
+          ) : null}
+        </View>
+      )}
     </View>
   )
 }
