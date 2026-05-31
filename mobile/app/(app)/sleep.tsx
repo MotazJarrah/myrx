@@ -1019,7 +1019,7 @@ export default function SleepPage() {
           >
             <View style={s.verdictHead}>
               <Moon size={16} color={verdict.color} />
-              <Text style={[s.verdictBadge, { color: verdict.color }]}>THIS WEEK</Text>
+              <Text style={[s.verdictBadge, { color: verdict.color }]}>HOW TO IMPROVE YOUR SLEEP</Text>
               <View style={{ flex: 1 }} />
               {/* "How we compute" info pill — same Pattern 5 inline-panel
                   treatment used on every detail page (CLAUDE.md). Tap to
@@ -1040,22 +1040,9 @@ export default function SleepPage() {
                 exiting={FadeOutUp.duration(180)}
                 style={[s.howPanel, { borderLeftColor: verdict.color }]}
               >
-                <Text style={s.howTitle}>How we compute this</Text>
+                <Text style={s.howTitle}>Improve sleep</Text>
                 <Text style={s.howBody}>
-                  <Text style={s.howBold}>Target: </Text>
-                  {fmtHoursOnly(targetHours)} based on your age (AASM, NSF, Li 2022).
-                  {'\n'}
-                  <Text style={s.howBold}>Your averages: </Text>
-                  bedtime {fmtClock12(avgBedHour)}, wake {fmtClock12(avgWakeHour)}, total {fmtHoursMinutes(sessions7.reduce((a, s) => a + s.duration_s, 0) / Math.max(1, sessions7.length))} — from the last 7 nights.
-                  {'\n'}
-                  <Text style={s.howBold}>This week's nudge: </Text>
-                  ±15 min toward your target. Small weekly shifts stick; large jumps don't.
-                  {'\n'}
-                  <Text style={s.howBold}>Cue timings: </Text>
-                  caffeine, alcohol, meals and screen cutoffs are calculated from your bedtime ({fmtClock12(avgBedHour)}), not generic clock times — so the advice fits your actual schedule.
-                  {'\n'}
-                  <Text style={s.howBold}>Wake-time first: </Text>
-                  A steady wake time matters more than a steady bedtime. Every coaching cue leads with holding your wake time.
+                  A steady wake time matters more than a steady bedtime. Shift sleep in small 15-minute weekly steps — big jumps don't stick. Time your caffeine, alcohol and screens to your actual bedtime, not generic clock times. A cool dark bedroom and morning sunlight cover the rest.
                 </Text>
               </Animated.View>
             )}
