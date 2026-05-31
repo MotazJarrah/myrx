@@ -35,11 +35,12 @@
 import { useCallback, useMemo, useState } from 'react'
 import {
   View, Text, ScrollView, StyleSheet,
-  RefreshControl,
+  RefreshControl, Pressable,
 } from 'react-native'
+import Animated, { FadeInUp, FadeOutUp, LinearTransition } from 'react-native-reanimated'
 import { useFocusEffect } from 'expo-router'
 import {
-  Moon, Clock, Activity, BedDouble, Brain,
+  Moon, Clock, Activity, BedDouble, Brain, Info,
 } from 'lucide-react-native'
 import Svg, { Path, Line as SvgLine } from 'react-native-svg'
 
@@ -489,6 +490,9 @@ export default function SleepPage() {
   // up here via onActiveChange. We re-render this in a row directly under
   // the clock so the user always sees the selected day's details.
   const [clockReadout, setClockReadout] = useState<SleepClockReadout | null>(null)
+  // "How we compute" inline info panel toggle — Pattern 5 from CLAUDE.md
+  // (FadeInUp / FadeOutUp + LinearTransition for sibling layout reflow).
+  const [howOpen, setHowOpen] = useState(false)
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -1009,13 +1013,53 @@ export default function SleepPage() {
 
       {!loading && hasAnyData && (
         <AnimateRise delay={0}>
-          <View style={[s.verdictCard, { borderLeftColor: verdict.color }]}>
+          <Animated.View
+            layout={LinearTransition.duration(200)}
+            style={[s.verdictCard, { borderLeftColor: verdict.color }]}
+          >
             <View style={s.verdictHead}>
               <Moon size={16} color={verdict.color} />
               <Text style={[s.verdictBadge, { color: verdict.color }]}>THIS WEEK</Text>
+              <View style={{ flex: 1 }} />
+              {/* "How we compute" info pill — same Pattern 5 inline-panel
+                  treatment used on every detail page (CLAUDE.md). Tap to
+                  expand a short explanation of how the numbers were
+                  derived; tap again to collapse. */}
+              <Pressable
+                onPress={() => setHowOpen(o => !o)}
+                hitSlop={8}
+                style={s.howButton}
+              >
+                <Info size={14} color={verdict.color} />
+              </Pressable>
             </View>
             <Text style={s.verdictText}>{verdictText}</Text>
-          </View>
+            {howOpen && (
+              <Animated.View
+                entering={FadeInUp.duration(200)}
+                exiting={FadeOutUp.duration(180)}
+                style={[s.howPanel, { borderLeftColor: verdict.color }]}
+              >
+                <Text style={s.howTitle}>How we compute this</Text>
+                <Text style={s.howBody}>
+                  <Text style={s.howBold}>Target: </Text>
+                  {fmtHoursOnly(targetHours)} (age-banded — AASM 2016, NSF 2015, Li 2022 Nature Aging).
+                  {'\n'}
+                  <Text style={s.howBold}>Your averages: </Text>
+                  bedtime {fmtClock12(avgBedHour)}, wake {fmtClock12(avgWakeHour)}, duration {fmtHoursMinutes(sessions7.reduce((a, s) => a + s.duration_s, 0) / Math.max(1, sessions7.length))} — all from the last 7 nights.
+                  {'\n'}
+                  <Text style={s.howBold}>This week's nudge: </Text>
+                  ±15 min toward target per CBT-I sleep-restriction protocol (Spielman 1987) — bigger jumps don't stick because the circadian rhythm only adapts in small weekly increments.
+                  {'\n'}
+                  <Text style={s.howBold}>Hygiene timings: </Text>
+                  caffeine, alcohol, meals, screens all calculated relative to your bedtime ({fmtClock12(avgBedHour)}), not generic clock times. So "no caffeine after X" is X = bedtime − 6h, where 6h is caffeine's half-life (Drake 2013).
+                  {'\n'}
+                  <Text style={s.howBold}>Wake-time anchor: </Text>
+                  Czeisler showed wake time is your strongest circadian zeitgeber — stronger than bedtime. Every coaching cue leads with holding your wake time.
+                </Text>
+              </Animated.View>
+            )}
+          </Animated.View>
         </AnimateRise>
       )}
 
@@ -1349,6 +1393,38 @@ const s = StyleSheet.create({
     padding:         14,
     gap:             8,
   },
+  howButton: {
+    width: 24, height: 24,
+    alignItems:     'center',
+    justifyContent: 'center',
+    borderRadius:   12,
+  },
+  howPanel: {
+    marginTop:      12,
+    paddingLeft:    12,
+    paddingVertical: 10,
+    paddingRight:   4,
+    borderLeftWidth: 2,
+    gap:            6,
+  },
+  howTitle: {
+    color:        colors.foreground,
+    fontSize:     12,
+    fontWeight:   '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  howBody: {
+    color:      colors.mutedForeground,
+    fontSize:   12,
+    lineHeight: 18,
+  },
+  howBold: {
+    color:      colors.foreground,
+    fontWeight: '600',
+  },
+
   verdictHead: {
     flexDirection: 'row',
     alignItems:    'center',
