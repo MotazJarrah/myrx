@@ -411,14 +411,17 @@ export default function SleepClock({
               ))}
             </G>
 
-            {/* Sleep arcs */}
+            {/* Sleep arcs. Only the ACTIVE ring renders bright; every other
+                ring fades by recency (newer = slightly brighter than older).
+                The isMostRecent boost was removed once we made activeIdx
+                default to most-recent — the active highlight now does that
+                job, and keeping the boost made the most-recent ring stay
+                bright even after the user tapped a different day. */}
             <G>
               {rings.map(r => {
                 const isActive = activeIdx === r.idx
-                const base = r.isMostRecent
-                  ? palette.myrx.lime
-                  : withAlpha(palette.myrx.lime, 0.55 - r.idx * 0.05)
-                const fill = isActive ? palette.myrx.lime : base
+                const fadedFill = withAlpha(palette.myrx.lime, 0.55 - r.idx * 0.05)
+                const fill = isActive ? palette.myrx.lime : fadedFill
                 return (
                   <Path
                     key={`arc-${r.idx}`}
