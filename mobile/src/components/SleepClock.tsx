@@ -333,7 +333,7 @@ export default function SleepClock({
         ? `${fmtShortDate(new Date(oldest.startAt), dateFormat)} – ${fmtShortDate(new Date(newest.startAt), dateFormat)}`
         : ''
       return {
-        title:     'Typical',
+        title:     'Average sleep time',
         time:      `${fmtClock(avg.bedHour)} – ${fmtClock(avg.wakeHour)}`,
         sub:       rangeLabel,
         isAverage: true,
@@ -358,12 +358,12 @@ export default function SleepClock({
 
   // Center label content — what shows inside the clock hole. Same source
   // as the bottom readout. For ring selections we show day + date; for
-  // the Typical band we show "Typical" + the date range.
+  // the average band the center stays empty — the below-clock readout
+  // already names it and shows the date range, so duplicating in the
+  // center adds noise.
   const centerCard = (() => {
     if (!readoutCard) return null
-    if (readoutCard.isAverage) {
-      return { line1: 'Typical', line2: readoutCard.sub }
-    }
+    if (readoutCard.isAverage) return null  // skip — readout-below carries it
     const idx = activeIdx >= 0 && rings[activeIdx] ? activeIdx : DEFAULT_IDX
     const r   = rings[idx]
     if (!r) return null
