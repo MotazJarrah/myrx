@@ -456,11 +456,11 @@ function makeCue(id: CueId, avgBedHour: number, avgWakeHour: number): string {
     case 'screens_off':
       return `Screens off by ${shift(bed, -0.5)} — blue light delays sleep onset more than ambient room light.`
     case 'sunlight':
-      return `Get 10+ min of sunlight by ${shift(wake, 0.5)} — light within 30 min of wake is your strongest circadian anchor.`
+      return `Get 10+ min of sunlight by ${shift(wake, 0.5)} — morning light sets your body's daily clock.`
     case 'temp':
       return `Cool the bedroom to ≤67°F before bed — your body's core-temp drop triggers deep-stage entry.`
     case 'wake_anchor':
-      return `Hold your alarm at ${fmtClock12(wake)} — wake time is your dominant circadian anchor (stronger than bedtime).`
+      return `Hold your alarm at ${fmtClock12(wake)} — a steady wake time matters more than a steady bedtime.`
     case 'rem_tail':
       return `Protect your last 90 minutes of sleep — most of your nightly REM happens in that window.`
   }
@@ -623,7 +623,7 @@ export default function SleepPage() {
     // so chronically-short users don't read the same line every week.
     let action: string
     if (status === 'ok') {
-      action = `Hold this rhythm — the age-banded ${fmtHoursOnly(targetHours)} target is met.`
+      action = `Hold this rhythm — your ${fmtHoursOnly(targetHours)} target is met.`
     } else {
       action = cueWeek === 0
         ? makeCue('sunlight', avgBedHour, avgWakeHour)
@@ -778,7 +778,7 @@ export default function SleepPage() {
     // but the wake-anchor framing comes first.
     let action: string
     if (status === 'ok') {
-      action = `On target — your circadian rhythm is locked in.`
+      action = `On target — your sleep timing is steady.`
     } else if (bedStatus !== 'ok' && consistencyStatus === 'fail') {
       // Both off — wake-anchor is the highest-leverage fix.
       action = makeCue('wake_anchor', avgBedHour, avgWakeHour)
@@ -875,7 +875,7 @@ export default function SleepPage() {
     if (microTarget && microTarget.direction !== 'hold') {
       const nextLabel = fmtHoursMinutes(microTarget.microTargetSec)
       const sign      = microTarget.deltaMin > 0 ? '+' : ''
-      microLine = ` This week, aim for ${nextLabel} (${sign}${microTarget.deltaMin} min) — your circadian rhythm adapts in 15-min weekly steps.`
+      microLine = ` This week, aim for ${nextLabel} (${sign}${microTarget.deltaMin} min) — small 15-min weekly shifts stick; big jumps don't.`
     }
 
     // --- 3. LEVER --------------------------------------------------------
@@ -898,11 +898,11 @@ export default function SleepPage() {
           // Pull bedtime to: wake - microTarget (this week's smaller nudge)
           const microSec = microTarget?.microTargetSec ?? targetSecs
           const newBedHour = ((avgWakeHour - microSec / 3600) % 24 + 24) % 24
-          leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your alarm anchor (wake time is your strongest circadian zeitgeber) and pull bedtime to ${fmtClock12(newBedHour)}.`
+          leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your alarm and pull bedtime to ${fmtClock12(newBedHour)}.`
         }
       } else {
         // Over-target — cap by holding wake, drifting bedtime later.
-        leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your alarm and let bedtime drift later — oversleeping past the age-banded ${fmtHoursOnly(targetHours)} target signals recovery debt or misaligned rhythm.`
+        leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your alarm and let bedtime drift later — too much sleep past ${fmtHoursOnly(targetHours)} usually means recovery debt.`
       }
     } else if (lead.name === 'schedule') {
       leverLine = ` ${makeCue('wake_anchor', avgBedHour, avgWakeHour)}`
@@ -920,7 +920,7 @@ export default function SleepPage() {
       if (lead.name === 'schedule') {
         cascadeLine = ' Once your wake anchor holds, total and stage time usually follow.'
       } else if (scheduleDim.status === 'fail' || scheduleDim.status === 'warn') {
-        cascadeLine = ` Locking your wake time also fixes the other ${dimsOffOther === 1 ? 'dim that is' : 'dims that are'} off.`
+        cascadeLine = ` Locking your wake time also fixes the other ${dimsOffOther === 1 ? 'stat that is' : 'stats that are'} off.`
       } else if (totalDim.status === 'fail' || totalDim.status === 'warn') {
         cascadeLine = ' Adding total sleep typically lifts deep + REM proportionally.'
       }
@@ -1043,19 +1043,19 @@ export default function SleepPage() {
                 <Text style={s.howTitle}>How we compute this</Text>
                 <Text style={s.howBody}>
                   <Text style={s.howBold}>Target: </Text>
-                  {fmtHoursOnly(targetHours)} (age-banded — AASM 2016, NSF 2015, Li 2022 Nature Aging).
+                  {fmtHoursOnly(targetHours)} based on your age (AASM, NSF, Li 2022).
                   {'\n'}
                   <Text style={s.howBold}>Your averages: </Text>
-                  bedtime {fmtClock12(avgBedHour)}, wake {fmtClock12(avgWakeHour)}, duration {fmtHoursMinutes(sessions7.reduce((a, s) => a + s.duration_s, 0) / Math.max(1, sessions7.length))} — all from the last 7 nights.
+                  bedtime {fmtClock12(avgBedHour)}, wake {fmtClock12(avgWakeHour)}, total {fmtHoursMinutes(sessions7.reduce((a, s) => a + s.duration_s, 0) / Math.max(1, sessions7.length))} — from the last 7 nights.
                   {'\n'}
                   <Text style={s.howBold}>This week's nudge: </Text>
-                  ±15 min toward target per CBT-I sleep-restriction protocol (Spielman 1987) — bigger jumps don't stick because the circadian rhythm only adapts in small weekly increments.
+                  ±15 min toward your target. Small weekly shifts stick; large jumps don't.
                   {'\n'}
-                  <Text style={s.howBold}>Hygiene timings: </Text>
-                  caffeine, alcohol, meals, screens all calculated relative to your bedtime ({fmtClock12(avgBedHour)}), not generic clock times. So "no caffeine after X" is X = bedtime − 6h, where 6h is caffeine's half-life (Drake 2013).
+                  <Text style={s.howBold}>Cue timings: </Text>
+                  caffeine, alcohol, meals and screen cutoffs are calculated from your bedtime ({fmtClock12(avgBedHour)}), not generic clock times — so the advice fits your actual schedule.
                   {'\n'}
-                  <Text style={s.howBold}>Wake-time anchor: </Text>
-                  Czeisler showed wake time is your strongest circadian zeitgeber — stronger than bedtime. Every coaching cue leads with holding your wake time.
+                  <Text style={s.howBold}>Wake-time first: </Text>
+                  A steady wake time matters more than a steady bedtime. Every coaching cue leads with holding your wake time.
                 </Text>
               </Animated.View>
             )}
@@ -1093,7 +1093,7 @@ export default function SleepPage() {
       {/* ── Unified dimension breakdown (single card, 4 stacked rows) ───── */}
       {!loading && hasAnyData && (
         <AnimateRise delay={300} style={s.card}>
-          <Text style={s.cardLabel}>Dimension breakdown</Text>
+          <Text style={s.cardLabel}>Sleep stats</Text>
           <DimensionRow
             icon={<Clock size={14} color={statusColor(totalDim.status)} />}
             label="Total sleep"
@@ -1119,7 +1119,7 @@ export default function SleepPage() {
               detail pages (Riegel · Daniels' · Seiler, Epley · Brzycki ·
               Lombardi, etc.). Sources behind every target value above. */}
           <Text style={s.attribution}>
-            AASM · NSF · Li 2022 · Belenky · Van Dongen · Wittmann · Windred · Spielman · Czeisler · Wright · Roehrs · Okamoto-Mizuno · Burgess · Drake · Park — age-banded targets, dose-response thresholds, CBT-I micro-targeting, bedtime-anchored hygiene cues
+            AASM · NSF · Li 2022 · Belenky · Van Dongen · Wittmann · Windred · Spielman · Czeisler · Wright · Roehrs · Okamoto-Mizuno · Burgess · Drake · Park — targets by age, science-backed cutoffs, weekly nudges, cues timed to your bedtime
           </Text>
         </AnimateRise>
       )}
