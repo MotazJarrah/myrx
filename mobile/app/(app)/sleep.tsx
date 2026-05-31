@@ -1068,13 +1068,13 @@ export default function SleepPage() {
                   bedtime {fmtClock12(avgBedHour)}, wake {fmtClock12(avgWakeHour)}, total {fmtHoursMinutes(sessions7.reduce((a, s) => a + s.duration_s, 0) / Math.max(1, sessions7.length))} — from the last 7 nights.
                   {'\n'}
                   <Text style={s.howBold}>This week's nudge: </Text>
-                  ±15 min toward your target. Small weekly shifts stick; large jumps don't.
+                  ±15 min toward your target.
                   {'\n'}
                   <Text style={s.howBold}>Cue timings: </Text>
-                  caffeine, alcohol, meals and screen cutoffs are calculated from your bedtime ({fmtClock12(avgBedHour)}), not generic clock times.
+                  caffeine, alcohol, meals and screen cutoffs are calculated from your bedtime ({fmtClock12(avgBedHour)}).
                   {'\n'}
                   <Text style={s.howBold}>Wake-time first: </Text>
-                  A steady wake time matters more than a steady bedtime.
+                  A consistent wake time matters more than a variable bedtime.
                 </Text>
               </Animated.View>
             )}
