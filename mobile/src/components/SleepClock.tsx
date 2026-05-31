@@ -332,10 +332,22 @@ export default function SleepClock({
       const rangeLabel = oldest && newest
         ? `${fmtShortDate(new Date(oldest.startAt), dateFormat)} – ${fmtShortDate(new Date(newest.startAt), dateFormat)}`
         : ''
+      // Average nightly duration across the 7-night window. Computed from
+      // actual session durations (not from the angular delta between avg
+      // bedtime and avg wake — those use circular means which round-trip
+      // through angle space and can drift a few minutes off the true mean).
+      const avgDurMs = nights.length > 0
+        ? nights.reduce((sum, n) =>
+            sum + (new Date(n.endAt).getTime() - new Date(n.startAt).getTime()),
+            0) / nights.length
+        : 0
+      const avgDurLabel = avgDurMs > 0 ? fmtDurMs(avgDurMs) : ''
+      // Combine duration + date range as "7h 12m · 05/22 – 05/31"
+      const subParts = [avgDurLabel, rangeLabel].filter(Boolean)
       return {
         title:     'Average sleep time',
         time:      `${fmtClock(avg.bedHour)} – ${fmtClock(avg.wakeHour)}`,
-        sub:       rangeLabel,
+        sub:       subParts.join(' · '),
         isAverage: true,
       }
     }
