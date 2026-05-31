@@ -1032,7 +1032,7 @@ export default function SleepPage() {
                 hitSlop={8}
                 style={[s.targetsPill, {
                   borderColor: withAlpha(verdict.color, 0.55),
-                  backgroundColor: withAlpha(verdict.color, 0.12),
+                  backgroundColor: withAlpha(verdict.color, 0.15),
                 }]}
               >
                 <Text style={[s.targetsPillText, { color: verdict.color }]}>
@@ -1415,10 +1415,13 @@ const s = StyleSheet.create({
     borderRadius:   12,
     borderWidth:    1,
   },
+  // Matches the strength adp-zone pill text style (fontSize 11, weight 700,
+  // uppercase, 0.5 letter-spacing) so the two pages share one visual.
   targetsPillText: {
-    fontSize:     12,
+    fontSize:     11,
     fontWeight:   '700',
-    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   howPanel: {
     marginTop:      10,
