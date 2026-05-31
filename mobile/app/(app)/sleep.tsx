@@ -563,21 +563,10 @@ export default function SleepPage() {
     }))
   }, [sessions7])
 
-  // Target window (for the faint outer arc on the clock)
-  const targetBedHour  = useMemo(() => {
-    if (sessions7.length === 0) return undefined
-    const avgWake = sessions7.reduce((a, s) => a + wakeOffsetSeconds(s.end_at), 0) / sessions7.length
-    const targetBed = avgWake - targetSecs
-    // Convert seconds-from-midnight (possibly negative) → 24h hour
-    const wrapped = ((targetBed % 86_400) + 86_400) % 86_400
-    return wrapped / 3600
-  }, [sessions7, targetSecs])
-
-  const targetWakeHour = useMemo(() => {
-    if (sessions7.length === 0) return undefined
-    const avgWake = sessions7.reduce((a, s) => a + wakeOffsetSeconds(s.end_at), 0) / sessions7.length
-    return avgWake / 3600
-  }, [sessions7])
+  // (Earlier draft had a synthetic "target window" arc on the clock — removed
+  // because users were misreading it as "average sleep window". The clock now
+  // computes its OWN circular-mean average band internally; sleep.tsx doesn't
+  // need to pass any target hints in.)
 
   // ── Hypnogram data ─────────────────────────────────────────────────────────
 
@@ -661,13 +650,13 @@ export default function SleepPage() {
         <AnimateRise delay={150} style={s.card}>
           <Text style={s.cardLabel}>Last 7 nights</Text>
           <Text style={s.cardSub}>
-            Each ring is one night. Aligned arcs = consistent schedule. Tap a ring for detail.
+            Each ring is one night. Aligned arcs = consistent schedule. Drag a finger across the
+            rings to see bedtime + wake for each night. The outer purple band is your typical
+            sleep window across the week.
           </Text>
           <SleepClock
             nights={clockNights}
-            targetBedHour={targetBedHour}
-            targetWakeHour={targetWakeHour}
-            size={280}
+            size={320}
           />
         </AnimateRise>
       )}
