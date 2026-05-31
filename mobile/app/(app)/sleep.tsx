@@ -1022,30 +1022,43 @@ export default function SleepPage() {
               <Text style={[s.verdictBadge, { color: verdict.color }]}>HOW TO IMPROVE YOUR SLEEP</Text>
             </View>
             <Text style={s.verdictText}>{verdictText}</Text>
-            {/* Sleep-targets info pill — same design pattern as strength's
-                adp-zone pill: the LABEL itself is the tappable chip, sits
-                on its own line under the banner text. Tap → expansion
-                panel below with labeled sections, NO repeated title. */}
-            <View style={s.pillRow}>
+            {/* Sleep-targets info pill — copied verbatim from strength's
+                adp-zone info pill ([exercise].tsx:4747-4763). Right-aligned
+                in a flex row, tight padding, fully rounded, light alpha
+                border + bg. Tap → expansion panel below. */}
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 }}>
               <Pressable
                 onPress={() => setHowOpen(o => !o)}
                 hitSlop={8}
-                style={[s.targetsPill, {
-                  borderColor: withAlpha(verdict.color, 0.55),
-                  backgroundColor: withAlpha(verdict.color, 0.15),
-                }]}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 4,
+                  paddingHorizontal: 8, paddingVertical: 2,
+                  borderRadius: 999, borderWidth: 1,
+                  borderColor: withAlpha(verdict.color, 0.4),
+                  backgroundColor: withAlpha(verdict.color, 0.1),
+                }}
               >
-                <Text style={[s.targetsPillText, { color: verdict.color }]}>
+                <Text
+                  style={{
+                    fontSize: 10, fontWeight: '700', textTransform: 'uppercase',
+                    letterSpacing: 1, color: verdict.color,
+                  }}
+                  numberOfLines={1}
+                >
                   Sleep targets
                 </Text>
-                <Info size={12} color={verdict.color} />
+                <Info size={11} color={verdict.color} />
               </Pressable>
             </View>
             {howOpen && (
               <Animated.View
                 entering={FadeInUp.duration(200)}
                 exiting={FadeOutUp.duration(180)}
-                style={[s.howPanel, { borderLeftColor: verdict.color }]}
+                style={{
+                  borderWidth: 1, borderColor: withAlpha(verdict.color, 0.15),
+                  backgroundColor: alpha(colors.card, 0.6), borderRadius: 6,
+                  paddingHorizontal: 10, paddingVertical: 8, marginTop: 4,
+                }}
               >
                 <Text style={s.howBody}>
                   <Text style={s.howBold}>Target: </Text>
@@ -1398,38 +1411,6 @@ const s = StyleSheet.create({
     borderRadius:    12,
     padding:         14,
     gap:             8,
-  },
-  // Sleep-targets pill — mirrors strength's adp-zone pill design.
-  // Sits on its own row under the banner text; tappable; the label is
-  // the trigger (no separate Info button).
-  pillRow: {
-    marginTop:    10,
-    flexDirection: 'row',
-  },
-  targetsPill: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           6,
-    paddingHorizontal: 10,
-    paddingVertical:    5,
-    borderRadius:   12,
-    borderWidth:    1,
-  },
-  // Matches the strength adp-zone pill text style (fontSize 11, weight 700,
-  // uppercase, 0.5 letter-spacing) so the two pages share one visual.
-  targetsPillText: {
-    fontSize:     11,
-    fontWeight:   '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  howPanel: {
-    marginTop:      10,
-    paddingLeft:    12,
-    paddingVertical: 10,
-    paddingRight:   4,
-    borderLeftWidth: 2,
-    gap:            6,
   },
   howBody: {
     color:      colors.mutedForeground,
