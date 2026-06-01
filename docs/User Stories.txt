@@ -1,3 +1,4 @@
+v1
 - notifications system
 - reflect logo and all over changes to homepage
 - we need a loading animation using our logo somehow
@@ -5,10 +6,15 @@
 - add light switch to settings
 - stairmill says per rep, should be interval, check other too
 - add info on what items to scan and what are allowed to scan when an item thats not in the db is scanned
-- gender consent for none male selections
-- recent activity shifts the page but not the position of the nav bar
-- reporting tool
-- customer support and ticketing tool
+- find non binary svg
 - need to redo the whole end user sign up process nd create a sign up process specifically for user invited by a coach
 - subscription and refund management on admin portal
-- fix coached by schema on admin portal
+- link bodyweight bmi to lean factor
+
+v2
+- homescreen badge
+- customer support and ticketing tool
+
+
+v3
+- reporting tool
