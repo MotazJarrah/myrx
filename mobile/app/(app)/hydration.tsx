@@ -45,6 +45,7 @@ import {
 import {
   useSharedValue, useDerivedValue, withTiming,
 } from 'react-native-reanimated'
+import { router } from 'expo-router'  // TEMP — Aquos animation spike nav (remove with the spike)
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import { dataCache } from '../../src/lib/cache'
@@ -484,6 +485,23 @@ export default function Hydration() {
           <Text style={s.sub}>{formatToday()}</Text>
         </View>
 
+        {/* ── TEMP: Aquos animation spike (Rive vs Skia bake-off) ──
+            Throwaway dev entry point so the two companion prototypes can be
+            compared on-device. Remove this whole block (+ the expo-router
+            import + app/rive-spike.tsx + app/skia-spike.tsx) once a path is
+            chosen. */}
+        <View style={s.spikeCard}>
+          <Text style={s.spikeLabel}>Aquos animation — compare</Text>
+          <View style={s.spikeRow}>
+            <Pressable style={s.spikeBtn} onPress={() => router.push('/rive-spike' as any)}>
+              <Text style={s.spikeBtnText}>Rive version</Text>
+            </Pressable>
+            <Pressable style={s.spikeBtn} onPress={() => router.push('/skia-spike' as any)}>
+              <Text style={s.spikeBtnText}>Skia version</Text>
+            </Pressable>
+          </View>
+        </View>
+
         {/* ── Today's progress + quick-add chips ── */}
         <AnimateRise delay={0}>
           <View style={s.card}>
@@ -629,6 +647,29 @@ const s = StyleSheet.create({
   // Header
   h1:  { fontSize: 20, fontWeight: '600', color: colors.foreground, letterSpacing: -0.4 },
   sub: { fontSize: 14, color: colors.mutedForeground, marginTop: 2 },
+
+  // TEMP — Aquos animation spike entry (remove with the spike)
+  spikeCard: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: withAlpha(palette.myrx.lime, 0.4),
+    borderRadius: 12,
+    padding: 12,
+    gap: 8,
+    backgroundColor: withAlpha(palette.myrx.lime, 0.05),
+  },
+  spikeLabel: { fontSize: 11, fontFamily: fonts.sans[700], color: palette.myrx.lime, textTransform: 'uppercase', letterSpacing: 1 },
+  spikeRow: { flexDirection: 'row', gap: 10 },
+  spikeBtn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: withAlpha(palette.myrx.lime, 0.14),
+    borderWidth: 1,
+    borderColor: withAlpha(palette.myrx.lime, 0.3),
+  },
+  spikeBtnText: { fontSize: 13, fontFamily: fonts.sans[700], color: colors.foreground },
 
   // Card chrome — matches bodyweight / dashboard
   card: {

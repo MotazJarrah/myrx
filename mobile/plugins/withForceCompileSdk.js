@@ -25,7 +25,7 @@
 
 const { withProjectBuildGradle } = require('@expo/config-plugins')
 
-const MARKER = '// MyRX: force compileSdk 35 on third-party libs'
+const MARKER = '// MyRX: force compileSdk 36 on third-party libs'
 
 module.exports = function withForceCompileSdk(config) {
   return withProjectBuildGradle(config, (cfg) => {
@@ -46,7 +46,9 @@ module.exports = function withForceCompileSdk(config) {
 ${MARKER}
 // react-native-sms-user-consent v1.4.0 hardcodes compileSdkVersion 23 in its
 // own build.gradle, which AGP 8 / Java 9+ rejects. Bump every subproject's
-// android.compileSdk to the project default (35), but only if it's missing
+// android.compileSdk to the project default (36 — required since Rive 9.8.3
+// pulls in androidx.core 1.17.0, which mandates compileSdk 36), but only if
+// it's missing
 // or below 30 so we don't accidentally downgrade libs that declare something
 // higher.
 //
@@ -58,16 +60,16 @@ subprojects { p ->
   p.plugins.withId('com.android.library') {
     p.android {
       if (compileSdk == null || compileSdk < 30) {
-        compileSdk 35
-        buildToolsVersion '35.0.0'
+        compileSdk 36
+        buildToolsVersion '36.0.0'
       }
     }
   }
   p.plugins.withId('com.android.application') {
     p.android {
       if (compileSdk == null || compileSdk < 30) {
-        compileSdk 35
-        buildToolsVersion '35.0.0'
+        compileSdk 36
+        buildToolsVersion '36.0.0'
       }
     }
   }

@@ -5245,3 +5245,74 @@ Admins (`is_superuser = true`) see an "Admin Portal" button in the client nav, o
 - [x] Supabase MCP connected
 - [x] get_users_for_admin RPC returns avatar_url
 - [x] `food_logs` table + RLS + index (migration: `supabase/migrations/20260501_food_logs.sql`)
+
+---
+
+## Hydration mascot — Rive plant ("Aquos") — IN PROGRESS / BLOCKED (June 1 2026)
+
+A Tamagotchi-style **gamification mascot** for the Hydration page: a potted plant floating in water whose **leaves open their eyes one at a time as the user logs water**, culminating in the water animating at ~100% of the daily goal. Explicitly a *gamification helper*, NOT turning the app into a game. The user's lock: **"2 clicks per progression"** to open one leaf — and clicks-per-leaf + the hydration→leaves mapping must live **in app code, NOT baked into the rig** (so it stays tunable). Tech: **Rive** via `rive-react-native@9.8.3`.
+
+**STATUS: blocked on visual verification.** The edited rig is built, exported, bundled, and the app rebuilt (BUILD SUCCESSFUL), but per-leaf control has NOT been confirmed to visually open leaves. User reports "nothing is working." See "Current blocker" below.
+
+### The file + license
+- Source: Rive Community **"Wavy Plant - Bone Rig / Interactive Hover" by BradleyConners**, license **CC BY** → **MUST credit BradleyConners** in an in-app credits/licenses screen before shipping.
+- Marketplace: `https://rive.app/marketplace/21837-40979-wavy-plant-bone-rig-interactive-hover/`
+- Original free download: `MyRX/21837-40979-wavy-plant-bone-rig-interactive-hover.riv` (289720 bytes).
+- **EDITED export (has per-leaf control):** `MyRX/new wavy_plant_-_bone_rig___interactive_hover.riv` (290172 bytes).
+- Bundled into app (both = the EDITED export): `mobile/android/app/src/main/res/raw/wavy_plant.riv` + `mobile/assets/wavy_plant.riv`.
+
+### Rig structure (introspected — 10 artboards)
+- Artboard **"plant"** (#1) = the one we render. SM `"State Machine 1"`. Original input: ONE boolean **"leaf on"** → opens ALL 5 eyes at once (verified: all 5 glow open within ~0.3 s, simultaneous — no free per-leaf scrub). Hierarchy: `leafs off / leafs on / stick / controls (→ track 1..5, each holds a nested "leaf" artboard)`.
+- Artboard **"leaf"** (#8) = a single leaf. SM `"State Machine 1"`, input **"active"** (boolean) → `eye on`/`eye off` + scale/color anims.
+- Others: `plant - remap` (#0, input "water on"), `plant - base` (#7, "water on"), field-stars/bubbles, fx-leaf-light, fx-bubbles, tent-basic/comp.
+- **PROVEN (3 ways) the ORIGINAL "plant" artboard exposes NO per-leaf control** — only "leaf on" (all). `setInputStateAtPath('active', true, 'leaf 1')` resolves the nested artboard but throws `No StateMachineInput found` (FATAL — async throw inside Rive's `advance()`, past JS try/catch, crashes the app). A 55-combo `inputByPath(name, path)` probe resolved zero leaf inputs. So per-leaf REQUIRES a rig edit.
+
+### The edit (done in Rive editor — lives in the exported file)
+- Remixed to the user's Rive account: **workspace `TazDS86`, account id 1500321, file id 2328827** → editor URL `editor.rive.app/file/.../2328827`.
+- Used Rive's **in-editor "Build" Agent** (the AI agent in the editor) to add a **View Model `PlantControl`** with 5 boolean properties **`leaf1..leaf5`**, each (per the Agent) data-bound to track N's leaf `active` input. "leaf on" preserved. The Agent also created a `LeafControlScript` — **a STUB / demo-comment file, IGNORE it** (not the binding mechanism).
+- **VERIFIED** via WASM introspection of the exported `.riv`: `viewModelCount()=1`, VM `PlantControl` with `leaf1..leaf5` (all boolean). Properties are real + exported.
+- **UNVERIFIED (the crux):** whether each `leafN` property is actually *bound* to a leaf's `active` input — i.e. whether flipping it visually opens that leaf. The Agent's stub script hints the binding step may have been left undone.
+
+### Rive paid plan
+Free tier can edit/remix but NOT export `.riv`. User upgraded to **CADET ($9/mo)** (has ".riv export"; banner: "Free to create, $9 to ship"). Can downgrade after — the `.riv` is bundled and runs offline forever; re-subscribe only to edit the rig again. Workspace billing: `rive.app/account/1500321`.
+
+### Runtime API (rive-react-native 9.8.3 — CONFIRMED in node_modules `.d.ts`)
+```ts
+import Rive, { Fit, Alignment, useRive, useRiveBoolean, AutoBind, BindByName } from 'rive-react-native'
+const [setRef, riveRef] = useRive()
+// <Rive ref={setRef} resourceName="wavy_plant" artboardName="plant"
+//       stateMachineName="State Machine 1" dataBinding={AutoBind(true)} autoplay ... />
+const [, setLeaf1] = useRiveBoolean(riveRef, 'leaf1')   // setLeaf1(true) should open leaf 1
+```
+- Data-bind helpers (from package root): `AutoBind(bool)`, `BindByName(name)`, `BindByIndex(n)`, `BindEmpty()`, plus `useRiveBoolean/Number/String/Color/Enum/Trigger`.
+- Classic SM API also present on the ref: `setInputState(sm, input, value)`, `setInputStateAtPath`, `fireState`. So `riveRef.setInputState('State Machine 1','leaf on',true)` opens all leaves (works — proven).
+
+### Metro shim (CRITICAL — do NOT remove)
+`mobile/metro.config.js` redirects bare `rive-react-native` → `node_modules/rive-react-native/lib/commonjs/index.js`. The package's `react-native`/`source` field points at `src/index.tsx`, which Expo SDK 54's Metro can't resolve → it 500s the whole bundle. The resolver shim fixes it.
+
+### Android build
+`rive-react-native` forced **compileSdk 36** (androidx.core 1.17 requires it). Set in: `mobile/android/gradle.properties` (`android.compileSdkVersion=36`, `android.buildToolsVersion=36.0.0`), `mobile/app.json` (expo-build-properties `compileSdkVersion: 36`), `mobile/plugins/withForceCompileSdk.js` (marker `// MyRX: force compileSdk 36 on third-party libs`). **A `res/raw/*.riv` change requires `npx expo run:android` (~2 min)** — JS hot-reload does NOT pick up native resources. Always use `npx expo run:android` (NOT raw `gradlew`) so the arm64-only ABI filter applies.
+
+### Spike screens + assets (THROWAWAY — delete once the real integration lands)
+- `mobile/app/plant-spike.tsx` — current data-binding test (`AutoBind` + `useRiveBoolean leaf1..5`; buttons Open-next-leaf / Reset / All-leaves-on). Reach via `myrx://plant-spike`.
+- `mobile/app/rive-spike.tsx` — old avatar comparison spike (`resourceName="avatar"` → `res/raw/avatar.riv`).
+- `mobile/app/skia-spike.tsx` — Skia comparison spike (`assets/aquos-hero.png`).
+- `mobile/app/(app)/hydration.tsx` — has a TEMP dashed **"AQUOS ANIMATION — COMPARE"** card linking to `/rive-spike` + `/skia-spike` (remove it).
+- Throwaway assets: `res/raw/avatar.riv`, `mobile/assets/aquos-hero.png`, `MyRX/Aquos/` (hand-drawn creature images, abandoned — user said "any mascot will do").
+
+### Introspection tooling
+`C:/Users/motaz/riv-introspect/` — Node scripts using `@rive-app/canvas-advanced-single` with headless DOM shims. **The richer `Image` shim that fires `onload` via `queueMicrotask` is REQUIRED** or `rive.load()` hangs forever on the plant's embedded image mesh (a minimal Image stub never resolves). Node 22's `navigator` is read-only — do NOT shim it. Scripts: `introspect.mjs` (artboards + SM inputs), `nesting.mjs` (probe artboard prototype methods), `probe.mjs` (`inputByPath(name,path)` grid), `vmcheck.mjs` (view models + properties). Run `node <script>.mjs [path-to-riv]` — inspects any `.riv` offline without rendering.
+
+### CURRENT BLOCKER + suspected failure modes (debug here next)
+Data-binding plant-spike built/bundled/rebuilt/deployed OK (no JS or rive errors in logcat, plant renders), but per-leaf control is NOT visually confirmed. Investigate in order:
+1. **Agent's data binding may be incomplete** — `PlantControl.leafN` properties exist but may not be *bound* to track N's leaf `active` (the stub `LeafControlScript` hints at this). **VERIFY IN THE RIVE EDITOR**: open file 2328827, use the editor's preview/**Testing** panel to toggle `PlantControl.leafN` and watch a single leaf open. This proves the binding BEFORE touching app code. If unbound, wire them (or redo — see "recommended approach").
+2. **AutoBind(true) may not bind PlantControl** — it auto-binds the artboard's DEFAULT VM instance. Inspector showed `Model=PlantControl, Instance=Instance` (likely a default exists). If AutoBind fails, try `dataBinding={BindByName('PlantControl')}`.
+3. **useRiveBoolean path may be wrong** — tried `'leaf1'`; if nested/different the setter silently no-ops.
+4. **Nested leaf SMs may not be running** — if a leaf instance plays a fixed timeline instead of its `State Machine 1`, its `active` never takes effect.
+
+**Recommended next-session approach:** verify/repair the bindings IN the Rive editor with eyes on the canvas FIRST (toggle `PlantControl.leafN` in the editor's Testing panel → watch one leaf open), then re-export → re-bundle → `npx expo run:android` → test. If the Agent's data binding is broken/hard to fix, switch to the simpler, more runtime-robust **state-machine approach**: add a Number input `growth` (0–5) on the plant SM with 6 states opening one more leaf each, OR expose 5 plain boolean SM inputs — both drive cleanly via `setInputState(...)` with zero data-binding complexity. The user already paid for CADET, so re-editing + re-exporting is free until they downgrade.
+
+**Once per-leaf works:** wire into `mobile/app/(app)/hydration.tsx` — count taps/hydration, **2 clicks (tunable const) = +1 leaf**, map daily-water-% → open-leaf-count (0–5), fire the water animation near 100%. Then DELETE all spike screens + the hydration dashed card + throwaway assets, and add the **BradleyConners (CC BY)** credit.
+
+### Dev-env reminders (full details in the mobile dev section)
+Wireless adb: `adb connect 10.0.0.111:5555` (phone endpoint — sticky until reboot). Laptop LAN IP was **10.0.0.187** (re-derive each session via `Get-NetIPAddress`; DHCP can change it). Dev-client scheme `exp+myrx-mobile`; app scheme `myrx`. Deep-link to LAN Metro: `exp+myrx-mobile://expo-development-client/?url=http%3A%2F%2F10.0.0.187%3A8081` (NEVER `localhost` over wifi). Device screencap = 1080×2340; **the Read tool can hit a per-session "many-image / 2000px" cap mid-session — once capped, downscaling does NOT help; rely on the user's eyes or a fresh session for visual verification.**
