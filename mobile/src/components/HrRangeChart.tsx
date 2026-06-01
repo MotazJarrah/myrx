@@ -13,24 +13,33 @@
  *     workouts. The band's fill is a vertical gradient mapped to the
  *     5-zone HR model so the colour at any point in the band tells you
  *     which training zone you were in at that bpm:
- *         Z1 Recovery  (50–60% HRmax) — slate
- *         Z2 Easy      (60–70%)        — emerald
- *         Z3 Tempo     (70–80%)        — amber
- *         Z4 Threshold (80–90%)        — orange
- *         Z5 VO2 Max   (90–100%)       — red
- *     The gradient is shared (one definition) and rendered with
- *     userSpaceOnUse so each band shows ONLY the colours that fall within
- *     its own bpm range — i.e. a band peaking at Z4 won't show any red.
+ *         Z1 Recovery  (50–60% HRmax) — yellow
+ *         Z2 Easy      (60–70%)        — amber
+ *         Z3 Tempo     (70–80%)        — orange
+ *         Z4 Threshold (80–90%)        — burnt orange
+ *         Z5 VO2 Max   (90–100%)       — deep red
+ *     Each per-day band carries its own gradient whose stops mirror that
+ *     day's time-in-zone distribution; bands without per-second HR data
+ *     fall back to a Y-position-anchored gradient covering the full
+ *     zone range.
  *
  * Tap a day's column to pin a tooltip with the underlying numbers and the
  * highest zone the peak reached.
+ *
+ * Rendering — Skia-migrated 2026-05-31. The chart now paints in a single
+ * @shopify/react-native-skia <Canvas> with per-shape <LinearGradient>
+ * children replacing react-native-svg's <Defs> + url(#...) lookup. See
+ * Pattern 9 in CLAUDE.md for the Skia conventions; SleepClock.tsx is the
+ * canonical reference for animated paths. This chart has no per-frame
+ * animation — only static paths + RN Text overlays for labels + the
+ * existing Pressable tap-to-pin layer + RN <View> tooltip pill.
  */
 
-import { useCallback, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { View, Text, Pressable, StyleSheet, GestureResponderEvent, type LayoutChangeEvent } from 'react-native'
-import Svg, {
-  Rect, Line as SvgLine, Circle, Text as SvgText, Defs, LinearGradient, Stop, G,
-} from 'react-native-svg'
+import {
+  Canvas, Path, Group, Skia, vec, LinearGradient, type SkPath,
+} from '@shopify/react-native-skia'
 import { colors, palette, withAlpha, fonts } from '../theme'
 import { useChartTooltipScope, useRegisterChartDismiss } from '../lib/chartTooltipScope'
 
@@ -104,25 +113,27 @@ function zoneFor(bpm: number, hrMax: number): { id: 'below' | 'z1' | 'z2' | 'z3'
 }
 
 /**
- * Builds the SVG gradient stops for a band whose colour proportions
+ * Builds the gradient stops for a band whose colour proportions
  * mirror the workout's time-in-zone breakdown. Stops are computed
  * top-down (Z5 first → Z1 last) so the highest zone the user reached
  * sits at the top of the band. Zones with zero time are skipped — no
  * fake colour bands appear.
  *
- * Returns an array of { offset (0-1 string), color, opacity } stops
- * suitable for spreading into <Stop> elements.
+ * Returns parallel arrays of colors + positions ready to pass to
+ * Skia's <LinearGradient colors={...} positions={...} />. Two stops
+ * per slice with the same color give a sharp segment boundary; the
+ * adjacent slice's stops produce the next zone's hard transition.
  */
 type ZoneTimes = NonNullable<HrDayPoint['timeInZone']>
-type GradientStop = { offset: string; color: string; opacity: number }
+type GradientStopArrays = { colors: string[]; positions: number[] }
 
-function buildTimeInZoneStops(times: ZoneTimes, alpha: number): GradientStop[] {
+function buildTimeInZoneStops(times: ZoneTimes, alpha: number): GradientStopArrays {
   // Only training-zone time contributes to the band gradient. Time
   // below Z1 is resting territory and lives below the band entirely
   // (the band's bottom edge is anchored at the Z1 lower bound, so any
   // belowZ1 sample is outside the band's vertical extent).
   const total = times.z1 + times.z2 + times.z3 + times.z4 + times.z5
-  if (total <= 0) return []
+  if (total <= 0) return { colors: [], positions: [] }
   // Walk zones top → bottom so the highest-intensity zone the user
   // actually touched gets painted at the band's TOP.
   const order: Array<{ time: number; color: string }> = [
@@ -132,7 +143,8 @@ function buildTimeInZoneStops(times: ZoneTimes, alpha: number): GradientStop[] {
     { time: times.z2, color: ZONE_COLORS.z2 },
     { time: times.z1, color: ZONE_COLORS.z1 },
   ]
-  const stops: GradientStop[] = []
+  const colorsOut: string[] = []
+  const positions: number[] = []
   let cum = 0
   for (let i = 0; i < order.length; i++) {
     const slice = order[i]
@@ -141,11 +153,37 @@ function buildTimeInZoneStops(times: ZoneTimes, alpha: number): GradientStop[] {
     const endOffset   = (cum + slice.time) / total
     // Two stops per slice with the SAME color give a sharp segment.
     // The next slice's stops will create a sharp transition at the boundary.
-    stops.push({ offset: startOffset.toFixed(4), color: slice.color, opacity: alpha })
-    stops.push({ offset: endOffset.toFixed(4),   color: slice.color, opacity: alpha })
+    const tinted = withAlpha(slice.color, alpha)
+    colorsOut.push(tinted, tinted)
+    positions.push(startOffset, endOffset)
     cum += slice.time
   }
-  return stops
+  return { colors: colorsOut, positions }
+}
+
+/** Y-position-anchored fallback gradient — used for legacy workouts
+ *  synced before per-second HR logging was wired. Six even segments
+ *  (Z5 → Z4 → Z3 → Z2 → Z1 → belowZ1) from top to bottom. */
+function buildFallbackStops(alpha: number): GradientStopArrays {
+  const SEG = 1 / 6
+  const segs = [
+    ZONE_COLORS.z5,
+    ZONE_COLORS.z4,
+    ZONE_COLORS.z3,
+    ZONE_COLORS.z2,
+    ZONE_COLORS.z1,
+    ZONE_COLORS.belowZ1,
+  ]
+  const colorsOut: string[] = []
+  const positions: number[] = []
+  for (let i = 0; i < segs.length; i++) {
+    const tinted = withAlpha(segs[i], alpha)
+    const start  = i * SEG + 0.001
+    const end    = (i + 1) * SEG - 0.001
+    colorsOut.push(tinted, tinted)
+    positions.push(start, end)
+  }
+  return { colors: colorsOut, positions }
 }
 
 function niceTicks(min: number, max: number, count: number): number[] {
@@ -170,6 +208,32 @@ function fmtAxisLabel(ymd: string): string {
   return `${m}/${d}`
 }
 
+/** Build a Skia path for a rounded rectangle — used for the band fill. */
+function buildRoundedRectPath(x: number, y: number, w: number, h: number, r: number): SkPath {
+  const path = Skia.Path.Make()
+  path.addRRect({
+    rect: { x, y, width: w, height: h },
+    rx: r,
+    ry: r,
+  })
+  return path
+}
+
+/** Build a Skia path for a single horizontal line — used for Y-axis grid. */
+function buildLinePath(x1: number, y1: number, x2: number, y2: number): SkPath {
+  const path = Skia.Path.Make()
+  path.moveTo(x1, y1)
+  path.lineTo(x2, y2)
+  return path
+}
+
+/** Build a Skia path for a filled + stroked circle. */
+function buildCirclePath(cx: number, cy: number, r: number): SkPath {
+  const path = Skia.Path.Make()
+  path.addCircle(cx, cy, r)
+  return path
+}
+
 export default function HrRangeChart({
   data,
   hrMax,
@@ -191,49 +255,34 @@ export default function HrRangeChart({
     setWidth(e.nativeEvent.layout.width)
   }
 
-  if (data.length === 0 || width === 0) {
-    return <View style={{ height }} onLayout={onLayout} />
-  }
-
   // ── Y-domain ───────────────────────────────────────────────────────────
-  const allValues: number[] = []
-  for (const d of data) {
-    if (d.resting       != null) allValues.push(d.resting)
-    if (d.avg           != null) allValues.push(d.avg)
-    if (d.peakRangeLow  != null) allValues.push(d.peakRangeLow)
-    if (d.peakRangeHigh != null) allValues.push(d.peakRangeHigh)
-  }
-  if (allValues.length === 0) {
-    return <View style={{ height }} onLayout={onLayout} />
-  }
-  const rawMin = Math.min(...allValues)
-  const rawMax = Math.max(...allValues)
-  const pad    = Math.max(4, Math.round((rawMax - rawMin) * 0.10))
-  const yMin   = Math.max(30, rawMin - pad)
-  const yMax   = Math.min(220, rawMax + pad)
+  const layout = useMemo(() => {
+    if (data.length === 0 || width === 0) return null
+    const allValues: number[] = []
+    for (const d of data) {
+      if (d.resting       != null) allValues.push(d.resting)
+      if (d.avg           != null) allValues.push(d.avg)
+      if (d.peakRangeLow  != null) allValues.push(d.peakRangeLow)
+      if (d.peakRangeHigh != null) allValues.push(d.peakRangeHigh)
+    }
+    if (allValues.length === 0) return null
+    const rawMin = Math.min(...allValues)
+    const rawMax = Math.max(...allValues)
+    const pad    = Math.max(4, Math.round((rawMax - rawMin) * 0.10))
+    const yMin   = Math.max(30, rawMin - pad)
+    const yMax   = Math.min(220, rawMax + pad)
 
-  const plotW = Math.max(0, width  - Y_WIDTH - PADDING_RIGHT)
-  const plotH = Math.max(0, height - PADDING_TOP - PADDING_BOTTOM)
+    const plotW = Math.max(0, width  - Y_WIDTH - PADDING_RIGHT)
+    const plotH = Math.max(0, height - PADDING_TOP - PADDING_BOTTOM)
 
-  const xCenter = (i: number) =>
-    Y_WIDTH + (data.length === 1 ? plotW / 2 : (i + 0.5) * (plotW / data.length))
-  const yScale  = (y: number) =>
-    PADDING_TOP + plotH - ((y - yMin) / (yMax - yMin)) * plotH
+    const xCenter = (i: number) =>
+      Y_WIDTH + (data.length === 1 ? plotW / 2 : (i + 0.5) * (plotW / data.length))
+    const yScale  = (y: number) =>
+      PADDING_TOP + plotH - ((y - yMin) / (yMax - yMin)) * plotH
 
-  const yTicks = niceTicks(yMin, yMax, 4)
-
-  // ── Zone gradient — anchored in chart coordinates so each band's slice
-  //    of the gradient matches its actual bpm range. ─────────────────────
-  // y1 = top of Z5 (hrMax), y2 = bottom of Z1 (0.5 * hrMax).
-  const gradTopY    = yScale(hrMax)           // small Y = chart top
-  const gradBottomY = yScale(hrMax * 0.5)     // large Y = chart bottom
-  // Zone boundaries' OFFSET positions within the gradient (0 = top, 1 = bottom):
-  //   Z5 top    →   0.0
-  //   Z4 top    →   0.2
-  //   Z3 top    →   0.4
-  //   Z2 top    →   0.6
-  //   Z1 top    →   0.8
-  //   Z1 bottom →   1.0
+    const yTicks = niceTicks(yMin, yMax, 4)
+    return { yMin, yMax, plotW, plotH, xCenter, yScale, yTicks }
+  }, [data, width, height])
 
   /**
    * Returns the nearest day index for a touch X, OR `null` if the tap is
@@ -243,10 +292,11 @@ export default function HrRangeChart({
    * "tapped nothing" — which dismisses the tooltip below.
    */
   function pickIx(x: number): number | null {
+    if (!layout) return null
     let best = 0
     let bestD = Infinity
     for (let i = 0; i < data.length; i++) {
-      const cx = xCenter(i)
+      const cx = layout.xCenter(i)
       const d  = Math.abs(x - cx)
       if (d < bestD) { bestD = d; best = i }
     }
@@ -271,6 +321,26 @@ export default function HrRangeChart({
     setActiveIx(prev => (ix === null || prev === ix) ? null : ix)
   }
 
+  if (!layout) {
+    return <View style={{ height }} onLayout={onLayout} />
+  }
+
+  const { yScale, xCenter, yTicks } = layout
+
+  // ── Pre-build static paths so Skia doesn't rebuild them every render ─
+  const gridPaths = yTicks.map(t => ({
+    t,
+    y: yScale(t),
+    path: buildLinePath(Y_WIDTH, yScale(t), width - PADDING_RIGHT, yScale(t)),
+  }))
+
+  // Fallback gradient bounds — y1 = top of Z5 (hrMax), y2 = below Z1 (0.40*hrMax)
+  // so the belowZ1 colour reaches all the way to the bottom of any band.
+  const fallbackTopY    = yScale(hrMax)
+  const fallbackBottomY = yScale(hrMax * 0.40)
+  const fallbackIdle    = buildFallbackStops(0.90)
+  const fallbackActive  = buildFallbackStops(1.00)
+
   // The global ChartTooltipProvider handles dismiss for any tap outside
   // the chart's interactive Pressable — including the legend below, other
   // cards on the page, and any padding around. No local outer-View
@@ -278,135 +348,26 @@ export default function HrRangeChart({
   return (
     <View>
       <View style={{ height }} onLayout={onLayout}>
-        <Svg width={width} height={height}>
-          {/* Per-band gradients: each day's band gets its own gradient whose
-              colour stops mirror that day's TIME-IN-ZONE distribution.
-              `objectBoundingBox` (the SVG default) maps the gradient to
-              the band's own local coords — top = 0, bottom = 1. The
-              highest-intensity zone the user touched paints the top of
-              the band; lower zones stack below in proportion to time.
-              We pre-render gradients here in <Defs> and reference them by
-              id in each <Rect>'s fill. */}
-          <Defs>
-            {/* Y-position-anchored fallback. Used for legacy workouts
-                synced before per-second HR logging was wired. The Z1
-                boundary at 50% HRmax (yScale(hrMax*0.5)) sits inside the
-                gradient — anything below it gets the darker
-                belowZ1 colour so the visual transition is honest. */}
-            {(() => {
-              // Six even segments (0.0 - 0.166 - 0.333 - 0.5 - 0.666 - 0.833 - 1.0)
-              // map to Z5 → Z4 → Z3 → Z2 → Z1 → belowZ1 from top to bottom.
-              const SEG = 1 / 6
-              const segs = [
-                { c: ZONE_COLORS.z5      },
-                { c: ZONE_COLORS.z4      },
-                { c: ZONE_COLORS.z3      },
-                { c: ZONE_COLORS.z2      },
-                { c: ZONE_COLORS.z1      },
-                { c: ZONE_COLORS.belowZ1 },
-              ]
-              // y2 anchors at hrMax*0.40 (well below 50% so the belowZ1
-              // colour reaches all the way to the bottom of any band)
-              const yBottom = yScale(hrMax * 0.40)
-              const buildStops = (alpha: number) => segs.flatMap((s, i) => {
-                const start = i * SEG
-                const end   = (i + 1) * SEG
-                return [
-                  { offset: (start + 0.001).toFixed(4), color: s.c, opacity: alpha },
-                  { offset: (end   - 0.001).toFixed(4), color: s.c, opacity: alpha },
-                ]
-              })
-              const idleStops   = buildStops(0.90)
-              const activeStops = buildStops(1.00)
-              return (
-                <G>
-                  <LinearGradient
-                    id="zoneGrad-fallback"
-                    x1="0" y1={gradTopY} x2="0" y2={yBottom}
-                    gradientUnits="userSpaceOnUse"
-                  >
-                    {idleStops.map((s, j) => (
-                      <Stop key={`fbi-${j}`} offset={s.offset} stopColor={s.color} stopOpacity={s.opacity} />
-                    ))}
-                  </LinearGradient>
-                  <LinearGradient
-                    id="zoneGrad-fallback-active"
-                    x1="0" y1={gradTopY} x2="0" y2={yBottom}
-                    gradientUnits="userSpaceOnUse"
-                  >
-                    {activeStops.map((s, j) => (
-                      <Stop key={`fba-${j}`} offset={s.offset} stopColor={s.color} stopOpacity={s.opacity} />
-                    ))}
-                  </LinearGradient>
-                </G>
-              )
-            })()}
-            {/* Per-day time-in-zone gradients.
-                Stops at 0.90 idle / 1.00 active so the band colours match
-                the saturated look of the legend swatches. Lower alphas
-                (0.55) made bands look washed out against the dark chart
-                background. */}
-            {data.map((d, i) => {
-              if (!d.timeInZone) return null
-              const idleStops   = buildTimeInZoneStops(d.timeInZone, 0.90)
-              const activeStops = buildTimeInZoneStops(d.timeInZone, 1.00)
-              if (idleStops.length === 0) return null
-              return (
-                <G key={`grad-${i}`}>
-                  <LinearGradient
-                    id={`zoneGrad-${i}`}
-                    x1="0" y1="0" x2="0" y2="1"
-                  >
-                    {idleStops.map((s, j) => (
-                      <Stop key={`is-${j}`} offset={s.offset} stopColor={s.color} stopOpacity={s.opacity} />
-                    ))}
-                  </LinearGradient>
-                  <LinearGradient
-                    id={`zoneGrad-${i}-active`}
-                    x1="0" y1="0" x2="0" y2="1"
-                  >
-                    {activeStops.map((s, j) => (
-                      <Stop key={`as-${j}`} offset={s.offset} stopColor={s.color} stopOpacity={s.opacity} />
-                    ))}
-                  </LinearGradient>
-                </G>
-              )
-            })}
-          </Defs>
+        {/* Single Skia canvas paints the chart natively. One native view,
+            no per-prop bridge crossings. Each band carries its own
+            <LinearGradient> as a child of the <Path>, replacing the
+            <Defs>/url(#...) pattern from react-native-svg. */}
+        <Canvas style={{ width, height }}>
+          {/* Y-axis grid lines */}
+          <Group>
+            {gridPaths.map((g, i) => (
+              <Path
+                key={`yt-${i}`}
+                path={g.path}
+                color={withAlpha(palette.slate[500], 0.12)}
+                style="stroke"
+                strokeWidth={1}
+              />
+            ))}
+          </Group>
 
-          {/* Y-axis grid + tick labels.
-              Use <G> rather than nested <Svg> — nested <Svg> creates a new
-              SVG context that can't see the parent's <Defs>, which made our
-              `url(#zoneGrad)` references resolve to nothing (bands rendered
-              black). <G> is just a transform/grouping element so the parent
-              Defs stays in scope. */}
-          {yTicks.map((t, i) => {
-            const y = yScale(t)
-            return (
-              <G key={`yt-${i}`}>
-                <SvgLine
-                  x1={Y_WIDTH}
-                  x2={width - PADDING_RIGHT}
-                  y1={y}
-                  y2={y}
-                  stroke={withAlpha(palette.slate[500], 0.12)}
-                  strokeWidth={1}
-                />
-                <SvgText
-                  x={Y_WIDTH - 6}
-                  y={y + 4}
-                  fontSize={10}
-                  fontFamily={fonts.mono[500]}
-                  fill={colors.mutedForeground}
-                  textAnchor="end"
-                >
-                  {String(t)}
-                </SvgText>
-              </G>
-            )
-          })}
-
-          {/* Per-day glyphs */}
+          {/* Per-day glyphs — peak band + avg dot + resting dot. Day label
+              + Y-axis numeric labels live as RN <Text> overlays below. */}
           {data.map((d, i) => {
             const cx       = xCenter(i)
             const isActive = activeIx === i
@@ -421,82 +382,152 @@ export default function HrRangeChart({
                   })()
                 : null
 
+            const hasTimeInZone =
+              d.timeInZone != null &&
+              (d.timeInZone.z1 + d.timeInZone.z2 + d.timeInZone.z3 +
+               d.timeInZone.z4 + d.timeInZone.z5 + d.timeInZone.belowZ1) > 0
+
             return (
-              <G key={`col-${d.day}`}>
+              <Group key={`col-${d.day}`}>
                 {/* PEAK RANGE — band fill uses the day's per-band
                     time-in-zone gradient if we have per-second HR data;
                     otherwise falls back to the Y-position-anchored
-                    gradient (legacy workouts synced before HR logging). */}
+                    gradient (legacy workouts synced before HR logging).
+
+                    With Skia, the <LinearGradient> is a CHILD of the
+                    <Path> it fills (no global <Defs>). Time-in-zone
+                    gradients use local-coords (top/bottom of the band).
+                    Fallback gradients use chart-coords (the full Z5→Z1
+                    range) so each band shows only the colours that fall
+                    within its own bpm range. No stroke — the gray slate
+                    outline previously used was narrowing the visible
+                    fill area on these thin (8px) bands and muddying the
+                    colours. Active state still pops via the higher-
+                    opacity active gradient + the day pill above. */}
                 {peakBand && (() => {
-                  const hasTimeInZone =
-                    d.timeInZone != null &&
-                    (d.timeInZone.z1 + d.timeInZone.z2 + d.timeInZone.z3 +
-                     d.timeInZone.z4 + d.timeInZone.z5 + d.timeInZone.belowZ1) > 0
-                  const fillUrl = hasTimeInZone
-                    ? (isActive ? `url(#zoneGrad-${i}-active)` : `url(#zoneGrad-${i})`)
-                    : (isActive ? 'url(#zoneGrad-fallback-active)' : 'url(#zoneGrad-fallback)')
-                  // No stroke — the gray slate outline previously used was
-                  // narrowing the visible fill area on these thin (8px) bands
-                  // and muddying the colours. Active state still pops via
-                  // the higher-opacity active gradient + the day pill above.
+                  const bandX     = cx - BAND_WIDTH / 2
+                  const bandPath  = buildRoundedRectPath(
+                    bandX, peakBand.top, BAND_WIDTH, peakBand.h, CORNER_RADIUS,
+                  )
+
+                  if (hasTimeInZone) {
+                    const stops = isActive
+                      ? buildTimeInZoneStops(d.timeInZone!, 1.00)
+                      : buildTimeInZoneStops(d.timeInZone!, 0.90)
+                    if (stops.colors.length === 0) return null
+                    return (
+                      <Path path={bandPath}>
+                        <LinearGradient
+                          start={vec(bandX, peakBand.top)}
+                          end={vec(bandX, peakBand.top + peakBand.h)}
+                          colors={stops.colors}
+                          positions={stops.positions}
+                        />
+                      </Path>
+                    )
+                  }
+
+                  const stops = isActive ? fallbackActive : fallbackIdle
                   return (
-                    <Rect
-                      x={cx - BAND_WIDTH / 2}
-                      y={peakBand.top}
-                      width={BAND_WIDTH}
-                      height={peakBand.h}
-                      rx={CORNER_RADIUS}
-                      ry={CORNER_RADIUS}
-                      fill={fillUrl}
-                    />
+                    <Path path={bandPath}>
+                      <LinearGradient
+                        start={vec(bandX, fallbackTopY)}
+                        end={vec(bandX, fallbackBottomY)}
+                        colors={stops.colors}
+                        positions={stops.positions}
+                      />
+                    </Path>
                   )
                 })()}
 
-                {/* AVG DOT — sky blue */}
-                {d.avg != null && (
-                  <Circle
-                    cx={cx}
-                    cy={yScale(d.avg)}
-                    r={isActive ? DOT_R + 1 : DOT_R}
-                    fill={COLOR_AVG}
-                    stroke={colors.background}
-                    strokeWidth={1.5}
-                  />
-                )}
+                {/* AVG DOT — sky blue. Fill + stroke implemented as two
+                    Skia <Path>s sharing the same circle geometry; the
+                    outer-stroked path mimics SVG's stroke-on-fill. */}
+                {d.avg != null && (() => {
+                  const r       = isActive ? DOT_R + 1 : DOT_R
+                  const dotPath = buildCirclePath(cx, yScale(d.avg), r)
+                  return (
+                    <Group>
+                      <Path path={dotPath} color={COLOR_AVG} />
+                      <Path
+                        path={dotPath}
+                        color={colors.background}
+                        style="stroke"
+                        strokeWidth={1.5}
+                      />
+                    </Group>
+                  )
+                })()}
 
                 {/* RESTING DOT — emerald */}
-                {d.resting != null && (
-                  <Circle
-                    cx={cx}
-                    cy={yScale(d.resting)}
-                    r={isActive ? DOT_R + 1 : DOT_R}
-                    fill={COLOR_RESTING}
-                    stroke={colors.background}
-                    strokeWidth={1.5}
-                  />
-                )}
-
-                {/* Day label — compact M/D form so 7-8 labels fit. The
-                    full "Mon 5/18" version stays in the tooltip. */}
-                <SvgText
-                  x={cx}
-                  y={height - 10}
-                  fontSize={10}
-                  fontFamily={fonts.sans[500]}
-                  fill={isActive ? colors.foreground : colors.mutedForeground}
-                  textAnchor="middle"
-                >
-                  {fmtAxisLabel(d.day)}
-                </SvgText>
-              </G>
+                {d.resting != null && (() => {
+                  const r       = isActive ? DOT_R + 1 : DOT_R
+                  const dotPath = buildCirclePath(cx, yScale(d.resting), r)
+                  return (
+                    <Group>
+                      <Path path={dotPath} color={COLOR_RESTING} />
+                      <Path
+                        path={dotPath}
+                        color={colors.background}
+                        style="stroke"
+                        strokeWidth={1.5}
+                      />
+                    </Group>
+                  )
+                })()}
+              </Group>
             )
           })}
-        </Svg>
+        </Canvas>
+
+        {/* Y-axis numeric labels — RN Text overlay above the canvas. SVG
+            had these inline as <SvgText> children; with Skia we lift them
+            to absolute-positioned RN <Text> per Pattern 9. */}
+        {yTicks.map((t, i) => (
+          <Text
+            key={`yt-label-${i}`}
+            style={[
+              styles.yTickLabel,
+              {
+                top:  yScale(t) - 7,
+                left: 0,
+                width: Y_WIDTH - 6,
+              },
+            ]}
+            numberOfLines={1}
+          >
+            {String(t)}
+          </Text>
+        ))}
+
+        {/* Day labels — compact M/D form so 7-8 labels fit. The full
+            "Mon 5/18" version stays in the tooltip. */}
+        {data.map((d, i) => {
+          const cx       = xCenter(i)
+          const isActive = activeIx === i
+          return (
+            <Text
+              key={`day-label-${d.day}`}
+              style={[
+                styles.dayLabel,
+                {
+                  top:  height - 18,
+                  left: cx - 30,
+                  width: 60,
+                  color: isActive ? colors.foreground : colors.mutedForeground,
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {fmtAxisLabel(d.day)}
+            </Text>
+          )
+        })}
 
         {/* Tap overlay — captures all taps inside the chart area. Same
             pattern LineChart uses, which the SVG-responder approach
             doesn't reliably match on Android because react-native-svg
-            swallows some responder lifecycle events. */}
+            swallowed some responder lifecycle events. */}
         <Pressable
           onPressIn={onChartPressIn}
           style={StyleSheet.absoluteFill}
@@ -619,6 +650,24 @@ export default function HrRangeChart({
 }
 
 const styles = StyleSheet.create({
+  // Y-axis tick label — RN Text overlay above the Skia canvas. Right-aligned
+  // inside its column so the longest BPM number (3 digits) lines up with
+  // the chart's left edge.
+  yTickLabel: {
+    position:   'absolute',
+    fontSize:   10,
+    fontFamily: fonts.mono[500],
+    color:      colors.mutedForeground,
+    textAlign:  'right',
+  },
+  // Day label below each column.
+  dayLabel: {
+    position:   'absolute',
+    fontSize:   10,
+    fontFamily: fonts.sans[500],
+    textAlign:  'center',
+  },
+
   legendContainer: {
     marginTop:   8,
     paddingLeft: Y_WIDTH,

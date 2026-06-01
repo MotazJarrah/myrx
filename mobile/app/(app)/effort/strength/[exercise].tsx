@@ -17,9 +17,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Pressable, ScrollView, StyleSheet, useWindowDimensions, type LayoutChangeEvent } from 'react-native'
 import Animated, {
-  FadeInUp,
-  FadeOutUp,
-  LinearTransition,
+  Easing,
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
@@ -28,6 +26,100 @@ import Animated, {
   withDelay,
   runOnJS,
 } from 'react-native-reanimated'
+
+// Pattern 5 — Inline expansion panel (LOCKED, direct-height-animation).
+// PANEL_OPEN_DURATION / PANEL_CLOSE_DURATION / PANEL_EASING are the canonical
+// constants shared with sleep.tsx's DimensionRow — kept identical so every
+// expansion panel across the app feels the same.
+const PANEL_OPEN_DURATION  = 240
+const PANEL_CLOSE_DURATION = 200
+const PANEL_EASING         = Easing.bezier(0.16, 1, 0.3, 1)  // out-quint, same curve as AnimateRise
+
+// Safety buffer added to the captured height. Absorbs the small (~8–12 px)
+// width-mismatch clip that can happen on Android when the hidden measurer's
+// `position:'absolute'` width slightly differs from the visible panel's
+// in-flow width and text wraps to one more line in the visible than in
+// the measurer. The buffer renders below the body text, where the panel's
+// own card background / border is visually identical to bottom padding —
+// so the extra space looks intentional rather than buggy.
+const PANEL_HEIGHT_BUFFER_PX = 16
+
+/**
+ * ExpandPanel — direct-height-animation expansion panel.
+ *
+ * Hidden-measurer pattern (the one that ACTUALLY works on Fabric/new arch).
+ *
+ * Why the off-screen absolute measurer is necessary:
+ *   When the visible Animated.View has `height: 0 + overflow: 'hidden'`,
+ *   Fabric/new arch skips the inner child's layout pass, so an `onLayout`
+ *   placed INSIDE the Animated.View never fires — contentHeight stays 0
+ *   forever and the panel can't open. (We tried single-tree on June 1
+ *   2026; it broke pill expansion entirely. Reverted.)
+ *
+ * Why the ~16 px buffer absorbs the original "clipped last line" bug:
+ *   The absolute measurer at `left: 0, right: 0` sometimes ends up a few
+ *   percent wider than the visible panel when nested deep in flex layouts.
+ *   The text wraps to fewer lines in the measurer, so the captured height
+ *   can be 8–12 px short. Adding a fixed 16 px buffer to the animated
+ *   height absorbs that worst case; the extra space sits below the body
+ *   text inside the panel's card chrome, looking like extra bottom padding.
+ */
+function ExpandPanel({
+  open,
+  children,
+}: {
+  open: boolean
+  children: React.ReactNode
+}) {
+  const [contentHeight, setContentHeight] = useState(0)
+  const animatedHeight  = useSharedValue(0)
+  const animatedOpacity = useSharedValue(0)
+
+  // Drive the animation off the open flag + measured height. We only animate
+  // UP to contentHeight once we've measured it; before that the measurer is
+  // still computing.
+  if (open && contentHeight > 0) {
+    animatedHeight.value  = withTiming(contentHeight, { duration: PANEL_OPEN_DURATION,  easing: PANEL_EASING })
+    animatedOpacity.value = withTiming(1,             { duration: PANEL_OPEN_DURATION,  easing: PANEL_EASING })
+  } else if (!open) {
+    animatedHeight.value  = withTiming(0, { duration: PANEL_CLOSE_DURATION, easing: PANEL_EASING })
+    animatedOpacity.value = withTiming(0, { duration: PANEL_CLOSE_DURATION, easing: PANEL_EASING })
+  }
+
+  const panelAnimatedStyle = useAnimatedStyle(() => ({
+    height:   animatedHeight.value,
+    opacity:  animatedOpacity.value,
+    overflow: 'hidden',
+  }))
+
+  const onMeasurerLayout = (e: LayoutChangeEvent) => {
+    const h = Math.ceil(e.nativeEvent.layout.height) + PANEL_HEIGHT_BUFFER_PX
+    if (h > 0 && h !== contentHeight) setContentHeight(h)
+  }
+
+  return (
+    <>
+      {/* Hidden measurer — renders the panel at its NATURAL size off-screen
+          so we can capture its height for the animation. Necessary because
+          a child of a 0-height Animated.View doesn't get its layout pass
+          on Fabric/new arch (we proved that by trying single-tree June 1
+          2026 — pill expansion completely broke). */}
+      <View
+        style={{ position: 'absolute', opacity: 0, left: 0, right: 0, top: -9999 }}
+        pointerEvents="none"
+        onLayout={onMeasurerLayout}
+      >
+        {children}
+      </View>
+      {/* Visible panel — height animates 0 ↔ contentHeight. Because this is
+          the REAL height (not a fade-in overlay), all sibling views below
+          reflow naturally through layout. */}
+      <Animated.View style={panelAnimatedStyle}>
+        {children}
+      </Animated.View>
+    </>
+  )
+}
 import { Gesture, GestureDetector, ScrollView as GHScrollView } from 'react-native-gesture-handler'
 import { useLocalSearchParams, router } from 'expo-router'
 import { ChevronLeft, ChevronRight } from 'lucide-react-native'
@@ -752,30 +844,12 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
   // measured width differs (e.g., split-view, orientation, dynamic island
   // cutouts), but the difference is sub-pixel typically — the visible
   // 0 → N jump that caused the "hero card lags the rest of the page" is
-  // gone. Paired with layoutAnimEnabled below: if onLayout DOES refine
-  // by more than a pixel on first paint, the refinement still won't
-  // animate because LinearTransition is gated off until 2 RAFs after mount.
+  // gone. The previous `layoutAnimEnabled` first-paint gate is no longer
+  // needed: the info panel now uses direct-height-animation (ExpandPanel)
+  // which doesn't fight with the slot-width measurement on first paint.
   const PAGE_PADDING_HORIZONTAL = 16
   const winWidth = useWindowDimensions().width
   const [slotWidth, setSlotWidth] = useState(Math.max(0, winWidth - PAGE_PADDING_HORIZONTAL * 2))
-
-  // Disable LinearTransition on the very first paint of the hero body. The BW
-  // pager's slotWidth gets re-measured via onLayout — even with pre-seeding
-  // there can be a small adjustment, and we don't want the wrapper animating
-  // that adjustment as a layout change. After 2 requestAnimationFrames,
-  // layoutAnimEnabled flips true so subsequent layout changes (info panel
-  // open/close) still get the smooth slide.
-  const [layoutAnimEnabled, setLayoutAnimEnabled] = useState(false)
-  useEffect(() => {
-    let raf2: number | null = null
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => setLayoutAnimEnabled(true))
-    })
-    return () => {
-      cancelAnimationFrame(raf1)
-      if (raf2 != null) cancelAnimationFrame(raf2)
-    }
-  }, [])
 
   // Bodyweight consolidated: on first paint after the active tier is resolved
   // and the swipe carousel has measured itself, scroll to the active tier's
@@ -1156,10 +1230,8 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                       </Pressable>
                     </View>
 
-                    {bwTierInfoOpen && (
-                      <Animated.View
-                        entering={FadeInUp.duration(200)}
-                        exiting={FadeOutUp.duration(180)}
+                    <ExpandPanel open={bwTierInfoOpen}>
+                      <View
                         style={{
                           borderWidth: 1, borderColor: withAlpha(palette.blue[500], 0.15),
                           backgroundColor: alpha(colors.card, 0.6), borderRadius: 6,
@@ -1170,10 +1242,10 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                           {bwTierLabel(t)}
                         </Text>
                         <Text style={[s.tinyText, { lineHeight: 16 }]}>{bwWhyText(t)}</Text>
-                      </Animated.View>
-                    )}
+                      </View>
+                    </ExpandPanel>
 
-                    <Animated.View layout={layoutAnimEnabled ? LinearTransition.duration(200) : undefined} style={{ gap: 2 }}>
+                    <View style={{ gap: 2 }}>
                       {isGradT ? (
                         /* Graduated past this tier — simple one-liner; the
                            peak reps + graduation date + session count are
@@ -1364,7 +1436,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                           </View>
                         </>
                       )}
-                    </Animated.View>
+                    </View>
                   </NextTargetCallout>
                 </View>
               </View>
@@ -2148,12 +2220,11 @@ function AssistedMachineDetail({
                 </Pressable>
               </View>
 
-              {/* Inline expandable adp zone info panel — slides via Reanimated's
-                  FadeInUp / FadeOutUp layout animations. */}
-              {assistZoneInfoOpen && (
-                <Animated.View
-                  entering={FadeInUp.duration(200)}
-                  exiting={FadeOutUp.duration(180)}
+              {/* Inline expandable adp zone info panel — direct-height-animation
+                  (Pattern 5). The panel's real height grows/shrinks so sibling
+                  content below reflows naturally through layout. */}
+              <ExpandPanel open={assistZoneInfoOpen}>
+                <View
                   style={{
                     borderWidth: 1, borderColor: withAlpha(palette.blue[500], 0.15),
                     backgroundColor: alpha(colors.card, 0.6), borderRadius: 6,
@@ -2164,11 +2235,11 @@ function AssistedMachineDetail({
                     {selZoneCfg.label}
                   </Text>
                   <Text style={[s.tinyText, { lineHeight: 16 }]}>{selZoneCfg.whyText}</Text>
-                </Animated.View>
-              )}
+                </View>
+              </ExpandPanel>
 
               {/* Big number + RHS "assist" label. */}
-              <Animated.View layout={LinearTransition.duration(200)}>
+              <View>
                 <View style={s.targetRow}>
                   <View style={[s.calloutValueRow, { marginTop: 2 }]}>
                     <TickerNumber value={targetAssistance} fontSize={36} color={palette.blue[400]} fontWeight="700" />
@@ -2184,11 +2255,10 @@ function AssistedMachineDetail({
                     <Text style={s.plateChipText}>Target {targetBwPct}% BW</Text>
                   </View>
                 </View>
-              </Animated.View>
+              </View>
 
               {/* Thin separator + cue line. */}
-              <Animated.View
-                layout={LinearTransition.duration(200)}
+              <View
                 style={{
                   marginTop: 10, paddingTop: 10,
                   borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15),
@@ -2240,7 +2310,7 @@ function AssistedMachineDetail({
                     <Text style={s.tinyText}>Rest {selZoneCfg.restText} between sets</Text>
                   </>
                 )}
-              </Animated.View>
+              </View>
             </NextTargetCallout>
           )}
         </AnimateRise>
@@ -2687,24 +2757,9 @@ function CarryDetail({
       - CARRY_CARD_BORDER * 2,
   ))
 
-  // Disable LinearTransition on the very first paint of the carry hero. The
-  // carry pager's slotWidth gets re-measured via onLayout — even with
-  // pre-seeding there can be a small adjustment, and we don't want the
-  // inner hero-row LinearTransition wrappers animating that adjustment as
-  // a layout change. After 2 requestAnimationFrames, layoutAnimEnabled
-  // flips true so subsequent layout changes (info panel open/close, zone
-  // swipe slide) still get the smooth slide. Same pattern as BW.
-  const [carryLayoutAnimEnabled, setCarryLayoutAnimEnabled] = useState(false)
-  useEffect(() => {
-    let raf2: number | null = null
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => setCarryLayoutAnimEnabled(true))
-    })
-    return () => {
-      cancelAnimationFrame(raf1)
-      if (raf2 != null) cancelAnimationFrame(raf2)
-    }
-  }, [])
+  // The previous `carryLayoutAnimEnabled` first-paint gate is no longer needed:
+  // the inline info panel now uses direct-height-animation (ExpandPanel) which
+  // doesn't fight with the carry pager's slot-width measurement on first paint.
   // Tracks the slot index at the start of a manual drag so `onMomentumScrollEnd`
   // can clamp the result to ±1 (lock page swipe to a single page max).
   const dragStartIdxRef = useRef(0)
@@ -3105,20 +3160,18 @@ function CarryDetail({
                           </Pressable>
                         </View>
 
-                        {/* Inline expandable zone info panel — only on active slot. */}
-                        {isActiveSlot && carryZoneInfoOpen && (
-                          <Animated.View
-                            entering={FadeInUp.duration(200)}
-                            exiting={FadeOutUp.duration(180)}
-                            style={s.carryHeroZoneInfoPanel}
-                          >
+                        {/* Inline expandable zone info panel — only on active slot.
+                            Direct-height-animation (Pattern 5): sibling rows below
+                            reflow through layout when this panel grows/shrinks. */}
+                        <ExpandPanel open={isActiveSlot && carryZoneInfoOpen}>
+                          <View style={s.carryHeroZoneInfoPanel}>
                             <Text style={s.carryHeroZoneInfoTitle}>{zm.cfgZone.label}</Text>
                             <Text style={s.carryHeroZoneInfoBody}>{zm.cfgZone.whyText}</Text>
-                          </Animated.View>
-                        )}
+                          </View>
+                        </ExpandPanel>
 
                         {zm.hasTargets ? (
-                          <Animated.View layout={carryLayoutAnimEnabled ? LinearTransition.duration(200) : undefined} style={{ gap: 12 }}>
+                          <View style={{ gap: 12 }}>
                             {/* Weight row — W_target with delta vs. best on the right */}
                             <View style={s.carryHeroDualRow}>
                               <View style={s.calloutValueRow}>
@@ -3139,15 +3192,15 @@ function CarryDetail({
                                 {zm.distDeltaText}
                               </Text>
                             </View>
-                          </Animated.View>
+                          </View>
                         ) : (
                           <Text style={s.calloutSubText}>No qualifying efforts in this zone yet.</Text>
                         )}
 
                         {/* Thin separator + cue line. */}
-                        <Animated.View layout={carryLayoutAnimEnabled ? LinearTransition.duration(200) : undefined} style={s.carryHeroCueRow}>
+                        <View style={s.carryHeroCueRow}>
                           <Text style={s.carryHeroCueText}>{zm.cueLine}</Text>
-                        </Animated.View>
+                        </View>
                       </NextTargetCallout>
                     </View>
                   </View>
@@ -4762,13 +4815,11 @@ function StrengthDetail({
                 </Pressable>
               </View>
 
-              {/* Inline expandable adp zone info panel — slides down on open,
-                  slides up on close via Reanimated's FadeInUp / FadeOutUp
-                  layout animations. */}
-              {zoneInfoOpen && (
-                <Animated.View
-                  entering={FadeInUp.duration(200)}
-                  exiting={FadeOutUp.duration(180)}
+              {/* Inline expandable adp zone info panel — direct-height-animation
+                  (Pattern 5). The panel's real height grows/shrinks so the
+                  big-weight block below slides naturally via layout flow. */}
+              <ExpandPanel open={zoneInfoOpen}>
+                <View
                   style={{
                     borderWidth: 1, borderColor: withAlpha(palette.blue[500], 0.15),
                     backgroundColor: alpha(colors.card, 0.6), borderRadius: 6,
@@ -4779,15 +4830,11 @@ function StrengthDetail({
                     {selZoneCfg.label}
                   </Text>
                   <Text style={[s.tinyText, { lineHeight: 16 }]}>{selZoneCfg.whyText}</Text>
-                </Animated.View>
-              )}
+                </View>
+              </ExpandPanel>
 
-              {/* Big weight + equipment-specific RHS.
-                  Wrapped in an Animated.View with LinearTransition so that
-                  when the info panel above mounts/unmounts, the big-weight
-                  block slides into its new position smoothly instead of
-                  popping. */}
-              <Animated.View layout={LinearTransition.duration(200)}>
+              {/* Big weight + equipment-specific RHS. */}
+              <View>
               {equipmentType === 'barbell' && (
                 <>
                   <View style={s.targetRow}>
@@ -4873,13 +4920,10 @@ function StrengthDetail({
                   </Text>
                 </>
               )}
-              </Animated.View>
+              </View>
 
-              {/* Thin separator, then the prescription + rest line.
-                  Also LinearTransition-animated so it slides with the
-                  panel open/close. */}
-              <Animated.View
-                layout={LinearTransition.duration(200)}
+              {/* Thin separator, then the prescription + rest line. */}
+              <View
                 style={{
                   marginTop: 10, paddingTop: 10,
                   borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15),
@@ -4910,7 +4954,7 @@ function StrengthDetail({
                     <Text style={s.tinyText}>Rest {selZoneCfg.restText} between sets</Text>
                   </>
                 )}
-              </Animated.View>
+              </View>
             </NextTargetCallout>
           )}
         </AnimateRise>

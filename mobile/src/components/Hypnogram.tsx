@@ -17,15 +17,33 @@
  * Health reports gaps between stages (some sessions have a few unrecorded
  * minutes where the watch lost contact), the gaps render as background —
  * we deliberately don't paper over them with an interpolated Awake band.
+ *
+ * Rendering — GPU-backed via @shopify/react-native-skia (Pattern 9, see
+ * CLAUDE.md). All shapes paint inside a single <Canvas> on the GPU thread
+ * instead of nested <Svg>/<Rect>/<Line> primitives. Per-night a session may
+ * produce 50–200 stage segments; the previous SVG implementation rendered
+ * each Rect as its own native view + Yoga layout pass, which contributed
+ * to the Sleep page's draggy-scroll problem. Skia paints the entire band
+ * grid + segment array + row guides in one native draw call. No animations
+ * here (static visualization), so the port skips Reanimated entirely —
+ * the SkPath is built once per render via useMemo and handed to Skia.
+ *
+ * Axis labels (hour ticks) render as absolute-positioned RN <Text>
+ * overlays above the canvas. Skia has a text-rendering API but loading
+ * the Geist Mono font through it requires extra setup, and the labels
+ * are static + few (≤12 ticks), so RN Text is the right tier here.
  */
 
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   View, Text, Pressable, StyleSheet,
   type GestureResponderEvent,
   type LayoutChangeEvent,
 } from 'react-native'
-import Svg, { Rect, Line as SvgLine, Text as SvgText } from 'react-native-svg'
+import {
+  Canvas, Path, Group, Skia,
+  type SkPath,
+} from '@shopify/react-native-skia'
 import { colors, palette, withAlpha, fonts } from '../theme'
 import { useChartTooltipScope, useRegisterChartDismiss } from '../lib/chartTooltipScope'
 
@@ -91,6 +109,31 @@ function fmtSegDuration(s: number): string {
   return `${h}h ${r}m`
 }
 
+/**
+ * Build a Skia path for a rounded-rectangle segment block. Used in a
+ * useMemo for the per-segment paths — the geometry is static once the
+ * tap target / layout settles, so there's no per-frame work to push
+ * into a worklet. Skia.Path.Make() returns a fresh mutable path.
+ */
+function buildRoundedRectPath(
+  x: number, y: number, w: number, h: number, rx: number,
+): SkPath {
+  const path = Skia.Path.Make()
+  path.addRRect({
+    rect: { x, y, width: w, height: h },
+    rx, ry: rx,
+  })
+  return path
+}
+
+/** Build a 1px horizontal line path at (x1,y) → (x2,y). */
+function buildHLinePath(x1: number, x2: number, y: number): SkPath {
+  const path = Skia.Path.Make()
+  path.moveTo(x1, y)
+  path.lineTo(x2, y)
+  return path
+}
+
 export default function Hypnogram({
   segments,
   sessionStart,
@@ -110,38 +153,92 @@ export default function Hypnogram({
     setWidth(e.nativeEvent.layout.width)
   }
 
+  // ─── Geometry pre-compute (memoized so canvas paths don't rebuild
+  // on every tap — only on data / size changes). ──────────────────────
+  const geom = useMemo(() => {
+    const startMs = new Date(sessionStart).getTime()
+    const endMs   = new Date(sessionEnd).getTime()
+    const totalMs = Math.max(1, endMs - startMs)
+
+    const plotW = Math.max(0, width  - PADDING_X * 2)
+    const plotH = Math.max(0, height - PADDING_TOP - PADDING_BOTTOM)
+    const rowH  = plotH / ROW_ORDER.length
+
+    function xForMs(ms: number): number {
+      const t = (ms - startMs) / totalMs
+      return PADDING_X + Math.max(0, Math.min(1, t)) * plotW
+    }
+
+    function yForStage(stage: SleepStage): number {
+      const ix = ROW_ORDER.indexOf(stage)
+      return PADDING_TOP + ix * rowH
+    }
+
+    return { startMs, endMs, totalMs, plotW, plotH, rowH, xForMs, yForStage }
+  }, [sessionStart, sessionEnd, width, height])
+
+  // Segment geometry — recomputed only when segments / size change.
+  // Each entry carries the path + raw bounds (for hit testing) + colour.
+  const segGeom = useMemo(() => {
+    if (width === 0 || segments.length === 0) return []
+    return segments.map((seg) => {
+      const x1 = geom.xForMs(new Date(seg.start_at).getTime())
+      const x2 = geom.xForMs(new Date(seg.end_at).getTime())
+      const w  = Math.max(1, x2 - x1)
+      const y  = geom.yForStage(seg.stage) + 2
+      const h  = Math.max(1, geom.rowH - 4)
+      const color = STAGE_COLOR[seg.stage]
+      return {
+        x1, x2, y, h, w, color,
+        // Two paths per segment: fill + stroke (Skia draws each as a
+        // separate <Path>, so we precompute both shapes once).
+        path: buildRoundedRectPath(x1, y, w, h, 2),
+      }
+    })
+  }, [segments, width, geom])
+
+  // Row-guide paths — one horizontal hairline at the center of each row.
+  const guidePaths = useMemo(() => {
+    if (width === 0) return []
+    return ROW_ORDER.map((stage) => ({
+      stage,
+      path: buildHLinePath(
+        PADDING_X,
+        width - PADDING_X,
+        geom.yForStage(stage) + geom.rowH / 2,
+      ),
+    }))
+  }, [width, geom])
+
+  // Hour tick positions for the X-axis (every 2 hours or so).
+  const hourTicks = useMemo(() => {
+    if (width === 0 || segments.length === 0) return []
+    const out: { x: number; label: string }[] = []
+    const totalHours = geom.totalMs / 3600_000
+    const tickEvery  = totalHours > 9 ? 2 : 1   // 2-hour ticks for long sessions
+    const startHour  = new Date(geom.startMs)
+    startHour.setMinutes(0, 0, 0)
+    if (startHour.getTime() < geom.startMs) startHour.setHours(startHour.getHours() + 1)
+    for (let t = startHour.getTime(); t <= geom.endMs; t += tickEvery * 3600_000) {
+      const date  = new Date(t)
+      const hour  = date.getHours()
+      const label = `${((hour + 11) % 12) + 1}${hour < 12 ? 'a' : 'p'}`
+      out.push({ x: geom.xForMs(t), label })
+    }
+    return out
+  }, [segments, width, geom])
+
   if (segments.length === 0 || width === 0) {
     return <View style={{ height }} onLayout={onLayout} />
-  }
-
-  const startMs = new Date(sessionStart).getTime()
-  const endMs   = new Date(sessionEnd).getTime()
-  const totalMs = Math.max(1, endMs - startMs)
-
-  const plotW = Math.max(0, width  - PADDING_X * 2)
-  const plotH = Math.max(0, height - PADDING_TOP - PADDING_BOTTOM)
-
-  const rowH  = plotH / ROW_ORDER.length
-
-  function xForMs(ms: number): number {
-    const t = (ms - startMs) / totalMs
-    return PADDING_X + Math.max(0, Math.min(1, t)) * plotW
-  }
-
-  function yForStage(stage: SleepStage): number {
-    const ix = ROW_ORDER.indexOf(stage)
-    return PADDING_TOP + ix * rowH
   }
 
   // Pick the nearest segment for a tap X. Each segment owns its full
   // width window. If the tap falls in a gap between segments, returns
   // null (which dismisses the tooltip).
   function pickIx(x: number): number | null {
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i]
-      const x1 = xForMs(new Date(seg.start_at).getTime())
-      const x2 = xForMs(new Date(seg.end_at).getTime())
-      if (x >= x1 && x <= x2) return i
+    for (let i = 0; i < segGeom.length; i++) {
+      const g = segGeom[i]
+      if (x >= g.x1 && x <= g.x2) return i
     }
     return null
   }
@@ -152,79 +249,83 @@ export default function Hypnogram({
     setActiveIx(prev => (ix === null || prev === ix) ? null : ix)
   }
 
-  // Compute hour tick positions for the X-axis (every 2 hours or so).
-  const hourTicks: { x: number; label: string }[] = []
-  {
-    const totalHours = totalMs / 3600_000
-    const tickEvery  = totalHours > 9 ? 2 : 1   // 2-hour ticks for long sessions
-    const startHour  = new Date(startMs)
-    startHour.setMinutes(0, 0, 0)
-    if (startHour.getTime() < startMs) startHour.setHours(startHour.getHours() + 1)
-    for (let t = startHour.getTime(); t <= endMs; t += tickEvery * 3600_000) {
-      const date  = new Date(t)
-      const hour  = date.getHours()
-      const label = `${((hour + 11) % 12) + 1}${hour < 12 ? 'a' : 'p'}`
-      hourTicks.push({ x: xForMs(t), label })
-    }
-  }
-
   const active = activeIx != null ? segments[activeIx] : null
+
+  // Static colors — Skia accepts CSS-style color strings directly.
+  const guideColor = withAlpha('#ffffff', 0.04)
 
   return (
     <View>
       <View style={{ height }} onLayout={onLayout}>
-        <Svg width={width} height={height}>
+        {/* Single Skia canvas paints the entire band grid + segments in
+            one native draw call. Replaces the per-segment <Rect> + per-
+            row <Line> tree from the old react-native-svg implementation.
+            See Pattern 9 in CLAUDE.md. */}
+        <Canvas style={{ width, height }}>
           {/* Faint row guides — each stage row gets a horizontal hairline
               at the row's baseline so the eye can scan stages even where
               no segment is drawn. */}
-          {ROW_ORDER.map((stage) => (
-            <SvgLine
-              key={`guide-${stage}`}
-              x1={PADDING_X} x2={width - PADDING_X}
-              y1={yForStage(stage) + rowH / 2}
-              y2={yForStage(stage) + rowH / 2}
-              stroke={withAlpha('#ffffff', 0.04)}
-              strokeWidth={1}
-            />
-          ))}
+          <Group>
+            {guidePaths.map((g) => (
+              <Path
+                key={`guide-${g.stage}`}
+                path={g.path}
+                color={guideColor}
+                style="stroke"
+                strokeWidth={1}
+              />
+            ))}
+          </Group>
 
           {/* Each segment renders as a coloured rounded rectangle in its
               stage's row. Active segment gets a brighter fill + thin
-              outline so the user can see which one they tapped. */}
-          {segments.map((seg, i) => {
-            const x1 = xForMs(new Date(seg.start_at).getTime())
-            const x2 = xForMs(new Date(seg.end_at).getTime())
-            const w  = Math.max(1, x2 - x1)
-            const y  = yForStage(seg.stage) + 2
-            const h  = Math.max(1, rowH - 4)
-            const color = STAGE_COLOR[seg.stage]
-            const isActive = i === activeIx
-            return (
-              <Rect
-                key={`seg-${i}`}
-                x={x1} y={y} width={w} height={h} rx={2}
-                fill={withAlpha(color, isActive ? 0.95 : 0.75)}
-                stroke={isActive ? color : 'transparent'}
-                strokeWidth={isActive ? 1.5 : 0}
-              />
-            )
-          })}
+              outline so the user can see which one they tapped. Every
+              block gets a visible edge so the user can count + size-
+              compare segments at a glance. Active block bumps to the
+              full colour at 1.5px; idle blocks render a thinner inset
+              border in the same hue at ~60% alpha for outline definition. */}
+          <Group>
+            {segGeom.map((g, i) => {
+              const isActive = i === activeIx
+              return (
+                <Group key={`seg-${i}`}>
+                  {/* Fill */}
+                  <Path
+                    path={g.path}
+                    color={withAlpha(g.color, isActive ? 0.95 : 0.75)}
+                  />
+                  {/* Stroke outline (drawn over the fill) */}
+                  <Path
+                    path={g.path}
+                    color={isActive ? g.color : withAlpha(g.color, 0.6)}
+                    style="stroke"
+                    strokeWidth={isActive ? 1.5 : 1}
+                  />
+                </Group>
+              )
+            })}
+          </Group>
+        </Canvas>
 
-          {/* X-axis hour ticks */}
-          {hourTicks.map((t, i) => (
-            <SvgText
-              key={`ax-${i}`}
-              x={t.x}
-              y={height - 4}
-              fill={colors.mutedForeground}
-              fontSize={9}
-              fontFamily={fonts.mono[500]}
-              textAnchor="middle"
-            >
-              {t.label}
-            </SvgText>
-          ))}
-        </Svg>
+        {/* X-axis hour ticks — RN <Text> overlays above the canvas.
+            Static labels (≤12 ticks), no per-frame animation, so RN
+            Text is the right tier vs. loading a Skia text shaper.
+            Centered on each tick's x via width=24 + left = x-12. */}
+        {hourTicks.map((t, i) => (
+          <Text
+            key={`ax-${i}`}
+            style={[
+              s.tickLabel,
+              {
+                left:  t.x - 12,
+                top:   height - 14,
+                width: 24,
+              },
+            ]}
+          >
+            {t.label}
+          </Text>
+        ))}
 
         {/* Touch overlay covers the band area only (not the axis row). */}
         <Pressable
@@ -264,6 +365,13 @@ export default function Hypnogram({
 }
 
 const s = StyleSheet.create({
+  tickLabel: {
+    position:   'absolute',
+    color:      colors.mutedForeground,
+    fontSize:   9,
+    fontFamily: fonts.mono[500],
+    textAlign:  'center',
+  },
   tooltip: {
     marginTop:       6,
     flexDirection:   'row',

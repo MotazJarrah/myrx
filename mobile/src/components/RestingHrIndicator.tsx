@@ -9,11 +9,20 @@
  * Bands are derived from peer-reviewed normative tables (Topend Sports /
  * Cooper Clinic / ACSM compilations). They differ by ~1 bpm between
  * sources; this implementation uses median values.
+ *
+ * Skia-migrated 2026-05-31. Gauge rendering moved off `react-native-svg`
+ * onto `@shopify/react-native-skia` (single GPU-backed <Canvas>) to
+ * follow Pattern 9 (see CLAUDE.md). Reference: mobile/src/components/SleepClock.tsx.
+ * The tap-to-pin band popover + diagonal labels stay as RN overlays
+ * above the canvas — no animation, no need for Skia text.
  */
 
-import { useCallback, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { View, Text, Pressable, StyleSheet, type GestureResponderEvent } from 'react-native'
-import Svg, { Rect, Polygon } from 'react-native-svg'
+import {
+  Canvas, Path, Skia, Group,
+  type SkPath,
+} from '@shopify/react-native-skia'
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated'
 import { colors, palette, withAlpha, alpha, fonts } from '../theme'
 import { useChartTooltipScope, useRegisterChartDismiss } from '../lib/chartTooltipScope'
@@ -97,6 +106,76 @@ export function classifyResting(bpm: number, bands: RestingBand[]): RestingBand 
   return bands[bands.length - 1]
 }
 
+// ── Skia helpers ──────────────────────────────────────────────────────────
+//
+// Per Pattern 9 / SleepClock.tsx, we build Skia paths programmatically
+// rather than parsing SVG strings. These two helpers cover all the shapes
+// the gauge needs: a (possibly per-corner-rounded) rect for each segment,
+// and a triangle marker for the user's exact-bpm position.
+
+/**
+ * Build a Skia path for an axis-aligned rect with per-corner rounding.
+ * Used for the 7 spectrum segments — only the very first segment rounds
+ * its left corners (rx=4), only the very last rounds its right corners
+ * (ry=4 in SVG terms, which is functionally "round the right side").
+ * Middle segments are squared on both sides.
+ */
+function buildRectPath(
+  x: number, y: number, w: number, h: number,
+  rTL: number, rTR: number, rBR: number, rBL: number,
+): SkPath {
+  const path = Skia.Path.Make()
+  // No rounding → straight rectangle.
+  if (rTL === 0 && rTR === 0 && rBR === 0 && rBL === 0) {
+    path.addRect({ x, y, width: w, height: h })
+    return path
+  }
+  // Per-corner rounding via manual move+arc construction. Skia's
+  // addRRect accepts uniform corner radii; for per-corner we build it
+  // by hand so the SVG's selective rounding pattern is preserved.
+  path.moveTo(x + rTL, y)
+  path.lineTo(x + w - rTR, y)
+  if (rTR > 0) {
+    path.arcToOval(
+      { x: x + w - 2 * rTR, y: y, width: 2 * rTR, height: 2 * rTR },
+      -90, 90, false,
+    )
+  }
+  path.lineTo(x + w, y + h - rBR)
+  if (rBR > 0) {
+    path.arcToOval(
+      { x: x + w - 2 * rBR, y: y + h - 2 * rBR, width: 2 * rBR, height: 2 * rBR },
+      0, 90, false,
+    )
+  }
+  path.lineTo(x + rBL, y + h)
+  if (rBL > 0) {
+    path.arcToOval(
+      { x: x, y: y + h - 2 * rBL, width: 2 * rBL, height: 2 * rBL },
+      90, 90, false,
+    )
+  }
+  path.lineTo(x, y + rTL)
+  if (rTL > 0) {
+    path.arcToOval(
+      { x: x, y: y, width: 2 * rTL, height: 2 * rTL },
+      180, 90, false,
+    )
+  }
+  path.close()
+  return path
+}
+
+/** Triangle marker path — apex at (cx, apexY), base at (cx ± halfWidth, baseY). */
+function buildTrianglePath(cx: number, apexY: number, baseY: number, halfWidth: number): SkPath {
+  const path = Skia.Path.Make()
+  path.moveTo(cx - halfWidth, baseY)
+  path.lineTo(cx + halfWidth, baseY)
+  path.lineTo(cx, apexY)
+  path.close()
+  return path
+}
+
 // ── Spectrum gauge ────────────────────────────────────────────────────────
 
 function SpectrumGauge({
@@ -114,6 +193,47 @@ function SpectrumGauge({
   const dismiss = useCallback(() => setActiveBandIx(null), [])
   useRegisterChartDismiss(dismiss)
   const { markChartTouch } = useChartTooltipScope()
+
+  // Pre-build static segment paths. Each rect's rounding mirrors the
+  // original SVG: first segment rounds its left edge (rx=4 in SVG),
+  // last segment rounds its right edge (ry=4 in SVG). The earlier SVG
+  // used a slightly weird rx/ry combo (rx on first, ry on last) — we
+  // preserve the visual effect: rounded outer-left + rounded outer-right
+  // on the spectrum, square in between.
+  const segmentPaths = useMemo(() => {
+    if (width === 0) return [] as SkPath[]
+    const segW = width / bands.length
+    return bands.map((_, i) => {
+      const isFirst = i === 0
+      const isLast  = i === bands.length - 1
+      // Match original: rx={i === 0 ? 4 : 0}, ry={i === bands.length - 1 ? 4 : 0}.
+      // Translated to per-corner: first rect → round its left corners,
+      // last rect → round its right corners.
+      const rTL = isFirst ? 4 : 0
+      const rBL = isFirst ? 4 : 0
+      const rTR = isLast  ? 4 : 0
+      const rBR = isLast  ? 4 : 0
+      return buildRectPath(i * segW, 8, segW - 1, height, rTL, rTR, rBR, rBL)
+    })
+  }, [width, bands, height])
+
+  // Highlight stroke paths — same geometry as segments but stroked
+  // inside the segment by 1 px on each side (matches SVG x+1 / y+1).
+  const highlightPaths = useMemo(() => {
+    if (width === 0) return [] as SkPath[]
+    const segW = width / bands.length
+    return bands.map((_, i) => {
+      const isFirst = i === 0
+      const isLast  = i === bands.length - 1
+      const rTL = isFirst ? 2 : 0
+      const rBL = isFirst ? 2 : 0
+      const rTR = isLast  ? 2 : 0
+      const rBR = isLast  ? 2 : 0
+      // Inset by 1 px on each side, height by 2 px → matches the
+      // original SVG's inset (+1 x/y, width-3, height-2).
+      return buildRectPath(i * segW + 1, 9, segW - 3, height - 2, rTL, rTR, rBR, rBL)
+    })
+  }, [width, bands, height])
 
   if (width === 0) {
     return (
@@ -138,6 +258,10 @@ function SpectrumGauge({
   const tInSeg   = Math.max(0, Math.min(1, (bpm - segLow) / segRange))
   const markerX  = (userIx + tInSeg) * segW
 
+  // Triangle marker — apex at (markerX, 8) pointing down toward the
+  // segment top, base spans 12 px at y=0.
+  const markerPath = buildTrianglePath(markerX, 8, 0, 6)
+
   // Tap handler — converts touch X into a band index. Toggles off when
   // the same segment is tapped twice. markChartTouch() prevents the
   // page-level dismisser from firing on this same touch.
@@ -160,55 +284,49 @@ function SpectrumGauge({
   return (
     <View onLayout={e => setWidth(e.nativeEvent.layout.width)}>
       <View style={{ position: 'relative' }}>
-        <Svg width={width} height={height + 8}>
+        {/* Single Skia canvas paints the entire gauge natively. No
+            <Defs> needed — colours are passed inline per <Path>. */}
+        <Canvas style={{ width, height: height + 8 }}>
           {/* Seven coloured segments — matched to the chart band colours
               (0.90 idle / 1.00 highlighted). No dimming overlay; the
               gradient drop-shadow was previously washing the colours
               into "dull pastel" territory. */}
-          {bands.map((b, i) => {
-            const isCurrent  = i === userIx
-            const isSelected = activeBandIx === i
-            const fillAlpha  = isCurrent || isSelected ? 1.00 : 0.90
-            return (
-              <Rect
-                key={b.key}
-                x={i * segW}
-                y={8}
-                width={segW - 1}
-                height={height}
-                fill={withAlpha(b.color, fillAlpha)}
-                rx={i === 0 ? 4 : 0}
-                ry={i === bands.length - 1 ? 4 : 0}
-              />
-            )
-          })}
+          <Group>
+            {bands.map((b, i) => {
+              const isCurrent  = i === userIx
+              const isSelected = activeBandIx === i
+              const fillAlpha  = isCurrent || isSelected ? 1.00 : 0.90
+              return (
+                <Path
+                  key={b.key}
+                  path={segmentPaths[i]}
+                  color={withAlpha(b.color, fillAlpha)}
+                />
+              )
+            })}
+          </Group>
           {/* Inset white border on the current / selected band — gives a
               subtle "lit-up" feel without changing the segment's colour
               identity. */}
-          {bands.map((b, i) => {
-            const isCurrent  = i === userIx
-            const isSelected = activeBandIx === i
-            if (!isCurrent && !isSelected) return null
-            return (
-              <Rect
-                key={`hl-${b.key}`}
-                x={i * segW + 1}
-                y={9}
-                width={segW - 3}
-                height={height - 2}
-                fill="none"
-                stroke="#ffffff"
-                strokeOpacity={isSelected ? 0.55 : 0.30}
-                strokeWidth={1}
-                rx={2}
-              />
-            )
-          })}
-          <Polygon
-            points={`${markerX - 6},0 ${markerX + 6},0 ${markerX},8`}
-            fill={colors.foreground}
-          />
-        </Svg>
+          <Group>
+            {bands.map((b, i) => {
+              const isCurrent  = i === userIx
+              const isSelected = activeBandIx === i
+              if (!isCurrent && !isSelected) return null
+              return (
+                <Path
+                  key={`hl-${b.key}`}
+                  path={highlightPaths[i]}
+                  color={`rgba(255,255,255,${isSelected ? 0.55 : 0.30})`}
+                  style="stroke"
+                  strokeWidth={1}
+                />
+              )
+            })}
+          </Group>
+          {/* Triangle marker — points down at the user's exact bpm position. */}
+          <Path path={markerPath} color={colors.foreground} />
+        </Canvas>
 
         {/* Invisible tap overlay — clicks anywhere on the bar select that
             band's segment. Single Pressable + locationX math is simpler

@@ -17,11 +17,8 @@
  */
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, Pressable, ScrollView, StyleSheet, useWindowDimensions } from 'react-native'
+import { View, Text, Pressable, ScrollView, StyleSheet, useWindowDimensions, type LayoutChangeEvent } from 'react-native'
 import Animated, {
-  FadeInUp,
-  FadeOutUp,
-  LinearTransition,
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
@@ -29,7 +26,23 @@ import Animated, {
   withTiming,
   withDelay,
   runOnJS,
+  Easing,
 } from 'react-native-reanimated'
+
+// Pattern 5 — Inline expansion panel constants (LOCKED May 31 2026).
+// Every info-pill expansion in this file uses DIRECT HEIGHT ANIMATION:
+//   1. Hidden measurer renders the panel content off-screen and reports
+//      natural layout height via onLayout.
+//   2. SharedValue `animatedHeight` drives the visible panel's actual
+//      `height` style — when the flag flips, withTiming animates from
+//      0 → contentHeight (or reverse) over 240ms / 200ms close.
+//   3. Sibling views below the panel reflow naturally via React Native's
+//      normal layout pass — no LayoutAnimation, no LinearTransition,
+//      no cross-system fighting. Frame-perfect cascade for free.
+//   4. Opacity animates in parallel so the panel doesn't pop visually.
+const PANEL_OPEN_DURATION  = 240
+const PANEL_CLOSE_DURATION = 200
+const PANEL_EASING         = Easing.bezier(0.16, 1, 0.3, 1)  // out-quint, same curve as AnimateRise
 import { Gesture, GestureDetector, ScrollView as GHScrollView } from 'react-native-gesture-handler'
 import { useLocalSearchParams, router } from 'expo-router'
 import { ChevronLeft, ChevronRight, Info } from 'lucide-react-native'
@@ -1373,6 +1386,77 @@ function renderCardioInnerDetail(params: {
   return <PaceDetail activity={activity} efforts={efforts} distUnit={distUnit} onDelete={onDelete} onAddEffort={onAddEffort} hideHeader={hideHeader} />
 }
 
+// Safety buffer absorbing any clipped-last-line on width-mismatch between
+// the off-screen measurer and the visible panel (the panel's card chrome
+// makes the extra space look like normal bottom padding).
+const PANEL_HEIGHT_BUFFER_PX = 16
+
+// ── ZoneInfoExpansionPanel ───────────────────────────────────────────────────
+// Pattern 5 (LOCKED — direct-height-animation, hidden-measurer).
+//
+// Hidden-measurer is necessary because Fabric/new arch skips layout passes
+// for children of 0-height Animated.Views — a single-tree inner-measurer
+// fails to fire onLayout and the panel can never open. We proved this on
+// June 1 2026; the inner-measurer attempt broke pill expansion entirely.
+// The PANEL_HEIGHT_BUFFER_PX (16 px) absorbs the small width-mismatch clip
+// that can happen in deeply-nested flex layouts where the absolute
+// measurer's content width slightly differs from the visible panel's.
+function ZoneInfoExpansionPanel({
+  open, title, body,
+}: {
+  open:  boolean
+  title: string
+  body:  string
+}) {
+  const [contentHeight, setContentHeight] = useState(0)
+  const animatedHeight  = useSharedValue(0)
+  const animatedOpacity = useSharedValue(0)
+
+  // Drive the animation off the open flag + measured height. We only
+  // animate UP to contentHeight once we've measured it; before that
+  // the measurer is still computing.
+  if (open && contentHeight > 0) {
+    animatedHeight.value  = withTiming(contentHeight, { duration: PANEL_OPEN_DURATION,  easing: PANEL_EASING })
+    animatedOpacity.value = withTiming(1,             { duration: PANEL_OPEN_DURATION,  easing: PANEL_EASING })
+  } else if (!open) {
+    animatedHeight.value  = withTiming(0, { duration: PANEL_CLOSE_DURATION, easing: PANEL_EASING })
+    animatedOpacity.value = withTiming(0, { duration: PANEL_CLOSE_DURATION, easing: PANEL_EASING })
+  }
+
+  const panelAnimatedStyle = useAnimatedStyle(() => ({
+    height:   animatedHeight.value,
+    opacity:  animatedOpacity.value,
+    overflow: 'hidden',
+  }))
+
+  const onMeasurerLayout = (e: LayoutChangeEvent) => {
+    const h = Math.ceil(e.nativeEvent.layout.height) + PANEL_HEIGHT_BUFFER_PX
+    if (h > 0 && h !== contentHeight) setContentHeight(h)
+  }
+
+  const panelContent = (
+    <View style={s.heroInfoPanel}>
+      <Text style={s.heroInfoPanelTitle}>{title}</Text>
+      <Text style={s.heroInfoPanelBody}>{body}</Text>
+    </View>
+  )
+
+  return (
+    <>
+      <View
+        style={{ position: 'absolute', opacity: 0, left: 0, right: 0, top: -9999 }}
+        pointerEvents="none"
+        onLayout={onMeasurerLayout}
+      >
+        {panelContent}
+      </View>
+      <Animated.View style={panelAnimatedStyle}>
+        {panelContent}
+      </Animated.View>
+    </>
+  )
+}
+
 export default function CardioDetailRoute() {
   const { activity: rawActivity } = useLocalSearchParams<{ activity: string }>()
   const activity = typeof rawActivity === 'string' ? decodeURIComponent(rawActivity) : ''
@@ -1769,20 +1853,11 @@ function PaceDetail({
               </Pressable>
             </View>
 
-            {zoneInfoOpen && (
-              <Animated.View
-                entering={FadeInUp.duration(200)}
-                exiting={FadeOutUp.duration(180)}
-                style={s.heroInfoPanel}
-              >
-                <Text style={s.heroInfoPanelTitle}>
-                  {CARDIO_ZONE_CONFIG[selectedStep.zone].label} · {CARDIO_ZONE_CONFIG[selectedStep.zone].hrPctRange}
-                </Text>
-                <Text style={s.heroInfoPanelBody}>
-                  {CARDIO_ZONE_CONFIG[selectedStep.zone].whyText}
-                </Text>
-              </Animated.View>
-            )}
+            <ZoneInfoExpansionPanel
+              open={zoneInfoOpen}
+              title={`${CARDIO_ZONE_CONFIG[selectedStep.zone].label} · ${CARDIO_ZONE_CONFIG[selectedStep.zone].hrPctRange}`}
+              body={CARDIO_ZONE_CONFIG[selectedStep.zone].whyText}
+            />
 
             {/* Three rows — value on the left (big amber), descriptor on the
                 right (small muted). Mirrors strength's "value + descriptor"
@@ -1791,7 +1866,7 @@ function PaceDetail({
                 intensity feel ("conversation pace", "comfortably hard", "max
                 sustainable"); for the time and per-unit rows it identifies
                 the unit context. */}
-            <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+            <View style={{ gap: 14 }}>
               {/* Each big-value row uses TickerNumber so digits roll
                   slot-machine style when the selected step changes (e.g.,
                   tapping a different tile). Non-digit characters (×, m,
@@ -1858,21 +1933,18 @@ function PaceDetail({
                   </Text>
                 </View>
               )}
-            </Animated.View>
+            </View>
 
             {/* Cue — work + pace sentence on line 1. Rest descriptor on its
                 own line below (only for threshold / vo2 — endurance has no
                 rest line). Splitting them makes the rest cue much more
                 visible than when it was buried mid-sentence. */}
-            <Animated.View
-              layout={LinearTransition.duration(200)}
-              style={s.heroSep}
-            >
+            <View style={s.heroSep}>
               <Text style={s.heroCue}>{selectedStep.cue}</Text>
               {selectedStep.restLine ? (
                 <Text style={s.heroRestLine}>{selectedStep.restLine}</Text>
               ) : null}
-            </Animated.View>
+            </View>
           </View>
 
           {/* Science attribution */}
@@ -2580,22 +2652,13 @@ function SwimmingDetail({
               </Pressable>
             </View>
 
-            {zoneInfoOpen && (
-              <Animated.View
-                entering={FadeInUp.duration(200)}
-                exiting={FadeOutUp.duration(180)}
-                style={s.heroInfoPanel}
-              >
-                <Text style={s.heroInfoPanelTitle}>
-                  {CARDIO_ZONE_CONFIG[selectedStep.zone].label} · {CARDIO_ZONE_CONFIG[selectedStep.zone].hrPctRange}
-                </Text>
-                <Text style={s.heroInfoPanelBody}>
-                  {CARDIO_ZONE_CONFIG[selectedStep.zone].whyText}
-                </Text>
-              </Animated.View>
-            )}
+            <ZoneInfoExpansionPanel
+              open={zoneInfoOpen}
+              title={`${CARDIO_ZONE_CONFIG[selectedStep.zone].label} · ${CARDIO_ZONE_CONFIG[selectedStep.zone].hrPctRange}`}
+              body={CARDIO_ZONE_CONFIG[selectedStep.zone].whyText}
+            />
 
-            <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+            <View style={{ gap: 14 }}>
               {/* Row 1 — Work (reps × distance, e.g. "8 × 100m") */}
               <View style={s.heroValueRow}>
                 <TickerNumber
@@ -2634,15 +2697,12 @@ function SwimmingDetail({
                   leave every
                 </Text>
               </View>
-            </Animated.View>
+            </View>
 
             {/* Full coaching cue */}
-            <Animated.View
-              layout={LinearTransition.duration(200)}
-              style={s.heroSep}
-            >
+            <View style={s.heroSep}>
               <Text style={s.heroCue}>{selectedStep.cue}</Text>
-            </Animated.View>
+            </View>
           </View>
 
           {/* Science attribution — Maglischo + Counsilman + Costill are the
@@ -2903,18 +2963,11 @@ function BeatYourBestDetail({
           </Pressable>
         </View>
 
-        {infoOpen && (
-          <Animated.View
-            entering={FadeInUp.duration(200)}
-            exiting={FadeOutUp.duration(180)}
-            style={s.heroInfoPanel}
-          >
-            <Text style={s.heroInfoPanelTitle}>Beat your best</Text>
-            <Text style={s.heroInfoPanelBody}>
-              The simplest form of progression — go a little faster than your best at each canonical distance, every time you train. Small consistent improvements compound. Each row shows what to chase next.
-            </Text>
-          </Animated.View>
-        )}
+        <ZoneInfoExpansionPanel
+          open={infoOpen}
+          title="Beat your best"
+          body="The simplest form of progression — go a little faster than your best at each canonical distance, every time you train. Small consistent improvements compound. Each row shows what to chase next."
+        />
 
         <View style={{ marginTop: 12, gap: 6 }}>
           {distanceTargets.map(t => (
@@ -3514,22 +3567,13 @@ function AirBikeDetail({
                 </Pressable>
               </View>
 
-              {zoneInfoOpen && (
-                <Animated.View
-                  entering={FadeInUp.duration(200)}
-                  exiting={FadeOutUp.duration(180)}
-                  style={s.heroInfoPanel}
-                >
-                  <Text style={s.heroInfoPanelTitle}>
-                    {selectedCfg.label}
-                  </Text>
-                  <Text style={s.heroInfoPanelBody}>
-                    {selectedCfg.whyText}
-                  </Text>
-                </Animated.View>
-              )}
+              <ZoneInfoExpansionPanel
+                open={zoneInfoOpen}
+                title={selectedCfg.label}
+                body={selectedCfg.whyText}
+              />
 
-              <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+              <View style={{ gap: 14 }}>
                 <View style={s.heroValueRow}>
                   <TickerNumber
                     value={selectedRx.shortWork}
@@ -3565,14 +3609,11 @@ function AirBikeDetail({
                     {selectedRx.reps > 1 ? 'est. per rep' : 'est. total'}
                   </Text>
                 </View>
-              </Animated.View>
+              </View>
 
-              <Animated.View
-                layout={LinearTransition.duration(200)}
-                style={s.heroSep}
-              >
+              <View style={s.heroSep}>
                 <Text style={s.heroCue}>{selectedCue}</Text>
-              </Animated.View>
+              </View>
             </View>
           </View>
         </GestureDetector>
@@ -3904,18 +3945,13 @@ function RuckingDetail({
                 </Pressable>
               </View>
 
-              {zoneInfoOpen && (
-                <Animated.View
-                  entering={FadeInUp.duration(200)}
-                  exiting={FadeOutUp.duration(180)}
-                  style={s.heroInfoPanel}
-                >
-                  <Text style={s.heroInfoPanelTitle}>{selectedCfg.label}</Text>
-                  <Text style={s.heroInfoPanelBody}>{selectedCfg.whyText}</Text>
-                </Animated.View>
-              )}
+              <ZoneInfoExpansionPanel
+                open={zoneInfoOpen}
+                title={selectedCfg.label}
+                body={selectedCfg.whyText}
+              />
 
-              <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+              <View style={{ gap: 14 }}>
                 <View style={s.heroValueRow}>
                   <TickerNumber value={`${selectedZone.W_target} ${wUnit}`} fontSize={30} color={palette.amber[400]} fontWeight="700" />
                   <Text style={s.heroValueDescriptor} numberOfLines={1}>{selectedZone.weightDeltaText}</Text>
@@ -3924,11 +3960,11 @@ function RuckingDetail({
                   <TickerNumber value={`${selectedZone.D_target} ${dUnit}`} fontSize={30} color={palette.amber[400]} fontWeight="700" />
                   <Text style={s.heroValueDescriptor} numberOfLines={1}>{selectedZone.distDeltaText}</Text>
                 </View>
-              </Animated.View>
+              </View>
 
-              <Animated.View layout={LinearTransition.duration(200)} style={s.heroSep}>
+              <View style={s.heroSep}>
                 <Text style={s.heroCue}>{selectedZone.cueLine}</Text>
-              </Animated.View>
+              </View>
             </View>
           </View>
         </GestureDetector>
@@ -4406,18 +4442,13 @@ function StairMillDetail({
               </Pressable>
             </View>
 
-            {zoneInfoOpen && (
-              <Animated.View
-                entering={FadeInUp.duration(200)}
-                exiting={FadeOutUp.duration(180)}
-                style={s.heroInfoPanel}
-              >
-                <Text style={s.heroInfoPanelTitle}>{selectedCfg.label}</Text>
-                <Text style={s.heroInfoPanelBody}>{selectedCfg.whyText}</Text>
-              </Animated.View>
-            )}
+            <ZoneInfoExpansionPanel
+              open={zoneInfoOpen}
+              title={selectedCfg.label}
+              body={selectedCfg.whyText}
+            />
 
-            <Animated.View layout={LinearTransition.duration(200)} style={{ gap: 14 }}>
+            <View style={{ gap: 14 }}>
               <View style={s.heroValueRow}>
                 <TickerNumber value={selectedRx.shortWork} fontSize={30} color={palette.amber[400]} fontWeight="700" />
                 <Text style={s.heroValueDescriptor} numberOfLines={1}>
@@ -4434,11 +4465,11 @@ function StairMillDetail({
                 <TickerNumber value={`${selectedRx.targetFpm.toFixed(1)} fl/min`} fontSize={30} color={palette.amber[400]} fontWeight="700" />
                 <Text style={s.heroValueDescriptor} numberOfLines={1}>climb rate</Text>
               </View>
-            </Animated.View>
+            </View>
 
-            <Animated.View layout={LinearTransition.duration(200)} style={s.heroSep}>
+            <View style={s.heroSep}>
               <Text style={s.heroCue}>{selectedCue}</Text>
-            </Animated.View>
+            </View>
           </View>
 
           <Text style={[s.tinyText, { marginTop: 10 }]}>

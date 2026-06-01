@@ -35,14 +35,31 @@
 import { useCallback, useMemo, useState } from 'react'
 import {
   View, Text, ScrollView, StyleSheet,
-  RefreshControl, Pressable,
+  RefreshControl, Pressable, type LayoutChangeEvent,
 } from 'react-native'
-import Animated, { FadeInUp, FadeOutUp, LinearTransition } from 'react-native-reanimated'
+import Animated, {
+  useSharedValue, useAnimatedStyle, withTiming, Easing,
+} from 'react-native-reanimated'
+
+// Animation timings for the pill expansion. The panel's HEIGHT animates
+// from 0 → measured-content-height (and back), which means every view
+// below it cascades naturally via React Native's normal layout flow —
+// no layout-animation system needed. Sibling DimensionRows + Last Sleep
+// Cycle card + Duration trend card all get pushed down by the panel's
+// real height growing, not by a separate layout-animation pass.
+const PANEL_OPEN_DURATION  = 240
+const PANEL_CLOSE_DURATION = 200
+const PANEL_EASING         = Easing.bezier(0.16, 1, 0.3, 1)  // out-quint, same curve as AnimateRise
 import { useFocusEffect } from 'expo-router'
 import {
   Moon, Clock, Activity, BedDouble, Brain, Info,
 } from 'lucide-react-native'
-import Svg, { Path, Line as SvgLine } from 'react-native-svg'
+// Skia-migrated 2026-05-31. The inline SparkLine + MonthlySparkline charts
+// previously used react-native-svg <Svg>/<Path>/<Line>; they now render via
+// @shopify/react-native-skia for GPU-backed paint, matching the rest of the
+// Sleep page (SleepClock + Hypnogram already on Skia). See Pattern 9 in
+// CLAUDE.md + mobile/src/components/SleepClock.tsx as the canonical reference.
+import { Canvas, Path as SkiaPath, Skia } from '@shopify/react-native-skia'
 
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
@@ -82,12 +99,15 @@ type Status = 'ok' | 'warn' | 'fail' | 'unknown'
 
 interface DimensionResult {
   status:   Status
-  /** Raw current value (seconds for time dims, varies by dim). */
-  current:  number | null
-  /** Target value (matching units). */
-  target:   number | null
   headline: string
   action:   string
+  /**
+   * Per-stat info pill expansion text. Strictly the SCIENCE/MECHANISM
+   * behind this dimension — no target values, no current values, no
+   * coaching actions (those live elsewhere on the row). Explains "what
+   * this stat is and why it matters" only.
+   */
+  whyText:  string
   spark:    (number | null)[]
   /**
    * Y value of the target reference line drawn across the sparkline.
@@ -97,12 +117,6 @@ interface DimensionResult {
    * Null = no target line drawn.
    */
   sparkTarget: number | null
-  /**
-   * Status of the most recent night, computed per-dim using the same
-   * classifier as the dim itself. Drives the end-of-line dot color so the
-   * user sees "where am I right now" at a glance. Null = no recent data.
-   */
-  lastNightStatus: Status | null
 }
 
 // ── Time-based classifiers (locked May 31 2026) ──────────────────────────────
@@ -271,10 +285,6 @@ function fmtHoursOnly(h: number): string {
   return Number.isInteger(h) ? `${h}h` : `${h.toFixed(1)}h`
 }
 
-function fmtMin(min: number): string {
-  return `${Math.round(min)} min`
-}
-
 /**
  * Bedtime offset: seconds from local midnight. Sleep onset after 6PM the
  * previous day maps to NEGATIVE seconds (so 10PM = -7200, 2AM = +7200).
@@ -348,82 +358,6 @@ function computeVerdict(statuses: Status[]) {
 const DEEP_TARGET_S = 90 * 60   // 90 min adult target
 const REM_TARGET_S  = 90 * 60   // 90 min adult target
 
-// ── CBT-I micro-target — Spielman 1987 Sleep Restriction Therapy ────────────
-//
-// Behavioural-sleep-medicine protocol: the circadian rhythm adapts to bedtime
-// shifts in ~15-min weekly increments. Bigger jumps don't stick (acute
-// circadian misalignment). Our coaching surface uses this for the "this week
-// aim for X" line: we offer the user a 15-min nudge toward the age-banded
-// target, capped so we never overshoot.
-//
-// Reference: Spielman, A. J. et al. (1987). 'A behavioral perspective on
-// insomnia treatment.' Psychiatric Clinics of North America, 10(4), 541-553.
-// Reinforced as CBT-I gold-standard by Edinger 2021 AASM clinical guideline.
-const MICRO_TARGET_STEP_SEC = 15 * 60  // 15 min weekly increment
-
-interface MicroTarget {
-  /** Next week's target sleep duration in seconds. */
-  microTargetSec: number
-  /** Signed delta from current avg (positive = need more sleep). */
-  deltaMin:       number
-  /** 'increase' = need more, 'decrease' = need less, 'hold' = at target. */
-  direction:      'increase' | 'decrease' | 'hold'
-  /** True when this week's nudge would actually reach the age target. */
-  reachesTarget:  boolean
-}
-
-function computeMicroTarget(avgSec: number, targetSec: number): MicroTarget {
-  const gap = targetSec - avgSec  // positive → need more sleep
-  // Inside ±15-min window of target → already on it; no nudge this week.
-  if (Math.abs(gap) <= MICRO_TARGET_STEP_SEC) {
-    return {
-      microTargetSec: targetSec,
-      deltaMin:       Math.round(gap / 60),
-      direction:      'hold',
-      reachesTarget:  true,
-    }
-  }
-  const step = gap > 0 ? MICRO_TARGET_STEP_SEC : -MICRO_TARGET_STEP_SEC
-  const next = avgSec + step
-  // Clamp so we never overshoot the target in either direction.
-  const microTargetSec = gap > 0 ? Math.min(next, targetSec) : Math.max(next, targetSec)
-  return {
-    microTargetSec,
-    deltaMin:       Math.round((microTargetSec - avgSec) / 60),
-    direction:      gap > 0 ? 'increase' : 'decrease',
-    reachesTarget:  microTargetSec === targetSec,
-  }
-}
-
-// ── Bedtime-anchored hygiene cue registry ───────────────────────────────────
-//
-// Every cue references the user's ACTUAL average bedtime / wake time computed
-// from logs — not a generic clock time. So a user with a 2 AM bedtime gets
-// "no caffeine after 8 PM" instead of the useless "no caffeine after 2 PM".
-//
-// Each cue text is paired with the published-study mechanism in one sentence
-// so the user reads WHY the cue exists, not just "do this".
-//
-// Sources for each cue:
-//   - caffeine 6h cutoff:    Drake et al. 2013 (J Clin Sleep Med) — 6h
-//                             caffeine before bed still disrupts sleep onset.
-//   - alcohol 3h cutoff:     Roehrs & Roth 2001 — alcohol's #1 sleep effect
-//                             is REM suppression, especially the first half.
-//   - heavy meals 3h cutoff: Park et al. 2020 — late meals delay deep stage.
-//   - screens dim 60min:     Burgess 2013 — light suppresses melatonin onset.
-//   - screens off 30min:     Burgess 2013 — phasic blue-light triggers wake.
-//   - morning sunlight:      Wright et al. 2013, Khalsa 2003 — strongest
-//                             circadian phase anchor; within 30 min of wake.
-//   - bedroom temp ≤67°F:    Okamoto-Mizuno 2012 — thermoregulation drop
-//                             triggers deep-stage entry.
-//   - wake anchor:           Czeisler 1999 — wake time is the DOMINANT
-//                             zeitgeber (stronger than bedtime).
-//   - REM tail protection:   Carskadon & Dement — REM cycles lengthen across
-//                             the night; the last 90 min is mostly REM.
-type CueId =
-  | 'caffeine' | 'alcohol' | 'meals'
-  | 'screens_dim' | 'screens_off' | 'sunlight'
-  | 'temp' | 'wake_anchor' | 'rem_tail'
 
 /** Hour-of-day decimal → 12h clock string like "8:00 PM". */
 function fmtClock12(h: number): string {
@@ -435,47 +369,6 @@ function fmtClock12(h: number): string {
   return min === 0
     ? `${h12} ${period}`
     : `${h12}:${String(min).padStart(2, '0')} ${period}`
-}
-
-function makeCue(id: CueId, avgBedHour: number, avgWakeHour: number): string {
-  // Helper: shift a decimal-hour value by H hours and format. Bed-1h means
-  // "1 hour before bedtime". Wraps correctly across midnight.
-  const shift = (base: number, deltaHours: number) =>
-    fmtClock12(((base + deltaHours) % 24 + 24) % 24)
-  const bed   = avgBedHour
-  const wake  = avgWakeHour
-  switch (id) {
-    case 'caffeine':
-      return `No caffeine after ${shift(bed, -6)} — caffeine has a 6-hour half-life and disrupts sleep onset even when you don't feel wired.`
-    case 'alcohol':
-      return `No alcohol after ${shift(bed, -3)} — alcohol within 3 hours of bed suppresses REM more than any other dietary factor.`
-    case 'meals':
-      return `No heavy meals after ${shift(bed, -3)} — late digestion delays deep-stage entry by raising core temperature.`
-    case 'screens_dim':
-      return `Dim screens by ${shift(bed, -1)} — bright light within an hour of bed suppresses melatonin.`
-    case 'screens_off':
-      return `Screens off by ${shift(bed, -0.5)} — blue light delays sleep onset more than ambient room light.`
-    case 'sunlight':
-      return `Get 10+ min of sunlight by ${shift(wake, 0.5)} — morning light sets your body's daily clock.`
-    case 'temp':
-      return `Cool the bedroom to ≤67°F before bed — your body's core-temp drop triggers deep-stage entry.`
-    case 'wake_anchor':
-      return `Hold your alarm at ${fmtClock12(wake)} — a steady wake time matters more than a steady bedtime.`
-    case 'rem_tail':
-      return `Protect your last 90 minutes of sleep — most of your nightly REM happens in that window.`
-  }
-}
-
-/**
- * Pick a primary or alternate cue based on the calendar week, so a user
- * who's chronically off on the same dim doesn't read the same advice for
- * weeks in a row. Week parity flips every 7 days.
- */
-function weekParity(): 0 | 1 {
-  // Math.floor(Date.now() / WEEK_MS) is monotonic + globally consistent.
-  // Stable inside a single render but flips at the weekly boundary.
-  const WEEK_MS = 7 * 24 * 60 * 60 * 1000
-  return (Math.floor(Date.now() / WEEK_MS) % 2) as 0 | 1
 }
 
 export default function SleepPage() {
@@ -490,9 +383,10 @@ export default function SleepPage() {
   // up here via onActiveChange. We re-render this in a row directly under
   // the clock so the user always sees the selected day's details.
   const [clockReadout, setClockReadout] = useState<SleepClockReadout | null>(null)
-  // "How we compute" inline info panel toggle — Pattern 5 from CLAUDE.md
-  // (FadeInUp / FadeOutUp + LinearTransition for sibling layout reflow).
-  const [howOpen, setHowOpen] = useState(false)
+  // (Removed May 31 2026) — the "How we compute" panel state lived
+  // here but its corresponding UI was deleted when the verdict banner
+  // was retired. Per-row info pills now live inside each DimensionRow
+  // and own their own state.
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -585,31 +479,17 @@ export default function SleepPage() {
     return offsets.reduce((a, b) => a + b, 0) / offsets.length / 3600
   }, [sessions7])
 
-  // CBT-I weekly micro-target — shipped to the banner as "this week aim for X".
-  // Computed against the AGE-BANDED target, not user input. Captures whether
-  // user needs more sleep, less sleep, or is already on track.
-  const microTarget = useMemo(() => {
-    if (sessions7.length === 0) return null
-    const avg = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
-    return computeMicroTarget(avg, targetSecs)
-  }, [sessions7, targetSecs])
-
-  // Week parity for cue rotation. Stable within a render, flips weekly.
-  const cueWeek = useMemo(() => weekParity(), [])
-
   // ── Dimension 1: Total sleep ───────────────────────────────────────────────
 
   const totalDim: DimensionResult = useMemo(() => {
     if (sessions7.length === 0) {
       return {
         status:   'unknown',
-        current:  null,
-        target:   targetSecs,
         headline: `Target ${fmtHoursOnly(targetHours)}`,
-        action:   "Once a few nights are tracked, your average sleep duration shows here with a status against your age-adjusted target.",
+        action:   "Log a few nights and your average shows up here.",
+        whyText:  "How long you sleep each night. It's the foundation under cognition, mood, immunity, and hormones — when this slips, everything else slips with it. Push bedtime earlier in small steps and protect it.",
         spark:    [],
         sparkTarget: null,
-        lastNightStatus: null,
       }
     }
     const avg = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
@@ -617,24 +497,24 @@ export default function SleepPage() {
     const diffMin = Math.round((targetSecs - avg) / 60)
     const headline = `${fmtHoursMinutes(avg)} → ${fmtHoursOnly(targetHours)}`
 
-    // Concise per-dim action — one sentence, just "what to do". The broader
-    // coaching narrative lives in the top banner (verdictText). Cue rotates
-    // between primary (sunlight anchor) and alternate (wake anchor) weekly
-    // so chronically-short users don't read the same line every week.
+    // Terse "do this" — no explanation, no protocol names, and
+    // intentionally avoids the word "bedtime" so it doesn't duplicate
+    // the Bedtime row's action (that row owns the bedtime lever).
+    // Sleep duration owns the DURATION outcome — the lever named here
+    // is the wake side or total-hours framing.
     let action: string
     if (status === 'ok') {
-      action = `Hold this rhythm — your ${fmtHoursOnly(targetHours)} target is met.`
+      action = `On target — hold this.`
+    } else if (avg < targetSecs) {
+      action = `Sleep 15 minutes earlier this week.`
     } else {
-      action = cueWeek === 0
-        ? makeCue('sunlight', avgBedHour, avgWakeHour)
-        : makeCue('wake_anchor', avgBedHour, avgWakeHour)
+      action = `Cap at your target — wake 15 minutes earlier.`
     }
-    const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
-      status, current: avg, target: targetSecs, headline, action,
+      status, headline, action,
+      whyText: "How long you sleep each night. It's the foundation under cognition, mood, immunity, and hormones — when this slips, everything else slips with it. Push bedtime earlier in small steps and protect it.",
       spark: sparkWindow.map(s => s.duration_s),
       sparkTarget: targetSecs,
-      lastNightStatus: lastNight ? classifyTotal(lastNight.duration_s, targetSecs) : null,
     }
   }, [sessions7, sparkWindow, targetSecs, targetHours])
 
@@ -645,13 +525,11 @@ export default function SleepPage() {
     if (sessionsWithStages.length === 0) {
       return {
         status:   'unknown',
-        current:  null,
-        target:   DEEP_TARGET_S,
         headline: `Target 90 min`,
-        action:   "Deep sleep needs a worn watch to measure. Wear yours overnight (with Sleep Focus on) and the deep stage shows up here.",
+        action:   "Wear your watch overnight to track this.",
+        whyText:  "The non-dreaming stage where your body does its physical repairs — growth hormone release, immune maintenance, brain waste clearance. A cool, dark room and an earlier bedtime push more of it through.",
         spark:    [],
         sparkTarget: null,
-        lastNightStatus: null,
       }
     }
     const avg = sessionsWithStages.reduce((a, s) => a + (s.deep_s ?? 0), 0) / sessionsWithStages.length
@@ -659,27 +537,20 @@ export default function SleepPage() {
     const shortMin = Math.round((DEEP_TARGET_S - avg) / 60)
     const headline = `${fmtHoursMinutes(avg)} → 90 min`
 
-    // Concise per-dim action — one sentence, just "what to do". Cue rotates
-    // weekly between primary (temp) and alternate (meals) so chronically-
-    // deep-short users see variation. Both cues are bedtime-anchored.
+    // Terse "do this" — no explanation, no overlap with whyText.
     let action: string
     if (status === 'ok') {
-      action = `On target — your body's repair window is covered.`
+      action = `On target — hold this.`
     } else if (shortMin > 0) {
-      action = cueWeek === 0
-        ? makeCue('temp',  avgBedHour, avgWakeHour)
-        : makeCue('meals', avgBedHour, avgWakeHour)
+      action = `Drop the bedroom temperature a few degrees tonight.`
     } else {
       action = `At target.`
     }
-    const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
-      status, current: avg, target: DEEP_TARGET_S, headline, action,
+      status, headline, action,
+      whyText: "The non-dreaming stage where your body does its physical repairs — growth hormone release, immune maintenance, brain waste clearance. A cool, dark room and an earlier bedtime push more of it through.",
       spark: sparkWindow.map(s => s.deep_s),
       sparkTarget: DEEP_TARGET_S,
-      lastNightStatus: lastNight && lastNight.deep_s != null && lastNight.deep_s > 0
-        ? classifyStage(lastNight.deep_s, DEEP_TARGET_S)
-        : null,
     }
   }, [sessions7, sparkWindow])
 
@@ -690,13 +561,11 @@ export default function SleepPage() {
     if (sessionsWithStages.length === 0) {
       return {
         status:   'unknown',
-        current:  null,
-        target:   REM_TARGET_S,
         headline: `Target 90 min`,
-        action:   "REM sleep needs a worn watch to measure. Wear yours overnight and the REM stage shows up here.",
+        action:   "Wear your watch overnight to track this.",
+        whyText:  "The dream stage where your brain consolidates learning, regulates emotion, and processes memory. It clusters in the back half of the night, so sleeping the full duration is what unlocks it. Skip evening alcohol and you'll see more of it.",
         spark:    [],
         sparkTarget: null,
-        lastNightStatus: null,
       }
     }
     const avg = sessionsWithStages.reduce((a, s) => a + (s.rem_s ?? 0), 0) / sessionsWithStages.length
@@ -704,26 +573,20 @@ export default function SleepPage() {
     const shortMin = Math.round((REM_TARGET_S - avg) / 60)
     const headline = `${fmtHoursMinutes(avg)} → 90 min`
 
-    // Cue rotates weekly between primary (alcohol cutoff) and alternate
-    // (REM-tail protection) so users see different angles.
+    // Terse "do this" — no overlap with whyText.
     let action: string
     if (status === 'ok') {
-      action = `On target — memory + mood consolidation covered.`
+      action = `On target — hold this.`
     } else if (shortMin > 0) {
-      action = cueWeek === 0
-        ? makeCue('alcohol',  avgBedHour, avgWakeHour)
-        : makeCue('rem_tail', avgBedHour, avgWakeHour)
+      action = `Skip alcohol within 4 hours of bed tonight.`
     } else {
       action = `At target.`
     }
-    const lastNight = sparkWindow[sparkWindow.length - 1]
     return {
-      status, current: avg, target: REM_TARGET_S, headline, action,
+      status, headline, action,
+      whyText: "The dream stage where your brain consolidates learning, regulates emotion, and processes memory. It clusters in the back half of the night, so sleeping the full duration is what unlocks it. Skip evening alcohol and you'll see more of it.",
       spark: sparkWindow.map(s => s.rem_s),
       sparkTarget: REM_TARGET_S,
-      lastNightStatus: lastNight && lastNight.rem_s != null && lastNight.rem_s > 0
-        ? classifyStage(lastNight.rem_s, REM_TARGET_S)
-        : null,
     }
   }, [sessions7, sparkWindow])
 
@@ -733,13 +596,11 @@ export default function SleepPage() {
     if (sessions7.length === 0) {
       return {
         status:   'unknown',
-        current:  null,
-        target:   null,
         headline: 'No data yet',
-        action:   "Once you log a few nights, your bedtime + consistency show up here together as your schedule grade.",
+        action:   "Log a few nights and your bedtime + consistency grade appear here.",
+        whyText:  "When you fall asleep, and how steady it stays night to night. Your body anchors its internal rhythm to when you wake — drift the wake time and hormones, body temperature, and digestion drift with it. Lock the wake time first; bedtime falls in behind it.",
         spark:    [],
         sparkTarget: null,
-        lastNightStatus: null,
       }
     }
 
@@ -766,170 +627,38 @@ export default function SleepPage() {
 
     const currentBedLabel = fmtBedtime(avgBed)
     const targetBedLabel  = fmtBedtime(targetBed)
-    const wakeLabel       = fmtBedtime(avgWake)
     const headline = consistencyStatus === 'unknown'
       ? `${currentBedLabel} → ${targetBedLabel}`
       : `${currentBedLabel} · ±${Math.round(sdMin)}m`
 
-    const lateMin = (avgBed - targetBed) / 60
-    // Schedule's PRIMARY lever is the wake anchor (Czeisler — wake is the
-    // dominant zeitgeber). All variants of "off" lead with that. Specific
-    // bedtime offset still surfaces when the user is significantly late,
-    // but the wake-anchor framing comes first.
+    // Terse "do this" — no explanation, no overlap with whyText.
     let action: string
     if (status === 'ok') {
-      action = `On target — your sleep timing is steady.`
+      action = `On target — hold this.`
     } else if (bedStatus !== 'ok' && consistencyStatus === 'fail') {
-      // Both off — wake-anchor is the highest-leverage fix.
-      action = makeCue('wake_anchor', avgBedHour, avgWakeHour)
+      action = `Lock your alarm at ${fmtClock12(avgWakeHour)} every day.`
     } else if (bedStatus !== 'ok') {
-      // Bedtime drift only — name the actual time AND the wake anchor.
-      action = `Shift bedtime to ${targetBedLabel} (${fmtMin(Math.abs(lateMin))} ${lateMin > 0 ? 'earlier' : 'later'}) — and hold ${fmtClock12(avgWakeHour)} as your alarm anchor.`
+      action = `Move bedtime to ${targetBedLabel}.`
     } else {
-      // Consistency only — pure wake-anchor framing.
-      action = makeCue('wake_anchor', avgBedHour, avgWakeHour)
+      action = `Lock your alarm at ${fmtClock12(avgWakeHour)} every day.`
     }
 
     // Spark values inverted so UP = went to bed earlier (better). Each value
     // is "seconds earlier than target bedtime". The sparkTarget line is at 0
     // (= exactly on target). Positive = early, negative = late.
-    const lastNight = sparkWindow[sparkWindow.length - 1]
-    const lastNightBedStatus = lastNight
-      ? classifyBedtime(bedtimeOffsetSeconds(lastNight.start_at), targetBed)
-      : null
     return {
-      status, current: avgBed, target: targetBed, headline, action,
+      status, headline, action,
+      whyText: "When you fall asleep, and how steady it stays night to night. Your body anchors its internal rhythm to when you wake — drift the wake time and hormones, body temperature, and digestion drift with it. Lock the wake time first; bedtime falls in behind it.",
       spark: sparkWindow.map(s => targetBed - bedtimeOffsetSeconds(s.start_at)),
       sparkTarget: 0,
-      lastNightStatus: lastNightBedStatus,
     }
   }, [sessions7, sparkWindow, targetSecs, targetHours])
 
-  // ── Verdict ────────────────────────────────────────────────────────────────
-  //
-  // The banner names the dim the user should focus on first AND uses that
-  // dim's status color so the colour matches the dim card's pill. Picking
-  // the lead by worst-status-first (FAIL before WARN) guarantees the banner
-  // always points at the most severe item. Color tracks lead.status (NOT
-  // the old off-count threshold which could turn the banner red even when
-  // the named item was only amber).
-
-  const lead = useMemo(() => {
-    const items: Array<{ name: string; status: Status }> = [
-      { name: 'total sleep', status: totalDim.status },
-      { name: 'deep sleep',  status: deepDim.status },
-      { name: 'REM sleep',   status: remDim.status },
-      { name: 'schedule',    status: scheduleDim.status },
-    ]
-    return items.find(i => i.status === 'fail')
-        ?? items.find(i => i.status === 'warn')
-        ?? null
-  }, [totalDim, deepDim, remDim, scheduleDim])
-
-  const verdict = useMemo(() => {
-    const statuses = [totalDim.status, deepDim.status, remDim.status, scheduleDim.status]
-    const known    = statuses.filter(s => s !== 'unknown')
-    const offCount = known.filter(s => s === 'warn' || s === 'fail').length
-    // Color tracks the LEAD item's status — when banner says "start with X"
-    // its colour matches X's dim-card pill. Falls back to emerald when no
-    // lead exists (all OK or no data).
-    const color = lead ? statusColor(lead.status) : palette.emerald[400]
-    return { color, offCount, knownCount: known.length }
-  }, [totalDim, deepDim, remDim, scheduleDim, lead])
-
-  // Consolidated coaching cue — woven from three pieces:
-  //
-  //   1. STATE — current avg + age-banded target.
-  //   2. MICRO-TARGET — CBT-I 15-min weekly nudge ("this week aim for X").
-  //   3. LEVER — concrete action keyed off lead-dim status. Distinguishes
-  //      "sleep more" (move wake later or pull bedtime earlier) vs
-  //      "sleep earlier" (bedtime is the specific gap). Always anchors
-  //      on the wake time as the dominant zeitgeber (Czeisler).
-  //
-  // When 2+ dims are off, a brief cascade sentence explains why fixing
-  // the lead usually pulls the others along.
-  //
-  // Per-dim cards keep ONLY a concise "what to do" line. This banner is
-  // the integrative narrative.
-  const verdictText = useMemo(() => {
-    if (sessions7.length === 0) {
-      return 'No nights tracked yet. Once data starts landing, your weekly verdict shows here.'
-    }
-    const avgSec   = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
-    const avgLabel = fmtHoursMinutes(avgSec)
-
-    // All-on-track → simple hold message.
-    if (verdict.offCount === 0 || !lead) {
-      return `Sleep is averaging ${avgLabel} — on track across the board. Hold ${fmtClock12(avgWakeHour)} as your alarm and let bedtime follow.`
-    }
-
-    // --- 1. STATE ----------------------------------------------------------
-    const stateLine = `Sleep is averaging ${avgLabel}.`
-
-    // --- 2. MICRO-TARGET --------------------------------------------------
-    // Only show when total sleep is off-target AND a non-trivial nudge
-    // exists. Otherwise the micro-target line just confuses (e.g. user
-    // hitting target but bedtime drifts — micro-target says "hold" which
-    // doesn't help the schedule discussion).
-    let microLine = ''
-    if (microTarget && microTarget.direction !== 'hold') {
-      const nextLabel = fmtHoursMinutes(microTarget.microTargetSec)
-      const sign      = microTarget.deltaMin > 0 ? '+' : ''
-      microLine = ` This week, aim for ${nextLabel} (${sign}${microTarget.deltaMin} min) — small 15-min weekly shifts stick; big jumps don't.`
-    }
-
-    // --- 3. LEVER --------------------------------------------------------
-    // Wake time = the dominant zeitgeber. Every lever sentence anchors on it.
-    let leverLine = ''
-    if (lead.name === 'total sleep') {
-      const totalCur = totalDim.current ?? 0
-      if (totalCur < targetSecs) {
-        // Determine the lever. If bedtime is at-or-before the target
-        // bedtime (avgWake - target_duration), the user is already going
-        // to bed early enough — needs to wake later OR extend total via
-        // additional bedtime shift. Otherwise, pull bedtime earlier.
-        const targetBedHour     = ((avgWakeHour - targetHours) % 24 + 24) % 24
-        const bedtimeAlreadyEarly = Math.abs(((avgBedHour - targetBedHour + 24) % 24) - 12) > 11.7
-          ? false  // wrap edge case — treat as not-early to avoid weird math
-          : avgBedHour <= targetBedHour || avgBedHour > 18  // 6 PM-midnight bedtimes count as "before target"
-        if (bedtimeAlreadyEarly) {
-          leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your wake target — or extend it later if your schedule allows. Bedtime is already on track.`
-        } else {
-          // Pull bedtime to: wake - microTarget (this week's smaller nudge)
-          const microSec = microTarget?.microTargetSec ?? targetSecs
-          const newBedHour = ((avgWakeHour - microSec / 3600) % 24 + 24) % 24
-          leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your alarm and pull bedtime to ${fmtClock12(newBedHour)}.`
-        }
-      } else {
-        // Over-target — cap by holding wake, drifting bedtime later.
-        leverLine = ` Hold ${fmtClock12(avgWakeHour)} as your alarm and let bedtime drift later — too much sleep past ${fmtHoursOnly(targetHours)} usually means recovery debt.`
-      }
-    } else if (lead.name === 'schedule') {
-      leverLine = ` ${makeCue('wake_anchor', avgBedHour, avgWakeHour)}`
-    } else if (lead.name === 'deep sleep') {
-      leverLine = ` ${cueWeek === 0 ? makeCue('temp', avgBedHour, avgWakeHour) : makeCue('meals', avgBedHour, avgWakeHour)}`
-    } else {
-      // REM
-      leverLine = ` ${cueWeek === 0 ? makeCue('alcohol', avgBedHour, avgWakeHour) : makeCue('rem_tail', avgBedHour, avgWakeHour)}`
-    }
-
-    // --- CASCADE (only when 2+ dims off) ---------------------------------
-    let cascadeLine = ''
-    const dimsOffOther = verdict.offCount - 1
-    if (dimsOffOther >= 1) {
-      if (lead.name === 'schedule') {
-        cascadeLine = ' Once your wake anchor holds, total and stage time usually follow.'
-      } else if (scheduleDim.status === 'fail' || scheduleDim.status === 'warn') {
-        cascadeLine = ` Locking your wake time also fixes the other ${dimsOffOther === 1 ? 'stat that is' : 'stats that are'} off.`
-      } else if (totalDim.status === 'fail' || totalDim.status === 'warn') {
-        cascadeLine = ' Adding total sleep typically lifts deep + REM proportionally.'
-      }
-    }
-
-    return `${stateLine}${microLine}${leverLine}${cascadeLine}`
-  }, [sessions7, verdict, lead, totalDim, scheduleDim, targetSecs, targetHours, avgBedHour, avgWakeHour, microTarget, cueWeek])
-
   // ── Sleep Clock data ───────────────────────────────────────────────────────
+  // (Verdict + verdictText + lead useMemos lived here until May 31 2026 —
+  //  they fed the now-removed "How to improve your sleep" banner. Their
+  //  content was decomposed into per-stat `action` + `whyText` fields
+  //  on each DimensionResult, which is where it actually belongs.)
 
   const clockNights: SleepClockNight[] = useMemo(() => {
     // Most recent first, max 7 nights
@@ -1011,81 +740,10 @@ export default function SleepPage() {
         </AnimateRise>
       )}
 
+      {/* ── Sleep rhythm (clock visualization of the week) ───────────────── */}
       {!loading && hasAnyData && (
-        <AnimateRise delay={0}>
-          <Animated.View
-            layout={LinearTransition.duration(200)}
-            style={[s.verdictCard, { borderLeftColor: verdict.color }]}
-          >
-            <View style={s.verdictHead}>
-              <Moon size={16} color={verdict.color} />
-              <Text style={[s.verdictBadge, { color: verdict.color }]}>HOW TO IMPROVE YOUR SLEEP</Text>
-            </View>
-            <Text style={s.verdictText}>{verdictText}</Text>
-            {/* Sleep-targets info pill — copied verbatim from strength's
-                adp-zone info pill ([exercise].tsx:4747-4763). Right-aligned
-                in a flex row, tight padding, fully rounded, light alpha
-                border + bg. Tap → expansion panel below. */}
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 8 }}>
-              <Pressable
-                onPress={() => setHowOpen(o => !o)}
-                hitSlop={8}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 4,
-                  paddingHorizontal: 8, paddingVertical: 2,
-                  borderRadius: 999, borderWidth: 1,
-                  borderColor: withAlpha(verdict.color, 0.4),
-                  backgroundColor: withAlpha(verdict.color, 0.1),
-                }}
-              >
-                <Text
-                  style={{
-                    fontSize: 10, fontWeight: '700', textTransform: 'uppercase',
-                    letterSpacing: 1, color: verdict.color,
-                  }}
-                  numberOfLines={1}
-                >
-                  Sleep targets
-                </Text>
-                <Info size={11} color={verdict.color} />
-              </Pressable>
-            </View>
-            {howOpen && (
-              <Animated.View
-                entering={FadeInUp.duration(200)}
-                exiting={FadeOutUp.duration(180)}
-                style={{
-                  borderWidth: 1, borderColor: withAlpha(verdict.color, 0.15),
-                  backgroundColor: alpha(colors.card, 0.6), borderRadius: 6,
-                  paddingHorizontal: 10, paddingVertical: 8, marginTop: 4,
-                }}
-              >
-                <Text style={s.howBody}>
-                  <Text style={s.howBold}>Target: </Text>
-                  {fmtHoursOnly(targetHours)} based on your age.
-                  {'\n'}
-                  <Text style={s.howBold}>Your averages: </Text>
-                  bedtime {fmtClock12(avgBedHour)}, wake {fmtClock12(avgWakeHour)}, total {fmtHoursMinutes(sessions7.reduce((a, s) => a + s.duration_s, 0) / Math.max(1, sessions7.length))} — from the last 7 nights.
-                  {'\n'}
-                  <Text style={s.howBold}>This week's nudge: </Text>
-                  ±15 min toward your target.
-                  {'\n'}
-                  <Text style={s.howBold}>Cue timings: </Text>
-                  caffeine, alcohol, meals and screen cutoffs are calculated from your bedtime ({fmtClock12(avgBedHour)}).
-                  {'\n'}
-                  <Text style={s.howBold}>Wake-time first: </Text>
-                  A consistent wake time matters more than a variable bedtime.
-                </Text>
-              </Animated.View>
-            )}
-          </Animated.View>
-        </AnimateRise>
-      )}
-
-      {/* ── Sleep Clock ──────────────────────────────────────────────────── */}
-      {!loading && hasAnyData && (
-        <AnimateRise delay={150} style={s.card}>
-          <Text style={s.cardLabel}>Last 7 nights</Text>
+        <AnimateRise delay={0} style={s.card}>
+          <Text style={s.cardLabel}>Sleep Rhythm</Text>
           <SleepClock
             nights={clockNights}
             size={320}
@@ -1109,29 +767,44 @@ export default function SleepPage() {
         </AnimateRise>
       )}
 
-      {/* ── Unified dimension breakdown (single card, 4 stacked rows) ───── */}
+      {/* ── Unified dimension breakdown (single card, 4 stacked rows) ─────
+          The old "How to improve your sleep" verdict banner was REMOVED
+          May 31 2026 — its cues + Sleep-target pill were redundant with
+          this card. Each row now carries its own per-stat info pill
+          (dim.whyText) exposing the science scoped to that single
+          metric, and dim.action provides the per-stat coaching cue.
+          Sibling-card reflow when a row's pill expands is automatic —
+          the panel's REAL height animates from 0 → measured-content via
+          Reanimated useSharedValue + withTiming, so every sibling row
+          inside this card AND every card below cascades through React
+          Native's normal layout flow (no layout-animation system
+          needed). See DimensionRow for the mechanic. */}
       {!loading && hasAnyData && (
         <AnimateRise delay={300} style={s.card}>
-          <Text style={s.cardLabel}>Sleep stats</Text>
+          <Text style={s.cardLabel}>Sleep Stats</Text>
           <DimensionRow
             icon={<Clock size={14} color={statusColor(totalDim.status)} />}
-            label="Total sleep"
+            label="Sleep Duration"
+            pillLabel="Sleep Duration"
             dim={totalDim}
             isFirst
           />
           <DimensionRow
             icon={<BedDouble size={14} color={statusColor(scheduleDim.status)} />}
-            label="Schedule"
+            label="Bedtime"
+            pillLabel="Bedtime"
             dim={scheduleDim}
           />
           <DimensionRow
             icon={<Activity size={14} color={statusColor(deepDim.status)} />}
-            label="Deep sleep"
+            label="Deep Sleep"
+            pillLabel="Deep Sleep"
             dim={deepDim}
           />
           <DimensionRow
             icon={<Brain size={14} color={statusColor(remDim.status)} />}
-            label="REM sleep"
+            label="REM Cycle"
+            pillLabel="Rapid Eye Movement"
             dim={remDim}
           />
           {/* Science attribution — same line treatment as cardio/strength
@@ -1146,7 +819,7 @@ export default function SleepPage() {
       {/* ── Last night hypnogram ─────────────────────────────────────────── */}
       {!loading && hasAnyData && latestSession && latestHasStages && (
         <AnimateRise delay={500} style={s.card}>
-          <Text style={s.cardLabel}>Last night</Text>
+          <Text style={s.cardLabel}>Last Sleep Cycle</Text>
           <View style={s.hypnoMetaRow}>
             <Text style={s.hypnoMeta}>
               {new Date(latestSession.start_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
@@ -1178,7 +851,7 @@ export default function SleepPage() {
       {/* ── 30-day duration trend ────────────────────────────────────────── */}
       {!loading && hasAnyData && monthSeries.length > 0 && (
         <AnimateRise delay={500} style={s.card}>
-          <Text style={s.cardLabel}>Duration — last 30 days</Text>
+          <Text style={s.cardLabel}>Duration — Last 30 Days</Text>
           <Text style={s.cardSub}>
             Each bar is one night. Dashed line is your {fmtHoursOnly(targetHours)} target.
           </Text>
@@ -1198,16 +871,90 @@ export default function SleepPage() {
 // a visual rhythm, no per-card borders compete for the user's eye.
 
 function DimensionRow({
-  icon, label, dim, isFirst,
+  icon, label, pillLabel, dim, isFirst,
 }: {
-  icon:    React.ReactNode
-  label:   string
-  dim:     DimensionResult
-  isFirst?: boolean
+  icon:      React.ReactNode
+  /** Row title (e.g. "Sleep duration", "Bedtime", "Deep sleep", "REM cycle"). */
+  label:     string
+  /** Pill label — may differ from row label (e.g. REM row → "Rapid eye movement" pill). */
+  pillLabel: string
+  dim:       DimensionResult
+  isFirst?:  boolean
 }) {
   const color = statusColor(dim.status)
+  // Pill expansion uses DIRECT HEIGHT ANIMATION (locked May 31 2026):
+  //   1. Hidden measurer renders the panel content off-screen at full size
+  //      and reports its layout via onLayout. We capture the real
+  //      height once (memoized in `contentHeight`).
+  //   2. A SharedValue `animatedHeight` drives the visible panel's
+  //      actual `height` style via useAnimatedStyle. When `whyOpen`
+  //      flips, we withTiming the shared value from 0 → contentHeight
+  //      (or reverse) over 240ms with an out-quint easing.
+  //   3. Because the visible panel's REAL height is changing, every
+  //      view below it (the variables block in this row, every other
+  //      DimensionRow, Last Sleep Cycle card, Duration trend card)
+  //      reflows automatically through React Native's natural layout
+  //      pass. No LayoutAnimation, no LinearTransition wrappers, no
+  //      cross-system fighting — just frame-perfect layout cascade.
+  //   4. Opacity animates in parallel so the panel doesn't pop in/out
+  //      visually at the height boundaries.
+  // This was the "everything below a pill needs to slide, not snap"
+  // ask from the user. Pure native layout flow gives us that for free
+  // once the panel's height is genuinely animating.
+  const [whyOpen, setWhyOpen] = useState(false)
+  const [contentHeight, setContentHeight] = useState(0)
+  const animatedHeight  = useSharedValue(0)
+  const animatedOpacity = useSharedValue(0)
+
+  // Drive the animation off the open flag + measured height. We only
+  // animate UP to contentHeight once we've measured it; before that
+  // the measurer is still computing.
+  if (whyOpen && contentHeight > 0) {
+    animatedHeight.value  = withTiming(contentHeight, { duration: PANEL_OPEN_DURATION,  easing: PANEL_EASING })
+    animatedOpacity.value = withTiming(1,             { duration: PANEL_OPEN_DURATION,  easing: PANEL_EASING })
+  } else if (!whyOpen) {
+    animatedHeight.value  = withTiming(0, { duration: PANEL_CLOSE_DURATION, easing: PANEL_EASING })
+    animatedOpacity.value = withTiming(0, { duration: PANEL_CLOSE_DURATION, easing: PANEL_EASING })
+  }
+
+  const panelAnimatedStyle = useAnimatedStyle(() => ({
+    height:   animatedHeight.value,
+    opacity:  animatedOpacity.value,
+    overflow: 'hidden',
+  }))
+
+  // Safety buffer (16 px) absorbs any width-mismatch clip between the
+  // off-screen measurer and the visible panel. Fabric/new arch skips
+  // child layout for 0-height Animated.Views, so a single-tree
+  // inner-measurer can't work — the hidden-measurer is necessary.
+  const onMeasurerLayout = (e: LayoutChangeEvent) => {
+    const h = Math.ceil(e.nativeEvent.layout.height) + 16
+    if (h > 0 && h !== contentHeight) setContentHeight(h)
+  }
+
+  // The panel content — rendered TWICE so the hidden measurer can
+  // report its natural size while the visible copy lives inside the
+  // height-animated wrapper.
+  const panelContent = (
+    <View
+      style={{
+        borderWidth: 1, borderColor: withAlpha(color, 0.15),
+        backgroundColor: alpha(colors.card, 0.6), borderRadius: 6,
+        paddingHorizontal: 10, paddingVertical: 8, marginTop: 4,
+      }}
+    >
+      <Text style={{ color: colors.foreground, fontWeight: '700', fontSize: 12, marginBottom: 4 }}>
+        {pillLabel}
+      </Text>
+      <Text style={[s.howBody, { lineHeight: 16 }]}>{dim.whyText}</Text>
+    </View>
+  )
+
   return (
     <View style={[s.dimRow, isFirst && s.dimRowFirst]}>
+      {/* Row 1: icon + label on the left, status pill on the right.
+          The status pill stays in line with the title — same row, far
+          right — as the user asked. */}
       <View style={s.dimRowHead}>
         {icon}
         <Text style={s.dimRowLabel}>{label}</Text>
@@ -1216,15 +963,75 @@ function DimensionRow({
           <Text style={[s.dimPillText, { color }]}>{statusGlyph(dim.status)}</Text>
         </View>
       </View>
-      <Text style={s.dimHeadline}>{dim.headline}</Text>
-      <SparkLine
-        values={dim.spark}
-        accent={color}
-        target={dim.sparkTarget}
-        width={300}
-        height={30}
-      />
-      <Text style={s.dimAction}>{dim.action}</Text>
+
+      {/* Row 2: info pill RIGHT-aligned on its own line, between the
+          title row above and the variables block below. Mirrors
+          strength's adp-zone pill placement
+          ({flexDirection:'row', justifyContent:'flex-end'}). */}
+      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 6 }}>
+        <Pressable
+          onPress={() => setWhyOpen(o => !o)}
+          hitSlop={8}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 4,
+            paddingHorizontal: 8, paddingVertical: 2,
+            borderRadius: 999, borderWidth: 1,
+            borderColor: withAlpha(color, 0.4),
+            backgroundColor: withAlpha(color, 0.1),
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 10, fontWeight: '700', textTransform: 'uppercase',
+              letterSpacing: 1, color,
+            }}
+            numberOfLines={1}
+          >
+            {pillLabel}
+          </Text>
+          <Info size={11} color={color} />
+        </Pressable>
+      </View>
+
+      {/* Hidden measurer — renders the panel off-screen at natural size.
+          We tried inner-measurer June 1 2026 to fix a clipped-last-line
+          bug, but Fabric/new arch skips layout passes for children of
+          0-height Animated.Views — onLayout never fired and pill
+          expansion broke entirely. Reverted; the +16 px buffer in
+          onMeasurerLayout absorbs the original clip instead. */}
+      <View
+        style={{
+          position: 'absolute', opacity: 0, left: 0, right: 0,
+          top: -9999,
+        }}
+        pointerEvents="none"
+        onLayout={onMeasurerLayout}
+      >
+        {panelContent}
+      </View>
+
+      {/* Visible panel — height animates 0 ↔ contentHeight. Because
+          this is the REAL height (not a fade-in overlay), all sibling
+          views below reflow naturally through layout. */}
+      <Animated.View style={panelAnimatedStyle}>
+        {panelContent}
+      </Animated.View>
+
+      {/* Variables block — plain View. The panel's height growing
+          above this view automatically pushes it down via React
+          Native's normal layout flow. No animation wrapper needed
+          here; that's the whole point of the height-anim approach. */}
+      <View>
+        <Text style={[s.dimHeadline, { marginTop: 6 }]}>{dim.headline}</Text>
+        <SparkLine
+          values={dim.spark}
+          accent={color}
+          target={dim.sparkTarget}
+          width={300}
+          height={30}
+        />
+        <Text style={s.dimAction}>{dim.action}</Text>
+      </View>
     </View>
   )
 }
@@ -1241,54 +1048,90 @@ function SparkLine({
   /** Y value of the dashed reference line. Null = no target line. */
   target?: number | null
 }) {
-  const valid = values
-    .map((v, i) => v == null ? null : { x: i, v })
-    .filter((p): p is { x: number; v: number } => p != null)
-  if (valid.length < 2) {
+  // Skia path memoization: rebuild only when inputs change. Paths are
+  // static (no per-frame animation here), so useMemo + plain props on
+  // the <SkiaPath> work fine — no useDerivedValue/sharedValue needed.
+  const built = useMemo(() => {
+    const valid = values
+      .map((v, i) => v == null ? null : { x: i, v })
+      .filter((p): p is { x: number; v: number } => p != null)
+    if (valid.length < 2) return null
+
+    const vs   = valid.map(p => p.v)
+    const xMin = 0
+    const xMax = values.length - 1
+    // Expand the y-range to include the target line so it always renders
+    // inside the spark frame even when every recent night is below (or
+    // above) target.
+    const dataMin = Math.min(...vs)
+    const dataMax = Math.max(...vs)
+    const yMin = target != null ? Math.min(dataMin, target) : dataMin
+    const yMax = target != null ? Math.max(dataMax, target) : dataMax
+    const yRange = Math.max(1e-6, yMax - yMin)
+    const tx = (x: number) => (x - xMin) / Math.max(1, xMax - xMin) * width
+    const ty = (v: number) => height - 2 - ((v - yMin) / yRange) * (height - 4)
+
+    // Data line — Skia path built command-by-command (skips null gaps
+    // with moveTo just like the prior SVG version's 'M' command).
+    const dataPath = Skia.Path.Make()
+    let lastWasNull = true
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i]
+      if (v == null) { lastWasNull = true; continue }
+      const px = tx(i)
+      const py = ty(v)
+      if (lastWasNull) dataPath.moveTo(px, py)
+      else             dataPath.lineTo(px, py)
+      lastWasNull = false
+    }
+
+    // Target line — horizontal dashed line at the target Y. Skia dashes
+    // are applied per-shape (no Defs scope) so we mark the path via a
+    // sibling <SkiaPath> with strokeWidth + a dashed PathEffect would
+    // normally be set, BUT Skia's <Path> accepts a `strokeWidth` prop;
+    // for dashing we instead build the dashes as discrete sub-paths
+    // (3 px dash, 3 px gap) to match the SVG `strokeDasharray="3,3"`
+    // pattern exactly.
+    let targetPath: ReturnType<typeof Skia.Path.Make> | null = null
+    if (target != null) {
+      targetPath = Skia.Path.Make()
+      const targetY = ty(target)
+      const DASH = 3
+      const GAP  = 3
+      let x = 0
+      while (x < width) {
+        const x2 = Math.min(x + DASH, width)
+        targetPath.moveTo(x, targetY)
+        targetPath.lineTo(x2, targetY)
+        x += DASH + GAP
+      }
+    }
+
+    return { dataPath, targetPath }
+  }, [values, target, width, height])
+
+  if (!built) {
     return <View style={{ width, height, opacity: 0.4 }} />
   }
-  const vs   = valid.map(p => p.v)
-  const xMin = 0
-  const xMax = values.length - 1
-  // Expand the y-range to include the target line so it always renders
-  // inside the spark frame even when every recent night is below (or
-  // above) target.
-  const dataMin = Math.min(...vs)
-  const dataMax = Math.max(...vs)
-  const yMin = target != null ? Math.min(dataMin, target) : dataMin
-  const yMax = target != null ? Math.max(dataMax, target) : dataMax
-  const yRange = Math.max(1e-6, yMax - yMin)
-  function tx(x: number) { return (x - xMin) / Math.max(1, xMax - xMin) * width }
-  function ty(v: number) { return height - 2 - ((v - yMin) / yRange) * (height - 4) }
-
-  // Build the data line.
-  const segments: string[] = []
-  let lastWasNull = true
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i]
-    if (v == null) { lastWasNull = true; continue }
-    const cmd = lastWasNull ? 'M' : 'L'
-    segments.push(`${cmd}${tx(i).toFixed(1)},${ty(v).toFixed(1)}`)
-    lastWasNull = false
-  }
-
-  // Target line: dashed horizontal, slightly dimmed accent color.
-  const targetY = target != null ? ty(target) : null
 
   return (
     <View style={{ height, marginVertical: 2 }}>
-      <Svg width={width} height={height}>
-        {targetY != null && (
-          <Path
-            d={`M0,${targetY.toFixed(1)} L${width},${targetY.toFixed(1)}`}
-            stroke={withAlpha(accent, 0.45)}
+      <Canvas style={{ width, height }}>
+        {built.targetPath && (
+          <SkiaPath
+            path={built.targetPath}
+            style="stroke"
             strokeWidth={1}
-            strokeDasharray="3,3"
-            fill="none"
+            color={withAlpha(accent, 0.45)}
           />
         )}
-        <Path d={segments.join(' ')} stroke={accent} strokeWidth={1.75} fill="none" />
-      </Svg>
+        <SkiaPath
+          path={built.dataPath}
+          style="stroke"
+          strokeWidth={1.75}
+          color={accent}
+        />
+      </Canvas>
     </View>
   )
 }
@@ -1303,45 +1146,78 @@ function MonthlySparkline({
   height?: number
 }) {
   const [width, setWidth] = useState(0)
-  if (values.length === 0) return null
-  const yMax  = Math.max(target * 1.2, Math.max(...values, target) + 0.5)
-  const yMin  = 0
-  const plotH = height - 12
 
-  function ty(v: number) {
-    return 4 + plotH - ((v - yMin) / (yMax - yMin)) * plotH
-  }
+  // Build all Skia geometry up-front. One path per color bucket (ok /
+  // amber) so the canvas only emits two stroked/filled shapes for the
+  // bars + one for the target dashes — fewer draw calls than per-bar
+  // <Path> nodes. Recomputes only when values/target/width/height
+  // change.
+  const built = useMemo(() => {
+    if (values.length === 0 || width <= 0) return null
+    const yMax  = Math.max(target * 1.2, Math.max(...values, target) + 0.5)
+    const yMin  = 0
+    const plotH = height - 12
+    const ty    = (v: number) =>
+      4 + plotH - ((v - yMin) / (yMax - yMin)) * plotH
+
+    // Bars grouped by color bucket. addRect / Skia.XYWHRect mirrors the
+    // SVG path's `M x,y h w v h h-w z` rectangle exactly.
+    const okPath    = Skia.Path.Make()
+    const amberPath = Skia.Path.Make()
+    for (let i = 0; i < values.length; i++) {
+      const v    = values[i]
+      const barW = Math.max(1, (width / values.length) - 2)
+      const x    = (i / values.length) * width + 1
+      const y    = ty(v)
+      const h    = Math.max(1, height - 8 - y)
+      const ok   = v >= target * 0.9 && v <= target * 1.2
+      const rect = Skia.XYWHRect(x, y, barW, h)
+      if (ok) okPath.addRect(rect)
+      else    amberPath.addRect(rect)
+    }
+
+    // Target line — same 3px dash, 3px gap pattern as SparkLine. Skia
+    // doesn't take a strokeDasharray prop, so we build the dash run as
+    // discrete moveTo/lineTo sub-paths.
+    const targetPath = Skia.Path.Make()
+    const targetY    = ty(target)
+    const DASH       = 3
+    const GAP        = 3
+    let x = 0
+    while (x < width) {
+      const x2 = Math.min(x + DASH, width)
+      targetPath.moveTo(x, targetY)
+      targetPath.lineTo(x2, targetY)
+      x += DASH + GAP
+    }
+
+    return { okPath, amberPath, targetPath }
+  }, [values, target, width, height])
+
+  if (values.length === 0) return null
 
   return (
     <View
       onLayout={e => setWidth(e.nativeEvent.layout.width)}
       style={{ height }}
     >
-      {width > 0 && (
-        <Svg width={width} height={height}>
-          {values.map((v, i) => {
-            const barW = Math.max(1, (width / values.length) - 2)
-            const x    = (i / values.length) * width + 1
-            const y    = ty(v)
-            const h    = Math.max(1, height - 8 - y)
-            const ok   = v >= target * 0.9 && v <= target * 1.2
-            const color = ok ? palette.emerald[400] : palette.amber[400]
-            return (
-              <Path
-                key={`bar-${i}`}
-                d={`M${x.toFixed(1)},${y.toFixed(1)} h${barW.toFixed(1)} v${h.toFixed(1)} h-${barW.toFixed(1)} z`}
-                fill={withAlpha(color, 0.65)}
-              />
-            )
-          })}
-          <SvgLine
-            x1={0} x2={width}
-            y1={ty(target)} y2={ty(target)}
-            stroke={palette.slate[400]}
-            strokeWidth={1}
-            strokeDasharray="3,3"
+      {built && width > 0 && (
+        <Canvas style={{ width, height }}>
+          <SkiaPath
+            path={built.okPath}
+            color={withAlpha(palette.emerald[400], 0.65)}
           />
-        </Svg>
+          <SkiaPath
+            path={built.amberPath}
+            color={withAlpha(palette.amber[400], 0.65)}
+          />
+          <SkiaPath
+            path={built.targetPath}
+            style="stroke"
+            strokeWidth={1}
+            color={palette.slate[400]}
+          />
+        </Canvas>
       )}
     </View>
   )
@@ -1403,39 +1279,13 @@ const s = StyleSheet.create({
   emptyTitle: { color: colors.foreground, fontSize: 16, fontWeight: '600' },
   emptyBody:  { color: colors.mutedForeground, fontSize: 13, lineHeight: 19 },
 
-  verdictCard: {
-    backgroundColor: alpha(colors.card, 0.7),
-    borderColor:     colors.border,
-    borderWidth:     1,
-    borderLeftWidth: 4,
-    borderRadius:    12,
-    padding:         14,
-    gap:             8,
-  },
+  // howBody = body text inside the per-row info-pill expansion panel.
+  // The banner-related verdict styles (verdictCard / Head / Badge / Text)
+  // and howBold were removed May 31 2026 with the banner itself.
   howBody: {
     color:      colors.mutedForeground,
     fontSize:   12,
     lineHeight: 18,
-  },
-  howBold: {
-    color:      colors.foreground,
-    fontWeight: '600',
-  },
-
-  verdictHead: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           8,
-  },
-  verdictBadge: {
-    fontSize:      10,
-    fontWeight:    '700',
-    letterSpacing: 0.8,
-  },
-  verdictText: {
-    color:      colors.foreground,
-    fontSize:   14,
-    lineHeight: 20,
   },
 
   // Unified dimension breakdown — one row per metric inside a single card.

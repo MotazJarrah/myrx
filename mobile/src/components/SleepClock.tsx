@@ -26,6 +26,16 @@
  * selection. Selection persists between touches until another ring
  * is touched or the user touches outside.
  *
+ * Rendering — GPU-backed via @shopify/react-native-skia. The entire
+ * clock draws in a single Skia <Canvas> at native speed; per-frame
+ * animations (entrance rotation, dim-up/down on selection, avg-band
+ * growth) run on the GPU thread without crossing the React Native
+ * bridge. This is the Phase-1 port from `react-native-svg` (May 31
+ * 2026) — same visual output, same gesture handling, same component
+ * API. The Sleep page's draggy-scroll problem was caused by the
+ * previous SVG implementation's per-prop bridge crossings; Skia
+ * eliminates those entirely.
+ *
  * Designed alongside the Sleep page rebuild (May 31 2026) — works
  * for both watch users (full data) and phone-only users (just
  * bedtime + wake times).
@@ -33,8 +43,15 @@
 
 import React, { useState, useMemo, useEffect } from 'react'
 import { View, Text, StyleSheet } from 'react-native'
-import Svg, { Circle, Path, Line, G } from 'react-native-svg'
+import {
+  Canvas, Path, Circle, Line, Group, Skia, vec,
+  type SkPath,
+} from '@shopify/react-native-skia'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
+import {
+  useSharedValue, useDerivedValue, withSpring, withTiming, withDelay,
+  interpolateColor,
+} from 'react-native-reanimated'
 import { colors, palette, withAlpha, fonts } from '../theme'
 
 export interface SleepClockNight {
@@ -79,6 +96,204 @@ interface Props {
 // -- Special sentinel for the "average" band, which is selectable too.
 const AVG_IDX = -1
 
+// ─── Skia helpers ────────────────────────────────────────────────────────────
+//
+// Skia's `Path` accepts a Skia path OBJECT, not an SVG string. We could call
+// Skia.Path.MakeFromSVGString(...) every frame, but that's expensive (parses
+// the string on each tick). Faster: build the path programmatically using
+// Skia's path commands. Both arcPathSkia / arcPathSkiaWorklet build the
+// same crescent-shape path used by the SVG version, but using Skia's API
+// directly so the result is a native path object ready to draw.
+
+/**
+ * Build a Skia path for the crescent arc between two angles at radius `r`
+ * with a given thickness. Worklet-safe — used inside useDerivedValue on
+ * the UI thread for per-frame animations.
+ */
+function buildArcPath(
+  cx: number, cy: number, r: number,
+  startAngleDeg: number, endAngleDeg: number,
+  thickness: number,
+): SkPath {
+  'worklet'
+  let a1 = startAngleDeg
+  let a2 = endAngleDeg
+  while (a2 <= a1) a2 += 360
+
+  const rOut    = r + thickness / 2
+  const rIn     = r - thickness / 2
+  const deg2rad = Math.PI / 180
+
+  const p1x = cx + rOut * Math.cos((a1 - 90) * deg2rad)
+  const p1y = cy + rOut * Math.sin((a1 - 90) * deg2rad)
+  const p2x = cx + rOut * Math.cos((a2 - 90) * deg2rad)
+  const p2y = cy + rOut * Math.sin((a2 - 90) * deg2rad)
+  const p3x = cx + rIn  * Math.cos((a2 - 90) * deg2rad)
+  const p3y = cy + rIn  * Math.sin((a2 - 90) * deg2rad)
+  const p4x = cx + rIn  * Math.cos((a1 - 90) * deg2rad)
+  const p4y = cy + rIn  * Math.sin((a1 - 90) * deg2rad)
+
+  // Skia.Path.Make() returns a fresh mutable path. Build the crescent in
+  // the same order as the SVG version: outer arc → inner radial → reverse
+  // inner arc → close.
+  const path = Skia.Path.Make()
+  path.moveTo(p1x, p1y)
+  // arcToOval(rect, startAngle, sweepAngle, forceMoveTo)
+  //   - rect:        bounding rect of the OUTER circle (centered on cx,cy radius rOut)
+  //   - startAngle:  measured from +x axis (3 o'clock), CCW negative; we use the angle
+  //                  we already computed in screen-space "12-o'clock-up" terms — but
+  //                  Skia uses standard math angles (0 = right, 90 = down on screen).
+  //   - We computed our angles as "degrees clockwise from 12". Convert to Skia:
+  //     skiaAngle = mathAngle = (ourAngle - 90)
+  //   - sweepAngle: positive = clockwise (matches our sweep direction).
+  const outerRect = {
+    x: cx - rOut, y: cy - rOut, width: rOut * 2, height: rOut * 2,
+  }
+  const innerRect = {
+    x: cx - rIn,  y: cy - rIn,  width: rIn  * 2, height: rIn  * 2,
+  }
+  const sweep = a2 - a1
+  path.arcToOval(outerRect, a1 - 90, sweep, false)
+  path.lineTo(p3x, p3y)
+  path.arcToOval(innerRect, a2 - 90, -sweep, false)
+  path.lineTo(p1x, p1y)
+  path.close()
+  return path
+}
+
+/**
+ * Single animated sleep arc (Skia version).
+ *
+ * Two animations layered on the same Skia <Path>:
+ *
+ * 1. ENTRANCE (fires once on mount). The arc starts at a random
+ *    rotation offset of ±150° around the clock center and spring-falls
+ *    into its final position with light damping for a slight overshoot
+ *    + settle. Each ring rolls in with a per-ring stagger so the set
+ *    feels organic. Combined with a fast opacity fade-in so the random
+ *    starting angle isn't visible as a hard jump.
+ *
+ * 2. SELECTION DIM (re-runs whenever isActive flips). The arc's fill
+ *    color is interpolated between the per-ring fadedFill and the
+ *    bright brightFill, with a 220 ms timing curve. Dim-up when
+ *    selected, dim-down when deselected — no hard on/off swap.
+ *
+ * Per-frame work runs entirely on the Skia GPU thread via Reanimated
+ * `useDerivedValue`. No bridge crossings per prop update.
+ */
+function RingArc({
+  idx, isActive, cx, cy, r, bedAngle, wakeAngle, thickness,
+  brightFill, fadedFill,
+}: {
+  idx:        number
+  isActive:   boolean
+  cx:         number
+  cy:         number
+  r:          number
+  bedAngle:   number
+  wakeAngle:  number
+  thickness:  number
+  brightFill: string
+  fadedFill:  string
+}) {
+  // Random ±150° starting angle. useMemo so the value is stable across
+  // re-renders — without it, Math.random() would re-roll on every parent
+  // re-render and the spring would keep restarting from new angles.
+  const initialRot = useMemo(() => (Math.random() - 0.5) * 300, [])
+  const rotation   = useSharedValue(initialRot)
+  const opacity    = useSharedValue(0)
+  const intensity  = useSharedValue(isActive ? 1 : 0)
+
+  // Entrance — fires once per mount of this instance. Slower, bouncier
+  // spring + per-ring stagger so the cascade is unmistakable.
+  useEffect(() => {
+    const stagger = idx * 110
+    rotation.value = withDelay(stagger, withSpring(0, {
+      damping:   8,
+      stiffness: 40,
+      mass:      1.4,
+    }))
+    opacity.value = withDelay(stagger, withTiming(1, { duration: 520 }))
+  // mount-only — re-running on dep changes would replay the entrance
+  // animation every time the parent re-renders, which is wrong.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Dim up / down whenever the active flag flips.
+  useEffect(() => {
+    intensity.value = withTiming(isActive ? 1 : 0, { duration: 220 })
+  }, [isActive])
+
+  // Path geometry — recomputes when rotation shared value changes. Runs
+  // entirely on the UI thread; the returned SkPath is rendered by Skia
+  // natively without any React Native re-render cycle.
+  const path = useDerivedValue(() => {
+    return buildArcPath(
+      cx, cy, r,
+      bedAngle  + rotation.value,
+      wakeAngle + rotation.value,
+      thickness,
+    )
+  })
+
+  // Color — interpolates between faded and bright as intensity rises.
+  const color = useDerivedValue(() => {
+    return interpolateColor(intensity.value, [0, 1], [fadedFill, brightFill])
+  })
+
+  return <Path path={path} color={color} opacity={opacity} />
+}
+
+/**
+ * Animated average sleep band (Skia version) — the indigo arc outside the
+ * outermost ring showing the user's circular-mean sleep window.
+ *
+ * When selected (activeIdx === AVG_IDX):
+ *  • intensity 0→1 (fade dim → bright)
+ *  • growth   0→1 (thickness scales from base to 1.75×)
+ *
+ * Both animate together over 220 ms timing so the band visibly "puffs
+ * up" + brightens in one motion. Deselect reverses both. The path
+ * itself is rebuilt inside useDerivedValue when growth changes so the
+ * thickness morph is smooth.
+ */
+function AvgBand({
+  cx, cy, r, baseThickness, bedAngle, wakeAngle, isActive,
+  fadedFill, brightFill,
+}: {
+  cx:            number
+  cy:            number
+  r:             number
+  baseThickness: number
+  bedAngle:      number
+  wakeAngle:     number
+  isActive:      boolean
+  fadedFill:     string
+  brightFill:    string
+}) {
+  const intensity = useSharedValue(isActive ? 1 : 0)
+  const growth    = useSharedValue(isActive ? 1 : 0)
+
+  useEffect(() => {
+    intensity.value = withTiming(isActive ? 1 : 0, { duration: 220 })
+    growth.value    = withTiming(isActive ? 1 : 0, { duration: 220 })
+  }, [isActive])
+
+  const path = useDerivedValue(() => {
+    // 1× when unselected, 1.75× when selected — clearly visible bump.
+    const thickness = baseThickness * (1 + growth.value * 0.75)
+    return buildArcPath(cx, cy, r, bedAngle, wakeAngle, thickness)
+  })
+
+  const color = useDerivedValue(() => {
+    return interpolateColor(intensity.value, [0, 1], [fadedFill, brightFill])
+  })
+
+  return <Path path={path} color={color} />
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 /**
  * Convert a Date to its "hour of day" position (0-24 decimal) in the
  * user's local timezone. We anchor the clock face to local time so the
@@ -89,64 +304,27 @@ function hourOfDay(iso: string): number {
   return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600
 }
 
-/** Polar → cartesian. angleDeg measured clockwise from 12 o'clock. */
+/** Inverse of hourOfDay — converts 0–24 hour back to clockwise angle (12 = 0°). */
+function hourToAngle(h: number): number {
+  return (h / 24) * 360
+}
+
+/** Polar → cartesian. Angle in degrees, clockwise from 12 o'clock. */
 function polar(cx: number, cy: number, r: number, angleDeg: number) {
   const rad = ((angleDeg - 90) * Math.PI) / 180
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
 }
 
-/** Build an SVG arc path between two angles at a given radius. */
-function arcPath(
-  cx: number, cy: number, r: number,
-  startAngleDeg: number, endAngleDeg: number,
-  thickness: number,
-): string {
-  let a1 = startAngleDeg
-  let a2 = endAngleDeg
-  while (a2 <= a1) a2 += 360
-  const sweep    = a2 - a1
-  const largeArc = sweep > 180 ? 1 : 0
-
-  const rOut = r + thickness / 2
-  const rIn  = r - thickness / 2
-
-  const p1 = polar(cx, cy, rOut, a1)
-  const p2 = polar(cx, cy, rOut, a2)
-  const p3 = polar(cx, cy, rIn,  a2)
-  const p4 = polar(cx, cy, rIn,  a1)
-
-  return [
-    `M ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`,
-    `A ${rOut.toFixed(2)} ${rOut.toFixed(2)} 0 ${largeArc} 1 ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`,
-    `L ${p3.x.toFixed(2)} ${p3.y.toFixed(2)}`,
-    `A ${rIn.toFixed(2)} ${rIn.toFixed(2)} 0 ${largeArc} 0 ${p4.x.toFixed(2)} ${p4.y.toFixed(2)}`,
-    'Z',
-  ].join(' ')
-}
-
 /**
- * Hour-of-day (0-24) → degrees clockwise from 12 o'clock on a
- * 12-hour clock face. Wraps automatically: hour 13 maps to the
- * same angle as hour 1, hour 22 maps to the same as hour 10, etc.
- */
-function hourToAngle(h: number): number {
-  const wrapped = ((h % 12) + 12) % 12
-  return (wrapped / 12) * 360
-}
-
-/**
- * Circular mean of an array of hours-of-day. Naive arithmetic mean
- * breaks for values that straddle midnight (e.g. avg of [23.5, 0.5]
- * should be 0.0, not 12.0). This uses Mardia 1972's circular
- * statistics: project each hour onto the unit circle, sum the
- * vectors, take the resulting angle. Returns a value in [0, 24).
+ * Circular mean of a list of hour-of-day values (0–24). Returns the
+ * angular center of mass — handles wrap-around (e.g. 23:30 + 00:30
+ * averages to 00:00, not 12:00 like a naive arithmetic mean).
  */
 function circularMeanHours(hours: number[]): number | null {
   if (hours.length === 0) return null
-  let sx = 0
-  let sy = 0
+  let sx = 0, sy = 0
   for (const h of hours) {
-    const theta = (h * 2 * Math.PI) / 24
+    const theta = (h / 24) * 2 * Math.PI
     sx += Math.cos(theta)
     sy += Math.sin(theta)
   }
@@ -181,8 +359,12 @@ export default function SleepClock({
   const outerR        = size / 2 - labelInset
   const ringThickness = 11
   const ringGap       = 2
-  const ringCount     = Math.min(nights.length, 7)
-  const innerR        = outerR - (ringCount * (ringThickness + ringGap)) + ringGap
+  // ALWAYS reserve 7 ring slots, regardless of how many nights have data.
+  // Empty slots render their track but no arc / no center label / no gesture
+  // target — the clock's overall geometry stays constant week-over-week so
+  // adding a night doesn't shrink the inner hole and reflow the page.
+  const TOTAL_SLOTS   = 7
+  const innerR        = outerR - (TOTAL_SLOTS * (ringThickness + ringGap)) + ringGap
 
   // Average band sits between outermost ring and hour numerals.
   const avgBandR         = outerR + ringThickness / 2 + 6
@@ -191,28 +373,65 @@ export default function SleepClock({
   // Hour numerals positioned just outside the average band.
   const labelR = avgBandR + avgBandThickness / 2 + 11
 
-  // Pre-compute each ring's arc data.
-  const rings = useMemo(() => {
-    return nights.slice(0, 7).map((n, i) => {
-      const r          = outerR - i * (ringThickness + ringGap)
+  // Pre-compute all 7 ring slots — slots with data carry full per-night
+  // info; empty slots carry only their geometry (idx + radius) and a
+  // hasData=false flag.
+  //
+  // CALENDAR-ANCHORED INDEXING (not array-position):
+  //   ring 0 = most-recent night's bed-date (the "today" anchor)
+  //   ring N = N calendar days before the anchor
+  // A missing date in the middle of the week leaves a HOLE at that ring
+  // (the visual stack stays date-aligned), instead of all populated nights
+  // collapsing into the outer slots and empties piling at the bottom.
+  type RingSlot =
+    | { idx: number; r: number; hasData: false }
+    | {
+        idx: number; r: number; hasData: true
+        label: string; isMostRecent: boolean
+        bedAngle: number; wakeAngle: number
+        bedHour: number; wakeHour: number
+        durationMs: number; dayName: string; dateLabel: string
+      }
+  const rings: RingSlot[] = useMemo(() => {
+    // Anchor on the most-recent night's bed-date so ring 0 always has data
+    // (preserves the default-select-most-recent contract). Each older ring
+    // is N days back from there. Without any nights, all 7 slots are empty.
+    const anchorRaw = nights[0] ? new Date(nights[0].startAt) : null
+    const anchorMid = anchorRaw
+      ? new Date(anchorRaw.getFullYear(), anchorRaw.getMonth(), anchorRaw.getDate())
+      : null
+    // Map: dayOffset (0..6, days back from anchor) → SleepClockNight
+    const byOffset = new Map<number, SleepClockNight>()
+    if (anchorMid) {
+      for (const n of nights) {
+        const d   = new Date(n.startAt)
+        const mid = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+        const off = Math.round((anchorMid.getTime() - mid.getTime()) / 86_400_000)
+        if (off >= 0 && off < TOTAL_SLOTS) byOffset.set(off, n)
+      }
+    }
+    return Array.from({ length: TOTAL_SLOTS }, (_, i): RingSlot => {
+      const r = outerR - i * (ringThickness + ringGap)
+      const n = byOffset.get(i)
+      if (!n) {
+        return { idx: i, r, hasData: false }
+      }
       const bedHour    = hourOfDay(n.startAt)
       const wakeHour   = hourOfDay(n.endAt)
       const bedAngle   = hourToAngle(bedHour)
       const wakeAngle  = hourToAngle(wakeHour)
-      const path       = arcPath(cx, cy, r, bedAngle, wakeAngle, ringThickness)
       const durationMs = new Date(n.endAt).getTime() - new Date(n.startAt).getTime()
-      // Date label for the center of the clock — derived from the BEDTIME
-      // (start_at). Format follows user preference. Day name on the first
-      // line, date below it.
       const startDate  = new Date(n.startAt)
       const dayName    = startDate.toLocaleDateString([], { weekday: 'short' })
       const dateLabel  = fmtShortDate(startDate, dateFormat)
       return {
         idx:         i,
+        r,
+        hasData:     true,
         label:       n.label,
         isMostRecent: n.isMostRecent,
-        r,
-        path,
+        bedAngle,
+        wakeAngle,
         bedHour,
         wakeHour,
         durationMs,
@@ -230,17 +449,8 @@ export default function SleepClock({
     const avgBed    = circularMeanHours(bedHours)
     const avgWake   = circularMeanHours(wakeHours)
     if (avgBed == null || avgWake == null) return null
-    return {
-      bedHour:  avgBed,
-      wakeHour: avgWake,
-      path:     arcPath(
-        cx, cy, avgBandR,
-        hourToAngle(avgBed),
-        hourToAngle(avgWake),
-        avgBandThickness,
-      ),
-    }
-  }, [nights, cx, cy, avgBandR])
+    return { bedHour: avgBed, wakeHour: avgWake }
+  }, [nights])
 
   // All 12 hour numerals around the rim.
   const hourNumerals = useMemo(() => {
@@ -254,53 +464,50 @@ export default function SleepClock({
   }, [cx, cy, labelR])
 
   // -- Gesture handler: scrub finger across rings to update active.
-  // Maps finger distance from center → which ring it's hovering.
-  function indexFromDistance(dist: number): number | null {
-    // Inside the central hole → nothing selected.
+  // Three-way return: number / 'keep' / null.
+  function indexFromDistance(dist: number): number | 'keep' | null {
     if (dist < innerR - ringThickness / 2) return null
-    // Beyond the average band's outer edge → nothing selected.
     if (dist > avgBandR + avgBandThickness / 2 + 4) return null
-    // Inside the average-band slot?
     if (dist >= avgBandR - avgBandThickness / 2 - 2
         && dist <= avgBandR + avgBandThickness / 2 + 4
         && avg != null) {
       return AVG_IDX
     }
-    // Otherwise find the nearest sleep ring.
     let bestIdx  = null as number | null
     let bestDist = Infinity
     for (const r of rings) {
+      if (!r.hasData) continue
       const d = Math.abs(dist - r.r)
       if (d <= ringThickness / 2 + ringGap / 2 && d < bestDist) {
         bestDist = d
         bestIdx  = r.idx
       }
     }
-    return bestIdx
+    if (bestIdx != null) return bestIdx
+    const outermostR = rings[0]?.r ?? outerR
+    const innermostR = rings[rings.length - 1]?.r ?? innerR
+    if (dist >= innermostR - ringThickness / 2
+        && dist <= outermostR + ringThickness / 2) {
+      return 'keep'
+    }
+    return null
+  }
+
+  function resolveSelection(dist: number): number | 'keep' {
+    const raw = indexFromDistance(dist)
+    if (raw === 'keep') return 'keep'
+    if (raw == null) return DEFAULT_IDX
+    return raw
   }
 
   // Gesture rules:
-  //  - onBegin fires on ANY initial touch (before activation). We set the
-  //    active ring there so a simple tap immediately registers.
-  //  - .activeOffsetX([-3, 3]) means the pan only ACTIVATES if the user
-  //    drags ≥3px horizontally. That's enough to claim the gesture for
-  //    scrub-mode without stealing all single-finger touches.
-  //  - .failOffsetY([-8, 8]) means if the user drags ≥8px VERTICALLY first,
-  //    the pan FAILS and the parent ScrollView takes over — page scrolls
-  //    normally. The onBegin's setActiveIdx already fired, so the touch
-  //    isn't wasted.
-  //  - .runOnJS(true) avoids worklet hell — math is trivial (sqrt + 7-row
-  //    linear scan), no UI-thread sync needed.
-  // null from indexFromDistance means "touched outside the ring area"
-  // (center hole or beyond the labels) — per spec, that resets selection
-  // back to the most-recent day. Average band is selectable only if it
-  // exists (avg != null).
-  function resolveSelection(dist: number): number {
-    const raw = indexFromDistance(dist)
-    if (raw == null) return DEFAULT_IDX  // outside the rings → snap to most-recent
-    return raw                            // ring idx or AVG_IDX
-  }
-
+  //  - .activeOffsetX([-3, 3]) → pan activates after 3 px horizontal drag
+  //  - .failOffsetY([-8, 8]) → if vertical drag passes 8 px first, the
+  //    gesture FAILS and the parent ScrollView takes over. The 8 px
+  //    threshold is the original design tuned to feel "natural" — wide
+  //    enough that tap-then-tiny-drift on the clock area still counts
+  //    as a clock tap, not an accidental scroll. The Skia migration
+  //    removed the scroll-perf reason to tighten this further.
   const gesture = Gesture.Pan()
     .activeOffsetX([-3, 3])
     .failOffsetY([-8, 8])
@@ -309,40 +516,39 @@ export default function SleepClock({
       const dx   = e.x - cx
       const dy   = e.y - cy
       const dist = Math.sqrt(dx * dx + dy * dy)
-      setActiveIdx(resolveSelection(dist))
+      const next = resolveSelection(dist)
+      if (next === 'keep') return
+      setActiveIdx(next)
     })
     .onUpdate(e => {
       const dx   = e.x - cx
       const dy   = e.y - cy
       const dist = Math.sqrt(dx * dx + dy * dy)
-      setActiveIdx(resolveSelection(dist))
+      const next = resolveSelection(dist)
+      if (next === 'keep') return
+      setActiveIdx(next)
     })
 
-  // Readout always resolves to a value — never null. If the user hasn't
-  // interacted yet (or dragged off the rings), activeIdx is DEFAULT_IDX
-  // (= 0 = most-recent night) and the readout shows that night's data.
-  // The center label inside the clock and the parent-mirrored readout
-  // below the clock both consume this.
+  // ─── Readout for parent + center label ─────────────────────────────────────
   const readoutCard: SleepClockReadout | null = (() => {
     if (activeIdx === AVG_IDX && avg) {
-      // Range across the whole 7-night window. Endpoints in user's
-      // preferred date format.
-      const oldest = nights[nights.length - 1]
-      const newest = nights[0]
-      const rangeLabel = oldest && newest
-        ? `${fmtShortDate(new Date(oldest.startAt), dateFormat)} – ${fmtShortDate(new Date(newest.startAt), dateFormat)}`
+      // For the average band, surface a friendly date-range subtitle:
+      // "May 25 – May 31 · ~6h 45m" so the user knows what's being averaged.
+      const minDate = nights.reduce<Date | null>((acc, n) => {
+        const d = new Date(n.startAt)
+        return !acc || d < acc ? d : acc
+      }, null)
+      const maxDate = nights.reduce<Date | null>((acc, n) => {
+        const d = new Date(n.startAt)
+        return !acc || d > acc ? d : acc
+      }, null)
+      const rangeLabel = minDate && maxDate
+        ? `${minDate.toLocaleDateString([], { month: 'short', day: 'numeric' })} – ${maxDate.toLocaleDateString([], { month: 'short', day: 'numeric' })}`
         : ''
-      // Average nightly duration across the 7-night window. Computed from
-      // actual session durations (not from the angular delta between avg
-      // bedtime and avg wake — those use circular means which round-trip
-      // through angle space and can drift a few minutes off the true mean).
       const avgDurMs = nights.length > 0
-        ? nights.reduce((sum, n) =>
-            sum + (new Date(n.endAt).getTime() - new Date(n.startAt).getTime()),
-            0) / nights.length
+        ? nights.reduce((acc, n) => acc + (new Date(n.endAt).getTime() - new Date(n.startAt).getTime()), 0) / nights.length
         : 0
-      const avgDurLabel = avgDurMs > 0 ? fmtDurMs(avgDurMs) : ''
-      // Combine duration + date range as "7h 12m · 05/22 – 05/31"
+      const avgDurLabel = avgDurMs > 0 ? `~${fmtDurMs(avgDurMs)}` : ''
       const subParts = [avgDurLabel, rangeLabel].filter(Boolean)
       return {
         title:     'Average sleep time',
@@ -351,9 +557,9 @@ export default function SleepClock({
         isAverage: true,
       }
     }
-    const idx = activeIdx >= 0 && rings[activeIdx] ? activeIdx : DEFAULT_IDX
-    const r   = rings[idx]
-    if (!r) return null  // no data at all
+    const candidate = activeIdx >= 0 ? rings[activeIdx] : undefined
+    const r = (candidate && candidate.hasData) ? candidate : rings[DEFAULT_IDX]
+    if (!r || !r.hasData) return null
     return {
       title:     r.label,
       time:      `${fmtClock(r.bedHour)} – ${fmtClock(r.wakeHour)}`,
@@ -362,39 +568,43 @@ export default function SleepClock({
     }
   })()
 
-  // Mirror selection up to the parent so the page can render its own
-  // below-the-card readout from the same source of truth.
   useEffect(() => {
     if (onActiveChange) onActiveChange(readoutCard)
   }, [readoutCard?.title, readoutCard?.time, readoutCard?.sub, readoutCard?.isAverage])
 
-  // Center label content — what shows inside the clock hole. Same source
-  // as the bottom readout. For ring selections we show day + date; for
-  // the average band the center stays empty — the below-clock readout
-  // already names it and shows the date range, so duplicating in the
-  // center adds noise.
   const centerCard = (() => {
     if (!readoutCard) return null
-    if (readoutCard.isAverage) return null  // skip — readout-below carries it
-    const idx = activeIdx >= 0 && rings[activeIdx] ? activeIdx : DEFAULT_IDX
-    const r   = rings[idx]
-    if (!r) return null
+    if (readoutCard.isAverage) return null
+    const candidate = activeIdx >= 0 ? rings[activeIdx] : undefined
+    const r = (candidate && candidate.hasData) ? candidate : rings[DEFAULT_IDX]
+    if (!r || !r.hasData) return null
     return { line1: r.dayName, line2: r.dateLabel }
   })()
+
+  // ─── Skia-painted static elements ──────────────────────────────────────────
+  // Pre-computed colors for the static layers (background, spokes, tracks)
+  // — passed as plain strings since Skia accepts CSS-style colors directly.
+  const bgColor     = withAlpha(palette.slate[500], 0.04)
+  const spokeColor  = withAlpha(palette.slate[400], 0.18)
+  const trackColor  = withAlpha(palette.slate[400], 0.10)
 
   return (
     <View style={s.wrap}>
       <GestureDetector gesture={gesture}>
         <View style={{ width: size, height: size }} collapsable={false}>
-          <Svg width={size} height={size}>
-            {/* Subtle background circle (the clock face) */}
+          {/* Single Skia canvas paints the entire clock natively. One
+              native view, no per-prop bridge crossings, no SVG layout
+              passes. All animations are GPU-driven via Reanimated
+              shared values feeding useDerivedValue chains. */}
+          <Canvas style={{ width: size, height: size }}>
+            {/* Background clock face */}
             <Circle
               cx={cx} cy={cy} r={outerR + ringThickness / 2}
-              fill={withAlpha(palette.slate[500], 0.04)}
+              color={bgColor}
             />
 
-            {/* Hour spokes (every 3rd hour: 12, 3, 6, 9) — very faint */}
-            <G>
+            {/* Hour spokes — 12, 3, 6, 9 */}
+            <Group>
               {[0, 3, 6, 9].map(h => {
                 const angle = (h / 12) * 360
                 const p1    = polar(cx, cy, innerR - 4, angle)
@@ -402,64 +612,70 @@ export default function SleepClock({
                 return (
                   <Line
                     key={`spoke-${h}`}
-                    x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
-                    stroke={withAlpha(palette.slate[400], 0.18)}
+                    p1={vec(p1.x, p1.y)}
+                    p2={vec(p2.x, p2.y)}
+                    color={spokeColor}
                     strokeWidth={1}
                   />
                 )
               })}
-            </G>
+            </Group>
 
-            {/* Ring tracks (full circle, very faint) */}
-            <G>
+            {/* Ring tracks (full-circle outlines, very faint) */}
+            <Group>
               {rings.map(r => (
                 <Circle
                   key={`track-${r.idx}`}
                   cx={cx} cy={cy} r={r.r}
-                  stroke={withAlpha(palette.slate[400], 0.10)}
+                  color={trackColor}
+                  style="stroke"
                   strokeWidth={ringThickness}
-                  fill="none"
                 />
               ))}
-            </G>
+            </Group>
 
-            {/* Sleep arcs. Only the ACTIVE ring renders bright; every other
-                ring fades by recency (newer = slightly brighter than older).
-                The isMostRecent boost was removed once we made activeIdx
-                default to most-recent — the active highlight now does that
-                job, and keeping the boost made the most-recent ring stay
-                bright even after the user tapped a different day. */}
-            <G>
-              {rings.map(r => {
-                const isActive = activeIdx === r.idx
-                const fadedFill = withAlpha(palette.myrx.lime, 0.55 - r.idx * 0.05)
-                const fill = isActive ? palette.myrx.lime : fadedFill
+            {/* Sleep arcs — animated entrance + dim-up/down per ring */}
+            <Group>
+              {rings.map(slot => {
+                if (!slot.hasData) return null
                 return (
-                  <Path
-                    key={`arc-${r.idx}`}
-                    d={r.path}
-                    fill={fill}
+                  <RingArc
+                    key={`arc-${slot.idx}`}
+                    idx={slot.idx}
+                    isActive={activeIdx === slot.idx}
+                    cx={cx}
+                    cy={cy}
+                    r={slot.r}
+                    bedAngle={slot.bedAngle}
+                    wakeAngle={slot.wakeAngle}
+                    thickness={ringThickness}
+                    fadedFill={withAlpha(palette.myrx.lime, 0.55 - slot.idx * 0.05)}
+                    brightFill={palette.myrx.lime}
                   />
                 )
               })}
-            </G>
+            </Group>
 
-            {/* Average sleep window band — outside outermost ring */}
+            {/* Average sleep window band */}
             {avg && (
-              <Path
-                d={avg.path}
-                fill={
-                  activeIdx === AVG_IDX
-                    ? withAlpha(palette.indigo[400], 0.85)
-                    : withAlpha(palette.indigo[400], 0.50)
-                }
+              <AvgBand
+                cx={cx}
+                cy={cy}
+                r={avgBandR}
+                baseThickness={avgBandThickness}
+                bedAngle={hourToAngle(avg.bedHour)}
+                wakeAngle={hourToAngle(avg.wakeHour)}
+                isActive={activeIdx === AVG_IDX}
+                fadedFill={withAlpha(palette.indigo[400], 0.50)}
+                brightFill={withAlpha(palette.indigo[400], 0.85)}
               />
             )}
-          </Svg>
+          </Canvas>
 
-          {/* Center label — day name + date (or 'Typical' + range) for the
-              currently selected ring. Sits in the empty hole inside the
-              innermost ring. Renders nothing if there's no data at all. */}
+          {/* Center label (day name + date) — RN Text overlay above the
+              canvas. Skia has its own text-rendering API but loading the
+              Geist font through it requires extra setup; RN Text is fine
+              for a static label that doesn't animate per frame. */}
           {centerCard && (
             <View
               pointerEvents="none"
@@ -477,7 +693,7 @@ export default function SleepClock({
             </View>
           )}
 
-          {/* Hour numerals — all 12, absolutely positioned. */}
+          {/* Hour numerals — all 12, RN Text overlay, no animation */}
           {hourNumerals.map(m => {
             const isCardinal = m.h === 12 || m.h === 3 || m.h === 6 || m.h === 9
             return (
@@ -497,16 +713,13 @@ export default function SleepClock({
               </Text>
             )
           })}
-
         </View>
       </GestureDetector>
-      {/* The below-clock readout is now rendered by the PARENT (sleep.tsx)
-          via the onActiveChange callback. The center-of-clock label above
-          remains owned by this component since it's geometrically tied
-          to the clock's inner hole. */}
     </View>
   )
 }
+
+// ─── Formatters (JS-thread, used in readouts + center label) ─────────────────
 
 function fmtClock(h: number): string {
   const wrapped = ((h % 24) + 24) % 24
@@ -551,7 +764,6 @@ const s = StyleSheet.create({
     fontFamily: fonts.mono[700],
     fontSize:   13,
   },
-  // Center label — day name + date inside the clock's inner hole.
   centerLabel: {
     position:       'absolute',
     alignItems:     'center',

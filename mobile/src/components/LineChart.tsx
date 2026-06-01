@@ -1,6 +1,7 @@
 /**
- * LineChart — react-native-svg port of the Recharts <LineChart> usage in
- * MyRX/src/pages/StrengthDetail.jsx (and later CardioDetail / BodyweightDetail).
+ * LineChart — Skia-migrated 2026-05-31. Originally a react-native-svg port of
+ * the Recharts <LineChart> usage in MyRX/src/pages/StrengthDetail.jsx (and
+ * later CardioDetail / BodyweightDetail).
  *
  * Visual parity with Recharts' shape:
  *   – 200px tall by default
@@ -13,11 +14,20 @@
  * On mobile we don't have hover, so the tooltip is *tap to pin*: tap anywhere
  * inside the plot area → snaps to the nearest point and shows a floating
  * value chip; tap again on empty space to dismiss.
+ *
+ * Rendering — GPU-backed via @shopify/react-native-skia. All shape work
+ * (curve, dashed reference line, dots) draws inside a single Skia <Canvas>.
+ * Text labels (axis ticks, tooltip body) remain absolute-positioned RN
+ * <Text>/<View> overlays above the canvas — Skia's text-rendering API
+ * would require loading Geist through it, and these labels are static
+ * (no per-frame animation), so the overlay path is fine. See Pattern 9
+ * of CLAUDE.md and SleepClock.tsx for the canonical Skia patterns this
+ * file follows.
  */
 
-import { useCallback, useState, type ReactNode } from 'react'
+import { useCallback, useState, useMemo, type ReactNode } from 'react'
 import { View, Text, Pressable, StyleSheet, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native'
-import Svg, { Path, Line as SvgLine, Circle, Text as SvgText } from 'react-native-svg'
+import { Canvas, Path, Circle, Skia, Group, DashPathEffect, type SkPath } from '@shopify/react-native-skia'
 import { colors, palette, fonts } from '../theme'
 import { useChartTooltipScope, useRegisterChartDismiss } from '../lib/chartTooltipScope'
 
@@ -75,11 +85,16 @@ function fmtDate(iso: string): string {
 }
 
 // ── Fritsch-Carlson monotone cubic interpolation ──────────────────────────
-// Produces an SVG `d` string with cubic Beziers between points such that the
-// curve is monotone whenever the input is monotone (no overshoot).
-function buildMonotonePath(pts: Array<[number, number]>): string {
-  if (pts.length === 0) return ''
-  if (pts.length === 1) return `M ${pts[0][0]} ${pts[0][1]}`
+// Produces a Skia path with cubic Beziers between points such that the curve
+// is monotone whenever the input is monotone (no overshoot). Math unchanged
+// from the SVG version — it's the curve-shape contract, not a render concern.
+function buildMonotoneSkiaPath(pts: Array<[number, number]>): SkPath {
+  const path = Skia.Path.Make()
+  if (pts.length === 0) return path
+  if (pts.length === 1) {
+    path.moveTo(pts[0][0], pts[0][1])
+    return path
+  }
 
   const n = pts.length
   const xs = pts.map(p => p[0])
@@ -117,15 +132,15 @@ function buildMonotonePath(pts: Array<[number, number]>): string {
   }
 
   // Cubic Bezier control points
-  let d = `M ${xs[0]} ${ys[0]}`
+  path.moveTo(xs[0], ys[0])
   for (let i = 0; i < n - 1; i++) {
     const cp1x = xs[i]   + dx[i] / 3
     const cp1y = ys[i]   + ts[i] * dx[i] / 3
     const cp2x = xs[i+1] - dx[i] / 3
     const cp2y = ys[i+1] - ts[i+1] * dx[i] / 3
-    d += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${xs[i+1]} ${ys[i+1]}`
+    path.cubicTo(cp1x, cp1y, cp2x, cp2y, xs[i+1], ys[i+1])
   }
-  return d
+  return path
 }
 
 // ── Round-down nice-looking tick value (for integer reps axes) ────────────
@@ -172,20 +187,13 @@ export default function LineChart({
     setWidth(e.nativeEvent.layout.width)
   }
 
-  // No data → empty placeholder so the card still has size
-  if (data.length === 0) {
-    return <View style={{ height }} onLayout={onLayout} />
-  }
-
-  if (width === 0) {
-    return <View style={{ height }} onLayout={onLayout} />
-  }
-
   // ── Domain ──────────────────────────────────────────────────────────────
-  const ys = data.map(p => p.y)
-  const rawMin = Math.min(...ys)
-  const rawMax = Math.max(...ys)
-  const yMin = yDomain?.min ? yDomain.min(rawMin) : rawMin
+  // Computed before any early returns so useMemo hooks below can depend on
+  // the same scalars without conditional-hook headaches.
+  const ys      = data.map(p => p.y)
+  const rawMin  = data.length > 0 ? Math.min(...ys) : 0
+  const rawMax  = data.length > 0 ? Math.max(...ys) : 1
+  const yMin    = yDomain?.min ? yDomain.min(rawMin) : rawMin
   const yMaxRaw = yDomain?.max ? yDomain.max(rawMax) : rawMax
   // Avoid yMin === yMax (single-point series)
   const yMax = (yMaxRaw - yMin < 1e-9) ? yMin + 1 : yMaxRaw
@@ -204,7 +212,38 @@ export default function LineChart({
     : (y: number) => PADDING_TOP + plotH - ((y - yMin) / (yMax - yMin)) * plotH
 
   const points: Array<[number, number]> = data.map((d, i) => [xScale(i), yScale(d.y)])
-  const pathD = buildMonotonePath(points)
+
+  // Skia path for the monotone-cubic curve. Memoised so we don't rebuild it
+  // on every render — only when layout or data changes. The path is a native
+  // Skia object; rebuilding it allocates GPU resources, so caching matters.
+  const curvePath = useMemo(
+    () => buildMonotoneSkiaPath(points),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [width, height, yWidth, data.length, yMin, yMax, reversed,
+     // Include the actual point values so a same-length-different-data update
+     // (e.g. swiping to a different exercise) rebuilds the path:
+     data.map(d => `${d.ts}:${d.y}`).join('|')],
+  )
+
+  // Skia path for the dashed personal-best reference line. Null when no
+  // reference line is shown (single-point series, or no PB provided).
+  const referencePath = useMemo<SkPath | null>(() => {
+    if (referenceY == null || data.length <= 1) return null
+    const p = Skia.Path.Make()
+    p.moveTo(yWidth, yScale(referenceY))
+    p.lineTo(yWidth + plotW, yScale(referenceY))
+    return p
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [referenceY, data.length, yWidth, plotW, yMin, yMax, reversed, height])
+
+  // No data → empty placeholder so the card still has size
+  if (data.length === 0) {
+    return <View style={{ height }} onLayout={onLayout} />
+  }
+
+  if (width === 0) {
+    return <View style={{ height }} onLayout={onLayout} />
+  }
 
   // ── Y-axis ticks (4 segments → 5 ticks max) ──────────────────────────────
   const yTicks = niceTicks(yMin, yMax, 4, allowDecimals)
@@ -244,63 +283,98 @@ export default function LineChart({
   return (
     <View>
       <View style={{ height }} onLayout={onLayout}>
-        <Svg width={width} height={height}>
-          {/* Y-axis tick labels */}
-          {yTicks.map((t, i) => (
-            <SvgText
-              key={`yt-${i}`}
-              x={yWidth - 6}
-              y={yScale(t) + 4}
-              fill={colors.mutedForeground}
-              fontSize={11}
-              textAnchor="end"
-            >
-              {yTickFormatter(t)}
-            </SvgText>
-          ))}
-
-          {/* X-axis tick labels (first + last) */}
-          {xTickIxs.map(i => (
-            <SvgText
-              key={`xt-${i}`}
-              x={xScale(i)}
-              y={PADDING_TOP + plotH + 16}
-              fill={colors.mutedForeground}
-              fontSize={11}
-              textAnchor={i === 0 ? 'start' : (i === data.length - 1 ? 'end' : 'middle')}
-            >
-              {fmtDate(data[i].ts)}
-            </SvgText>
-          ))}
-
-          {/* Personal-best reference line */}
-          {referenceY != null && data.length > 1 && (
-            <SvgLine
-              x1={yWidth}
-              y1={yScale(referenceY)}
-              x2={yWidth + plotW}
-              y2={yScale(referenceY)}
-              stroke={LINE_COLOR}
+        {/* Skia canvas paints the chart shapes (reference line, curve,
+            dots) at native speed. Text labels overlay above as
+            absolute-positioned RN <Text>. */}
+        <Canvas style={{ width, height }}>
+          {/* Personal-best reference line — dashed, 40% opacity. The
+              DashPathEffect is a CHILD of the <Path> per Skia's scoping
+              rules (NOT a top-level <Defs> like SVG). intervals=[4,3]
+              mirrors the original strokeDasharray="4 3". */}
+          {referencePath && (
+            <Path
+              path={referencePath}
+              color={LINE_COLOR}
+              style="stroke"
               strokeWidth={1}
-              strokeDasharray="4 3"
-              strokeOpacity={0.4}
-            />
+              opacity={0.4}
+            >
+              <DashPathEffect intervals={[4, 3]} />
+            </Path>
           )}
 
-          {/* Curve */}
-          <Path d={pathD} stroke={LINE_COLOR} strokeWidth={2} fill="none" />
+          {/* Curve — Fritsch-Carlson monotone cubic. */}
+          <Path
+            path={curvePath}
+            color={LINE_COLOR}
+            style="stroke"
+            strokeWidth={2}
+          />
 
-          {/* Dots */}
-          {points.map(([x, y], i) => (
-            <Circle
-              key={`dot-${i}`}
-              cx={x}
-              cy={y}
-              r={i === activeIx ? activeDotRadius : 4}
-              fill={LINE_COLOR}
-            />
-          ))}
-        </Svg>
+          {/* Dots — one per data point, with the active one larger. */}
+          <Group>
+            {points.map(([x, y], i) => (
+              <Circle
+                key={`dot-${i}`}
+                cx={x}
+                cy={y}
+                r={i === activeIx ? activeDotRadius : 4}
+                color={LINE_COLOR}
+              />
+            ))}
+          </Group>
+        </Canvas>
+
+        {/* Y-axis tick labels — RN Text overlay. Static, no per-frame
+            animation, so Skia text rendering isn't necessary. Matches
+            SVG's textAnchor="end" via right-aligned text inside a box
+            ending at yWidth - 6. */}
+        {yTicks.map((t, i) => (
+          <Text
+            key={`yt-${i}`}
+            style={[
+              s.yTickLabel,
+              {
+                left:  0,
+                top:   yScale(t) - 7,
+                width: yWidth - 6,
+              },
+            ]}
+          >
+            {yTickFormatter(t)}
+          </Text>
+        ))}
+
+        {/* X-axis tick labels (first + last) — RN Text overlay. */}
+        {xTickIxs.map(i => {
+          const isLast  = i === data.length - 1
+          const isFirst = i === 0 && data.length > 1
+          // Match SVG's textAnchor: first = start, last = end, single = middle
+          const align: 'left' | 'right' | 'center' =
+            isFirst ? 'left' : (isLast ? 'right' : 'center')
+          const x = xScale(i)
+          const TICK_W = 80
+          let left: number
+          if (align === 'left')       left = x
+          else if (align === 'right') left = x - TICK_W
+          else                        left = x - TICK_W / 2
+          return (
+            <Text
+              key={`xt-${i}`}
+              style={[
+                s.xTickLabel,
+                {
+                  left,
+                  top:       PADDING_TOP + plotH + 6,
+                  width:     TICK_W,
+                  textAlign: align,
+                },
+              ]}
+            >
+              {fmtDate(data[i].ts)}
+            </Text>
+          )
+        })}
 
         {/* Tap-to-pin tooltip overlay */}
         <Pressable
@@ -331,6 +405,17 @@ export default function LineChart({
 }
 
 const s = StyleSheet.create({
+  yTickLabel: {
+    position:  'absolute',
+    color:     colors.mutedForeground,
+    fontSize:  11,
+    textAlign: 'right',
+  },
+  xTickLabel: {
+    position: 'absolute',
+    color:    colors.mutedForeground,
+    fontSize: 11,
+  },
   tooltip: {
     position: 'absolute',
     backgroundColor: colors.card,

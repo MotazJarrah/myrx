@@ -10,26 +10,39 @@
  * silky smooth but the mannequin snaps to the new pose on release rather
  * than animating live during the drag.
  *
+ * Skia-migrated 2026-05-31. Previously rendered via `react-native-svg` —
+ * see Pattern 9 of CLAUDE.md ("Skia GPU canvas") + SleepClock.tsx for the
+ * canonical migration reference. We use a single <Canvas> with one outer
+ * <Group transform={[scale, translate]}> that simulates SVG's viewBox →
+ * canvas coordinate mapping. All shape transforms (translate / rotate /
+ * rotate-around-point) become Skia <Group> transforms. Gradients are
+ * inlined per-shape (Skia has no <Defs> equivalent — gradient nodes are
+ * scoped to their parent shape).
+ *
  * NOTE: An earlier attempt to lift the mannequin's transforms onto reanimated
  * shared values + react-native-svg's animated G/Path props blocked touch
  * input on the emulator (likely a new-arch + react-native-svg interaction).
- * Avoid `Animated.createAnimatedComponent(G | Path)` until that's resolved.
+ * The current implementation re-renders from `degrees` (a React prop) — fine
+ * because the Slider is commit-on-release. If the future direction is
+ * live-animated mannequin, drive everything via useSharedValue + Skia
+ * useDerivedValue and the render layer is already GPU-ready.
  */
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { View, Text, StyleSheet } from 'react-native'
-import Svg, {
-  Defs,
+import {
+  Canvas,
+  Path,
+  Circle,
+  Oval,
+  Line,
+  Group,
+  Skia,
+  vec,
   LinearGradient,
   RadialGradient,
-  Stop,
-  Rect,
-  Circle,
-  Ellipse,
-  Path,
-  Line as SvgLine,
-  G,
-} from 'react-native-svg'
+  type SkPath,
+} from '@shopify/react-native-skia'
 import { colors, palette, alpha, withAlpha, fonts } from '../theme'
 import Slider from './Slider'
 
@@ -66,77 +79,213 @@ const W = {
   jAct:  '#A855F7',
 }
 
-// ── SVG Defs ────────────────────────────────────────────────────────────────
-function FigureDefs() {
-  return (
-    <Defs>
-      <LinearGradient id="gSeg" x1="0" y1="0" x2="1" y2="0">
-        <Stop offset="0%"   stopColor={W.lt}  />
-        <Stop offset="35%"  stopColor={W.mid} />
-        <Stop offset="100%" stopColor={W.dk}  />
-      </LinearGradient>
-      <LinearGradient id="gAct" x1="0" y1="0" x2="1" y2="0">
-        <Stop offset="0%"   stopColor={W.actLt} />
-        <Stop offset="40%"  stopColor={W.act}   />
-        <Stop offset="100%" stopColor={W.actDk} />
-      </LinearGradient>
-      <RadialGradient id="gJR" cx="35%" cy="35%">
-        <Stop offset="0%"   stopColor={W.lt} />
-        <Stop offset="100%" stopColor={W.dk} />
-      </RadialGradient>
-      <RadialGradient id="gJAct" cx="35%" cy="35%">
-        <Stop offset="0%"   stopColor={W.actLt} />
-        <Stop offset="100%" stopColor={W.jAct}  />
-      </RadialGradient>
-    </Defs>
-  )
-}
+const DEG2RAD = Math.PI / 180
 
-// ── Primitives ──────────────────────────────────────────────────────────────
+// ── Skia primitives ─────────────────────────────────────────────────────────
+//
+// Each primitive is a thin shim around a Skia shape with the inactive /
+// active gradient inlined as a child node. Skia gradients are SCOPED — no
+// <Defs>; the LinearGradient / RadialGradient lives inside the <Path> /
+// <Circle> / <Oval> it fills. Coordinates passed to LinearGradient.start /
+// .end are in the SAME local coordinate space as the shape, which is the
+// outer Canvas pixel space transformed by the Group hierarchy above.
 
+/**
+ * Vertical-rectangle limb segment with rounded ends — thigh, upper arm,
+ * forearm, etc. Origin (0,0) sits at the joint; segment extends downward
+ * `len` pixels and is `w` pixels wide. The active gradient is the magenta
+ * "wood actuator" gradient when the limb is being measured.
+ *
+ * The gradient runs LEFT → RIGHT across the rect's width (light edge on
+ * the left, deep wood on the right) — same direction as the original SVG
+ * `x1="0" x2="1"` linear gradient.
+ */
 function Seg({ len, w, active, opacity = 1 }: { len: number; w: number; active?: boolean; opacity?: number }) {
   const r = w / 2
+  const x0 = -r
+  // Build a rounded rect via Skia.Path. addRRect requires an InputRRect.
+  const path = useMemo<SkPath>(() => {
+    const p = Skia.Path.Make()
+    const rect = Skia.XYWHRect(x0, 0, w, len)
+    const rrect = Skia.RRectXY(rect, r, r)
+    p.addRRect(rrect)
+    return p
+  }, [x0, w, len, r])
   return (
-    <Rect x={-r} y={0} width={w} height={len} rx={r} ry={r}
-      fill={active ? 'url(#gAct)' : 'url(#gSeg)'} opacity={opacity} />
+    <Path path={path} opacity={opacity}>
+      <LinearGradient
+        start={vec(x0, 0)}
+        end={vec(x0 + w, 0)}
+        colors={active ? [W.actLt, W.act, W.actDk] : [W.lt, W.mid, W.dk]}
+        positions={active ? [0, 0.4, 1] : [0, 0.35, 1]}
+      />
+    </Path>
   )
 }
 
+/**
+ * Horizontal-rectangle segment (foot). Origin (0,0) sits at the ankle;
+ * the foot extends `len` pixels horizontally and is `h` pixels tall.
+ * `flip` mirrors the foot to point left instead of right (used for the
+ * left foot in the front view).
+ */
 function SegH({ len, h, active, flip = false }: { len: number; h: number; active?: boolean; flip?: boolean }) {
   const r = h / 2
+  const x0 = flip ? -len : 0
+  const path = useMemo<SkPath>(() => {
+    const p = Skia.Path.Make()
+    const rect = Skia.XYWHRect(x0, -r, len, h)
+    const rrect = Skia.RRectXY(rect, r, r)
+    p.addRRect(rrect)
+    return p
+  }, [x0, len, h, r])
   return (
-    <Rect x={flip ? -len : 0} y={-r} width={len} height={h} rx={r} ry={r}
-      fill={active ? 'url(#gAct)' : 'url(#gSeg)'} />
+    <Path path={path}>
+      <LinearGradient
+        start={vec(x0, 0)}
+        end={vec(x0 + len, 0)}
+        colors={active ? [W.actLt, W.act, W.actDk] : [W.lt, W.mid, W.dk]}
+        positions={active ? [0, 0.4, 1] : [0, 0.35, 1]}
+      />
+    </Path>
   )
 }
 
+/**
+ * Joint sphere. Always centered on (0,0) in local space — the parent
+ * <Group> positions it. Radial gradient produces the highlight at
+ * 35%/35% (upper-left), darkening toward the wood-deep edge.
+ */
 function Joint({ r, active, opacity = 1 }: { r: number; active?: boolean; opacity?: number }) {
+  // Radial gradient center is computed from the bounding rect: the SVG
+  // had cx=35% cy=35% relative to the gradient bounding box. For a circle
+  // of radius `r` centered at origin, that puts the highlight at
+  // (-r + 0.7r, -r + 0.7r) = (-0.3r, -0.3r).
+  const cx = -0.3 * r
+  const cy = -0.3 * r
   return (
-    <Circle cx={0} cy={0} r={r}
-      fill={active ? 'url(#gJAct)' : 'url(#gJR)'} opacity={opacity} />
+    <Circle cx={0} cy={0} r={r} opacity={opacity}>
+      <RadialGradient
+        c={vec(cx, cy)}
+        r={r * 1.6}
+        colors={active ? [W.actLt, W.jAct] : [W.lt, W.dk]}
+      />
+    </Circle>
   )
 }
 
+/**
+ * ROM measurement arc — translucent magenta pie slice radiating from the
+ * joint. `startDeg` is the start angle (SVG convention: 0 = +x axis, 90
+ * = +y / down on screen). `sweepDeg` is signed: positive sweeps clockwise.
+ */
 function Arc({ radius, startDeg, sweepDeg }: { radius: number; startDeg: number; sweepDeg: number }) {
-  if (Math.abs(sweepDeg) < 2) return null
-  const toRad = (d: number) => d * Math.PI / 180
-  const x1 = +(radius * Math.cos(toRad(startDeg))).toFixed(2)
-  const y1 = +(radius * Math.sin(toRad(startDeg))).toFixed(2)
-  const x2 = +(radius * Math.cos(toRad(startDeg + sweepDeg))).toFixed(2)
-  const y2 = +(radius * Math.sin(toRad(startDeg + sweepDeg))).toFixed(2)
-  const large = Math.abs(sweepDeg) > 180 ? 1 : 0
-  const sweep = sweepDeg > 0 ? 1 : 0
+  const path = useMemo<SkPath | null>(() => {
+    if (Math.abs(sweepDeg) < 2) return null
+    const x1 = radius * Math.cos(startDeg * DEG2RAD)
+    const y1 = radius * Math.sin(startDeg * DEG2RAD)
+    const p = Skia.Path.Make()
+    p.moveTo(0, 0)
+    p.lineTo(x1, y1)
+    // arcToOval takes the bounding rect of the full oval. For a circle of
+    // radius `radius` centered at origin, the rect is (-r,-r,2r,2r).
+    // Skia's arcToOval uses the SAME angle convention as SVG: 0 = +x,
+    // sweeps clockwise for positive sweep.
+    const rect = Skia.XYWHRect(-radius, -radius, radius * 2, radius * 2)
+    p.arcToOval(rect, startDeg, sweepDeg, false)
+    p.lineTo(0, 0)
+    p.close()
+    return p
+  }, [radius, startDeg, sweepDeg])
+  if (!path) return null
   return (
-    <Path
-      d={`M0,0 L${x1},${y1} A${radius},${radius} 0 ${large} ${sweep} ${x2},${y2} Z`}
-      fill="rgba(232,121,249,0.13)" stroke="#E879F9" strokeWidth={1.2} strokeLinejoin="round"
-    />
+    <>
+      {/* Fill */}
+      <Path path={path} color="rgba(232,121,249,0.13)" />
+      {/* Stroke — same path, stroked separately so we get the
+          original strokeWidth=1.2 strokeLinejoin="round" outline. */}
+      <Path
+        path={path}
+        color="#E879F9"
+        style="stroke"
+        strokeWidth={1.2}
+        strokeJoin="round"
+      />
+    </>
   )
+}
+
+/**
+ * Static head ellipse — used by both views.
+ */
+function HeadEllipse({ cx, cy, rx, ry }: { cx: number; cy: number; rx: number; ry: number }) {
+  // Skia's <Oval> takes a rect; the gradient runs horizontally across
+  // the ellipse's bounding rect, matching the SVG linear gradient.
+  const rect = useMemo(() => Skia.XYWHRect(cx - rx, cy - ry, rx * 2, ry * 2), [cx, cy, rx, ry])
+  return (
+    <Oval rect={rect}>
+      <LinearGradient
+        start={vec(cx - rx, 0)}
+        end={vec(cx + rx, 0)}
+        colors={[W.lt, W.mid, W.dk]}
+        positions={[0, 0.35, 1]}
+      />
+    </Oval>
+  )
+}
+
+/**
+ * Small ellipse at the end of an arm — represents the hand.
+ * Origin is (0,11) in local coords; rx=8 ry=11.
+ */
+function HandEllipse({ active }: { active: boolean }) {
+  const rect = useMemo(() => Skia.XYWHRect(-8, 0, 16, 22), [])
+  return (
+    <Oval rect={rect}>
+      <LinearGradient
+        start={vec(-8, 0)}
+        end={vec(8, 0)}
+        colors={active ? [W.actLt, W.act, W.actDk] : [W.lt, W.mid, W.dk]}
+        positions={active ? [0, 0.4, 1] : [0, 0.35, 1]}
+      />
+    </Oval>
+  )
+}
+
+// ── ViewBox → Canvas transform helper ──────────────────────────────────────
+//
+// SVG `viewBox="minX minY width height"` maps the viewBox into the
+// rendering area via "preserveAspectRatio meet" (the default): the viewBox
+// is scaled uniformly to fit inside the canvas, centered, with letterbox
+// space on the longer axis. We replicate this with a single outer Group
+// translate+scale transform applied to all shapes drawn in viewBox space.
+
+function buildViewBoxTransform(
+  vb: [number, number, number, number],
+  canvasW: number,
+  canvasH: number,
+): { translateX: number; translateY: number; scale: number } {
+  const [minX, minY, vbW, vbH] = vb
+  const sx = canvasW / vbW
+  const sy = canvasH / vbH
+  const scale = Math.min(sx, sy)
+  // Centering: after scaling, the viewBox spans (vbW*scale) × (vbH*scale).
+  // Center it inside the canvas.
+  const tx = (canvasW - vbW * scale) / 2 - minX * scale
+  const ty = (canvasH - vbH * scale) / 2 - minY * scale
+  return { translateX: tx, translateY: ty, scale }
+}
+
+function parseViewBox(vbStr: string): [number, number, number, number] {
+  const [a, b, c, d] = vbStr.split(/\s+/).map(Number)
+  return [a, b, c, d]
 }
 
 // ── Side view ───────────────────────────────────────────────────────────────
 
-function SideView({ movement, degrees }: { movement: string; degrees: number }) {
+function SideView({ movement, degrees, canvasW, canvasH }: {
+  movement: string; degrees: number; canvasW: number; canvasH: number
+}) {
   const isShFlex = movement === 'shoulder-flexion'
   const isShExt  = movement === 'shoulder-extension'
   const isHipFx  = movement === 'hip-flexion'
@@ -173,112 +322,144 @@ function SideView({ movement, degrees }: { movement: string; degrees: number }) 
 
   const isUpper = isShFlex || isShExt
   const isLower = isHipFx || isKneeFx || isAnkle
-  const vb = isUpper  ? '50 15 145 265'
-           : isHipFx  ? '10 90 225 395'
-           : isLower  ? '40 140 165 328'
-           : '40 15 165 480'
+  const vbStr = isUpper  ? '50 15 145 265'
+              : isHipFx  ? '10 90 225 395'
+              : isLower  ? '40 140 165 328'
+              : '40 15 165 480'
+  const vb = parseViewBox(vbStr)
+  const t = buildViewBoxTransform(vb, canvasW, canvasH)
+
+  // Outer transform — emulates SVG viewBox + preserveAspectRatio="meet".
+  // Order: translate first, then scale (RN/Skia applies transforms in array order).
+  const outerTransform = [
+    { translateX: t.translateX },
+    { translateY: t.translateY },
+    { scale:      t.scale       },
+  ]
 
   return (
-    <Svg viewBox={vb} width="100%" height="100%">
-      <FigureDefs />
-
+    <Group transform={outerTransform}>
       {!isUpper && (
-        <SvgLine x1="65" y1="462" x2="195" y2="462" stroke="#374151" strokeWidth={2} strokeLinecap="round" />
+        <Line
+          p1={vec(65, 462)}
+          p2={vec(195, 462)}
+          color="#374151"
+          strokeWidth={2}
+          strokeCap="round"
+        />
       )}
 
-      <G transform={`rotate(${spineRot}, 120, ${WAIST_Y})`}>
-        <G transform={`translate(120, ${TORSO_TOP_Y})`}>
+      {/* Spine + head — rotates around (120, WAIST_Y) when spinal-flexion */}
+      <Group
+        transform={[{ rotate: spineRot * DEG2RAD }]}
+        origin={vec(120, WAIST_Y)}
+      >
+        <Group transform={[{ translateX: 120 }, { translateY: TORSO_TOP_Y }]}>
           <Seg len={TORSO_LEN} w={38} active={isSpinal} />
-        </G>
-        <G transform={`translate(120, ${NECK_Y})`}>
+        </Group>
+        <Group transform={[{ translateX: 120 }, { translateY: NECK_Y }]}>
           <Joint r={9} active={false} />
-        </G>
-        <Ellipse cx={120} cy={HEAD_CY} rx={HEAD_RX} ry={HEAD_RY} fill="url(#gSeg)" />
-        <G transform="translate(120, 19)"><Joint r={7} active={false} /></G>
-      </G>
+        </Group>
+        <HeadEllipse cx={120} cy={HEAD_CY} rx={HEAD_RX} ry={HEAD_RY} />
+        <Group transform={[{ translateX: 120 }, { translateY: 19 }]}>
+          <Joint r={7} active={false} />
+        </Group>
+      </Group>
 
       {isSpinal && (
-        <G transform={`translate(120, ${WAIST_Y})`}>
+        <Group transform={[{ translateX: 120 }, { translateY: WAIST_Y }]}>
           <Arc radius={48} startDeg={-90} sweepDeg={+degrees} />
-        </G>
+        </Group>
       )}
 
-      <G transform={`translate(120, ${WAIST_Y})`}>
+      <Group transform={[{ translateX: 120 }, { translateY: WAIST_Y }]}>
         <Joint r={10} active={isSpinal} />
-      </G>
+      </Group>
 
-      <G transform={`translate(${HIP_X - 6}, ${HIP_Y})`} opacity={0.32}>
+      {/* Reference (ghost) leg — slightly behind the active leg, at 32% opacity */}
+      <Group transform={[{ translateX: HIP_X - 6 }, { translateY: HIP_Y }]} opacity={0.32}>
         <Joint r={12} active={false} />
         <Seg len={TH_LEN} w={20} active={false} />
-        <G transform={`translate(0, ${TH_LEN})`}>
+        <Group transform={[{ translateY: TH_LEN }]}>
           <Joint r={10} active={false} />
           <Seg len={SH_LEN} w={16} active={false} />
-          <G transform={`translate(0, ${SH_LEN})`}>
+          <Group transform={[{ translateY: SH_LEN }]}>
             <Joint r={8} active={false} />
             <SegH len={FOOT_LEN} h={FOOT_H} active={false} />
-          </G>
-        </G>
-      </G>
+          </Group>
+        </Group>
+      </Group>
 
-      <G transform={`translate(${HIP_X}, ${HIP_Y})`}>
+      {/* Active leg — hip rotation, knee rotation, ankle rotation cascade */}
+      <Group transform={[{ translateX: HIP_X }, { translateY: HIP_Y }]}>
         <Joint r={13} active={legAct || shinAct || footAct} />
         {isHipFx && <Arc radius={48} startDeg={90} sweepDeg={-degrees} />}
 
-        <G transform={`rotate(${legRot})`}>
+        <Group transform={[{ rotate: legRot * DEG2RAD }]}>
           <Seg len={TH_LEN} w={TH_W} active={legAct} />
 
-          <G transform={`translate(0, ${TH_LEN})`}>
+          <Group transform={[{ translateY: TH_LEN }]}>
             <Joint r={11} active={shinAct} />
             {isKneeFx && <Arc radius={40} startDeg={90} sweepDeg={+degrees} />}
 
-            <G transform={`rotate(${kneeRot})`}>
+            <Group transform={[{ rotate: kneeRot * DEG2RAD }]}>
               <Seg len={SH_LEN} w={SH_W} active={shinAct} />
 
-              <G transform={`translate(0, ${SH_LEN})`}>
+              <Group transform={[{ translateY: SH_LEN }]}>
                 <Joint r={9} active={footAct} />
                 {isAnkle && <Arc radius={34} startDeg={0} sweepDeg={-degrees} />}
 
-                <G transform={`rotate(${ankleRot})`}>
+                <Group transform={[{ rotate: ankleRot * DEG2RAD }]}>
                   <SegH len={FOOT_LEN} h={FOOT_H} active={footAct} />
-                </G>
-              </G>
-            </G>
-          </G>
-        </G>
-      </G>
+                </Group>
+              </Group>
+            </Group>
+          </Group>
+        </Group>
+      </Group>
 
+      {/* Arm — only rendered for non-hip movements. Hosted inside the same
+          spine-rotation group so the arm follows the torso during
+          spinal-flexion. */}
       {!isHipFx && (
-        <G transform={`rotate(${spineRot}, 120, ${WAIST_Y})`}>
-          <G transform={`translate(${SH_X}, ${SH_Y})`}>
+        <Group
+          transform={[{ rotate: spineRot * DEG2RAD }]}
+          origin={vec(120, WAIST_Y)}
+        >
+          <Group transform={[{ translateX: SH_X }, { translateY: SH_Y }]}>
             <Joint r={12} active={armAct} />
             {armAct && (
-              <Arc radius={42} startDeg={90}
-                sweepDeg={isShFlex ? -degrees : +degrees} />
+              <Arc
+                radius={42}
+                startDeg={90}
+                sweepDeg={isShFlex ? -degrees : +degrees}
+              />
             )}
-            <G transform={`rotate(${armRot})`}>
+            <Group transform={[{ rotate: armRot * DEG2RAD }]}>
               <Seg len={UA_LEN} w={UA_W} active={armAct} />
-              <G transform={`translate(0, ${UA_LEN})`}>
+              <Group transform={[{ translateY: UA_LEN }]}>
                 <Joint r={10} active={armAct} />
-                <G transform={`rotate(${elbowRot})`}>
+                <Group transform={[{ rotate: elbowRot * DEG2RAD }]}>
                   <Seg len={FA_LEN} w={FA_W} active={armAct} />
-                  <G transform={`translate(0, ${FA_LEN})`}>
+                  <Group transform={[{ translateY: FA_LEN }]}>
                     <Joint r={7} active={armAct} />
-                    <Ellipse cx={0} cy={11} rx={8} ry={11}
-                      fill={armAct ? 'url(#gAct)' : 'url(#gSeg)'} />
-                  </G>
-                </G>
-              </G>
-            </G>
-          </G>
-        </G>
+                    <HandEllipse active={armAct} />
+                  </Group>
+                </Group>
+              </Group>
+            </Group>
+          </Group>
+        </Group>
       )}
-    </Svg>
+    </Group>
   )
 }
 
 // ── Front view ──────────────────────────────────────────────────────────────
 
-function FrontView({ movement, degrees }: { movement: string; degrees: number }) {
+function FrontView({ movement, degrees, canvasW, canvasH }: {
+  movement: string; degrees: number; canvasW: number; canvasH: number
+}) {
   const isShAbd  = movement === 'shoulder-abduction'
   const isHipAbd = movement === 'hip-abduction'
 
@@ -299,31 +480,38 @@ function FrontView({ movement, degrees }: { movement: string; degrees: number })
   const rLegRot = isHipAbd ? -degrees : 0
   const lLegRot = 0
 
-  const vb = isShAbd  ? '55 10 175 290'
-           : isHipAbd ? '55 130 185 355'
-           : '25 15 195 490'
+  const vbStr = isShAbd  ? '55 10 175 290'
+              : isHipAbd ? '55 130 185 355'
+              : '25 15 195 490'
+  const vb = parseViewBox(vbStr)
+  const t = buildViewBoxTransform(vb, canvasW, canvasH)
+
+  const outerTransform = [
+    { translateX: t.translateX },
+    { translateY: t.translateY },
+    { scale:      t.scale       },
+  ]
 
   function ArmGroup({ pivot, rotAngle, active, side }: {
     pivot: { x: number; y: number }; rotAngle: number; active: boolean; side: 'left' | 'right'
   }) {
     const sweep = side === 'right' ? -degrees : +degrees
     return (
-      <G transform={`translate(${pivot.x}, ${pivot.y})`}>
+      <Group transform={[{ translateX: pivot.x }, { translateY: pivot.y }]}>
         <Joint r={12} active={active} />
         {active && <Arc radius={44} startDeg={90} sweepDeg={sweep} />}
-        <G transform={`rotate(${rotAngle})`}>
+        <Group transform={[{ rotate: rotAngle * DEG2RAD }]}>
           <Seg len={UA_LEN} w={UA_W} active={active} />
-          <G transform={`translate(0, ${UA_LEN})`}>
+          <Group transform={[{ translateY: UA_LEN }]}>
             <Joint r={10} active={active} />
             <Seg len={FA_LEN} w={FA_W} active={active} />
-            <G transform={`translate(0, ${FA_LEN})`}>
+            <Group transform={[{ translateY: FA_LEN }]}>
               <Joint r={7} active={active} />
-              <Ellipse cx={0} cy={11} rx={8} ry={11}
-                fill={active ? 'url(#gAct)' : 'url(#gSeg)'} />
-            </G>
-          </G>
-        </G>
-      </G>
+              <HandEllipse active={active} />
+            </Group>
+          </Group>
+        </Group>
+      </Group>
     )
   }
 
@@ -333,46 +521,56 @@ function FrontView({ movement, degrees }: { movement: string; degrees: number })
     const sweep = side === 'right' ? -degrees : +degrees
     const footFlip = side === 'left'
     return (
-      <G transform={`translate(${pivot.x}, ${pivot.y})`}>
+      <Group transform={[{ translateX: pivot.x }, { translateY: pivot.y }]}>
         <Joint r={13} active={active} />
         {active && <Arc radius={46} startDeg={90} sweepDeg={sweep} />}
-        <G transform={`rotate(${rotAngle})`}>
+        <Group transform={[{ rotate: rotAngle * DEG2RAD }]}>
           <Seg len={TH_LEN} w={TH_W} active={active} />
-          <G transform={`translate(0, ${TH_LEN})`}>
+          <Group transform={[{ translateY: TH_LEN }]}>
             <Joint r={11} active={active} />
             <Seg len={SH_LEN} w={SH_W} active={active} />
-            <G transform={`translate(0, ${SH_LEN})`}>
+            <Group transform={[{ translateY: SH_LEN }]}>
               <Joint r={9} active={active} />
               <SegH len={FOOT_LEN} h={FOOT_H} active={active} flip={footFlip} />
-            </G>
-          </G>
-        </G>
-      </G>
+            </Group>
+          </Group>
+        </Group>
+      </Group>
     )
   }
 
   return (
-    <Svg viewBox={vb} width="100%" height="100%">
-      <FigureDefs />
-
+    <Group transform={outerTransform}>
       {isHipAbd && (
-        <SvgLine x1="60" y1="462" x2="185" y2="462" stroke="#374151" strokeWidth={2} strokeLinecap="round" />
+        <Line
+          p1={vec(60, 462)}
+          p2={vec(185, 462)}
+          color="#374151"
+          strokeWidth={2}
+          strokeCap="round"
+        />
       )}
 
-      <Ellipse cx={120} cy={HEAD.cy} rx={HEAD.rx} ry={HEAD.ry} fill="url(#gSeg)" />
-      <G transform="translate(120, 19)"><Joint r={7} active={false} /></G>
-      <G transform="translate(120, 71)"><Joint r={9} active={false} /></G>
-      <G transform="translate(120, 71)">
+      <HeadEllipse cx={120} cy={HEAD.cy} rx={HEAD.rx} ry={HEAD.ry} />
+      <Group transform={[{ translateX: 120 }, { translateY: 19 }]}>
+        <Joint r={7} active={false} />
+      </Group>
+      <Group transform={[{ translateX: 120 }, { translateY: 71 }]}>
+        <Joint r={9} active={false} />
+      </Group>
+      <Group transform={[{ translateX: 120 }, { translateY: 71 }]}>
         <Seg len={87} w={54} active={false} />
-      </G>
-      <G transform="translate(120, 160)"><Joint r={10} active={false} /></G>
+      </Group>
+      <Group transform={[{ translateX: 120 }, { translateY: 160 }]}>
+        <Joint r={10} active={false} />
+      </Group>
 
       <LegGroup pivot={LHIP} rotAngle={lLegRot} active={false}    side="left" />
       <LegGroup pivot={RHIP} rotAngle={rLegRot} active={isHipAbd} side="right" />
 
       <ArmGroup pivot={LSH} rotAngle={lArmRot} active={false}   side="left" />
       <ArmGroup pivot={RSH} rotAngle={rArmRot} active={isShAbd} side="right" />
-    </Svg>
+    </Group>
   )
 }
 
@@ -386,6 +584,9 @@ interface Props {
 
 export default function ROMVisualizer({ movementKey, degrees, onChange }: Props) {
   const config = MOVEMENT_CONFIG[movementKey]
+  // Always call hooks unconditionally before any early returns (rules of hooks).
+  const [canvasSize, setCanvasSize] = useState<{ w: number; h: number } | null>(null)
+
   if (!config) return null
 
   const { view, normalRange, athleticRange } = config
@@ -417,10 +618,27 @@ export default function ROMVisualizer({ movementKey, degrees, onChange }: Props)
 
   return (
     <View style={s.root}>
-      <View style={s.figureBox}>
-        {view === 'side'
-          ? <SideView  movement={movementKey} degrees={degrees} />
-          : <FrontView movement={movementKey} degrees={degrees} />}
+      <View
+        style={s.figureBox}
+        onLayout={e => {
+          const { width, height } = e.nativeEvent.layout
+          // figureBox padding = 12 on all sides — usable canvas area = layout - 24.
+          const cw = Math.max(0, width  - 24)
+          const ch = Math.max(0, height - 24)
+          if (cw > 0 && ch > 0 && (canvasSize?.w !== cw || canvasSize?.h !== ch)) {
+            setCanvasSize({ w: cw, h: ch })
+          }
+        }}
+      >
+        {canvasSize && (
+          <Canvas style={{ width: canvasSize.w, height: canvasSize.h }}>
+            {view === 'side'
+              ? <SideView  movement={movementKey} degrees={degrees}
+                          canvasW={canvasSize.w} canvasH={canvasSize.h} />
+              : <FrontView movement={movementKey} degrees={degrees}
+                          canvasW={canvasSize.w} canvasH={canvasSize.h} />}
+          </Canvas>
+        )}
       </View>
 
       <View style={s.readoutRow}>

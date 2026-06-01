@@ -3,7 +3,7 @@
  *
  * Top of the Calories page. Shows:
  *  • A horizontally-scrollable 14-day tile row (13 past + today, no future)
- *  • A mini SVG trend chart with status-coloured vertical bands + dots + dashed
+ *  • A mini trend chart with status-coloured vertical bands + dots + dashed
  *    target line
  *
  * Parent passes pre-fetched `externalLogs` (a `{ [iso]: { calories } }` map) so
@@ -14,8 +14,13 @@
  * Tap a tile or a dot → `onDayClick(iso)` fires; the parent decides whether to
  * open the FoodLogDrawer for that day.
  *
- * The SVG path math mirrors the web's `<svg viewBox="0 0 320 72">` exactly —
- * react-native-svg renders with the same coordinate system.
+ * Skia-migrated 2026-05-31 (Pattern 9). The CalorieGraph subcomponent now
+ * draws inside a single `<Canvas>` from @shopify/react-native-skia. The dot
+ * tap-targets are RN `<Pressable>` overlays positioned absolutely above the
+ * canvas, since Skia primitives don't accept onPress handlers. The path math
+ * mirrors the original SVG `viewBox="0 0 W 72"` layout exactly — same band
+ * positions, same target dashed line, same polyline, same dot radii.
+ * Reference: mobile/src/components/SleepClock.tsx.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -23,7 +28,11 @@ import {
   View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator,
   type LayoutChangeEvent,
 } from 'react-native'
-import Svg, { Rect, Line, Polyline, Circle, G } from 'react-native-svg'
+import {
+  Canvas, Path, Circle as SkCircle, Group, Skia,
+  DashPathEffect,
+  type SkPath,
+} from '@shopify/react-native-skia'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { colors, alpha, palette, fonts } from '../theme'
@@ -89,7 +98,8 @@ const STATUS_DOT_COLOR: Record<Status, string> = {
   'empty':       'transparent',
 }
 
-// Per-status fill colours for the SVG bands + dots (RGBA).
+// Per-status fill colours for the bands + dots (RGBA). Skia accepts CSS-style
+// rgba() strings directly.
 const STATUS_GRAPH: Record<Status, { fill: string; dot: string }> = {
   'on-target':   { fill: 'rgba(52,211,153,0.12)',  dot: 'rgb(52,211,153)'  },
   'near-target': { fill: 'rgba(251,191,36,0.12)',  dot: 'rgb(251,191,36)'  },
@@ -98,10 +108,19 @@ const STATUS_GRAPH: Record<Status, { fill: string; dot: string }> = {
   'empty':       { fill: 'transparent',             dot: 'transparent'      },
 }
 
-// ── Mini trend graph ──────────────────────────────────────────────────────────
+// ── Mini trend graph (Skia-rendered) ─────────────────────────────────────────
 
 interface DayLog { calories: number }
 type LogsMap = Record<string, DayLog>
+
+interface GraphPoint {
+  idx:    number
+  iso:    string
+  cal:    number
+  status: Status
+  cx:     number
+  cy:     number
+}
 
 function CalorieGraph({
   days, logs, dailyTarget, onDotClick, width,
@@ -118,13 +137,99 @@ function CalorieGraph({
   const innerW = W - PAD.left - PAD.right
   const innerH = H - PAD.top  - PAD.bottom
 
-  const points = days
-    .map((d, i) => {
-      const log = logs[d.iso]
-      if (!log) return null
-      return { idx: i, iso: d.iso, cal: log.calories, status: statusFor(log.calories, dailyTarget) }
-    })
-    .filter((p): p is { idx: number; iso: string; cal: number; status: Status } => p !== null)
+  // Compute point geometry once per (days, logs, target, width) — used by
+  // both the Skia paths and the absolute-positioned Pressable hit targets.
+  const points: GraphPoint[] = useMemo(() => {
+    const raw = days
+      .map((d, i) => {
+        const log = logs[d.iso]
+        if (!log) return null
+        return { idx: i, iso: d.iso, cal: log.calories, status: statusFor(log.calories, dailyTarget) }
+      })
+      .filter((p): p is { idx: number; iso: string; cal: number; status: Status } => p !== null)
+
+    if (raw.length === 0) return []
+
+    const maxX   = days.length - 1
+    const allCal = raw.map(p => p.cal)
+    const minCal = Math.min(...allCal, dailyTarget ?? Infinity)
+    const maxCal = Math.max(...allCal, dailyTarget ?? 0)
+    const span   = maxCal - minCal || 200
+
+    const toX = (idx: number) => PAD.left + (idx / maxX) * innerW
+    const toY = (cal: number) => PAD.top  + (1 - (cal - minCal) / span) * innerH
+
+    return raw.map(p => ({
+      ...p,
+      cx: toX(p.idx),
+      cy: toY(p.cal),
+    }))
+  // PAD/inner* are stable per-W; including only the inputs that actually move.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days, logs, dailyTarget, W])
+
+  // Target line Y — recomputed inside the same projection.
+  const targetY = useMemo(() => {
+    if (dailyTarget == null) return null
+    if (points.length === 0) return null
+    const allCal = points.map(p => p.cal)
+    const minCal = Math.min(...allCal, dailyTarget)
+    const maxCal = Math.max(...allCal, dailyTarget)
+    const span   = maxCal - minCal || 200
+    return PAD.top + (1 - (dailyTarget - minCal) / span) * innerH
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points, dailyTarget, W])
+
+  const maxX  = days.length - 1
+  const bandW = innerW / maxX
+
+  // Build status-coloured bands as one Skia path per status group, so we
+  // can stroke each with its colour in a single draw call. Each band is a
+  // small rounded-rect from the data dot down to the bottom of the inner
+  // plot area.
+  const bandPaths = useMemo(() => {
+    const byStatus: Record<string, SkPath> = {}
+    for (const p of points) {
+      const { fill } = STATUS_GRAPH[p.status]
+      if (fill === 'transparent') continue
+      if (!byStatus[fill]) byStatus[fill] = Skia.Path.Make()
+      const xRaw = p.cx - bandW / 2
+      const x    = Math.max(PAD.left, xRaw)
+      const w    = Math.min(bandW, W - PAD.right - x)
+      const y    = p.cy
+      const h    = H - PAD.bottom - y
+      if (w > 0 && h > 0) {
+        byStatus[fill].addRRect({
+          rect: { x, y, width: w, height: h },
+          rx:   2,
+          ry:   2,
+        })
+      }
+    }
+    return Object.entries(byStatus).map(([fill, path]) => ({ fill, path }))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points, bandW, W])
+
+  // Connecting polyline — one Skia path connecting all dots in sequence.
+  const polyPath = useMemo(() => {
+    if (points.length < 2) return null
+    const path = Skia.Path.Make()
+    path.moveTo(points[0].cx, points[0].cy)
+    for (let i = 1; i < points.length; i++) {
+      path.lineTo(points[i].cx, points[i].cy)
+    }
+    return path
+  }, [points])
+
+  // Dashed target line — Skia path with a dash PathEffect applied.
+  const targetPath = useMemo(() => {
+    if (targetY == null) return null
+    const path = Skia.Path.Make()
+    path.moveTo(PAD.left, targetY)
+    path.lineTo(W - PAD.right, targetY)
+    return path
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetY, W])
 
   if (points.length === 0) {
     return (
@@ -134,80 +239,74 @@ function CalorieGraph({
     )
   }
 
-  const maxX   = days.length - 1
-  const allCal = points.map(p => p.cal)
-  const minCal = Math.min(...allCal, dailyTarget ?? Infinity)
-  const maxCal = Math.max(...allCal, dailyTarget ?? 0)
-  const span   = maxCal - minCal || 200
-
-  const toX = (idx: number) => PAD.left + (idx / maxX) * innerW
-  const toY = (cal: number) => PAD.top  + (1 - (cal - minCal) / span) * innerH
-
-  const bandW = innerW / maxX
-
-  // Target line Y
-  const targetY = dailyTarget != null ? toY(dailyTarget) : null
-
-  const polyline = points.map(p => `${toX(p.idx)},${toY(p.cal)}`).join(' ')
-
   return (
-    <Svg width={W} height={H} style={{ width: '100%', height: 72 }}>
-      {/* Per-day status-coloured vertical bands */}
-      {points.map(p => {
-        const { fill } = STATUS_GRAPH[p.status]
-        const x = toX(p.idx) - bandW / 2
-        const y = toY(p.cal)
-        return (
-          <Rect
-            key={p.iso}
-            x={Math.max(PAD.left, x)}
-            y={y}
-            width={Math.min(bandW, W - PAD.right - Math.max(PAD.left, x))}
-            height={H - PAD.bottom - y}
-            fill={fill}
-            rx={2}
+    <View style={{ width: W, height: H }}>
+      <Canvas style={{ width: W, height: H }}>
+        {/* Per-day status-coloured vertical bands */}
+        <Group>
+          {bandPaths.map(({ fill, path }) => (
+            <Path key={fill} path={path} color={fill} style="fill" />
+          ))}
+        </Group>
+
+        {/* Target dashed line — Dash effect applied via child PathEffect node */}
+        {targetPath && (
+          <Path
+            path={targetPath}
+            color={alpha(colors.mutedForeground, 0.20)}
+            style="stroke"
+            strokeWidth={1}
+          >
+            <DashPathEffect intervals={[3, 3]} />
+          </Path>
+        )}
+
+        {/* Connecting line (always neutral) */}
+        {polyPath && (
+          <Path
+            path={polyPath}
+            color={alpha(colors.mutedForeground, 0.30)}
+            style="stroke"
+            strokeWidth={1.5}
+            strokeJoin="round"
+            strokeCap="round"
           />
-        )
-      })}
+        )}
 
-      {/* Target dashed line */}
-      {targetY != null && (
-        <Line
-          x1={PAD.left} y1={targetY}
-          x2={W - PAD.right} y2={targetY}
-          stroke={alpha(colors.mutedForeground, 0.20)}
-          strokeWidth={1}
-          strokeDasharray="3 3"
+        {/* Visible dots — coloured by status */}
+        <Group>
+          {points.map(p => {
+            const { dot } = STATUS_GRAPH[p.status]
+            return (
+              <SkCircle
+                key={p.iso}
+                cx={p.cx}
+                cy={p.cy}
+                r={4}
+                color={dot}
+              />
+            )
+          })}
+        </Group>
+      </Canvas>
+
+      {/* Invisible Pressable hit targets above the canvas — Skia primitives
+          can't carry onPress handlers, so we mirror each dot with a 20×20
+          tap zone here. Same r=10 hit radius the SVG version used. */}
+      {points.map(p => (
+        <Pressable
+          key={`hit-${p.iso}`}
+          onPress={() => onDotClick(p.iso)}
+          style={{
+            position: 'absolute',
+            left:     p.cx - 10,
+            top:      p.cy - 10,
+            width:    20,
+            height:   20,
+          }}
         />
-      )}
-
-      {/* Connecting line (always neutral) */}
-      {points.length > 1 && (
-        <Polyline
-          points={polyline}
-          fill="none"
-          stroke={alpha(colors.mutedForeground, 0.30)}
-          strokeWidth={1.5}
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-      )}
-
-      {/* Clickable dots — coloured by status */}
-      {points.map(p => {
-        const { dot } = STATUS_GRAPH[p.status]
-        const cx = toX(p.idx)
-        const cy = toY(p.cal)
-        return (
-          <G key={p.iso} onPress={() => onDotClick(p.iso)}>
-            {/* Invisible larger hit target */}
-            <Circle cx={cx} cy={cy} r={10} fill="transparent" />
-            {/* Visible dot */}
-            <Circle cx={cx} cy={cy} r={4} fill={dot} />
-          </G>
-        )
-      })}
-    </Svg>
+      ))}
+    </View>
   )
 }
 

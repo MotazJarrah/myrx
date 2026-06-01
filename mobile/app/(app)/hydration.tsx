@@ -1,13 +1,15 @@
 /**
  * Hydration — daily water-intake tracker.
+ * Skia-migrated 2026-05-31 — see Pattern 9 in CLAUDE.md.
  *
  * Layout (top-to-bottom):
  *   1. Header — "Hydration" h1 + today's date subtext.
  *   2. Today's progress card (AnimateRise delay 0)
- *      ├─ Circular SVG progress ring (cyan), TickerNumber for current amount,
- *      │  helper text + bodyweight-based attribution.
+ *      ├─ Circular Skia progress ring (cyan), TickerNumber for current amount,
+ *      │  helper text + bodyweight-based attribution. Ring fill animates
+ *      │  smoothly as the user logs new entries.
  *      └─ Three quick-add chips (8/12/16 oz OR 250/350/500 mL) inside the same card.
- *   3. 7-day chart (AnimateRise delay 250) — SVG bar chart with dashed target line.
+ *   3. 7-day chart (AnimateRise delay 250) — Skia bar chart with dashed target line.
  *   4. Today's log list (AnimateRise delay 500) — DeleteAction tap-confirm per row.
  *
  * Storage model:
@@ -21,6 +23,15 @@
  *     profiles.current_weight + profiles.weight_unit.
  *   – Fallback when weight is missing: 64 oz / 1900 mL (classic 8 glasses).
  *
+ * Rendering — GPU-backed via @shopify/react-native-skia. The progress ring
+ * and the 7-day chart each paint inside a single Skia <Canvas>. The ring's
+ * fill is animated via a Reanimated shared value feeding useDerivedValue,
+ * so the arc smoothly extends whenever the user logs a new entry (without
+ * the React render cycle being driven per frame). Text labels (axis ticks,
+ * day labels) remain absolute-positioned RN <Text> overlays above the
+ * canvas per Pattern 9. See HrRangeChart.tsx + LineChart.tsx for the two
+ * most-relevant reference implementations.
+ *
  * NOTE (v1 scope): Wearable hydration integration (Samsung Health
  * DataTypes.HYDRATION, Apple HealthKit dietaryWater, etc.) is OUT OF SCOPE.
  * Manual entry only.
@@ -28,14 +39,18 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
-import Svg, { Circle, Rect, Line, Text as SvgText } from 'react-native-svg'
+import {
+  Canvas, Path, Group, Skia, vec, DashPathEffect, type SkPath,
+} from '@shopify/react-native-skia'
+import {
+  useSharedValue, useDerivedValue, withTiming,
+} from 'react-native-reanimated'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import { dataCache } from '../../src/lib/cache'
 import AnimateRise from '../../src/components/AnimateRise'
 import DeleteAction from '../../src/components/DeleteAction'
 import TickerNumber from '../../src/components/TickerNumber'
-import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── Volume helpers ───────────────────────────────────────────────────────────
@@ -103,7 +118,7 @@ function formatToday(): string {
   return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 }
 
-// ── Progress ring (SVG) ──────────────────────────────────────────────────────
+// ── Progress ring (Skia, animated) ────────────────────────────────────────────
 
 interface RingProps {
   pct:    number      // 0..1 (clamped at 1)
@@ -113,30 +128,71 @@ interface RingProps {
   trackColor: string
 }
 
+/**
+ * Animated circular progress ring rendered on a Skia canvas.
+ *
+ * The progress arc is built as a partial circle path inside useDerivedValue
+ * so the path re-builds on each shared-value frame. The shared value
+ * (`progress`) tweens from its previous value to the new `pct` via
+ * withTiming whenever the prop changes — so adding a chip-tap entry makes
+ * the arc smoothly extend rather than snap. Track is static (full circle).
+ *
+ * The arc is rotated -90° in math-space (i.e. it starts at 12 o'clock and
+ * sweeps clockwise) by passing `-90` as the start angle to addArc.
+ */
 function ProgressRing({ pct, size, stroke, color, trackColor }: RingProps) {
-  const r           = (size - stroke) / 2
-  const c           = size / 2
-  const circ        = 2 * Math.PI * r
-  const clamped     = Math.max(0, Math.min(1, pct))
-  const dashOffset  = circ * (1 - clamped)
+  const r = (size - stroke) / 2
+  const c = size / 2
+
+  // Tween the arc's sweep fraction; React renders are still cheap because
+  // only the shared value drives the per-frame work.
+  const progress = useSharedValue(Math.max(0, Math.min(1, pct)))
+  useEffect(() => {
+    progress.value = withTiming(Math.max(0, Math.min(1, pct)), { duration: 400 })
+  }, [pct, progress])
+
+  // Static track path (full circle outline) — built once.
+  const trackPath = useMemo(() => {
+    const path = Skia.Path.Make()
+    path.addCircle(c, c, r)
+    return path
+  }, [c, r])
+
+  // Animated progress arc path. Rebuilt on every shared-value tick on the
+  // UI thread (worklet). Uses addArc on a bounding rect so the result is a
+  // genuine arc (not a wedge with radial lines). startAngle=-90 means "12
+  // o'clock"; sweep is in degrees, positive = clockwise.
+  const arcPath = useDerivedValue(() => {
+    const path = Skia.Path.Make()
+    if (progress.value <= 0) return path
+    const sweep = 360 * progress.value
+    const rect = { x: c - r, y: c - r, width: r * 2, height: r * 2 }
+    path.addArc(rect, -90, sweep)
+    return path
+  })
+
   return (
-    <Svg width={size} height={size}>
-      {/* Track */}
-      <Circle cx={c} cy={c} r={r} stroke={trackColor} strokeWidth={stroke} fill="none" />
-      {/* Progress arc — rotate -90° so it starts at 12 o'clock */}
-      <Circle
-        cx={c} cy={c} r={r}
-        stroke={color} strokeWidth={stroke} fill="none"
-        strokeDasharray={`${circ} ${circ}`}
-        strokeDashoffset={dashOffset}
-        strokeLinecap="round"
-        transform={`rotate(-90 ${c} ${c})`}
+    <Canvas style={{ width: size, height: size }}>
+      {/* Track — full-circle outline at very low opacity */}
+      <Path
+        path={trackPath}
+        color={trackColor}
+        style="stroke"
+        strokeWidth={stroke}
       />
-    </Svg>
+      {/* Progress arc — sweep grows as `pct` grows */}
+      <Path
+        path={arcPath}
+        color={color}
+        style="stroke"
+        strokeWidth={stroke}
+        strokeCap="round"
+      />
+    </Canvas>
   )
 }
 
-// ── 7-day bar chart (SVG) ────────────────────────────────────────────────────
+// ── 7-day bar chart (Skia) ──────────────────────────────────────────────────
 
 interface BarChartProps {
   buckets: { key: string; label: string; ml: number }[]
@@ -146,6 +202,15 @@ interface BarChartProps {
   height: number
 }
 
+/**
+ * 7-day bar chart rendered on a Skia canvas with RN <Text> overlays for
+ * axis labels and day labels.
+ *
+ * Shape mix is the same as HrRangeChart: bars (Rects), a dashed reference
+ * line (DashPathEffect inside a Path), and tick labels lifted out to RN
+ * <Text> per Pattern 9. Static — no animations — so paths are built in
+ * useMemo, not useDerivedValue.
+ */
 function BarChart({ buckets, targetMl, displayUnit, width, height }: BarChartProps) {
   const padTop    = 16
   const padBottom = 22
@@ -168,73 +233,108 @@ function BarChart({ buckets, targetMl, displayUnit, width, height }: BarChartPro
   }
 
   const targetY   = yFor(targetMl)
-  // Tick marks at 0 / target / max — written in display unit
+  // Tick marks at 0 / target — written in display unit
   const yTicks = [
     { v: 0,        label: '0' },
     { v: targetMl, label: fmtVolume(targetMl, displayUnit) },
   ]
 
+  // Build the dashed target line path. Single Path; dash pattern via
+  // DashPathEffect (child of Path per Skia scoping rules — mirrors SVG's
+  // strokeDasharray="3 3").
+  const targetLinePath = useMemo<SkPath>(() => {
+    const path = Skia.Path.Make()
+    path.moveTo(padLeft, targetY)
+    path.lineTo(width - padRight, targetY)
+    return path
+  }, [padLeft, padRight, targetY, width])
+
+  // Bars — one rounded-rect path per day. Skia supports addRRect so each
+  // bar's rx=3 is honored without extra math.
+  const bars = useMemo(() => {
+    return buckets.map((b, i) => {
+      const x      = padLeft + i * (barW + gap)
+      const filled = b.ml > 0
+      const h      = filled ? Math.max(2, (b.ml / yMax) * plotH) : 2
+      const y      = padTop + plotH - h
+      const path   = Skia.Path.Make()
+      path.addRRect({
+        rect: { x, y, width: barW, height: h },
+        rx: 3,
+        ry: 3,
+      })
+      return {
+        key: b.key,
+        path,
+        color: filled ? palette.cyan[400] : withAlpha(palette.cyan[400], 0.18),
+      }
+    })
+  }, [buckets, padLeft, barW, gap, plotH, padTop, yMax])
+
   return (
-    <Svg width={width} height={height}>
-      {/* Y axis tick labels */}
+    <View style={{ width, height, position: 'relative' }}>
+      <Canvas style={{ width, height }}>
+        {/* Dashed target reference line — DashPathEffect is a CHILD of
+            <Path> per Skia (not a top-level <Defs> like SVG). Mirrors the
+            original strokeDasharray="3 3". */}
+        <Path
+          path={targetLinePath}
+          color={withAlpha(palette.cyan[400], 0.55)}
+          style="stroke"
+          strokeWidth={1}
+        >
+          <DashPathEffect intervals={[3, 3]} />
+        </Path>
+
+        {/* Bars — one rounded-rect per day */}
+        <Group>
+          {bars.map(b => (
+            <Path key={b.key} path={b.path} color={b.color} />
+          ))}
+        </Group>
+      </Canvas>
+
+      {/* Y-axis tick labels — RN Text overlay above the canvas. Right-
+          aligned to land just left of the plot area, mirroring SVG's
+          textAnchor="end" at x={padLeft - 4}. */}
       {yTicks.map(t => (
-        <SvgText
+        <Text
           key={t.label + t.v}
-          x={padLeft - 4}
-          y={yFor(t.v) + 3}
-          fontSize={9}
-          fill={colors.mutedForeground}
-          textAnchor="end"
+          style={[
+            chartStyles.yTickLabel,
+            {
+              top:  yFor(t.v) - 5,
+              left: 0,
+              width: padLeft - 6,
+            },
+          ]}
+          numberOfLines={1}
         >
           {t.label}
-        </SvgText>
+        </Text>
       ))}
 
-      {/* Dashed target reference line */}
-      <Line
-        x1={padLeft} x2={width - padRight}
-        y1={targetY} y2={targetY}
-        stroke={withAlpha(palette.cyan[400], 0.55)}
-        strokeWidth={1}
-        strokeDasharray="3 3"
-      />
-
-      {/* Bars */}
-      {buckets.map((b, i) => {
-        const x = padLeft + i * (barW + gap)
-        const filled = b.ml > 0
-        const h = filled ? Math.max(2, (b.ml / yMax) * plotH) : 2
-        const y = padTop + plotH - h
-        return (
-          <Rect
-            key={b.key}
-            x={x}
-            y={y}
-            width={barW}
-            height={h}
-            rx={3}
-            fill={filled ? palette.cyan[400] : withAlpha(palette.cyan[400], 0.18)}
-          />
-        )
-      })}
-
-      {/* Day labels */}
+      {/* Day labels under each bar */}
       {buckets.map((b, i) => {
         const x = padLeft + i * (barW + gap) + barW / 2
         return (
-          <SvgText
+          <Text
             key={b.key + '-lbl'}
-            x={x}
-            y={height - 6}
-            fontSize={10}
-            fill={colors.mutedForeground}
-            textAnchor="middle"
+            style={[
+              chartStyles.dayLabel,
+              {
+                top:  height - 14,
+                left: x - 20,
+                width: 40,
+              },
+            ]}
+            numberOfLines={1}
           >
             {b.label}
-          </SvgText>
+          </Text>
         )
       })}
-    </Svg>
+    </View>
   )
 }
 
@@ -257,12 +357,7 @@ export default function Hydration() {
   }, [])
 
   const cacheKey = user ? `hydration:${user.id}` : null
-  const cachedHydrationLogs = cacheKey ? dataCache.get<WaterLog[]>(cacheKey) : null
-  const [logs, setLogs] = useState<WaterLog[]>(() => cachedHydrationLogs ?? [])
-  // Initial-load loading flag — skipped when cached logs are already in
-  // hand so returning users get instant paint. Flips false after the
-  // supabase fetch resolves the first time.
-  const [loading, setLoading] = useState<boolean>(!cachedHydrationLogs)
+  const [logs, setLogs] = useState<WaterLog[]>(() => (cacheKey ? dataCache.get<WaterLog[]>(cacheKey) ?? [] : []))
 
   useEffect(() => {
     if (!user) return
@@ -276,7 +371,6 @@ export default function Hydration() {
         const rows = (data as WaterLog[] | null) ?? []
         setLogs(rows)
         if (cacheKey) dataCache.set(cacheKey, rows)
-        setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
@@ -380,26 +474,6 @@ export default function Hydration() {
         : `Bodyweight × 0.67 oz/lb`)
     : `Default — log your weight for a personalized target`
 
-  // Skeleton — first-paint placeholder when there's no cached water log
-  // data yet. Heights approximate header + progress ring card + 7-day
-  // chart card + today's log card so the structure is visible while the
-  // supabase fetch resolves.
-  if (loading) {
-    return (
-      <ScrollView contentContainerStyle={s.scroll}>
-        <View style={s.container}>
-          <View style={{ gap: 6 }}>
-            <Skeleton style={{ height: 22, width: 140, borderRadius: 6 }} />
-            <Skeleton style={{ height: 14, width: 240, borderRadius: 6 }} />
-          </View>
-          <Skeleton style={{ height: 360, width: '100%', borderRadius: 12 }} />
-          <Skeleton style={{ height: 240, width: '100%', borderRadius: 12 }} />
-          <Skeleton style={{ height: 200, width: '100%', borderRadius: 12 }} />
-        </View>
-      </ScrollView>
-    )
-  }
-
   return (
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
       <View style={s.container}>
@@ -467,14 +541,14 @@ export default function Hydration() {
             <Text style={s.chartHeading}>
               Last 7 days <Text style={s.chartHeadingMuted}>({fluidUnit})</Text>
             </Text>
-            {/* Width measured by parent; we lock the SVG to a fixed
+            {/* Width measured by parent; we lock the Skia canvas to a fixed
                 width matching the card's inner area. Container clips,
                 so 320 is safe on every supported phone width. */}
             <View style={s.chartInner}>
               <BarChart
                 buckets={sevenDayBuckets.map(b => ({
                   ...b,
-                  // Bar value uses the same canonical mL; the SVG converts
+                  // Bar value uses the same canonical mL; the chart converts
                   // the tick labels to display unit via fmtVolume.
                 }))}
                 targetMl={targetMl}
@@ -530,6 +604,23 @@ export default function Hydration() {
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
+
+// Chart-local label styles (RN Text overlays above the Skia canvas).
+const chartStyles = StyleSheet.create({
+  yTickLabel: {
+    position:   'absolute',
+    fontSize:   9,
+    color:      colors.mutedForeground,
+    textAlign:  'right',
+    fontFamily: fonts.mono[500],
+  },
+  dayLabel: {
+    position:  'absolute',
+    fontSize:  10,
+    color:     colors.mutedForeground,
+    textAlign: 'center',
+  },
+})
 
 const s = StyleSheet.create({
   scroll:    { paddingBottom: 24 },

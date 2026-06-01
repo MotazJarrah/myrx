@@ -288,16 +288,93 @@ The page padding is 16 px each side from `(app)/_layout.tsx`. The page content n
 
 ---
 
-**Pattern 5 — Inline expansion panel (`FadeInUp` / `FadeOutUp` + `LinearTransition`)**
+**Pattern 5 — Inline expansion panel (direct height animation — LOCKED May 31 2026)**
 
-What it does: a panel slides in from below (or fades up into existence) when toggled — used for "why this zone" info panels, band-level sub-progression detail panels, and any other inline expandable content. Adjacent siblings reflow smoothly so the panel doesn't visually shove content around.
+What it does: a panel grows from height 0 to its measured content height (and back) when toggled. Because the panel's REAL height changes, every sibling view below it cascades automatically through React Native's normal layout flow — other rows, charts, downstream cards all slide down smoothly with zero extra animation wrappers. Used for "why this zone" info panels, band-level sub-progression detail panels, the Sleep Stats per-row pills, and any other inline expandable content.
 
-- Imports: `import Animated, { FadeInUp, FadeOutUp, LinearTransition } from 'react-native-reanimated'`.
-- **Entering: `FadeInUp.duration(200)`**.
-- **Exiting: `FadeOutUp.duration(180)`**.
-- **Sibling layout: wrap the parent in `<Animated.View layout={LinearTransition.duration(200)}>`** so the big-number rows slide smoothly when the panel opens above/below them.
-- Auto-close on programmatic state change (e.g., navigating to a different zone via Pattern 4) — the wrapper component should `setZoneInfoOpen(false)` in the same `setState` batch that switches the variant.
-- Where it's used: zone info panels on Weighted Standard, Assisted Machine, Carry, Swimming, Cardio Pace detail pages; band sub-state info panels on Bodyweight consolidated.
+**Why the old pattern was retired:** the previous canonical was `FadeInUp` / `FadeOutUp` + a parent `<Animated.View layout={LinearTransition.duration(200)}>` wrapper. During the May 31 2026 Sleep page debugging session we proved this approach is unreliable in deep nesting (`ScrollView → AnimateRise → row → row-head`): the `LinearTransition` wrapper either fails to propagate to siblings outside its parent, or silently no-ops on Fabric/new arch. `LayoutAnimation.configureNext` (the React Native classic alternative) is broken on Fabric entirely. Setting `reanimated.staticFeatureFlags.DISABLE_COMMIT_PAUSING_MECHANISM: true` to "fix" `LinearTransition` instead breaks it further. Direct height animation sidesteps all of these — there's no animation system to fight with, just plain layout flow.
+
+**Canonical mechanic (copy verbatim — HIDDEN-MEASURER + BUFFER, locked June 1 2026):**
+
+```tsx
+import { useState } from 'react'
+import { View, type LayoutChangeEvent } from 'react-native'
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, Easing } from 'react-native-reanimated'
+
+const PANEL_OPEN_DURATION    = 240
+const PANEL_CLOSE_DURATION   = 200
+const PANEL_EASING           = Easing.bezier(0.16, 1, 0.3, 1)  // out-quint, matches AnimateRise
+const PANEL_HEIGHT_BUFFER_PX = 16  // absorbs the width-mismatch clipped-last-line bug — see below
+
+function CollapsiblePanel({ open, children }: { open: boolean; children: React.ReactNode }) {
+  const [contentHeight, setContentHeight] = useState(0)
+  const animatedHeight  = useSharedValue(0)
+  const animatedOpacity = useSharedValue(0)
+
+  if (open && contentHeight > 0) {
+    animatedHeight.value  = withTiming(contentHeight, { duration: PANEL_OPEN_DURATION,  easing: PANEL_EASING })
+    animatedOpacity.value = withTiming(1,             { duration: PANEL_OPEN_DURATION,  easing: PANEL_EASING })
+  } else if (!open) {
+    animatedHeight.value  = withTiming(0, { duration: PANEL_CLOSE_DURATION, easing: PANEL_EASING })
+    animatedOpacity.value = withTiming(0, { duration: PANEL_CLOSE_DURATION, easing: PANEL_EASING })
+  }
+
+  const panelStyle = useAnimatedStyle(() => ({
+    height:   animatedHeight.value,
+    opacity:  animatedOpacity.value,
+    overflow: 'hidden',
+  }))
+
+  const onMeasurerLayout = (e: LayoutChangeEvent) => {
+    const h = Math.ceil(e.nativeEvent.layout.height) + PANEL_HEIGHT_BUFFER_PX
+    if (h > 0 && h !== contentHeight) setContentHeight(h)
+  }
+
+  return (
+    <>
+      {/* Hidden off-screen measurer — renders the panel at natural size
+          so we can capture its height. NECESSARY: a child of a 0-height
+          Animated.View doesn't get a layout pass on Fabric / new arch,
+          so an inline single-tree measurer never fires onLayout. */}
+      <View
+        style={{ position: 'absolute', opacity: 0, left: 0, right: 0, top: -9999 }}
+        pointerEvents="none"
+        onLayout={onMeasurerLayout}
+      >
+        {children}
+      </View>
+      {/* Visible panel — REAL height animates 0 ↔ contentHeight. Sibling
+          views below cascade automatically through normal layout flow. */}
+      <Animated.View style={panelStyle}>
+        {children}
+      </Animated.View>
+    </>
+  )
+}
+```
+
+**Two bugs proven on June 1 2026 (both attempts to remove the buffer / inline the measurer failed — keep the canonical above):**
+
+1. **Single-tree inner-measurer breaks expansion entirely.** Tried placing the measurer INSIDE the Animated.View (sharing one tree → guaranteed width match). On Fabric / new arch, Yoga skips the layout pass for children of a 0-height parent — `onLayout` never fires, `contentHeight` stays 0 forever, the panel never opens when tapped. Confirmed live: pills stopped expanding completely. Reverted.
+
+2. **Hidden-measurer width mismatch clips last line.** The `position: 'absolute', left: 0, right: 0` measurer can end up a few percent wider than the visible panel in deep flex layouts (nested cards, `NextTargetCallout`, etc.), so text wraps to FEWER lines in the measurer. Captured height comes back ~8–12 px short of what the visible panel needs, clipping the bottom of the last line of body text.
+
+**Fix that actually works: hidden-measurer + 16 px buffer.** The 16 px is added to the captured height inside `onMeasurerLayout`, so the visible panel renders 16 px taller than the measurer reported. The extra space sits below the body text inside the panel's card background / border, where it reads as normal bottom padding rather than a bug.
+
+**LOCKED rules (do not deviate):**
+
+- **No `LayoutAnimation` ever.** Broken on Fabric — keep it out of React Native imports.
+- **No `Animated.View layout={LinearTransition}` wrappers** for sibling reflow. The reflow is automatic once the panel's real height changes.
+- **No `FadeInUp` / `FadeOutUp` for the panel itself.** Use the height-anim wrapper.
+- **Hidden-measurer is mandatory.** Single-tree inner-measurer is BROKEN on Fabric (see Bug #1 above). Don't try to reintroduce it.
+- **`PANEL_HEIGHT_BUFFER_PX = 16` is mandatory** and absorbs the width-mismatch clip. Don't drop it back to 0 thinking the visible vs measurer widths "should match" — they don't, reliably.
+- **Durations: 240 ms open, 200 ms close**, easing `Easing.bezier(0.16, 1, 0.3, 1)` (out-quint).
+- **Content below the panel is a plain `<View>`** — no animation wrapper needed.
+- **Auto-close on programmatic state change** (e.g., navigating to a different zone via Pattern 4).
+
+**Where it's used:** Sleep Stats per-row info pills (canonical implementation lives in `mobile/app/(app)/sleep.tsx` `DimensionRow`, ~lines 863-1000). Zone info panels on Weighted Standard, Assisted Machine, Carry, Swimming, Cardio Pace detail pages. Band sub-state info panels on Bodyweight consolidated. Stair-zone info pills on StairMill. Rucking adaptation zone info pill. Any future expand/collapse where the user wants the content below to slide rather than snap.
+
+**Migration note for legacy pages:** if you find code still using `FadeInUp` / `FadeOutUp` + `LinearTransition` for an inline expansion panel, that's the OLD pattern — rewrite to direct height animation. The Sleep Stats `DimensionRow` is the reference implementation; copy the mechanic line for line.
 
 **Info-pill content rule (LOCKED, May 19 2026):** the text inside an info pill / info panel is a **static string about progression-or-adaptation INTENT** for the activity. It is NOT:
 
@@ -388,6 +465,88 @@ What it does: the Save button on log forms gets a brief "✓ Saved" green/amber 
 
 ---
 
+**Pattern 9 — Skia GPU canvas for charts and visuals (LOCKED May 31 2026)**
+
+What it does: any chart or vector visualisation with multiple shapes/paths/gradients renders on a single `@shopify/react-native-skia` `<Canvas>` instead of nested `react-native-svg` primitives. Skia paths are constructed in worklets, animated via `useDerivedValue` + `useAnimatedProps`, and run entirely on the UI thread — no per-shape native bridge crossings, no per-frame Yoga layout passes for the visual elements.
+
+**Why the old pattern was retired:** `react-native-svg`'s `<Path>`, `<Circle>`, `<Line>`, etc. each cross the JS↔native bridge on every frame they animate. With more than a handful of animated primitives in one chart, the bridge becomes the scroll-perf bottleneck — even on flagship Android (Galaxy S25 Ultra). The Sleep page's `SleepClock` had 8 animated paths (7 ring arcs + 1 average band) and that alone caused full-page scroll glitch on the only page it appeared on. Migrating that one component to Skia eliminated the jank entirely. The conclusion the user explicitly locked in: **default to Skia for any chart / SVG-style visual; only fall back to `react-native-svg` for truly static, never-animated tiny vector overlays**, and even then prefer Skia when it's already loaded on the page.
+
+**Canonical mechanic (copy the shape from `mobile/src/components/SleepClock.tsx`):**
+
+```tsx
+import { Canvas, Path, Skia, type SkPath } from '@shopify/react-native-skia'
+import { useDerivedValue, type SharedValue } from 'react-native-reanimated'
+
+// Worklet — builds a Skia path object programmatically. Runs on the UI thread.
+function buildArcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: number, thickness: number): SkPath {
+  'worklet'
+  const path = Skia.Path.Make()
+  const startRad = (startDeg - 90) * Math.PI / 180
+  const endRad   = (endDeg   - 90) * Math.PI / 180
+  const outerR   = r + thickness / 2
+  const innerR   = r - thickness / 2
+  path.moveTo(cx + outerR * Math.cos(startRad), cy + outerR * Math.sin(startRad))
+  path.arcToRotated(outerR, outerR, 0, false, true,
+    cx + outerR * Math.cos(endRad), cy + outerR * Math.sin(endRad))
+  path.lineTo(cx + innerR * Math.cos(endRad), cy + innerR * Math.sin(endRad))
+  path.arcToRotated(innerR, innerR, 0, false, false,
+    cx + innerR * Math.cos(startRad), cy + innerR * Math.sin(startRad))
+  path.close()
+  return path
+}
+
+// Component — useDerivedValue recomputes the path when SharedValues change.
+function RingArc({ progress, color }: { progress: SharedValue<number>; color: string }) {
+  const path = useDerivedValue(() => buildArcPath(100, 100, 60, 0, progress.value * 360, 8))
+  return (
+    <Canvas style={{ width: 200, height: 200 }}>
+      <Path path={path} color={color} />
+    </Canvas>
+  )
+}
+```
+
+**Skia path-building APIs (the ones you'll actually use):**
+
+- `Skia.Path.Make()` — fresh empty path.
+- `.moveTo(x, y)` — set the pen position without drawing.
+- `.lineTo(x, y)` — straight line from pen position to (x, y).
+- `.arcToRotated(rx, ry, xAxisRotate, largeArc, sweepCW, x, y)` — SVG-style elliptical arc to (x, y).
+- `.cubicTo(c1x, c1y, c2x, c2y, x, y)` — cubic Bézier curve. Use this for the Catmull-Rom-to-Bézier conversion that `LineChart` does for monotone-cubic smoothing.
+- `.quadTo(cx, cy, x, y)` — quadratic Bézier.
+- `.addCircle(cx, cy, r)` — full circle sub-path.
+- `.addRect(Skia.XYWHRect(x, y, w, h))` — rectangle.
+- `.close()` — close the current sub-path.
+
+**Skia rendering primitives:**
+
+- `<Canvas style={{ width, height }}>` — wrapper. One per visualisation. Do NOT nest `<Canvas>` inside `<Canvas>`; use Skia's `<Group>` for grouping.
+- `<Path path={skPath} color={hex|sharedValue} />` — stroke or fill (`style="stroke"` adds stroke styling, default is fill).
+- `<Circle cx cy r color />` / `<Rect x y width height color />` / `<Line p1 p2 color />` — geometric primitives that don't need a Path.
+- `<LinearGradient start={vec(x1,y1)} end={vec(x2,y2)} colors={[c1, c2]} />` — must be a CHILD of the `<Path>` / shape it gradient-fills. Gradient `<Defs>` from svg-land does not exist.
+- `<Text x y text="..." font={font} color />` — uses `useFont('path/to/ttf', size)` to load a font. For dynamic numeric labels, an absolute-positioned RN `<Text>` overlay is often simpler than wiring fonts through Skia.
+
+**Animation patterns:**
+
+- **Static path, animated colour**: `useDerivedValue(() => interpolateColor(progress.value, [0, 1], ['#888', '#0f0']))` returns a colour string; pass directly to `<Path color={derived} />`.
+- **Animated path shape**: `useDerivedValue(() => buildXxxPath(args.value))` returns a path object; pass to `<Path path={derived} />`. Reanimated tracks the SharedValue deps and recomputes on UI-thread frames.
+- **Animated transform**: Skia doesn't have per-shape `transform`. Instead, build the path with the transform pre-applied inside the worklet, OR wrap shapes in `<Group transform={[{ rotate: derived }]}>` where the transform array is itself a SharedValue.
+- **Tap-to-pin tooltips**: render tooltips OUTSIDE the `<Canvas>` as RN absolute-positioned `<View>`s — Skia is for the visual; the tooltip is regular RN. Use `useRegisterChartDismiss(dismissFn)` + `markChartTouch()` from `mobile/src/lib/chartTooltipScope.tsx` so tapping outside dismisses correctly.
+
+**LOCKED rules (do not deviate):**
+
+- **No `react-native-svg` for new charts.** Default to Skia. The only acceptable exception: a one-off truly-static icon overlay that doesn't justify loading Skia on a page that doesn't already use it. If the page has any Skia visual at all, additional small overlays go through Skia too.
+- **No nested `<Canvas>`.** Group with `<Group>`. Nested canvases create separate Skia contexts that don't share `<LinearGradient>` definitions — the inner ones silently fall back to black.
+- **Build paths in worklets**, not at component render time. The worklet runs on the UI thread; component-render-time path construction crosses the bridge every time.
+- **One `<Canvas>` per visualisation**, not one per shape. Even 20 paths inside a single `<Canvas>` outperform 5 paths split across 5 `<Canvas>`s.
+- **`useDerivedValue` returns Skia objects (paths, colours)** — `useAnimatedProps` is for animated primitive props (transforms, opacity). Pick the right hook for what you're animating.
+
+**Where it's used:** `mobile/src/components/SleepClock.tsx` is the reference implementation (7 ring arcs + 1 average band, gesture-driven selection, calendar-anchored slot indexing). Other charts and visuals are migrating per the May 31 2026 app-wide Skia rollout — see the relevant component file's header comment for "Skia-migrated YYYY-MM-DD" markers.
+
+**Migration note for legacy charts:** if you find a component still importing `Svg`, `Path`, `Circle`, `Line`, `Rect`, `G`, `Defs`, `LinearGradient`, `Stop` from `react-native-svg` and using them with any animation (Reanimated `useAnimatedProps` on the `d` prop, `Animated.timing` on transforms, etc.), that's the OLD pattern — rewrite to Skia. Keep the component's PUBLIC PROP SURFACE identical so call sites don't have to change. Reference `SleepClock.tsx` for the canonical structure.
+
+---
+
 **Pattern 8 — Radial nav menu (long-press starburst)** — LOCKED May 24 2026
 
 The bottom tab bar replacement. A single floating circular button at screen-bottom-centre; press-and-hold blooms a half-circle of seven orbit icons; slide to highlight, release to navigate. Replaces the horizontal scrolling `BottomNav` entirely.
@@ -419,7 +578,7 @@ The bottom tab bar replacement. A single floating circular button at screen-bott
 
 ---
 
-**Adding a new animation:** before inventing a new motion, scan this list. If a similar pattern exists (e.g., a slide-in panel — that's Pattern 5), reuse the exact constants. If none of the patterns fit, write the new one INTO this list before merging — add a Pattern 9 entry with timing, gesture rules, source code location, and where it's used. This file is the contract.
+**Adding a new animation:** before inventing a new motion, scan this list. If a similar pattern exists (e.g., a slide-in panel — that's Pattern 5; a chart visual — that's Pattern 9), reuse the exact constants. If none of the patterns fit, write the new one INTO this list before merging — add a Pattern 10 entry with timing, gesture rules, source code location, and where it's used. This file is the contract.
 
 ### Weighted Standard next-target card — locked design spec
 
