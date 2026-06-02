@@ -545,11 +545,6 @@ export default function HeartPage() {
     return restings.length > 0 ? Math.min(...restings) : null
   }, [daily])
 
-  const avgThisWeek = useMemo(() => {
-    const avgs = daily.map(d => d.avg).filter((v): v is number => v != null)
-    return avgs.length > 0 ? Math.round(avgs.reduce((s, v) => s + v, 0) / avgs.length) : null
-  }, [daily])
-
   // Chart series — per-day resting dot + avg dot + workout-driven peak band
   const chartData = useMemo<HrDayPoint[]>(
     () => daily.map(d => ({
@@ -580,11 +575,7 @@ export default function HeartPage() {
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <View style={s.header}>
         <Text style={s.h1}>Heart</Text>
-        <Text style={s.h1Sub}>
-          {hasSamsung
-            ? `${restingThisWeek != null ? `Resting ${restingThisWeek} bpm` : 'No data yet'}${avgThisWeek != null ? `  ·  Avg ${avgThisWeek} bpm` : ''}`
-            : 'Connect a wearable to start tracking'}
-        </Text>
+        <Text style={s.h1Sub}>Track your heart rate, resting trends, and daily activity.</Text>
       </View>
 
       {/* Loading skeleton — placeholder cards while the initial Supabase

@@ -453,122 +453,12 @@ export async function syncRecent(daysBack: number = 7): Promise<SyncSummary> {
     )
   }
 
-  // 4) Sleep sessions + stages (May 31 2026 — Sleep page Phase 3).
-  //
-  // Each native session becomes one sleep_sessions row. If the session
-  // carries stages (worn-watch case), each stage block becomes one
-  // sleep_stages row keyed by the session's id. Phone-only sessions
-  // (Samsung's accelerometer-only detection without a watch) arrive
-  // with stages: [] — we still write the parent session so the user
-  // gets Total / Schedule / Consistency on the Sleep page; the UI
-  // shows an empty-state for Deep/REM when stages are missing.
-  //
-  // Defensive: if the user is on an older APK that doesn't yet have
-  // the rebuilt native readSleep method, native.readSleep is undefined
-  // and we skip the section cleanly without breaking the rest of sync.
-  if (typeof (native as any).readSleep === 'function') {
-    const sleep: NativeSleepSession[] = await native
-      .readSleep(startMs, endMs)
-      .catch((e) => {
-        errors.push(`sleep: ${errorMessage(e)}`)
-        return [] as NativeSleepSession[]
-      })
-
-    if (sleep.length > 0) {
-      const sessionRows = sleep
-        .filter((s) => s.sourceRecordId && s.startAt && s.endAt && s.durationS > 0)
-        .map((s) => {
-          // Aggregate per-stage seconds for the session-level summary
-          let awakeS = 0, lightS = 0, remS = 0, deepS = 0
-          let anyStage = false
-          for (const st of s.stages) {
-            anyStage = true
-            const start = Date.parse(st.startAt)
-            const end   = Date.parse(st.endAt)
-            const dur   = Number.isFinite(start) && Number.isFinite(end)
-              ? Math.max(0, Math.floor((end - start) / 1000))
-              : 0
-            if (st.type === 'awake') awakeS += dur
-            else if (st.type === 'light') lightS += dur
-            else if (st.type === 'rem')   remS   += dur
-            else if (st.type === 'deep')  deepS  += dur
-          }
-          return {
-            user_id:          userId,
-            source:           'samsung_health',
-            source_record_id: s.sourceRecordId,
-            start_at:         s.startAt,
-            end_at:           s.endAt,
-            duration_s:       s.durationS,
-            efficiency_pct:   null,  // Samsung's SDK doesn't expose efficiency stably
-            awake_s:          anyStage ? awakeS : null,
-            light_s:          anyStage ? lightS : null,
-            rem_s:            anyStage ? remS   : null,
-            deep_s:           anyStage ? deepS  : null,
-            score_samsung:    s.scoreNative,
-            raw_meta:         { package_name: s.packageName },
-          }
-        })
-
-      if (sessionRows.length > 0) {
-        const { data: insertedSessions, error: sessErr } = await supabase
-          .from('sleep_sessions')
-          .upsert(sessionRows, { onConflict: 'user_id,source,source_record_id' })
-          .select('id, source_record_id')
-        if (sessErr) {
-          errors.push(`sleep_sessions_upsert: ${sessErr.message}`)
-        } else {
-          sleepSessCount = insertedSessions?.length ?? sessionRows.length
-
-          // Build (session_record_id → session_id) map so we can write the
-          // per-stage rows next.
-          const sessIdByRecord: Record<string, string> = {}
-          for (const row of insertedSessions ?? []) {
-            if (row.source_record_id) sessIdByRecord[row.source_record_id] = row.id
-          }
-
-          // Wipe existing stages for any session we just upserted, then
-          // re-insert. Stages don't have their own (source, source_record_id)
-          // — the parent session's id is the only key — so the cleanest
-          // idempotent path is delete-then-insert keyed on session_id.
-          const sessIds = Object.values(sessIdByRecord)
-          if (sessIds.length > 0) {
-            await supabase
-              .from('sleep_stages')
-              .delete()
-              .in('session_id', sessIds)
-          }
-
-          const stageRows: Array<Record<string, unknown>> = []
-          for (const s of sleep) {
-            const sessionId = sessIdByRecord[s.sourceRecordId]
-            if (!sessionId) continue
-            for (const st of s.stages) {
-              const start = Date.parse(st.startAt)
-              const end   = Date.parse(st.endAt)
-              if (!Number.isFinite(start) || !Number.isFinite(end)) continue
-              const dur = Math.max(0, Math.floor((end - start) / 1000))
-              if (dur <= 0) continue
-              stageRows.push({
-                session_id: sessionId,
-                stage:      st.type,
-                start_at:   st.startAt,
-                end_at:     st.endAt,
-                duration_s: dur,
-              })
-            }
-          }
-          if (stageRows.length > 0) {
-            sleepStageCount = await chunkedUpsert(
-              'sleep_stages',
-              stageRows,
-              'session_id,start_at',  // no formal unique constraint; OK because we deleted first
-              errors,
-            )
-          }
-        }
-      }
-    }
+  // 4) Sleep sessions + stages — extracted to syncSleepRange() (below) so the
+  //    Sleep page can run a sleep-only sync over a wider 30-night window.
+  {
+    const r = await syncSleepRange(userId, startMs, endMs, errors)
+    sleepSessCount  = r.sessions
+    sleepStageCount = r.stages
   }
 
   // 5) Update last_synced_at unconditionally so the UI shows progress even on partial failure.
@@ -586,6 +476,174 @@ export async function syncRecent(daysBack: number = 7): Promise<SyncSummary> {
     sleepStages:   sleepStageCount,
     rangeStart:    startIso,
     rangeEnd:      endIso,
+    errors,
+  }
+}
+
+/**
+ * Shared sleep read + upsert. Reads sleep sessions (and stages, when a watch
+ * supplied them) over [startMs, endMs] and upserts into sleep_sessions /
+ * sleep_stages. Idempotent. Used by both syncRecent and syncSleepRecent.
+ *
+ * Phone-only sessions (Samsung's accelerometer detection without a watch)
+ * arrive with stages: [] — we still write the parent session so the user
+ * gets Total / Schedule / Consistency; the UI shows an empty-state for
+ * Deep/REM when stages are missing. Defensive against older APKs whose
+ * native module lacks readSleep (skips cleanly).
+ */
+async function syncSleepRange(
+  userId: string,
+  startMs: number,
+  endMs: number,
+  errors: string[],
+): Promise<{ sessions: number; stages: number }> {
+  if (!native || typeof (native as any).readSleep !== 'function') {
+    return { sessions: 0, stages: 0 }
+  }
+
+  let sleepSessCount  = 0
+  let sleepStageCount = 0
+
+  const sleep: NativeSleepSession[] = await native
+    .readSleep(startMs, endMs)
+    .catch((e) => {
+      errors.push(`sleep: ${errorMessage(e)}`)
+      return [] as NativeSleepSession[]
+    })
+
+  if (sleep.length > 0) {
+    const sessionRows = sleep
+      .filter((s) => s.sourceRecordId && s.startAt && s.endAt && s.durationS > 0)
+      .map((s) => {
+        // Aggregate per-stage seconds for the session-level summary
+        let awakeS = 0, lightS = 0, remS = 0, deepS = 0
+        let anyStage = false
+        for (const st of s.stages) {
+          anyStage = true
+          const start = Date.parse(st.startAt)
+          const end   = Date.parse(st.endAt)
+          const dur   = Number.isFinite(start) && Number.isFinite(end)
+            ? Math.max(0, Math.floor((end - start) / 1000))
+            : 0
+          if (st.type === 'awake') awakeS += dur
+          else if (st.type === 'light') lightS += dur
+          else if (st.type === 'rem')   remS   += dur
+          else if (st.type === 'deep')  deepS  += dur
+        }
+        return {
+          user_id:          userId,
+          source:           'samsung_health',
+          source_record_id: s.sourceRecordId,
+          start_at:         s.startAt,
+          end_at:           s.endAt,
+          duration_s:       s.durationS,
+          efficiency_pct:   null,  // Samsung's SDK doesn't expose efficiency stably
+          awake_s:          anyStage ? awakeS : null,
+          light_s:          anyStage ? lightS : null,
+          rem_s:            anyStage ? remS   : null,
+          deep_s:           anyStage ? deepS  : null,
+          score_samsung:    s.scoreNative,
+          raw_meta:         { package_name: s.packageName },
+        }
+      })
+
+    if (sessionRows.length > 0) {
+      const { data: insertedSessions, error: sessErr } = await supabase
+        .from('sleep_sessions')
+        .upsert(sessionRows, { onConflict: 'user_id,source,source_record_id' })
+        .select('id, source_record_id')
+      if (sessErr) {
+        errors.push(`sleep_sessions_upsert: ${sessErr.message}`)
+      } else {
+        sleepSessCount = insertedSessions?.length ?? sessionRows.length
+
+        const sessIdByRecord: Record<string, string> = {}
+        for (const row of insertedSessions ?? []) {
+          if (row.source_record_id) sessIdByRecord[row.source_record_id] = row.id
+        }
+
+        // Delete-then-insert stages keyed on session_id (stages have no
+        // (source, source_record_id) of their own — parent id is the key).
+        const sessIds = Object.values(sessIdByRecord)
+        if (sessIds.length > 0) {
+          await supabase.from('sleep_stages').delete().in('session_id', sessIds)
+        }
+
+        const stageRows: Array<Record<string, unknown>> = []
+        for (const s of sleep) {
+          const sessionId = sessIdByRecord[s.sourceRecordId]
+          if (!sessionId) continue
+          for (const st of s.stages) {
+            const start = Date.parse(st.startAt)
+            const end   = Date.parse(st.endAt)
+            if (!Number.isFinite(start) || !Number.isFinite(end)) continue
+            const dur = Math.max(0, Math.floor((end - start) / 1000))
+            if (dur <= 0) continue
+            stageRows.push({
+              session_id: sessionId,
+              stage:      st.type,
+              start_at:   st.startAt,
+              end_at:     st.endAt,
+              duration_s: dur,
+            })
+          }
+        }
+        if (stageRows.length > 0) {
+          sleepStageCount = await chunkedUpsert(
+            'sleep_stages',
+            stageRows,
+            'session_id,start_at',  // no formal unique constraint; OK — we deleted first
+            errors,
+          )
+        }
+      }
+    }
+  }
+
+  return { sessions: sleepSessCount, stages: sleepStageCount }
+}
+
+/**
+ * Sleep-only sync over a wider window (default 30 days). The Sleep page's
+ * Consistency chart spans 30 nights, so it needs a deeper backfill than
+ * Heart's 7-day window — but it doesn't need the heavy HR / steps / workouts
+ * pull, so this reads sleep alone. Mirrors syncRecent's auth + bleed guard.
+ */
+export async function syncSleepRecent(daysBack: number = 30): Promise<SyncSummary> {
+  if (!native) return blankSummary(daysBack, ['unsupported_platform'])
+
+  const { data: userData } = await supabase.auth.getUser()
+  const userId = userData?.user?.id
+  if (!userId) return blankSummary(daysBack, ['not_signed_in'])
+
+  const { data: integ, error: integErr } = await supabase
+    .from('user_integrations')
+    .select('user_id')
+    .eq('user_id', userId)
+    .eq('platform', 'samsung_health')
+    .maybeSingle()
+  if (integErr) return blankSummary(daysBack, [`integration_check: ${errorMessage(integErr)}`])
+  if (!integ)   return blankSummary(daysBack, ['not_authorized_for_this_user'])
+
+  const endMs   = Date.now()
+  const startMs = endMs - daysBack * 24 * 60 * 60 * 1000
+  const errors: string[] = []
+  const { sessions, stages } = await syncSleepRange(userId, startMs, endMs, errors)
+
+  await supabase
+    .from('user_integrations')
+    .update({ last_synced_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('platform', 'samsung_health')
+
+  return {
+    hrSamples:     0,
+    stepSamples:   0,
+    workouts:      0,
+    sleepSessions: sessions,
+    sleepStages:   stages,
+    rangeStart:    new Date(startMs).toISOString(),
+    rangeEnd:      new Date(endMs).toISOString(),
     errors,
   }
 }

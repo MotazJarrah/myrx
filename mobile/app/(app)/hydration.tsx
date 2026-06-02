@@ -115,10 +115,6 @@ function dateKey(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
-function formatToday(): string {
-  return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
-}
-
 // ── Progress ring (Skia, animated) ────────────────────────────────────────────
 
 interface RingProps {
@@ -482,7 +478,7 @@ export default function Hydration() {
         {/* ── Header ── */}
         <View>
           <Text style={s.h1}>Hydration</Text>
-          <Text style={s.sub}>{formatToday()}</Text>
+          <Text style={s.sub}>Track your water intake and reach your daily goal.</Text>
         </View>
 
         {/* ── TEMP: Aquos animation spike (Rive vs Skia bake-off) ──

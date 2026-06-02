@@ -44,6 +44,7 @@ import {
   Canvas, Path, Group, Skia,
   type SkPath,
 } from '@shopify/react-native-skia'
+import Animated, { FadeInUp, FadeOutUp, LinearTransition } from 'react-native-reanimated'
 import { colors, palette, withAlpha, fonts } from '../theme'
 import { useChartTooltipScope, useRegisterChartDismiss } from '../lib/chartTooltipScope'
 
@@ -197,6 +198,25 @@ export default function Hypnogram({
     })
   }, [segments, width, geom])
 
+  // Connector lines — a faint white vertical between consecutive stage
+  // blocks at each transition, bridging the row gap (the classic hypnogram
+  // staircase). Drawn over the segments so the block edges read clearly.
+  const connectorPaths = useMemo(() => {
+    if (width === 0 || segGeom.length < 2) return []
+    const out: SkPath[] = []
+    for (let i = 0; i < segGeom.length - 1; i++) {
+      const a = segGeom[i], b = segGeom[i + 1]
+      const x  = (a.x2 + b.x1) / 2
+      const yA = a.y + a.h / 2
+      const yB = b.y + b.h / 2
+      const p = Skia.Path.Make()
+      p.moveTo(x, Math.min(yA, yB))
+      p.lineTo(x, Math.max(yA, yB))
+      out.push(p)
+    }
+    return out
+  }, [segGeom, width])
+
   // Row-guide paths — one horizontal hairline at the center of each row.
   const guidePaths = useMemo(() => {
     if (width === 0) return []
@@ -305,6 +325,20 @@ export default function Hypnogram({
               )
             })}
           </Group>
+
+          {/* Faint white connectors between consecutive stage blocks —
+              the classic hypnogram staircase between the block edges. */}
+          <Group>
+            {connectorPaths.map((p, i) => (
+              <Path
+                key={`conn-${i}`}
+                path={p}
+                color={withAlpha('#ffffff', 0.18)}
+                style="stroke"
+                strokeWidth={1}
+              />
+            ))}
+          </Group>
         </Canvas>
 
         {/* X-axis hour ticks — RN <Text> overlays above the canvas.
@@ -337,9 +371,15 @@ export default function Hypnogram({
         />
       </View>
 
-      {/* Tooltip — pinned just above the bands when a segment is active. */}
+      {/* Tooltip — slides in just above the bands when a segment is
+          selected (matches the page's info-pill slide; no snap). */}
       {active && (
-        <View style={s.tooltip} pointerEvents="none">
+        <Animated.View
+          style={s.tooltip}
+          entering={FadeInUp.duration(200)}
+          exiting={FadeOutUp.duration(150)}
+          pointerEvents="none"
+        >
           <View style={[s.tooltipDot, { backgroundColor: STAGE_COLOR[active.stage] }]} />
           <View style={{ flex: 1 }}>
             <Text style={s.tooltipTitle}>{STAGE_LABEL[active.stage]}</Text>
@@ -347,19 +387,19 @@ export default function Hypnogram({
               {fmtClock(active.start_at)} – {fmtClock(active.end_at)}  ·  {fmtSegDuration(active.duration_s)}
             </Text>
           </View>
-        </View>
+        </Animated.View>
       )}
 
       {/* Compact legend — one chip per stage in the SAME row order as the
           bands. Cosmetic only; matches the bands' colour to the label. */}
-      <View style={s.legendRow}>
+      <Animated.View style={s.legendRow} layout={LinearTransition.duration(200)}>
         {ROW_ORDER.map((stage) => (
           <View key={`leg-${stage}`} style={s.legendItem}>
             <View style={[s.legendSwatch, { backgroundColor: STAGE_COLOR[stage] }]} />
             <Text style={s.legendLabel}>{STAGE_LABEL[stage]}</Text>
           </View>
         ))}
-      </View>
+      </Animated.View>
     </View>
   )
 }

@@ -21,10 +21,10 @@
  *
  * Interactive: drag a finger across the rings to scrub through
  * nights — whichever ring the finger lands on becomes the active
- * ring; the center label updates live. Touch lands outside the ring
- * area (center hole or beyond the outermost label band) → clears
- * selection. Selection persists between touches until another ring
- * is touched or the user touches outside.
+ * ring; the center label updates live. Touching the center hole or a
+ * gap between rings KEEPS the current selection; tapping OUTSIDE the
+ * clock face (past the rings/numerals) RESETS to the most-recent night.
+ * A ring selects that night; the outer average rim selects the average.
  *
  * Rendering — GPU-backed via @shopify/react-native-skia. The entire
  * clock draws in a single Skia <Canvas> at native speed; per-frame
@@ -304,9 +304,14 @@ function hourOfDay(iso: string): number {
   return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600
 }
 
-/** Inverse of hourOfDay — converts 0–24 hour back to clockwise angle (12 = 0°). */
+/** Convert an hour-of-day (0–24) to a clockwise angle on the 12-HOUR dial
+ *  (12 = 0° at top). MUST be 12-hour (30°/hr) so the sleep arcs line up with
+ *  the 1–12 numerals around the rim — a 24-hour mapping (h/24) put every arc
+ *  at HALF its correct clock position (bug fixed Jun 1 2026: a 7:33 AM wake
+ *  landed at ~3:45 instead of 7:30). The %12 folds PM onto the same spots as
+ *  AM, which is fine — a sleep clock only ever spans one overnight. */
 function hourToAngle(h: number): number {
-  return (h / 24) * 360
+  return ((h % 12) / 12) * 360
 }
 
 /** Polar → cartesian. Angle in degrees, clockwise from 12 o'clock. */
@@ -334,10 +339,12 @@ function circularMeanHours(hours: number[]): number | null {
   return ((meanH % 24) + 24) % 24
 }
 
-/** Default selected ring is the most-recent night (idx 0). Drag-outside
- *  resets the selection back to 0 (not null) so the readout + center
- *  label always show something. AVG_IDX is only entered by tapping the
- *  outer indigo band; it doesn't survive across mount/data changes. */
+/** Default selected ring is the most-recent night (idx 0) — the mount
+ *  default AND the reset target. LOCKED (Jun 1 2026): touching the CENTER
+ *  hole (or a gap between rings) KEEPS the current selection — the middle is
+ *  inert. Touching OUTSIDE the clock face (past the average band, on the
+ *  numerals or in the corners) RESETS to idx 0. A ring selects that night;
+ *  the average rim selects AVG_IDX. Keep center≠reset and outside≠keep. */
 const DEFAULT_IDX = 0
 
 export default function SleepClock({
@@ -347,7 +354,8 @@ export default function SleepClock({
   onActiveChange,
 }: Props) {
   // Active selection: always a valid value, never null. Defaults to most
-  // recent night (idx 0). Touching outside the rings snaps back to 0.
+  // recent night (idx 0) on mount + on a reset. Center/gap touch = keep,
+  // outside-the-clock touch = reset to idx 0 — see indexFromDistance.
   const [activeIdx, setActiveIdx] = useState<number>(DEFAULT_IDX)
 
   const cx = size / 2
@@ -463,40 +471,48 @@ export default function SleepClock({
     return out
   }, [cx, cy, labelR])
 
-  // -- Gesture handler: scrub finger across rings to update active.
-  // Three-way return: number / 'keep' / null.
-  function indexFromDistance(dist: number): number | 'keep' | null {
-    if (dist < innerR - ringThickness / 2) return null
-    if (dist > avgBandR + avgBandThickness / 2 + 4) return null
-    if (dist >= avgBandR - avgBandThickness / 2 - 2
-        && dist <= avgBandR + avgBandThickness / 2 + 4
-        && avg != null) {
-      return AVG_IDX
-    }
-    let bestIdx  = null as number | null
-    let bestDist = Infinity
-    for (const r of rings) {
-      if (!r.hasData) continue
-      const d = Math.abs(dist - r.r)
-      if (d <= ringThickness / 2 + ringGap / 2 && d < bestDist) {
-        bestDist = d
-        bestIdx  = r.idx
+  // -- Gesture hit-test: which ring / band does this distance-from-center hit?
+  // Returns a ring idx, AVG_IDX, 'keep', or 'reset'. LOCKED (Jun 1 2026) —
+  // two DISTINCT behaviors the user asked for, do NOT collapse them:
+  //   • CENTER hole + gaps between rings → 'keep' (the middle is inert; a
+  //     touch there must never change the selected ring).
+  //   • OUTSIDE the clock face (past the average band — the numerals, the
+  //     corners) → 'reset' to the most-recent night (DEFAULT_IDX).
+  //   • A ring band → that night.  • The average-band annulus → AVG_IDX.
+  function indexFromDistance(dist: number): number | 'keep' | 'reset' {
+    // Center hole → keep the current selection (the middle is inert).
+    if (dist < innerR - ringThickness / 2) return 'keep'
+
+    // Inside the rings zone: snap to the nearest data ring; an inter-ring
+    // gap (no ring within tolerance) keeps the current selection.
+    if (dist <= outerR + ringThickness / 2) {
+      let bestIdx  = null as number | null
+      let bestDist = Infinity
+      for (const r of rings) {
+        if (!r.hasData) continue
+        const d = Math.abs(dist - r.r)
+        if (d <= ringThickness / 2 + ringGap / 2 && d < bestDist) {
+          bestDist = d
+          bestIdx  = r.idx
+        }
       }
-    }
-    if (bestIdx != null) return bestIdx
-    const outermostR = rings[0]?.r ?? outerR
-    const innermostR = rings[rings.length - 1]?.r ?? innerR
-    if (dist >= innermostR - ringThickness / 2
-        && dist <= outermostR + ringThickness / 2) {
+      if (bestIdx != null) return bestIdx
       return 'keep'
     }
-    return null
+
+    // Just past the rings → the average band. The band itself is only 4 px,
+    // so accept a generous annulus around it (easy to hit — was a ~10 px
+    // sliver the user had to be pixel-perfect with).
+    if (avg != null && dist <= avgBandR + 8) return AVG_IDX
+
+    // Further out (the hour numerals, the corners — i.e. OUTSIDE the clock
+    // face) → reset to the most-recent night.
+    return 'reset'
   }
 
   function resolveSelection(dist: number): number | 'keep' {
     const raw = indexFromDistance(dist)
-    if (raw === 'keep') return 'keep'
-    if (raw == null) return DEFAULT_IDX
+    if (raw === 'reset') return DEFAULT_IDX
     return raw
   }
 

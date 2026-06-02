@@ -16,7 +16,7 @@
  *
  * Layout (top → bottom):
  *   Header → Verdict card → Sleep Clock → 2x2 dimension grid →
- *   Hypnogram (watch only) → 30-day total-sleep sparkline
+ *   Hypnogram (watch only) → 7-night consistency chart
  *
  * Status pills use TIME-BASED bands (not percentages — locked with user):
  *   Total sleep:  ≤30min off=✓  /  30-90min=⚠  /  >90min=✗
@@ -50,9 +50,14 @@ import Animated, {
 const PANEL_OPEN_DURATION  = 240
 const PANEL_CLOSE_DURATION = 200
 const PANEL_EASING         = Easing.bezier(0.16, 1, 0.3, 1)  // out-quint, same curve as AnimateRise
+
+// Sync-on-focus master switch. Opening Sleep / pull-to-refresh pulls a 30-day
+// window from Samsung Health (the page displays the last 7 nights) so recent
+// gaps self-heal. Flip to false only for local dummy-data testing.
+const SLEEP_SYNC_ON_FOCUS = true
 import { useFocusEffect } from 'expo-router'
 import {
-  Moon, Clock, Activity, BedDouble, Brain, Info,
+  Moon, Clock, Activity, BedDouble, Brain, Info, Watch,
 } from 'lucide-react-native'
 // Skia-migrated 2026-05-31. The inline SparkLine + MonthlySparkline charts
 // previously used react-native-svg <Svg>/<Path>/<Line>; they now render via
@@ -66,10 +71,12 @@ import { supabase } from '../../src/lib/supabase'
 import AnimateRise from '../../src/components/AnimateRise'
 import TickerNumber from '../../src/components/TickerNumber'
 import SleepClock, { type SleepClockNight, type SleepClockReadout } from '../../src/components/SleepClock'
+import SleepConsistency, { minsAfter6pm, fmtClock } from '../../src/components/SleepConsistency'
 import Hypnogram, {
   type HypnogramSegment, type SleepStage,
 } from '../../src/components/Hypnogram'
 import Skeleton from '../../src/components/Skeleton'
+import { syncSleepRecent } from '../../src/lib/integrations/samsungHealth'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── DB row shapes ────────────────────────────────────────────────────────────
@@ -168,30 +175,6 @@ function classifyStage(actualS: number, targetS: number): Status {
 }
 
 /**
- * Bedtime status — minutes late vs the target bedtime.
- *
- * Threshold grounded in the social-jetlag literature:
- *   - Wittmann et al. 2006 (Chronobiology International): coined "social
- *     jetlag" as ≥1h offset between work-day and free-day sleep midpoints,
- *     associated with BMI, smoking, cardiometabolic markers.
- *   - Roenneberg et al. 2012: each 1h of social jetlag → ~33% increase in
- *     overweight risk.
- *
- * Mapped to OK/WARN/FAIL on a single bedtime drift:
- *   late ≤ 15 min → ok    (within natural day-to-day variation)
- *   late ≤ 60 min → warn  (drift toward but below social-jetlag threshold)
- *   else        → fail   (≥1h late = clinically meaningful misalignment)
- *
- * Going to bed EARLIER than target is fine.
- */
-function classifyBedtime(actualOffsetS: number, targetOffsetS: number): Status {
-  const lateMin = (actualOffsetS - targetOffsetS) / 60
-  if (lateMin <= 15) return 'ok'
-  if (lateMin <= 60) return 'warn'     // social-jetlag boundary (Wittmann 2006)
-  return 'fail'
-}
-
-/**
  * Consistency status — std-dev of bedtime offsets across the week.
  *
  * Thresholds grounded in sleep-regularity actigraphy research:
@@ -285,35 +268,6 @@ function fmtHoursOnly(h: number): string {
   return Number.isInteger(h) ? `${h}h` : `${h.toFixed(1)}h`
 }
 
-/**
- * Bedtime offset: seconds from local midnight. Sleep onset after 6PM the
- * previous day maps to NEGATIVE seconds (so 10PM = -7200, 2AM = +7200).
- * Continuous axis for averaging / std-dev without midnight wrap confusion.
- */
-function bedtimeOffsetSeconds(iso: string): number {
-  const d        = new Date(iso)
-  const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  let offset = (d.getTime() - midnight.getTime()) / 1000
-  if (offset >= 18 * 3600) offset -= 86_400
-  return offset
-}
-
-function wakeOffsetSeconds(iso: string): number {
-  const d        = new Date(iso)
-  const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  return (d.getTime() - midnight.getTime()) / 1000
-}
-
-function fmtBedtime(secsFromMidnight: number | null): string {
-  if (secsFromMidnight == null) return '—'
-  const wrapped = ((secsFromMidnight % 86_400) + 86_400) % 86_400
-  const h24     = Math.floor(wrapped / 3600)
-  const m       = Math.floor((wrapped % 3600) / 60)
-  const h12     = ((h24 + 11) % 12) + 1
-  const period  = h24 < 12 ? 'AM' : 'PM'
-  return `${h12}:${String(m).padStart(2, '0')} ${period}`
-}
-
 function stdDev(values: number[]): number {
   if (values.length < 2) return 0
   const mean = values.reduce((a, b) => a + b, 0) / values.length
@@ -358,18 +312,6 @@ function computeVerdict(statuses: Status[]) {
 const DEEP_TARGET_S = 90 * 60   // 90 min adult target
 const REM_TARGET_S  = 90 * 60   // 90 min adult target
 
-
-/** Hour-of-day decimal → 12h clock string like "8:00 PM". */
-function fmtClock12(h: number): string {
-  const wrapped = ((h % 24) + 24) % 24
-  const hr      = Math.floor(wrapped)
-  const min     = Math.floor((wrapped - hr) * 60)
-  const period  = hr < 12 ? 'AM' : 'PM'
-  const h12     = ((hr + 11) % 12) + 1
-  return min === 0
-    ? `${h12} ${period}`
-    : `${h12}:${String(min).padStart(2, '0')} ${period}`
-}
 
 export default function SleepPage() {
   const { profile } = useAuth()
@@ -437,6 +379,17 @@ export default function SleepPage() {
         await fetchData()
         if (cancelled) return
         setLoading(false)
+        if (!SLEEP_SYNC_ON_FOCUS) return  // TEMP: sync disabled for dummy-data testing
+        // Background sleep sync — pulls a 30-day window so recent gaps in our DB
+        // self-heal (we display the last 7 nights but pull extra as a margin).
+        // Mirrors Heart's sync-on-focus. Sleep-only — no heavy HR pull.
+        try {
+          const summary = await syncSleepRecent(30)
+          if (cancelled) return
+          if (summary.sleepSessions > 0 || summary.sleepStages > 0) {
+            await fetchData()
+          }
+        } catch { /* swallow — non-fatal */ }
       })()
       return () => { cancelled = true }
     }, [fetchData]),
@@ -444,7 +397,10 @@ export default function SleepPage() {
 
   const onPullRefresh = useCallback(async () => {
     setRefreshing(true)
-    try { await fetchData() } finally { setRefreshing(false) }
+    try {
+      if (SLEEP_SYNC_ON_FOCUS) await syncSleepRecent(30)
+      await fetchData()
+    } finally { setRefreshing(false) }
   }, [fetchData])
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -455,34 +411,39 @@ export default function SleepPage() {
   )
   const targetSecs  = targetHours * 3600
 
-  // Spark window — last 14 nights chronologically
-  const sparkWindow = useMemo(() => {
-    const cutoff = nDaysAgoIso(14)
-    return sessions30
-      .filter(s => s.start_at >= cutoff)
-      .slice()
-      .sort((a, b) => (a.start_at < b.start_at ? -1 : 1))
-  }, [sessions30])
+  // The single 7-night window the whole page reads from (the 7 most-recent
+  // nights; sessions30 is desc). Clock, consistency, targets, and deep/REM all
+  // average over THIS, so every "average" on the page agrees. Only Last Sleep
+  // Cycle steps outside it (it shows the latest night).
+  const last7 = useMemo(() => sessions30.slice(0, 7), [sessions30])
 
-  // Computed avg bedtime + wake time (decimal hours, local TZ). Used by
-  // both the Schedule dim AND the bedtime-anchored cue registry. Derived
-  // from logs — no settings input required. When the user has no nights
-  // yet, falls back to 0 (caller checks sessions7.length before using).
-  const avgBedHour = useMemo(() => {
-    if (sessions7.length === 0) return 0
-    const offsets = sessions7.map(s => bedtimeOffsetSeconds(s.start_at))
-    return offsets.reduce((a, b) => a + b, 0) / offsets.length / 3600
-  }, [sessions7])
-  const avgWakeHour = useMemo(() => {
-    if (sessions7.length === 0) return 0
-    const offsets = sessions7.map(s => wakeOffsetSeconds(s.end_at))
-    return offsets.reduce((a, b) => a + b, 0) / offsets.length / 3600
-  }, [sessions7])
+  // Spark window — last7 oldest → newest, for the deep/REM sparklines.
+  const sparkWindow = useMemo(
+    () => last7.slice().sort((a, b) => (a.start_at < b.start_at ? -1 : 1)),
+    [last7],
+  )
 
-  // ── Dimension 1: Total sleep ───────────────────────────────────────────────
+  // 7-night sleep summary — anchors the Consistency chart's target lines AND
+  // the Sleep Targets section. Target wake = your average wake (your body's
+  // anchor, so it doubles as the target); target bedtime = wake − sleep-need.
+  // Computed in the chart's minsAfter6pm basis so the chart lines and the
+  // section numbers always agree.
+  const sleepAvg = useMemo(() => {
+    if (last7.length === 0) return null
+    const beds  = last7.map(s => minsAfter6pm(s.start_at))
+    const wakes = last7.map(s => minsAfter6pm(s.end_at))
+    const avgBedMin    = beds.reduce((a, b) => a + b, 0) / beds.length
+    const avgWakeMin   = wakes.reduce((a, b) => a + b, 0) / wakes.length
+    const targetBedMin = avgWakeMin - targetHours * 60
+    const avgDurS      = last7.reduce((a, s) => a + s.duration_s, 0) / last7.length
+    const bedSdMin     = stdDev(beds)
+    return { avgBedMin, avgWakeMin, targetBedMin, avgDurS, bedSdMin }
+  }, [last7, targetHours])
 
-  const totalDim: DimensionResult = useMemo(() => {
-    if (sessions7.length === 0) {
+  // ── Sleep Target: duration (7-night average vs target) ─────────────────────
+
+  const durationTargetDim: DimensionResult = useMemo(() => {
+    if (!sleepAvg) {
       return {
         status:   'unknown',
         headline: `Target ${fmtHoursOnly(targetHours)}`,
@@ -492,40 +453,34 @@ export default function SleepPage() {
         sparkTarget: null,
       }
     }
-    const avg = sessions7.reduce((a, s) => a + s.duration_s, 0) / sessions7.length
-    const status = classifyTotal(avg, targetSecs)
-    const diffMin = Math.round((targetSecs - avg) / 60)
-    const headline = `${fmtHoursMinutes(avg)} → ${fmtHoursOnly(targetHours)}`
-
-    // Terse "do this" — no explanation, no protocol names, and
-    // intentionally avoids the word "bedtime" so it doesn't duplicate
-    // the Bedtime row's action (that row owns the bedtime lever).
-    // Sleep duration owns the DURATION outcome — the lever named here
-    // is the wake side or total-hours framing.
+    const status   = classifyTotal(sleepAvg.avgDurS, targetSecs)
+    const headline = `avg ${fmtHoursMinutes(sleepAvg.avgDurS)} → target ${fmtHoursOnly(targetHours)}`
+    // Duration cue speaks in SLEEP-AMOUNT terms (the bedtime row owns the
+    // bedtime lever) so the two cues are always worded differently.
     let action: string
     if (status === 'ok') {
       action = `On target — hold this.`
-    } else if (avg < targetSecs) {
-      action = `Sleep 15 minutes earlier this week.`
     } else {
-      action = `Cap at your target — wake 15 minutes earlier.`
+      const offMin = Math.round(Math.abs(sleepAvg.avgDurS - targetSecs) / 60)
+      action = sleepAvg.avgDurS > targetSecs
+        ? `Aim to sleep about ${offMin} min less.`
+        : `Aim to sleep about ${offMin} min more.`
     }
     return {
       status, headline, action,
       whyText: "How long you sleep each night. It's the foundation under cognition, mood, immunity, and hormones — when this slips, everything else slips with it. Push bedtime earlier in small steps and protect it.",
-      spark: sparkWindow.map(s => s.duration_s),
-      sparkTarget: targetSecs,
+      spark: [], sparkTarget: null,
     }
-  }, [sessions7, sparkWindow, targetSecs, targetHours])
+  }, [sleepAvg, targetSecs, targetHours])
 
   // ── Dimension 2: Deep sleep ────────────────────────────────────────────────
 
   const deepDim: DimensionResult = useMemo(() => {
-    const sessionsWithStages = sessions7.filter(s => s.deep_s != null)
+    const sessionsWithStages = sparkWindow.filter(s => s.deep_s != null)
     if (sessionsWithStages.length === 0) {
       return {
         status:   'unknown',
-        headline: `Target 90 min`,
+        headline: `Optimal 90 min`,
         action:   "Wear your watch overnight to track this.",
         whyText:  "The non-dreaming stage where your body does its physical repairs — growth hormone release, immune maintenance, brain waste clearance. A cool, dark room and an earlier bedtime push more of it through.",
         spark:    [],
@@ -535,7 +490,7 @@ export default function SleepPage() {
     const avg = sessionsWithStages.reduce((a, s) => a + (s.deep_s ?? 0), 0) / sessionsWithStages.length
     const status = classifyStage(avg, DEEP_TARGET_S)
     const shortMin = Math.round((DEEP_TARGET_S - avg) / 60)
-    const headline = `${fmtHoursMinutes(avg)} → 90 min`
+    const headline = `avg ${fmtHoursMinutes(avg)} → optimal 90 min`
 
     // Terse "do this" — no explanation, no overlap with whyText.
     let action: string
@@ -552,18 +507,18 @@ export default function SleepPage() {
       spark: sparkWindow.map(s => s.deep_s),
       sparkTarget: DEEP_TARGET_S,
     }
-  }, [sessions7, sparkWindow])
+  }, [sparkWindow])
 
   // ── Dimension 3: REM sleep ─────────────────────────────────────────────────
 
   const remDim: DimensionResult = useMemo(() => {
-    const sessionsWithStages = sessions7.filter(s => s.rem_s != null)
+    const sessionsWithStages = sparkWindow.filter(s => s.rem_s != null)
     if (sessionsWithStages.length === 0) {
       return {
         status:   'unknown',
-        headline: `Target 90 min`,
+        headline: `Optimal 90 min`,
         action:   "Wear your watch overnight to track this.",
-        whyText:  "The dream stage where your brain consolidates learning, regulates emotion, and processes memory. It clusters in the back half of the night, so sleeping the full duration is what unlocks it. Skip evening alcohol and you'll see more of it.",
+        whyText:  "The dream stage where your brain consolidates learning, regulates emotion, and processes memory. It clusters in the back half of the night, so a full, unbroken night is what unlocks it.",
         spark:    [],
         sparkTarget: null,
       }
@@ -571,88 +526,73 @@ export default function SleepPage() {
     const avg = sessionsWithStages.reduce((a, s) => a + (s.rem_s ?? 0), 0) / sessionsWithStages.length
     const status = classifyStage(avg, REM_TARGET_S)
     const shortMin = Math.round((REM_TARGET_S - avg) / 60)
-    const headline = `${fmtHoursMinutes(avg)} → 90 min`
+    const headline = `avg ${fmtHoursMinutes(avg)} → optimal 90 min`
 
     // Terse "do this" — no overlap with whyText.
     let action: string
     if (status === 'ok') {
       action = `On target — hold this.`
     } else if (shortMin > 0) {
-      action = `Skip alcohol within 4 hours of bed tonight.`
+      action = `If you drink, leave a few hours before bed — alcohol strongly suppresses REM.`
     } else {
       action = `At target.`
     }
     return {
       status, headline, action,
-      whyText: "The dream stage where your brain consolidates learning, regulates emotion, and processes memory. It clusters in the back half of the night, so sleeping the full duration is what unlocks it. Skip evening alcohol and you'll see more of it.",
+      whyText: "The dream stage where your brain consolidates learning, regulates emotion, and processes memory. It clusters in the back half of the night, so a full, unbroken night is what unlocks it.",
       spark: sparkWindow.map(s => s.rem_s),
       sparkTarget: REM_TARGET_S,
     }
-  }, [sessions7, sparkWindow])
+  }, [sparkWindow])
 
-  // ── Dimension 4: Schedule (bedtime + consistency rolled) ───────────────────
+  // ── Sleep Target: bedtime (7-night avg vs target = wake − sleep-need) ──────
 
-  const scheduleDim: DimensionResult = useMemo(() => {
-    if (sessions7.length === 0) {
+  const bedtimeTargetDim: DimensionResult = useMemo(() => {
+    if (!sleepAvg) {
       return {
         status:   'unknown',
         headline: 'No data yet',
-        action:   "Log a few nights and your bedtime + consistency grade appear here.",
+        action:   "Log a few nights and your bedtime target appears here.",
         whyText:  "When you fall asleep, and how steady it stays night to night. Your body anchors its internal rhythm to when you wake — drift the wake time and hormones, body temperature, and digestion drift with it. Lock the wake time first; bedtime falls in behind it.",
         spark:    [],
         sparkTarget: null,
       }
     }
-
-    const bedOffsets  = sessions7.map(s => bedtimeOffsetSeconds(s.start_at))
-    const wakeOffsets = sessions7.map(s => wakeOffsetSeconds(s.end_at))
-    const avgBed      = bedOffsets.reduce((a, b) => a + b, 0) / bedOffsets.length
-    const avgWake     = wakeOffsets.reduce((a, b) => a + b, 0) / wakeOffsets.length
-    const targetBed   = avgWake - targetSecs
-
-    const bedStatus = classifyBedtime(avgBed, targetBed)
-
-    // Consistency: only meaningful with 3+ nights
+    // Grade bedtime on its distance from target in EITHER direction
+    // (classifyTotal is symmetric: |avg − target|), so going to bed too EARLY
+    // is flagged too — early is what causes oversleeping. Same thresholds as
+    // the duration grade, and since |avgBed − targetBed| == |avgDur − target|,
+    // the bedtime + duration grades always agree.
+    const bedStatus = classifyTotal(sleepAvg.avgBedMin * 60, sleepAvg.targetBedMin * 60)
     let consistencyStatus: Status = 'unknown'
-    let sdMin = 0
-    if (sessions7.length >= 3) {
-      const sd = stdDev(bedOffsets)
-      sdMin = sd / 60
-      consistencyStatus = classifyConsistency(sd)
-    }
-
+    if (last7.length >= 3) consistencyStatus = classifyConsistency(sleepAvg.bedSdMin * 60)
     const status = consistencyStatus === 'unknown'
       ? bedStatus
       : worseStatus(bedStatus, consistencyStatus)
 
-    const currentBedLabel = fmtBedtime(avgBed)
-    const targetBedLabel  = fmtBedtime(targetBed)
-    const headline = consistencyStatus === 'unknown'
-      ? `${currentBedLabel} → ${targetBedLabel}`
-      : `${currentBedLabel} · ±${Math.round(sdMin)}m`
+    const avgBedLabel    = fmtClock(sleepAvg.avgBedMin)
+    const targetBedLabel = fmtClock(sleepAvg.targetBedMin)
+    const headline = `avg ${avgBedLabel} → target ${targetBedLabel}`
 
-    // Terse "do this" — no explanation, no overlap with whyText.
+    // Bedtime cue speaks in BEDTIME-LEVER terms (move the bedtime), distinct
+    // from the duration row's sleep-amount wording.
     let action: string
     if (status === 'ok') {
       action = `On target — hold this.`
-    } else if (bedStatus !== 'ok' && consistencyStatus === 'fail') {
-      action = `Lock your alarm at ${fmtClock12(avgWakeHour)} every day.`
     } else if (bedStatus !== 'ok') {
-      action = `Move bedtime to ${targetBedLabel}.`
+      const offMin = Math.round(Math.abs(sleepAvg.avgBedMin - sleepAvg.targetBedMin))
+      action = sleepAvg.avgBedMin < sleepAvg.targetBedMin
+        ? `Aim to go to bed about ${offMin} min later.`
+        : `Aim to go to bed about ${offMin} min earlier.`
     } else {
-      action = `Lock your alarm at ${fmtClock12(avgWakeHour)} every day.`
+      action = `Aim to keep a steady bedtime.`
     }
-
-    // Spark values inverted so UP = went to bed earlier (better). Each value
-    // is "seconds earlier than target bedtime". The sparkTarget line is at 0
-    // (= exactly on target). Positive = early, negative = late.
     return {
       status, headline, action,
       whyText: "When you fall asleep, and how steady it stays night to night. Your body anchors its internal rhythm to when you wake — drift the wake time and hormones, body temperature, and digestion drift with it. Lock the wake time first; bedtime falls in behind it.",
-      spark: sparkWindow.map(s => targetBed - bedtimeOffsetSeconds(s.start_at)),
-      sparkTarget: 0,
+      spark: [], sparkTarget: null,
     }
-  }, [sessions7, sparkWindow, targetSecs, targetHours])
+  }, [sleepAvg, last7.length])
 
   // ── Sleep Clock data ───────────────────────────────────────────────────────
   // (Verdict + verdictText + lead useMemos lived here until May 31 2026 —
@@ -660,15 +600,15 @@ export default function SleepPage() {
   //  content was decomposed into per-stat `action` + `whyText` fields
   //  on each DimensionResult, which is where it actually belongs.)
 
-  const clockNights: SleepClockNight[] = useMemo(() => {
-    // Most recent first, max 7 nights
-    return sessions7.slice(0, 7).map((s, idx) => ({
+  const clockNights: SleepClockNight[] = useMemo(
+    () => last7.map((s, idx) => ({
       label: new Date(s.start_at).toLocaleDateString([], { weekday: 'short' }),
       startAt: s.start_at,
       endAt:   s.end_at,
       isMostRecent: idx === 0,
-    }))
-  }, [sessions7])
+    })),
+    [last7],
+  )
 
   // (Earlier draft had a synthetic "target window" arc on the clock — removed
   // because users were misreading it as "average sleep window". The clock now
@@ -688,15 +628,10 @@ export default function SleepPage() {
   )
   const latestSession = sessions7[0] ?? null
   const latestHasStages = latestSession?.deep_s != null && hypnoSegments.length > 0
-
-  // ── 30-day series ──────────────────────────────────────────────────────────
-
-  const monthSeries = useMemo(() => {
-    const sorted = sessions30
-      .slice()
-      .sort((a, b) => (a.start_at < b.start_at ? -1 : 1))
-    return sorted.map(s => s.duration_s / 3600)  // hours
-  }, [sessions30])
+  // Any watch stage data in the recent window? Drives the Deep & REM block's
+  // banner + legend visibility (deep/REM dims are 'unknown' when no night in
+  // the spark window carried stages).
+  const hasStageData = deepDim.status !== 'unknown' || remDim.status !== 'unknown'
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -712,11 +647,7 @@ export default function SleepPage() {
     >
       <View style={s.header}>
         <Text style={s.h1}>Sleep</Text>
-        <Text style={s.h1Sub}>
-          {hasAnyData
-            ? `Target ${fmtHoursOnly(targetHours)}  ·  ${sessions7.length} ${sessions7.length === 1 ? 'night' : 'nights'} this week`
-            : 'Pair your watch or keep your phone on the bed at night to start tracking.'}
-        </Text>
+        <Text style={s.h1Sub}>Your last 7 nights — duration, schedule, and recovery.</Text>
       </View>
 
       {loading && !hasAnyData && (
@@ -744,6 +675,7 @@ export default function SleepPage() {
       {!loading && hasAnyData && (
         <AnimateRise delay={0} style={s.card}>
           <Text style={s.cardLabel}>Sleep Rhythm</Text>
+          <Text style={s.cardSub}>A view of your week's bedtimes and wake times.</Text>
           <SleepClock
             nights={clockNights}
             size={320}
@@ -767,6 +699,45 @@ export default function SleepPage() {
         </AnimateRise>
       )}
 
+      {/* ── Sleep consistency: 7-night chart + sleep targets ────────────── */}
+      {!loading && hasAnyData && sleepAvg && (
+        <AnimateRise delay={200} style={s.card}>
+          <Text style={s.cardLabel}>Consistency</Text>
+          <Text style={s.cardSub}>
+            Aim to land each night on your targets.
+          </Text>
+          <SleepConsistency
+            nights={last7}
+            targetWakeMin={sleepAvg.avgWakeMin}
+            targetBedMin={sleepAvg.targetBedMin}
+            avgBedMin={sleepAvg.avgBedMin}
+          />
+
+          {/* Sleep Targets — duration + bedtime, target vs your average */}
+          <View style={s.targetsSection}>
+            <Text style={s.targetsTitle}>Sleep Targets</Text>
+            <DimensionRow
+              icon={<Clock size={14} color={statusColor(durationTargetDim.status)} />}
+              label="Sleep Duration"
+              pillLabel="Sleep Duration"
+              dim={durationTargetDim}
+              hideSpark
+              isFirst
+            />
+            <DimensionRow
+              icon={<BedDouble size={14} color={statusColor(bedtimeTargetDim.status)} />}
+              label="Bedtime"
+              pillLabel="Bedtime"
+              dim={bedtimeTargetDim}
+              hideSpark
+            />
+            <Text style={s.attribution}>
+              AASM · NSF · Li 2022 · Windred · Wittmann · Czeisler — sleep-need targets by age, and a bedtime anchored to your wake time.
+            </Text>
+          </View>
+        </AnimateRise>
+      )}
+
       {/* ── Unified dimension breakdown (single card, 4 stacked rows) ─────
           The old "How to improve your sleep" verdict banner was REMOVED
           May 31 2026 — its cues + Sleep-target pill were redundant with
@@ -780,84 +751,94 @@ export default function SleepPage() {
           Native's normal layout flow (no layout-animation system
           needed). See DimensionRow for the mechanic. */}
       {!loading && hasAnyData && (
-        <AnimateRise delay={300} style={s.card}>
-          <Text style={s.cardLabel}>Sleep Stats</Text>
-          <DimensionRow
-            icon={<Clock size={14} color={statusColor(totalDim.status)} />}
-            label="Sleep Duration"
-            pillLabel="Sleep Duration"
-            dim={totalDim}
-            isFirst
-          />
-          <DimensionRow
-            icon={<BedDouble size={14} color={statusColor(scheduleDim.status)} />}
-            label="Bedtime"
-            pillLabel="Bedtime"
-            dim={scheduleDim}
-          />
+        <AnimateRise delay={350} style={s.card}>
+          <Text style={s.cardLabel}>Deep & REM Recovery</Text>
+          <Text style={s.cardSub}>
+            Deep and REM aren't targets you chase — they improve on their own as your sleep duration and schedule do.
+          </Text>
+
+          {/* No watch stage data → CTA banner under the subtitle. */}
+          {!hasStageData && (
+            <View style={s.banner}>
+              <Watch size={18} color={palette.indigo[400]} />
+              <Text style={s.bannerText}>
+                Wear your watch while you sleep to track Deep, REM, and your sleep cycle.
+              </Text>
+            </View>
+          )}
+
           <DimensionRow
             icon={<Activity size={14} color={statusColor(deepDim.status)} />}
             label="Deep Sleep"
             pillLabel="Deep Sleep"
             dim={deepDim}
+            hideAction
+            isFirst
           />
           <DimensionRow
             icon={<Brain size={14} color={statusColor(remDim.status)} />}
             label="REM Cycle"
             pillLabel="Rapid Eye Movement"
             dim={remDim}
+            hideAction
           />
-          {/* Science attribution — same line treatment as cardio/strength
-              detail pages (Riegel · Daniels' · Seiler, Epley · Brzycki ·
-              Lombardi, etc.). Sources behind every target value above. */}
-          <Text style={s.attribution}>
-            AASM · NSF · Li 2022 · Belenky · Van Dongen · Wittmann · Windred · Spielman · Czeisler · Wright · Roehrs · Okamoto-Mizuno · Burgess · Drake · Park — targets by age, science-backed cutoffs, weekly nudges, cues timed to your bedtime
-          </Text>
-        </AnimateRise>
-      )}
 
-      {/* ── Last night hypnogram ─────────────────────────────────────────── */}
-      {!loading && hasAnyData && latestSession && latestHasStages && (
-        <AnimateRise delay={500} style={s.card}>
-          <Text style={s.cardLabel}>Last Sleep Cycle</Text>
-          <View style={s.hypnoMetaRow}>
-            <Text style={s.hypnoMeta}>
-              {new Date(latestSession.start_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-              {' – '}
-              {new Date(latestSession.end_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-            </Text>
-            <Text style={s.hypnoMetaDot}>•</Text>
-            <View style={s.hypnoTotalRow}>
-              <TickerNumber
-                value={Math.floor(latestSession.duration_s / 3600)}
-                style={s.hypnoTotalNum}
-              />
-              <Text style={s.hypnoTotalUnit}>h </Text>
-              <TickerNumber
-                value={Math.round((latestSession.duration_s % 3600) / 60)}
-                style={s.hypnoTotalNum}
-              />
-              <Text style={s.hypnoTotalUnit}>m</Text>
+          {/* "Dotted = optimal" legend only matters once sparklines exist. */}
+          {hasStageData && (
+            <View style={s.deepRemLegend}>
+              <View style={s.deepRemLegendDots}>
+                <View style={s.deepRemLegendDot} />
+                <View style={s.deepRemLegendDot} />
+                <View style={s.deepRemLegendDot} />
+              </View>
+              <Text style={s.deepRemLegendText}>Optimal</Text>
             </View>
+          )}
+
+          {/* Last Sleep Cycle — final section of this block. Hypnogram when the
+              latest night has stages, else a watch-icon placeholder. */}
+          <View style={s.cycleSection}>
+            <Text style={s.cycleSectionTitle}>Last Sleep Cycle</Text>
+            {latestSession && latestHasStages ? (
+              <>
+                <View style={s.hypnoMetaRow}>
+                  <Text style={s.hypnoMeta}>
+                    {new Date(latestSession.start_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                    {' – '}
+                    {new Date(latestSession.end_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </Text>
+                  <Text style={s.hypnoMetaDot}>•</Text>
+                  <View style={s.hypnoTotalRow}>
+                    <TickerNumber
+                      value={Math.floor(latestSession.duration_s / 3600)}
+                      style={s.hypnoTotalNum}
+                    />
+                    <Text style={s.hypnoTotalUnit}>h </Text>
+                    <TickerNumber
+                      value={Math.round((latestSession.duration_s % 3600) / 60)}
+                      style={s.hypnoTotalNum}
+                    />
+                    <Text style={s.hypnoTotalUnit}>m</Text>
+                  </View>
+                </View>
+                <Hypnogram
+                  segments={hypnoSegments}
+                  sessionStart={latestSession.start_at}
+                  sessionEnd={latestSession.end_at}
+                />
+              </>
+            ) : (
+              <View style={s.cyclePlaceholder}>
+                <Watch size={22} color={colors.mutedForeground} />
+                <Text style={s.cyclePlaceholderText}>
+                  Your sleep cycle appears here once your watch tracks a night.
+                </Text>
+              </View>
+            )}
           </View>
-          <Hypnogram
-            segments={hypnoSegments}
-            sessionStart={latestSession.start_at}
-            sessionEnd={latestSession.end_at}
-          />
         </AnimateRise>
       )}
 
-      {/* ── 30-day duration trend ────────────────────────────────────────── */}
-      {!loading && hasAnyData && monthSeries.length > 0 && (
-        <AnimateRise delay={500} style={s.card}>
-          <Text style={s.cardLabel}>Duration — Last 30 Days</Text>
-          <Text style={s.cardSub}>
-            Each bar is one night. Dashed line is your {fmtHoursOnly(targetHours)} target.
-          </Text>
-          <MonthlySparkline values={monthSeries} target={targetHours} />
-        </AnimateRise>
-      )}
     </ScrollView>
   )
 }
@@ -871,7 +852,7 @@ export default function SleepPage() {
 // a visual rhythm, no per-card borders compete for the user's eye.
 
 function DimensionRow({
-  icon, label, pillLabel, dim, isFirst,
+  icon, label, pillLabel, dim, isFirst, hideSpark, hideAction,
 }: {
   icon:      React.ReactNode
   /** Row title (e.g. "Sleep duration", "Bedtime", "Deep sleep", "REM cycle"). */
@@ -880,6 +861,10 @@ function DimensionRow({
   pillLabel: string
   dim:       DimensionResult
   isFirst?:  boolean
+  /** Hide the sparkline — target rows show only the target vs average + cue. */
+  hideSpark?:  boolean
+  /** Hide the coaching cue — Deep/REM are outcomes, not targets to chase. */
+  hideAction?: boolean
 }) {
   const color = statusColor(dim.status)
   // Pill expansion uses DIRECT HEIGHT ANIMATION (locked May 31 2026):
@@ -1022,15 +1007,19 @@ function DimensionRow({
           Native's normal layout flow. No animation wrapper needed
           here; that's the whole point of the height-anim approach. */}
       <View>
-        <Text style={[s.dimHeadline, { marginTop: 6 }]}>{dim.headline}</Text>
-        <SparkLine
-          values={dim.spark}
-          accent={color}
-          target={dim.sparkTarget}
-          width={300}
-          height={30}
-        />
-        <Text style={s.dimAction}>{dim.action}</Text>
+        {dim.status !== 'unknown' && (
+          <Text style={[s.dimHeadline, { marginTop: 6 }]}>{dim.headline}</Text>
+        )}
+        {!hideSpark && dim.status !== 'unknown' && dim.spark.length > 0 && (
+          <SparkLine
+            values={dim.spark}
+            accent={color}
+            target={dim.sparkTarget}
+            width={300}
+            height={30}
+          />
+        )}
+        {!hideAction && <Text style={s.dimAction}>{dim.action}</Text>}
       </View>
     </View>
   )
@@ -1107,7 +1096,16 @@ function SparkLine({
       }
     }
 
-    return { dataPath, targetPath }
+    // Faint vertical separators — one per night, so each day reads as its
+    // own slot in the deep/REM sparklines.
+    const sepPath = Skia.Path.Make()
+    for (let i = 0; i < values.length; i++) {
+      const px = tx(i)
+      sepPath.moveTo(px, 0)
+      sepPath.lineTo(px, height)
+    }
+
+    return { dataPath, targetPath, sepPath }
   }, [values, target, width, height])
 
   if (!built) {
@@ -1117,6 +1115,12 @@ function SparkLine({
   return (
     <View style={{ height, marginVertical: 2 }}>
       <Canvas style={{ width, height }}>
+        <SkiaPath
+          path={built.sepPath}
+          style="stroke"
+          strokeWidth={1}
+          color={withAlpha('#ffffff', 0.13)}
+        />
         {built.targetPath && (
           <SkiaPath
             path={built.targetPath}
@@ -1132,93 +1136,6 @@ function SparkLine({
           color={accent}
         />
       </Canvas>
-    </View>
-  )
-}
-
-// ── MonthlySparkline ─────────────────────────────────────────────────────────
-
-function MonthlySparkline({
-  values, target, height = 80,
-}: {
-  values: number[]   // hours per night
-  target: number     // target hours
-  height?: number
-}) {
-  const [width, setWidth] = useState(0)
-
-  // Build all Skia geometry up-front. One path per color bucket (ok /
-  // amber) so the canvas only emits two stroked/filled shapes for the
-  // bars + one for the target dashes — fewer draw calls than per-bar
-  // <Path> nodes. Recomputes only when values/target/width/height
-  // change.
-  const built = useMemo(() => {
-    if (values.length === 0 || width <= 0) return null
-    const yMax  = Math.max(target * 1.2, Math.max(...values, target) + 0.5)
-    const yMin  = 0
-    const plotH = height - 12
-    const ty    = (v: number) =>
-      4 + plotH - ((v - yMin) / (yMax - yMin)) * plotH
-
-    // Bars grouped by color bucket. addRect / Skia.XYWHRect mirrors the
-    // SVG path's `M x,y h w v h h-w z` rectangle exactly.
-    const okPath    = Skia.Path.Make()
-    const amberPath = Skia.Path.Make()
-    for (let i = 0; i < values.length; i++) {
-      const v    = values[i]
-      const barW = Math.max(1, (width / values.length) - 2)
-      const x    = (i / values.length) * width + 1
-      const y    = ty(v)
-      const h    = Math.max(1, height - 8 - y)
-      const ok   = v >= target * 0.9 && v <= target * 1.2
-      const rect = Skia.XYWHRect(x, y, barW, h)
-      if (ok) okPath.addRect(rect)
-      else    amberPath.addRect(rect)
-    }
-
-    // Target line — same 3px dash, 3px gap pattern as SparkLine. Skia
-    // doesn't take a strokeDasharray prop, so we build the dash run as
-    // discrete moveTo/lineTo sub-paths.
-    const targetPath = Skia.Path.Make()
-    const targetY    = ty(target)
-    const DASH       = 3
-    const GAP        = 3
-    let x = 0
-    while (x < width) {
-      const x2 = Math.min(x + DASH, width)
-      targetPath.moveTo(x, targetY)
-      targetPath.lineTo(x2, targetY)
-      x += DASH + GAP
-    }
-
-    return { okPath, amberPath, targetPath }
-  }, [values, target, width, height])
-
-  if (values.length === 0) return null
-
-  return (
-    <View
-      onLayout={e => setWidth(e.nativeEvent.layout.width)}
-      style={{ height }}
-    >
-      {built && width > 0 && (
-        <Canvas style={{ width, height }}>
-          <SkiaPath
-            path={built.okPath}
-            color={withAlpha(palette.emerald[400], 0.65)}
-          />
-          <SkiaPath
-            path={built.amberPath}
-            color={withAlpha(palette.amber[400], 0.65)}
-          />
-          <SkiaPath
-            path={built.targetPath}
-            style="stroke"
-            strokeWidth={1}
-            color={palette.slate[400]}
-          />
-        </Canvas>
-      )}
     </View>
   )
 }
@@ -1275,6 +1192,53 @@ const s = StyleSheet.create({
     textAlign: 'center',
   },
   cardSub:   { color: colors.mutedForeground, fontSize: 12, marginTop: -6 },
+
+  // Sleep Targets sub-section inside the Consistency card.
+  targetsSection: {
+    marginTop:      14,
+    paddingTop:     14,
+    borderTopWidth: 1,
+    borderTopColor: alpha(colors.border, 0.5),
+  },
+  targetsTitle: { color: colors.foreground, fontSize: 14, fontWeight: '600' },
+
+  // Deep & REM block — single "dotted = optimal" legend at the bottom.
+  deepRemLegend:     { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  deepRemLegendDots: { flexDirection: 'row', gap: 2, alignItems: 'center' },
+  deepRemLegendDot:  { width: 4, height: 2, backgroundColor: colors.mutedForeground },
+  deepRemLegendText: { color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.sans[500] },
+
+  // "Wear your watch" CTA banner under the Deep & REM subtitle (no-stage state).
+  banner: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    gap:             10,
+    backgroundColor: withAlpha(palette.indigo[400], 0.10),
+    borderColor:     withAlpha(palette.indigo[400], 0.25),
+    borderWidth:     1,
+    borderRadius:    10,
+    paddingHorizontal: 12,
+    paddingVertical:   10,
+    marginTop:       2,
+  },
+  bannerText: { color: colors.foreground, fontSize: 12, lineHeight: 17, flex: 1 },
+
+  // Last Sleep Cycle as the final section of the Deep & REM card.
+  cycleSection: {
+    marginTop:      14,
+    paddingTop:     14,
+    borderTopWidth: 1,
+    borderTopColor: alpha(colors.border, 0.5),
+  },
+  cycleSectionTitle: { color: colors.foreground, fontSize: 14, fontWeight: '600', marginBottom: 10 },
+  cyclePlaceholder:  { alignItems: 'center', gap: 8, paddingVertical: 20 },
+  cyclePlaceholderText: {
+    color:      colors.mutedForeground,
+    fontSize:   12,
+    lineHeight: 17,
+    textAlign:  'center',
+    maxWidth:   240,
+  },
 
   emptyTitle: { color: colors.foreground, fontSize: 16, fontWeight: '600' },
   emptyBody:  { color: colors.mutedForeground, fontSize: 13, lineHeight: 19 },
@@ -1375,12 +1339,12 @@ const s = StyleSheet.create({
     alignItems:    'baseline',
   },
   hypnoTotalNum: {
-    color:      palette.indigo[400],
+    color:      colors.foreground,
     fontSize:   18,
     fontWeight: '700',
   },
   hypnoTotalUnit: {
-    color:    palette.indigo[400],
+    color:    colors.foreground,
     fontSize: 12,
     fontWeight: '600',
     opacity:  0.7,
