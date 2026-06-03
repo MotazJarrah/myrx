@@ -147,9 +147,9 @@ TASKS = [
      "mobile RadialNav.tsx (reverted)",
      "2026-06-03"),
 
-    ("T014", "Dashboard pills covering all pages", "Dashboard", "Cross", "Pending",
-     "Current pills: Strength PRs, Cardio PRs, Food streak, Lowest HR, Weekly weight. Gap pages were Sleep, Hydration, Mobility. PROPOSED + recommended: add Sleep ('avg Xh / 7 nights', indigo) and Hydration ('X days hit water goal / 14', cyan). Mobility pill DROPPED (feature removed, T012). Data confirmed available (sleep_sessions, water_logs). Whatever lands MUST mirror to admin + coach client dashboards.",
-     "Awaiting user go-ahead on the two pills (Sleep avg + Hydration streak). Then implement on mobile dashboard + admin AdminUserDetail + coach CoachClientDetail.",
+    ("T014", "Dashboard pills covering all pages", "Dashboard", "Cross", "Done",
+     "Gap pages were Sleep + Hydration (Mobility pill dropped — feature removed in T012). Added two chips on ALL three surfaces: 'Nh avg sleep . 7 nights' (indigo, from sleep_sessions.duration_s) + 'N days hit water goal . 7d' (cyan: days in the last 7 where sum(amount_ml x BHI multiplier) >= 35 mL/kg of latest bodyweight). Each chip hides when there's no data, like the existing chips.",
+     "DONE 2026-06-03 (awaiting user device test). Surfaces: mobile dashboard.tsx; web AdminUserDetail.jsx + CoachClientDetail.jsx (their SnapshotBadge gained indigo/cyan colors). mobile tsc clean + web build clean. Sleep/Hydration coaching-surface promotions (T043/T044) are separate roadmap items.",
      "(planned) mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 

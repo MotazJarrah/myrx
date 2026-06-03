@@ -106,6 +106,8 @@ function SnapshotBadge({ children, color }) {
     red:     'bg-red-500/10 border-red-500/20 text-red-400',
     green:   'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
     zinc:    'bg-zinc-500/10 border-zinc-500/20 text-zinc-400',
+    indigo:  'bg-indigo-500/10 border-indigo-500/20 text-indigo-400',
+    cyan:    'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
     <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${cls}`}>
@@ -183,11 +185,13 @@ export default function CoachClientDetail() {
       const monthStartISO  = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
       const fourteenDate   = new Date(Date.now() - 14 * 86_400_000).toISOString().split('T')[0]
 
-      const [allEfRes, foodRes, hrRes, bw14Res] = await Promise.all([
+      const [allEfRes, foodRes, hrRes, bw14Res, sleepRes, waterRes] = await Promise.all([
         supabase.from('efforts').select('created_at, label, value, type').eq('user_id', id).limit(5000),
         supabase.from('food_logs').select('log_date').eq('user_id', id).gte('log_date', fourteenDate).order('log_date', { ascending: false }).limit(50),
         supabase.from('hr_samples').select('bpm').eq('user_id', id).is('workout_id', null).gte('measured_at', weekAgoISO).order('bpm', { ascending: true }).limit(1),
         supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', id).gte('created_at', fourteenAgoISO).order('created_at', { ascending: false }).limit(50),
+        supabase.from('sleep_sessions').select('duration_s').eq('user_id', id).gte('start_at', weekAgoISO).limit(50),
+        supabase.from('water_logs').select('amount_ml, drink_type, logged_at').eq('user_id', id).gte('logged_at', weekAgoISO).limit(500),
       ])
 
       const allStrength = (allEfRes.data || []).filter(e => e.type === 'strength')
@@ -246,7 +250,27 @@ export default function CoachClientDetail() {
         }
       }
 
-      setSnapshot({ strengthPRsThisMonth, cardioPRsThisMonth, foodStreak, lowestBpm, weightDiff, latestWeight })
+      const sleepDurs = (sleepRes.data || []).map(s => Number(s.duration_s)).filter(d => d > 0)
+      const avgSleepH = sleepDurs.length
+        ? Math.round((sleepDurs.reduce((a, b) => a + b, 0) / sleepDurs.length / 3600) * 10) / 10
+        : null
+
+      let hydrationDays = null
+      if (bw.length > 0) {
+        const goalMl = Math.round(toKg(parseFloat(bw[0].weight), bw[0].unit || 'lb') * 35)
+        const waterRows = waterRes.data || []
+        if (goalMl > 0 && waterRows.length) {
+          const byDay = {}
+          for (const l of waterRows) {
+            const dt = new Date(l.logged_at)
+            const key = `${dt.getFullYear()}-${dt.getMonth()}-${dt.getDate()}`
+            byDay[key] = (byDay[key] || 0) + Number(l.amount_ml) * (l.drink_type === 'milk' ? 1.5 : 1)
+          }
+          hydrationDays = Object.values(byDay).filter(ml => ml >= goalMl).length
+        }
+      }
+
+      setSnapshot({ strengthPRsThisMonth, cardioPRsThisMonth, foodStreak, lowestBpm, weightDiff, latestWeight, avgSleepH, hydrationDays })
     }
     loadSnapshot()
   }, [id, snapshotKey, coachProfile?.weight_unit])
@@ -308,7 +332,9 @@ export default function CoachClientDetail() {
     (snapshot.foodStreak > 0) ||
     (snapshot.lowestBpm != null) ||
     (snapshot.weightDiff != null) ||
-    (snapshot.latestWeight != null)
+    (snapshot.latestWeight != null) ||
+    (snapshot.avgSleepH != null) ||
+    (snapshot.hydrationDays != null)
   )
 
   return (
@@ -464,6 +490,16 @@ export default function CoachClientDetail() {
                 ⚖️ <TickerNumber value={Math.round(snapshot.latestWeight * 10) / 10} /> {coachProfile?.weight_unit || 'lb'} · latest
               </SnapshotBadge>
             ) : null}
+            {snapshot.avgSleepH != null && (
+              <SnapshotBadge color="indigo">
+                😴 <TickerNumber value={snapshot.avgSleepH} />h avg sleep · 7 nights
+              </SnapshotBadge>
+            )}
+            {snapshot.hydrationDays != null && (
+              <SnapshotBadge color="cyan">
+                💧 <TickerNumber value={snapshot.hydrationDays} /> day{snapshot.hydrationDays !== 1 ? 's' : ''} hit water goal · 7d
+              </SnapshotBadge>
+            )}
           </div>
         )}
       </div>

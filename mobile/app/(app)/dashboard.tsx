@@ -247,6 +247,43 @@ function computeWeeklyWeightDiff(bwLogs: { weight: number; unit: string; created
   return { deltaKg: toKg(bwLogs[0].weight, bwLogs[0].unit) - toKg(bwLogs[1].weight, bwLogs[1].unit) }
 }
 
+// ── Sleep + hydration chip helpers (added with the Sleep/Hydration chips) ────
+
+/** Avg sleep hours across the given sessions (duration_s). null if none. */
+function computeAvgSleepHours(sessions: { duration_s: number | null }[]): number | null {
+  const durs = sessions.map(s => Number(s.duration_s)).filter(d => d > 0)
+  if (durs.length === 0) return null
+  const avgSecs = durs.reduce((a, b) => a + b, 0) / durs.length
+  return Math.round((avgSecs / 3600) * 10) / 10
+}
+
+// Beverage-Hydration-Index multiplier (mirrors the Hydration page): milk 1.5×,
+// everything else 1.0×. Effective hydration = amount_ml × multiplier.
+function hydrationMult(t: string): number { return t === 'milk' ? 1.5 : 1 }
+
+/** Daily water goal in mL (35 mL/kg of latest bodyweight). 0 if no weight. */
+function hydrationGoalMl(bwLogs: { weight: number; unit: string }[]): number {
+  const latest = bwLogs[0]
+  if (!latest?.weight) return 0
+  const kg = latest.unit === 'lb' ? Number(latest.weight) * 0.453592 : Number(latest.weight)
+  return kg > 0 ? Math.round(kg * 35) : 0
+}
+
+/** How many of the last-7 days the user's effective water intake hit goal. */
+function computeHydrationDaysHit(
+  logs: { amount_ml: number; drink_type: string; logged_at: string }[],
+  goalMl: number,
+): number | null {
+  if (logs.length === 0 || goalMl <= 0) return null
+  const byDay: Record<string, number> = {}
+  for (const l of logs) {
+    const d = new Date(l.logged_at)
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+    byDay[key] = (byDay[key] ?? 0) + Number(l.amount_ml) * hydrationMult(l.drink_type)
+  }
+  return Object.values(byDay).filter(ml => ml >= goalMl).length
+}
+
 // ── Coach info ───────────────────────────────────────────────────────────────
 //
 // Returned by the SECURITY DEFINER RPC `get_coach_info()` which resolves
@@ -395,6 +432,9 @@ export default function Dashboard() {
   const [foodStreak, setFoodStreak]         = useState<number | null>(cached?.foodStreak ?? null)
   const [lowestHR7d, setLowestHR7d]         = useState<number | null>(cached?.lowestHR   ?? null)
   const [weeklyWeightKg, setWeeklyWeightKg] = useState<number | null>(cached?.weeklyKg   ?? null)
+  // Sleep (avg hours / 7 nights) + Hydration (days hit goal / 7) chips.
+  const [avgSleepH, setAvgSleepH]           = useState<number | null>(cached?.avgSleepH     ?? null)
+  const [hydrationDays, setHydrationDays]   = useState<number | null>(cached?.hydrationDays ?? null)
   // "Coached by [name]" mini-badge data. Resolved via SECURITY DEFINER
   // RPC `get_coach_info()` which returns the caller's linked coach (or
   // the admin superuser fallback). Render is gated on chat_enabled +
@@ -449,7 +489,11 @@ export default function Dashboard() {
       // coach or the admin superuser fallback (or null). Drives the
       // "Coached by [name]" badge in the profile card.
       supabase.rpc('get_coach_info'),
-    ]).then(([efRes, bwRes, calRes, allEffRes, foodLogRes, hrRes, bwWindowRes, coachRes]) => {
+      // Sleep — last 7 nights (duration_s) for the avg-sleep chip.
+      supabase.from('sleep_sessions').select('duration_s').eq('user_id', user.id).gte('start_at', sevenDaysAgoISO),
+      // Hydration — last 7 days of water logs for the days-hit-goal chip.
+      supabase.from('water_logs').select('amount_ml, drink_type, logged_at').eq('user_id', user.id).gte('logged_at', sevenDaysAgoISO),
+    ]).then(([efRes, bwRes, calRes, allEffRes, foodLogRes, hrRes, bwWindowRes, coachRes, sleepRes, waterRes]) => {
       const efforts  = efRes.data  ?? []
       const bw       = bwRes.data  ?? []
       const calories = (calRes.data ?? []).map((r: any) => ({ ...r, created_at: r.log_date + 'T12:00:00' }))
@@ -471,6 +515,14 @@ export default function Dashboard() {
       const bwWindow     = (bwWindowRes.data ?? []) as { weight: number; unit: string; created_at: string }[]
       const weeklyDiff   = computeWeeklyWeightDiff(bwWindow)
       const weeklyKgVal  = weeklyDiff ? weeklyDiff.deltaKg : null
+
+      // Sleep avg (hours) + hydration days-hit-goal (last 7). Goal comes from
+      // the freshly-fetched bodyweight rows (35 mL/kg); chips hide on no data.
+      const avgSleepV      = computeAvgSleepHours((sleepRes.data ?? []) as { duration_s: number | null }[])
+      const hydrationDaysV = computeHydrationDaysHit(
+        (waterRes.data ?? []) as { amount_ml: number; drink_type: string; logged_at: string }[],
+        hydrationGoalMl(bw as { weight: number; unit: string }[]),
+      )
 
       // Coach info — RPC returns NULL when neither a linked coach nor
       // an admin superuser fallback exists (self-coached and no admin
@@ -496,6 +548,8 @@ export default function Dashboard() {
       setLowestHR7d(lowestHRv)
       setWeeklyWeightKg(weeklyKgVal)
       setCoachInfo(coachVal)
+      setAvgSleepH(avgSleepV)
+      setHydrationDays(hydrationDaysV)
 
       if (cacheKey) dataCache.set(cacheKey, {
         efforts, bw, calories,
@@ -505,6 +559,8 @@ export default function Dashboard() {
         lowestHR:    lowestHRv,
         weeklyKg:    weeklyKgVal,
         coachInfo:   coachVal,
+        avgSleepH:     avgSleepV,
+        hydrationDays: hydrationDaysV,
       })
 
       setLoading(false)
@@ -833,6 +889,32 @@ export default function Dashboard() {
               </View>
             )
           })() : null}
+
+          {/* 😴 Avg sleep over the last 7 nights (Sleep page chip). */}
+          {avgSleepH != null && (
+            <View style={[d.statChip, d.statChipIndigo]}>
+              <Text style={d.statChipEmoji}>😴</Text>
+              <View style={d.statChipNum}>
+                <TickerNumber value={avgSleepH} fontSize={11} color={palette.indigo[400]} fontWeight="700" />
+              </View>
+              <Text style={[d.statChipText, { color: palette.indigo[400] }]}>
+                {`h avg sleep · 7 nights`}
+              </Text>
+            </View>
+          )}
+
+          {/* 💧 Days the water goal was hit, last 7 (Hydration page chip). */}
+          {hydrationDays != null && (
+            <View style={[d.statChip, d.statChipCyan]}>
+              <Text style={d.statChipEmoji}>💧</Text>
+              <View style={d.statChipNum}>
+                <TickerNumber value={hydrationDays} fontSize={11} color={palette.cyan[400]} fontWeight="700" />
+              </View>
+              <Text style={[d.statChipText, { color: palette.cyan[400] }]}>
+                {` day${hydrationDays !== 1 ? 's' : ''} hit water goal · 7d`}
+              </Text>
+            </View>
+          )}
         </View>
         </AnimateRise>
 
@@ -1004,6 +1086,8 @@ const d = StyleSheet.create({
   statChipEmerald: { borderColor: withAlpha(palette.emerald[500], 0.30), backgroundColor: withAlpha(palette.emerald[500], 0.10) },
   statChipSlate:   { borderColor: colors.border, backgroundColor: alpha(colors.muted, 0.30) },
   statChipMuted:   { borderColor: colors.border, backgroundColor: alpha(colors.muted, 0.30) },
+  statChipIndigo:  { borderColor: withAlpha(palette.indigo[500], 0.30), backgroundColor: withAlpha(palette.indigo[500], 0.10) },
+  statChipCyan:    { borderColor: withAlpha(palette.cyan[500],   0.30), backgroundColor: withAlpha(palette.cyan[500],   0.10) },
   statChipEmoji: { fontSize: 11, marginRight: 4 },
   statChipNum:   { marginRight: 0 },
   statChipText:  { fontSize: 11, fontWeight: '500' },
