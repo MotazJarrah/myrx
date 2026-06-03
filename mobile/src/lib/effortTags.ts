@@ -127,18 +127,6 @@ function getCardioSubtype(activityName: string): string {
   return 'Machine'
 }
 
-// ── Mobility subtype detection ────────────────────────────────────────────────
-
-function getMobilitySubtype(lower: string): string {
-  if (/bear crawl|bear hold|beast hold|commando crawl|crab hold|crab walk|crocodile crawl|duck walk|kickthrough|frog hop|gorilla walk|inchworm|lateral bear|lateral crab|leopard crawl|lizard walk|low crawl|monkey walk|plank walk|scorpion reach|scorpion walk|seal walk|spider|tabletop hold|traveling ape|underswitch/.test(lower))
-    return 'Movement'
-
-  if (/boat pose|bound angle|bow pose|bridge pose|cat cow|chair pose|child|cobra pose|corpse pose|crescent|dancer|double pigeon|downward dog|extended side angle|fish pose|frog pose|garland|goddess|half moon|happy baby|head.to.knee|hero pose|knees.to.chest|legs up the wall|lizard pose|locust pose|low lunge|mountain pose|pigeon pose|puppy pose|reversed warrior|sphinx|supine spinal twist|tree pose|triangle pose|upward dog|warrior|wheel pose|wide.angle/.test(lower))
-    return 'Yoga'
-
-  return 'Stretch'
-}
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export interface EffortTagDescriptor {
@@ -171,20 +159,6 @@ export function getEffortTags(effort: { type: string; label?: string }): EffortT
     return {
       primary:   { label: 'Cardio',  style: TAG_STYLES.cardio },
       secondary: { label: subtype,   style: TAG_STYLES[subtype] ?? TAG_STYLES.Endurance },
-    }
-  }
-
-  if (effort.type === 'mobility') {
-    const movementsStr = (effort.label ?? '').replace(/^Mobility Session\s*·?\s*/i, '')
-    const counts: Record<string, number> = { Movement: 0, Yoga: 0, Stretch: 0 }
-    movementsStr.split(',').forEach(chunk => {
-      const name = chunk.trim().replace(/\s+\d+:\d{2}(?::\d{2})?$/, '').trim()
-      if (name) counts[getMobilitySubtype(name.toLowerCase())]++
-    })
-    const subtype = (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0]) ?? 'Stretch'
-    return {
-      primary:   { label: 'Mobility', style: TAG_STYLES.mobility },
-      secondary: { label: subtype,    style: TAG_STYLES[subtype] },
     }
   }
 

@@ -175,14 +175,12 @@ export default function AdminDashboard() {
       const sevenDaysDate = new Date(Date.now() -  7 * 86_400_000).toISOString().split('T')[0]
       const weekAgoISO    = new Date(Date.now() -  7 * 86_400_000).toISOString()
 
-      const [usersRes, plansRes, bwRes, effortsRes, romRes, calRes] = await Promise.all([
+      const [usersRes, plansRes, bwRes, effortsRes, calRes] = await Promise.all([
         supabase.rpc('get_users_for_admin'),
         supabase.from('calorie_plans').select('user_id, starting_weight_kg, goal_weight_kg, goal_reached'),
         supabase.from('bodyweight').select('user_id, weight, unit, created_at').order('created_at', { ascending: false }),
         supabase.from('efforts').select('user_id, label, value, type, created_at')
           .gte('created_at', ninetyDaysAgo).limit(5000),
-        supabase.from('rom_records').select('user_id, created_at')
-          .gte('created_at', ninetyDaysAgo).limit(2000),
         supabase.from('calorie_logs').select('user_id, log_date')
           .gte('log_date', sevenDaysDate).limit(2000),
       ])
@@ -202,12 +200,6 @@ export default function AdminDashboard() {
         effortsByUser[e.user_id].push(e)
       })
 
-      const romDatesByUser = {}
-      ;(romRes.data || []).forEach(r => {
-        if (!romDatesByUser[r.user_id]) romDatesByUser[r.user_id] = []
-        romDatesByUser[r.user_id].push(r.created_at)
-      })
-
       const calByUser = {}
       ;(calRes.data || []).forEach(c => {
         if (!calByUser[c.user_id]) calByUser[c.user_id] = new Set()
@@ -217,13 +209,12 @@ export default function AdminDashboard() {
       // Build enriched per-client data
       const built = allUsers.map(u => {
         const efforts  = effortsByUser[u.id]  || []
-        const romDates = romDatesByUser[u.id] || []
         const plan     = planMap[u.id]        || null
         const bw       = latestBW[u.id]       || null
         const calDays  = calByUser[u.id]?.size ?? 0
 
-        // Last active: most recent effort or ROM date
-        const allDates = [...efforts.map(e => e.created_at), ...romDates]
+        // Last active: most recent effort
+        const allDates = efforts.map(e => e.created_at)
         const lastActive = allDates.length > 0
           ? allDates.reduce((a, b) => (a > b ? a : b))
           : null

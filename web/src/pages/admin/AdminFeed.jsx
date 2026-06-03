@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'wouter'
 import { supabase } from '../../lib/supabase'
-import { Dumbbell, Weight, Flame, Flower2, Activity, Filter } from 'lucide-react'
+import { Dumbbell, Weight, Flame, Activity, Filter } from 'lucide-react'
 import { dataCache } from '../../lib/cache'
 
 function formatDate(ts) {
@@ -25,7 +25,6 @@ const KIND_META = {
   cardio:   { label: 'Cardio',     icon: Activity,  iconCls: 'bg-amber-500/10 text-amber-400',   chip: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
   weighin:  { label: 'Weigh-in',   icon: Weight,    iconCls: 'bg-emerald-500/10 text-emerald-400', chip: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
   calorie:  { label: 'Calories',   icon: Flame,     iconCls: 'bg-red-500/10 text-red-400',       chip: 'bg-red-500/10 text-red-400 border-red-500/20' },
-  rom:      { label: 'Mobility',   icon: Flower2,   iconCls: 'bg-fuchsia-500/10 text-fuchsia-400', chip: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20' },
 }
 
 function itemKind(item) {
@@ -33,28 +32,21 @@ function itemKind(item) {
   return item._kind
 }
 
-function fmtMovement(key) {
-  if (!key) return '—'
-  return key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-}
-
 function itemLabel(item) {
   if (item._kind === 'effort')  return item.label
   if (item._kind === 'weighin') return `Weigh-in · ${item.weight} ${item.unit}`
   if (item._kind === 'calorie') return `Intake · ${item.calories} kcal`
-  if (item._kind === 'rom')     return `${fmtMovement(item.movement_key)} · ${item.degrees}°`
   return '—'
 }
 
 function tabForItem(item) {
   if (item._kind === 'effort')  return 'activity'
-  if (item._kind === 'rom')     return 'activity'
   if (item._kind === 'weighin') return 'body'
   if (item._kind === 'calorie') return 'calories'
   return 'profile'
 }
 
-const ALL_KINDS = ['strength', 'cardio', 'weighin', 'calorie', 'rom']
+const ALL_KINDS = ['strength', 'cardio', 'weighin', 'calorie']
 const LIMIT_PER_TABLE = 150
 const TWO_MONTHS_AGO = new Date(Date.now() - 61 * 86_400_000).toISOString()
 const TWO_MONTHS_DATE = TWO_MONTHS_AGO.split('T')[0]
@@ -70,7 +62,7 @@ export default function AdminFeed() {
 
   useEffect(() => {
     async function load() {
-      const [usersRes, effortsRes, bwRes, logsRes, romRes] = await Promise.all([
+      const [usersRes, effortsRes, bwRes, logsRes] = await Promise.all([
         supabase.rpc('get_users_for_admin'),
         supabase.from('efforts').select('id, user_id, label, type, created_at')
           .gte('created_at', TWO_MONTHS_AGO)
@@ -84,10 +76,6 @@ export default function AdminFeed() {
           .gte('log_date', TWO_MONTHS_DATE)
           .order('log_date', { ascending: false })
           .limit(LIMIT_PER_TABLE),
-        supabase.from('rom_records').select('id, user_id, movement_key, degrees, created_at')
-          .gte('created_at', TWO_MONTHS_AGO)
-          .order('created_at', { ascending: false })
-          .limit(LIMIT_PER_TABLE),
       ])
 
       const profileMap = {}
@@ -99,7 +87,6 @@ export default function AdminFeed() {
         // Calorie logs are date-only — use midnight UTC so they are always in the past
         // and sort correctly. Never use noon or local time which can be a future timestamp.
         ...(logsRes.data    || []).map(c => ({ ...c, _kind: 'calorie', _ts: c.log_date + 'T00:00:00.000Z' })),
-        ...(romRes.data     || []).map(r => ({ ...r, _kind: 'rom', _ts: r.created_at })),
       ]
         .sort((a, b) => new Date(b._ts) - new Date(a._ts))
         .map(item => ({ ...item, _profile: profileMap[item.user_id] }))

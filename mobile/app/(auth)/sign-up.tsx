@@ -1446,7 +1446,7 @@ function WhatsNextScreen({ next }: ScreenProps) {
   const points = [
     { n: 1,
       title: 'One log, every metric.',
-      body: "Strength sets, cardio runs, body weight, calories, mobility — whatever you train, MyRX tracks it. No more spreadsheets, no second app." },
+      body: "Strength sets, cardio runs, body weight, calories — whatever you train, MyRX tracks it. No more spreadsheets, no second app." },
     { n: 2,
       title: 'The math, done for you.',
       body: 'Your next set, your next race time, your daily calorie target — projected from your own numbers and updated every time you log.' },

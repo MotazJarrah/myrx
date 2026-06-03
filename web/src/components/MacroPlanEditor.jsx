@@ -710,9 +710,9 @@ export default function MacroPlanEditor({
         assigned_at:        new Date().toISOString(),
         updated_at:         new Date().toISOString(),
       }
-      const { error: dbErr } = existingPlan
-        ? await supabase.from('calorie_plans').update(payload).eq('user_id', user.id)
-        : await supabase.from('calorie_plans').insert(payload)
+      const { data: savedRow, error: dbErr } = existingPlan
+        ? await supabase.from('calorie_plans').update(payload).eq('user_id', user.id).select().single()
+        : await supabase.from('calorie_plans').insert(payload).select().single()
       if (dbErr) throw dbErr
 
       if (bodyFatBand !== profile?.body_fat_band) {
@@ -720,7 +720,12 @@ export default function MacroPlanEditor({
       }
 
       setSaved(true)
-      onPlanSaved?.({ ...existingPlan, ...payload })
+      // Use the DB-returned row so goal_reached reflects the reset trigger — a
+      // plan re-baseline (start/goal change) clears it, so the "Goal reached"
+      // banner disappears right after Update plan instead of lingering on a
+      // stale local copy. Fall back to an optimistic merge (goal_reached: false,
+      // since a save always re-baselines the phase) if select() returns nothing.
+      onPlanSaved?.(savedRow ?? { ...existingPlan, ...payload, goal_reached: false })
       setTimeout(() => setSaved(false), 3000)
     } catch (err) {
       setError(err?.message || 'Could not save the macro plan.')
@@ -781,7 +786,7 @@ export default function MacroPlanEditor({
           {existingPlan?.goal_reached && (
             <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-xs text-emerald-400">
               <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-              <span>Goal reached. Progress locked at 100% until you reset and assign a new phase.</span>
+              <span>Goal reached — progress stays at 100% until you set a new goal and hit Update plan.</span>
             </div>
           )}
 
@@ -1068,12 +1073,12 @@ export default function MacroPlanEditor({
 
         {timeline && (() => {
           if (timeline.mode === 'recomp') {
-            const b = timeline.monthsBest, r = timeline.monthsRealistic
-            const label = b === r ? `${b}` : `${b}–${r}`
-            const unit  = (b === 1 && r === 1) ? 'month' : 'months'
+            const m    = timeline.monthsBest
+            const unit = m === 1 ? 'month' : 'months'
             return (
               <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-3 text-sm">
-                <p className="font-semibold text-purple-400">Body recomposition · approx. ~{label} {unit}</p>
+                <p className="font-semibold text-purple-400">Body recomposition · approx. ~{m} {unit}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Scale moves slowly here — muscle gain offsets fat loss, so treat it as a best case.</p>
               </div>
             )
           }
@@ -1085,13 +1090,12 @@ export default function MacroPlanEditor({
               </p>
             </div>
           )
-          const b = timeline.monthsBest, r = timeline.monthsRealistic
-          const label = b === r ? `${b}` : `${b}–${r}`
-          const unit  = (b === 1 && r === 1) ? 'month' : 'months'
+          const m    = timeline.monthsBest
+          const unit = m === 1 ? 'month' : 'months'
           return (
             <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
               <p className="text-xs text-muted-foreground mb-0.5">Estimated timeline</p>
-              <p className="font-semibold">approx. ~{label} {unit}</p>
+              <p className="font-semibold">approx. ~{m} {unit}</p>
             </div>
           )
         })()}

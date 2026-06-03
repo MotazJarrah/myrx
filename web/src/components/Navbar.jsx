@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import {
   Dumbbell, Activity, Weight, Flame, History,
-  LayoutDashboard, LogOut, Flower2, ShieldCheck,
+  LayoutDashboard, LogOut, ShieldCheck,
   Lightbulb, Heart,
 } from 'lucide-react'
 import SuggestionDrawer from './SuggestionDrawer'
@@ -13,7 +13,6 @@ const links = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/strength',  label: 'Strength',  icon: Dumbbell },
   { href: '/cardio',    label: 'Cardio',    icon: Activity },
-  { href: '/mobility',  label: 'Mobility',  icon: Flower2 },
   { href: '/bodyweight',label: 'Bodyweight',icon: Weight },
   { href: '/heart',     label: 'Heart',     icon: Heart },
   { href: '/calories',  label: 'Calories',  icon: Flame },

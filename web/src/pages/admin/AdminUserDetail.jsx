@@ -147,40 +147,6 @@ function computeWeekStreak(dates) {
   return streak
 }
 
-// Monthly PRs (mirrors Dashboard logic)
-function computeMonthlyPRs(allStrengthEfforts, allRomRecords) {
-  const now = new Date()
-  const y = now.getFullYear(), mo = now.getMonth()
-  const isThisMonth = ds => {
-    const d = new Date(ds)
-    return d.getFullYear() === y && d.getMonth() === mo
-  }
-  let count = 0
-  const byEx = {}
-  allStrengthEfforts.forEach(e => {
-    const rm = parse1RM(e.value)
-    if (!rm) return
-    const ex = e.label?.split(' · ')[0]
-    if (!ex) return
-    if (!byEx[ex]) byEx[ex] = []
-    byEx[ex].push({ rm, date: e.created_at })
-  })
-  Object.values(byEx).forEach(arr => {
-    const best = arr.reduce((b, e) => e.rm > b.rm ? e : b, arr[0])
-    if (isThisMonth(best.date)) count++
-  })
-  const byMov = {}
-  allRomRecords.forEach(r => {
-    if (!byMov[r.movement_key]) byMov[r.movement_key] = []
-    byMov[r.movement_key].push({ deg: r.degrees, date: r.created_at })
-  })
-  Object.values(byMov).forEach(arr => {
-    const best = arr.reduce((b, e) => e.deg > b.deg ? e : b, arr[0])
-    if (isThisMonth(best.date)) count++
-  })
-  return count
-}
-
 function SnapshotBadge({ children, color }) {
   const cls = {
     blue:    'bg-blue-500/10 border-blue-500/20 text-blue-400',
@@ -333,7 +299,6 @@ function ActivityFeed({ userId, clientName, clientEmail }) {
       case 'training:efforts_insert':      return { icon: Dumbbell,      color: 'text-blue-400',    label: `Logged ${d.type || 'effort'}: ${d.label || ''}${d.value ? ` (${d.value})` : ''}` }
       case 'training:bodyweight_insert':   return { icon: Scale,         color: 'text-purple-400',  label: `Logged weight: ${d.weight ?? '?'} ${d.unit || ''}` }
       case 'training:food_logs_insert':    return { icon: Apple,         color: 'text-amber-400',   label: `Logged food: ${d.food_name || ''}${d.brand_name ? ` (${d.brand_name})` : ''} · ${d.calories ?? '?'} kcal${d.meal_slot ? ` · ${d.meal_slot}` : ''}` }
-      case 'training:rom_records_insert':  return { icon: Activity,      color: 'text-lime-400',    label: `Logged mobility: ${d.movement_key || ''} ${d.degrees ?? '?'}°` }
       case 'training:calorie_plans_insert':return { icon: Apple,         color: 'text-amber-400',   label: 'Calorie plan updated' }
       case 'training:wearable_workouts_insert': return { icon: Activity, color: 'text-emerald-400', label: `Synced wearable workout: ${d.exercise_type || '?'}${d.duration_s ? ` · ${Math.round(d.duration_s/60)} min` : ''}${d.platform ? ` · ${d.platform}` : ''}` }
       default:                             return { icon: Info, color: 'text-muted-foreground', label: t }
@@ -651,18 +616,21 @@ export default function AdminUserDetail() {
       const lowestBpm = hrRes.data?.[0]?.bpm ?? null
 
       // ── Weekly weight diff (signed, in admin's display unit) ────────────
-      let weightDiff = null
-      const bw = bw14Res.data || []
-      if (bw.length >= 2) {
-        const weekAgoTs = new Date(weekAgoISO).getTime()
-        const recent    = bw.find(r => new Date(r.created_at).getTime() >= weekAgoTs)
-        const older     = bw.find(r => new Date(r.created_at).getTime() <  weekAgoTs)
-        if (recent && older) {
-          // Normalize both to kg, subtract, convert to admin's preferred unit
-          const recentKg = toKg(parseFloat(recent.weight), recent.unit || 'lb')
-          const olderKg  = toKg(parseFloat(older.weight),  older.unit  || 'lb')
-          const diffKg   = recentKg - olderKg
-          const adminUnit = adminProfile?.weight_unit || 'lb'
+      // Weight change since the previous weigh-in (latest minus the one before
+      // it); falls back to the current weight when there's only one log so the
+      // chip still appears right after a weigh-in.
+      let weightDiff   = null
+      let latestWeight = null
+      const bw = [...(bw14Res.data || [])].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+      const adminUnit = adminProfile?.weight_unit || 'lb'
+      if (bw.length > 0) {
+        const latestKg = toKg(parseFloat(bw[0].weight), bw[0].unit || 'lb')
+        latestWeight = adminUnit === 'kg' ? latestKg : latestKg / 0.453592
+        if (bw.length >= 2) {
+          const prevKg = toKg(parseFloat(bw[1].weight), bw[1].unit || 'lb')
+          const diffKg = latestKg - prevKg
           weightDiff = adminUnit === 'kg' ? diffKg : diffKg / 0.453592
         }
       }
@@ -673,6 +641,7 @@ export default function AdminUserDetail() {
         foodStreak,
         lowestBpm,
         weightDiff,
+        latestWeight,
       })
     }
     loadSnapshot()
@@ -806,7 +775,8 @@ export default function AdminUserDetail() {
     (snapshot.cardioPRsThisMonth > 0) ||
     (snapshot.foodStreak > 0) ||
     (snapshot.lowestBpm != null) ||
-    (snapshot.weightDiff != null)
+    (snapshot.weightDiff != null) ||
+    (snapshot.latestWeight != null)
   )
 
   // Days remaining in the deletion grace window. Computed once per render
@@ -1130,11 +1100,15 @@ export default function AdminUserDetail() {
                 ❤️ <TickerNumber value={snapshot.lowestBpm} /> bpm low (7d)
               </SnapshotBadge>
             )}
-            {snapshot.weightDiff != null && (
+            {snapshot.weightDiff != null ? (
               <SnapshotBadge color="zinc">
-                ⚖️ {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {adminProfile?.weight_unit || 'lb'} this week
+                ⚖️ {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {adminProfile?.weight_unit || 'lb'} since last weigh-in
               </SnapshotBadge>
-            )}
+            ) : snapshot.latestWeight != null ? (
+              <SnapshotBadge color="zinc">
+                ⚖️ <TickerNumber value={Math.round(snapshot.latestWeight * 10) / 10} /> {adminProfile?.weight_unit || 'lb'} · latest
+              </SnapshotBadge>
+            ) : null}
           </div>
         )}
 

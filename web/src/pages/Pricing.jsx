@@ -85,7 +85,7 @@ const PRICING_FAQ = [
   { q: 'Is it really one-time?',
     a: 'Yes. CoreRX and FullRX are one-time purchases that unlock the tier forever on that account. No recurring charges, no renewal at the end of a year. Pay once, keep the unlock for as long as the account exists.' },
   { q: 'Do I need a paid tier to use the app?',
-    a: 'No. The Free tier is permanent and includes every coaching surface (Strength, Cardio, Bodyweight, Calories, Mobility, Heart). CoreRX and FullRX add features like Sleep, Hydration, and multi-device sync.' },
+    a: 'No. The Free tier is permanent and includes every coaching surface (Strength, Cardio, Bodyweight, Calories, Heart). CoreRX and FullRX add features like Sleep, Hydration, and multi-device sync.' },
   { q: 'What\'s the difference between CoreRX and FullRX?',
     a: 'CoreRX unlocks the convenience + sleep/hydration tier. FullRX adds the advanced coaching layer (body composition projections, auto-progressing training plans) AND grandfathers you into every future feature we ship — no second purchase needed.' },
   { q: 'Can I upgrade from CoreRX to FullRX later?',

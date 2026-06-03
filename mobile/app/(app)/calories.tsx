@@ -1099,37 +1099,21 @@ function TimelineCard({
   // clients calcTimeline's thermodynamic range stays authoritative,
   // since it reflects what the admin actually set + how long that
   // adjustment realistically takes.
-  const isSelfCoached = profile?.is_self_coached === true
-  const paceKey       = isSelfCoached ? paceForPlan(plan.energy_balance_pct ?? null) : null
-  const lockedMonths  = paceKey ? PACE_OPTIONS[paceKey].timeline_months : null
-  // Single-number display when locked; range otherwise. Maintain pace
-  // (timeline_months === 0) skips the override since there's no
-  // commitment timeline for maintenance.
-  const useLockedTimeline = lockedMonths != null && lockedMonths > 0
-
-  // Shared timeline number renderer used by both recomp and standard
-  // modes. Picks single-number ("~2 months") when self-coached and the
-  // pace is locked, falls back to range ("~2–4 months") otherwise.
-  // Type-narrowed parameter so TS knows monthsBest/Realistic exist —
-  // mismatch mode never calls this (it has no months data).
+  // Shared timeline number renderer (recomp + standard). Shows a single
+  // achievable "~N months" — the motivating "how short it could take"
+  // number, identical to what the coach view and the signup wizard show
+  // (all three run calcTimeline on the same goal). The conservative end
+  // lives in the footnote prose. Mismatch mode never calls this.
   function renderTimelineNum(
     timeline: { monthsBest: number; monthsRealistic: number },
     numColor?: string,
   ) {
-    let label: string
-    let unit: string
-    if (useLockedTimeline) {
-      label = `${lockedMonths}`
-      unit  = lockedMonths === 1 ? 'month' : 'months'
-    } else {
-      const b = timeline.monthsBest, r = timeline.monthsRealistic
-      label = b === r ? `${b}` : `${b}–${r}`
-      unit  = (b === 1 && r === 1) ? 'month' : 'months'
-    }
+    const m    = timeline.monthsBest
+    const unit = m === 1 ? 'month' : 'months'
     return (
       <View style={s.timelineNumRow}>
         <Text style={s.timelineApprox}>approx.</Text>
-        <Text style={[s.timelineNum, numColor ? { color: numColor } : null]}>~{label}</Text>
+        <Text style={[s.timelineNum, numColor ? { color: numColor } : null]}>~{m}</Text>
         <Text style={s.timelineUnit}>{unit}</Text>
       </View>
     )
@@ -1159,7 +1143,7 @@ function TimelineCard({
               With consistent training and adequate protein, you can lose fat and build muscle at the same time.
             </Text>
             <Text style={s.timelineFootnote}>
-              Net body weight in recomp typically shifts ~0.25–0.5 kg per month. Scale may stay flat while body composition improves — track progress photos and strength too.
+              The scale moves slowly in recomp because muscle gain offsets fat loss — treat this as a best case and track strength and photos too.
             </Text>
           </>
         ) : tl.mode === 'mismatch' ? (
@@ -1196,8 +1180,8 @@ function TimelineCard({
             </Text>
             <Text style={s.timelineFootnote}>
               {tl.isLoss
-                ? 'Best-case assumes full daily adherence. Realistic estimate accounts for cheat meals and rest days.'
-                : 'Best-case assumes full daily adherence. Realistic estimate accounts for low-appetite days and missed meals.'}
+                ? 'Faster estimate assumes ~20 on-plan days a month; the slower one accounts for cheat meals and rest days.'
+                : 'Faster estimate assumes ~20 on-plan days a month; the slower one accounts for low-appetite days and missed meals.'}
             </Text>
           </>
         )}

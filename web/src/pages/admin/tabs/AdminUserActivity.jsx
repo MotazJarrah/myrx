@@ -1,13 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { supabase } from '../../../lib/supabase'
 import { STRENGTH_MOVEMENTS, CARDIO_MOVEMENTS, ISOMETRIC_EXERCISE_NAMES, getCardioMode } from '../../../lib/movements'
 import { estimate1RM } from '../../../lib/formulas'
 import MovementSearch from '../../../components/MovementSearch'
-import ROMVisualizer from '../../../components/ROMVisualizer'
-import AdminClientMobility from '../AdminClientMobility'
 import {
-  Dumbbell, Activity, Flower2, Plus, ChevronRight,
+  Dumbbell, Activity, Plus, ChevronRight,
   Loader2, Check, AlertCircle, X, Timer,
 } from 'lucide-react'
 
@@ -38,19 +36,6 @@ function fmtDuration(secs) {
   return `${m}m ${s}s`
 }
 
-// ── ROM movement list ─────────────────────────────────────────────────────────
-
-const ROM_MOVEMENTS = [
-  { key: 'shoulder-flexion',   label: 'Shoulder Flexion',   group: 'Shoulder', maxDeg: 180 },
-  { key: 'shoulder-extension', label: 'Shoulder Extension', group: 'Shoulder', maxDeg: 60  },
-  { key: 'shoulder-abduction', label: 'Shoulder Abduction', group: 'Shoulder', maxDeg: 180 },
-  { key: 'hip-flexion',        label: 'Hip Flexion',        group: 'Hip',      maxDeg: 120 },
-  { key: 'hip-abduction',      label: 'Hip Abduction',      group: 'Hip',      maxDeg: 45  },
-  { key: 'knee-flexion',       label: 'Knee Flexion',       group: 'Knee',     maxDeg: 135 },
-  { key: 'ankle-dorsiflexion', label: 'Ankle Dorsiflexion', group: 'Ankle',    maxDeg: 20  },
-  { key: 'spinal-flexion',     label: 'Spinal Flexion',     group: 'Spine',    maxDeg: 90  },
-]
-
 // ── Add Effort Form ───────────────────────────────────────────────────────────
 
 function AddEffortForm({ userId, onSaved, onClose }) {
@@ -62,21 +47,9 @@ function AddEffortForm({ userId, onSaved, onClose }) {
   const [timeStr,      setTimeStr]      = useState('')
   const [distVal,      setDistVal]      = useState('')
   const [distUnit,     setDistUnit]     = useState('km')
-  const [romKey,       setRomKey]       = useState('')
-  const [degrees,      setDegrees]      = useState(90)
   const [date,         setDate]         = useState(() => new Date().toISOString().split('T')[0])
   const [saving,       setSaving]       = useState(false)
   const [error,        setError]        = useState('')
-  const romVisualizerRef = useRef(null)
-
-  // Scroll to ROM visualizer when a pill is selected
-  useEffect(() => {
-    if (romKey && type === 'mobility') {
-      setTimeout(() => {
-        romVisualizerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }, 50)
-    }
-  }, [romKey])
 
   const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
 
@@ -107,23 +80,9 @@ function AddEffortForm({ userId, onSaved, onClose }) {
 
   useEffect(() => { setDistVal(''); setTimeStr('') }, [cardioMode])
 
-  // Pre-populate ROM degrees from last saved record
-  useEffect(() => {
-    if (!romKey || type !== 'mobility') return
-    supabase
-      .from('rom_records')
-      .select('degrees')
-      .eq('user_id', userId)
-      .eq('movement_key', romKey)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-      .then(({ data }) => { setDegrees(data?.degrees ?? 0) })
-  }, [romKey, type, userId])
-
   function resetForm() {
     setExerciseName(''); setReps(''); setWeightVal(''); setTimeStr('')
-    setDistVal(''); setRomKey(''); setDegrees(90)
+    setDistVal('')
   }
 
   async function handleSave(e) {
@@ -138,14 +97,7 @@ function AddEffortForm({ userId, onSaved, onClose }) {
         ? new Date().toISOString()
         : new Date(date + 'T12:00:00Z').toISOString()
 
-      if (type === 'mobility') {
-        if (!romKey) throw new Error('Select a movement.')
-        const { error: err } = await supabase.from('rom_records').insert({
-          user_id: userId, movement_key: romKey, degrees: Number(degrees), created_at: ts,
-        })
-        if (err) throw err
-
-      } else if (type === 'strength') {
+      if (type === 'strength') {
         if (!exerciseName.trim()) throw new Error('Enter an exercise name.')
         let label, value
         if (isIsometric) {
@@ -197,7 +149,6 @@ function AddEffortForm({ userId, onSaved, onClose }) {
           {[
             { id: 'strength', label: 'Strength', icon: Dumbbell, cls: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
             { id: 'cardio',   label: 'Cardio',   icon: Activity, cls: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
-            { id: 'mobility', label: 'Mobility', icon: Flower2,  cls: 'text-fuchsia-400 bg-fuchsia-500/10 border-fuchsia-500/30' },
           ].map(t => {
             const Icon = t.icon
             return (
@@ -314,29 +265,6 @@ function AddEffortForm({ userId, onSaved, onClose }) {
         </div>
       )}
 
-      {/* ── Mobility ── */}
-      {type === 'mobility' && (
-        <div className="space-y-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Movement</p>
-            <div className="flex flex-wrap gap-1.5">
-              {ROM_MOVEMENTS.map(m => (
-                <button key={m.key} type="button" onClick={() => setRomKey(m.key)}
-                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
-                    romKey === m.key ? 'bg-fuchsia-500/20 border-fuchsia-500/40 text-fuchsia-300' : 'border-border text-muted-foreground hover:border-fuchsia-500/30 hover:text-foreground'
-                  }`}
-                >{m.label}</button>
-              ))}
-            </div>
-          </div>
-          {romKey && (
-            <div ref={romVisualizerRef}>
-              <ROMVisualizer movementKey={romKey} degrees={degrees} onChange={setDegrees} />
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Date + save */}
       {type && (
         <div className="space-y-3">
@@ -361,7 +289,6 @@ function MoveCard({ label, type, count, stat, onClick }) {
   const meta = {
     strength: { icon: Dumbbell, cls: 'bg-blue-500/10 text-blue-400',       chip: 'bg-blue-500/10 text-blue-400 border-blue-500/20'       },
     cardio:   { icon: Activity, cls: 'bg-amber-500/10 text-amber-400',     chip: 'bg-amber-500/10 text-amber-400 border-amber-500/20'     },
-    mobility: { icon: Flower2,  cls: 'bg-fuchsia-500/10 text-fuchsia-400', chip: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20' },
   }[type] ?? { icon: Dumbbell, cls: 'bg-muted text-muted-foreground', chip: 'bg-muted text-muted-foreground border-border' }
   const Icon = meta.icon
 
@@ -390,7 +317,6 @@ function MoveCard({ label, type, count, stat, onClick }) {
 export default function AdminUserActivity({ userId, onEffortSaved }) {
   const [, navigate]  = useLocation()
   const [efforts,  setEfforts]  = useState([])
-  const [romRecs,  setRomRecs]  = useState([])
   const [loading,  setLoading]  = useState(true)
   const [filter,   setFilter]   = useState('all')
   const [showForm, setShowForm] = useState(false)
@@ -399,25 +325,18 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [efRes, romRes] = await Promise.all([
-        supabase.from('efforts')
-          .select('id, label, value, type, created_at')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false }),
-        supabase.from('rom_records')
-          .select('id, movement_key, degrees, created_at')
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false }),
-      ])
+      const efRes = await supabase.from('efforts')
+        .select('id, label, value, type, created_at')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
       setEfforts(efRes.data || [])
-      setRomRecs(romRes.data || [])
       setLoading(false)
     }
     load()
   }, [userId, refresh])
 
   // ── Group by exercise name ────────────────────────────────────────────────
-  const { strengthMoves, cardioMoves, mobilityMoves } = useMemo(() => {
+  const { strengthMoves, cardioMoves } = useMemo(() => {
     const strengthMap = {}
     const cardioMap   = {}
 
@@ -473,46 +392,29 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
       }))
       .sort((a, b) => b.count - a.count)
 
-    const mobilityCounts = {}
-    romRecs.forEach(r => {
-      mobilityCounts[r.movement_key] = (mobilityCounts[r.movement_key] || 0) + 1
-    })
-    const mobilityMoves = Object.entries(mobilityCounts).map(([key, count]) => ({
-      label: ROM_MOVEMENTS.find(m => m.key === key)?.label ?? key,
-      key,
-      count,
-      type:  'mobility',
-      stat:  `${count} ${count === 1 ? 'entry' : 'entries'}`,
-    }))
-
-    return { strengthMoves, cardioMoves, mobilityMoves }
-  }, [efforts, romRecs])
+    return { strengthMoves, cardioMoves }
+  }, [efforts])
 
   // Available filters (only show if data exists)
   const availableFilters = [
     'all',
     ...(strengthMoves.length > 0 ? ['strength'] : []),
     ...(cardioMoves.length   > 0 ? ['cardio']   : []),
-    ...(mobilityMoves.length > 0 ? ['mobility'] : []),
   ]
 
-  // Mobility is shown via embedded AdminClientMobility — excluded from card list
   const visibleMoves = useMemo(() => {
     if (filter === 'strength') return strengthMoves
     if (filter === 'cardio')   return cardioMoves
-    if (filter === 'mobility') return []
     return [...strengthMoves, ...cardioMoves]
   }, [filter, strengthMoves, cardioMoves])
 
-  const showMobility = filter === 'all' || filter === 'mobility'
-
-  const totalMoves = strengthMoves.length + cardioMoves.length + mobilityMoves.length
+  const totalMoves = strengthMoves.length + cardioMoves.length
 
   function handleMoveClick(move) {
     navigate(`/admin/user/${userId}/effort/${move.type}/${encodeURIComponent(move.label)}`)
   }
 
-  const FILTER_LABELS = { all: 'All', strength: 'Strength', cardio: 'Cardio', mobility: 'Mobility' }
+  const FILTER_LABELS = { all: 'All', strength: 'Strength', cardio: 'Cardio' }
 
   return (
     <div className="space-y-4">
@@ -533,7 +435,7 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
             >
               {FILTER_LABELS[f]}
               {f !== 'all' && (() => {
-                const n = f === 'strength' ? strengthMoves.length : f === 'cardio' ? cardioMoves.length : mobilityMoves.length
+                const n = f === 'strength' ? strengthMoves.length : cardioMoves.length
                 return n > 0 ? ` (${n})` : ''
               })()}
             </button>
@@ -567,33 +469,20 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
           No efforts logged yet.
         </div>
       ) : (
-        <>
-          {visibleMoves.length > 0 && (
-            <div className="space-y-2">
-              {visibleMoves.map(move => (
-                <MoveCard
-                  key={`${move.type}-${move.label}`}
-                  label={move.label}
-                  type={move.type}
-                  count={move.count}
-                  stat={move.stat}
-                  onClick={() => handleMoveClick(move)}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Embedded mobility view — full ROM snapshot + movement cards */}
-          {showMobility && (
-            <AdminClientMobility
-              userId={userId}
-              onSaved={() => {
-                setRefresh(r => r + 1)
-                onEffortSaved?.()
-              }}
-            />
-          )}
-        </>
+        visibleMoves.length > 0 && (
+          <div className="space-y-2">
+            {visibleMoves.map(move => (
+              <MoveCard
+                key={`${move.type}-${move.label}`}
+                label={move.label}
+                type={move.type}
+                count={move.count}
+                stat={move.stat}
+                onClick={() => handleMoveClick(move)}
+              />
+            ))}
+          </div>
+        )
       )}
     </div>
   )

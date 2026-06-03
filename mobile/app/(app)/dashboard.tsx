@@ -9,7 +9,7 @@
  *      └─ Stats footer (streak / PRs / member-since), border-top
  *   2. Recent activity card (animate-rise delay 240ms)
  *      ├─ Header: "Recent activity" + "View all →"
- *      └─ 5 merged rows (efforts + ROM + bodyweight + calories), DeleteAction on each
+ *      └─ merged rows (efforts + bodyweight + calories), DeleteAction on each
  *
  * Helpers (formatGreeting, computeMonthlyPRs, computeFoodLogStreak,
  * computeWeeklyWeightDiff, parseCardioBest, formatHeight, etc.)
@@ -24,7 +24,7 @@ import {
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import {
-  Dumbbell, Activity, Weight, Flower2, Flame,
+  Dumbbell, Activity, Weight, Flame,
   User, Settings as SettingsIcon,
 } from 'lucide-react-native'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
@@ -206,13 +206,6 @@ function computeCardioPRsThisMonth(allCardioEfforts: any[]): number {
   return count
 }
 
-// Mobility (ROM) PR detection was part of the old combined
-// computeMonthlyPRs but isn't surfaced on the dashboard since
-// May 24 2026 — the user chose to display only strength + cardio
-// chips. If we re-add a mobility PR chip later, the pattern is the
-// same: group rom_records by movement_key, find highest degrees per
-// group, +1 if hit this month.
-
 /**
  * Count consecutive days the user has logged food, walking backward
  * from today (or yesterday if today has no logs yet). Returns 0 when
@@ -240,28 +233,18 @@ function computeFoodLogStreak(logDates: string[]): number {
 }
 
 /**
- * Compute the user's weight change over the past week. Compares the
- * latest log within the last 7 days against the latest log between
- * 8–14 days ago. Returns null when there aren't enough data points
- * to compute a meaningful diff.
+ * Weight change since the previous weigh-in — the latest log minus the one
+ * before it (within the window the caller fetches). Returns null when there
+ * are fewer than 2 logs to compare; the caller then falls back to showing the
+ * current weight so the chip still appears after a single fresh log.
  *
  * Returns the delta in CANONICAL kg; caller converts to display unit.
  */
 function computeWeeklyWeightDiff(bwLogs: { weight: number; unit: string; created_at: string }[]): { deltaKg: number } | null {
   if (!bwLogs || bwLogs.length < 2) return null
-  const now = Date.now()
-  const sevenDaysAgo    = now -  7 * 86400000
-  const fourteenDaysAgo = now - 14 * 86400000
-  // bwLogs is sorted DESC by created_at (newest first).
-  const recent = bwLogs.find(l => new Date(l.created_at).getTime() >= sevenDaysAgo)
-  if (!recent) return null
-  const previous = bwLogs.find(l => {
-    const t = new Date(l.created_at).getTime()
-    return t < sevenDaysAgo && t >= fourteenDaysAgo
-  })
-  if (!previous) return null
   const toKg = (w: number, u: string) => u === 'lb' ? w * 0.453592 : w
-  return { deltaKg: toKg(recent.weight, recent.unit) - toKg(previous.weight, previous.unit) }
+  // bwLogs is sorted DESC by created_at (newest first): [0] = latest, [1] = previous.
+  return { deltaKg: toKg(bwLogs[0].weight, bwLogs[0].unit) - toKg(bwLogs[1].weight, bwLogs[1].unit) }
 }
 
 // ── Coach info ───────────────────────────────────────────────────────────────
@@ -275,19 +258,6 @@ interface CoachInfo {
   avatar_url?: string | null
   last_seen_at?: string | null
   share_online_status?: boolean
-}
-
-// ── ROM metadata ──────────────────────────────────────────────────────────────
-
-const ROM_META: Record<string, { label: string; group: string }> = {
-  'shoulder-flexion':   { label: 'Shoulder Flexion',   group: 'Shoulder' },
-  'shoulder-extension': { label: 'Shoulder Extension', group: 'Shoulder' },
-  'shoulder-abduction': { label: 'Shoulder Abduction', group: 'Shoulder' },
-  'hip-flexion':        { label: 'Hip Flexion',         group: 'Hip'      },
-  'hip-abduction':      { label: 'Hip Abduction',       group: 'Hip'      },
-  'knee-flexion':       { label: 'Knee Flexion',        group: 'Knee'     },
-  'ankle-dorsiflexion': { label: 'Ankle Dorsiflexion', group: 'Ankle'    },
-  'spinal-flexion':     { label: 'Spinal Flexion',      group: 'Spine'    },
 }
 
 // ── Tag chip ──────────────────────────────────────────────────────────────────
@@ -313,15 +283,13 @@ const tc = StyleSheet.create({
 
 type AnyItem = {
   id: string
-  _kind: 'effort' | 'rom' | 'weighin' | 'calorie'
+  _kind: 'effort' | 'weighin' | 'calorie'
   created_at: string
   type?: string
   label?: string
   value?: string
   weight?: number
   unit?: string
-  movement_key?: string
-  degrees?: number
   calories?: number
   log_date?: string
 }
@@ -340,30 +308,6 @@ function ActivityRow({ item, onDelete }: { item: AnyItem; onDelete: () => void }
             <View style={d.rowTags}>
               <TagChip label="Calories" style={TAG_STYLES.calories} />
               <TagChip label="Intake"   style={TAG_STYLES.Intake} />
-              <Text style={d.rowDate}>{formatDate(item.created_at)}</Text>
-            </View>
-          </View>
-        </View>
-      </DeleteAction>
-    )
-  }
-
-  // ── ROM ──
-  if (item._kind === 'rom') {
-    const meta = ROM_META[item.movement_key ?? '']
-    return (
-      <DeleteAction onDelete={onDelete} style={d.rowOuter} bg={colors.background}>
-        <View style={d.rowInner}>
-          <View style={[d.iconBox, { backgroundColor: withAlpha(palette.fuchsia[500], 0.10) }]}>
-            <Flower2 size={14} color={palette.fuchsia[400]} />
-          </View>
-          <View style={d.rowText}>
-            <Text style={d.rowLabel} numberOfLines={1}>
-              {meta?.label ?? item.movement_key} · {item.degrees}° ROM
-            </Text>
-            <View style={d.rowTags}>
-              <TagChip label="Mobility" style={TAG_STYLES.mobility} />
-              {meta?.group ? <TagChip label={meta.group} style={TAG_STYLES[meta.group] ?? TAG_STYLES.Movement} /> : null}
               <Text style={d.rowDate}>{formatDate(item.created_at)}</Text>
             </View>
           </View>
@@ -393,7 +337,7 @@ function ActivityRow({ item, onDelete }: { item: AnyItem; onDelete: () => void }
     )
   }
 
-  // ── Effort (strength / cardio / mobility) ──
+  // ── Effort (strength / cardio) ──
   const { primary, secondary } = getEffortTags(item as any)
   const iconBg =
     item.type === 'strength' ? withAlpha(palette.blue[500], 0.10)
@@ -436,15 +380,12 @@ export default function Dashboard() {
   const cached   = cacheKey ? dataCache.get<any>(cacheKey) : null
 
   const [recentEfforts, setRecentEfforts]   = useState<any[]>(cached?.efforts   ?? [])
-  const [recentROM, setRecentROM]           = useState<any[]>(cached?.rom       ?? [])
   const [recentBW, setRecentBW]             = useState<any[]>(cached?.bw        ?? [])
   const [recentCalories, setRecentCalories] = useState<any[]>(cached?.calories  ?? [])
   // Strength + cardio PRs as separate chips (May 24 2026 split). Each
   // counts "this calendar month" personal records in its own modality —
   // strength = highest Est. 1RM per exercise, cardio = best per
-  // activity (direction-aware). Mobility PRs were dropped from the
-  // dashboard at the same time; the helper logic is preserved in the
-  // PR helpers section above if we re-introduce a mobility chip later.
+  // activity (direction-aware).
   const [strengthPRs, setStrengthPRs]       = useState<number | null>(cached?.strengthPrs ?? null)
   const [cardioPRs, setCardioPRs]           = useState<number | null>(cached?.cardioPrs   ?? null)
   // Stats footer chips added May 24 2026 — replaces the old training
@@ -488,14 +429,11 @@ export default function Dashboard() {
     Promise.all([
       // Recent activity feed — capped at 5 of each, sorted desc.
       supabase.from('efforts').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
-      supabase.from('rom_records').select('id, movement_key, degrees, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
       supabase.from('bodyweight').select('id, weight, unit, created_at').eq('user_id', user.id).order('created_at', { ascending: false }).limit(5),
       supabase.from('calorie_logs').select('id, log_date, calories').eq('user_id', user.id).order('log_date', { ascending: false }).limit(5),
-      // PR computation — all-time efforts + all-time ROM. Splits into
-      // strength / cardio / mobility downstream via .type filtering
-      // (plus rom_records being its own table).
+      // PR computation — all-time efforts, split into strength / cardio
+      // downstream via .type filtering.
       supabase.from('efforts').select('created_at, label, value, type').eq('user_id', user.id),
-      supabase.from('rom_records').select('movement_key, degrees, created_at').eq('user_id', user.id),
       // Food log streak — 14-day window of distinct log_dates is plenty
       // for the streak walker (caller counts consecutive days backward).
       supabase.from('food_logs').select('log_date').eq('user_id', user.id).gte('log_date', fourteenDaysAgoDay),
@@ -511,20 +449,15 @@ export default function Dashboard() {
       // coach or the admin superuser fallback (or null). Drives the
       // "Coached by [name]" badge in the profile card.
       supabase.rpc('get_coach_info'),
-    ]).then(([efRes, romRes, bwRes, calRes, allEffRes, allRomRes, foodLogRes, hrRes, bwWindowRes, coachRes]) => {
+    ]).then(([efRes, bwRes, calRes, allEffRes, foodLogRes, hrRes, bwWindowRes, coachRes]) => {
       const efforts  = efRes.data  ?? []
-      const rom      = romRes.data ?? []
       const bw       = bwRes.data  ?? []
       const calories = (calRes.data ?? []).map((r: any) => ({ ...r, created_at: r.log_date + 'T12:00:00' }))
       const allEff   = allEffRes.data ?? []
-      const allRom   = allRomRes.data ?? []
 
-      // PRs split per modality. allRom is still fetched (and kept in
-      // the Promise.all) so the recent activity feed can render ROM
-      // entries, but it's no longer wired into a PR count chip.
+      // PRs split per modality (strength / cardio).
       const strengthPrsCount = computeStrengthPRsThisMonth(allEff.filter((e: any) => e.type === 'strength'))
       const cardioPrsCount   = computeCardioPRsThisMonth(allEff.filter((e: any) => e.type === 'cardio'))
-      void allRom  // intentionally unused for PR counting — see note above
 
       // Food log streak — distinct log_dates from the 14-day window.
       const foodDates    = Array.from(new Set((foodLogRes.data ?? []).map((r: any) => r.log_date as string)))
@@ -555,7 +488,6 @@ export default function Dashboard() {
       }
 
       setRecentEfforts(efforts)
-      setRecentROM(rom)
       setRecentBW(bw)
       setRecentCalories(calories)
       setStrengthPRs(strengthPrsCount)
@@ -566,7 +498,7 @@ export default function Dashboard() {
       setCoachInfo(coachVal)
 
       if (cacheKey) dataCache.set(cacheKey, {
-        efforts, rom, bw, calories,
+        efforts, bw, calories,
         strengthPrs: strengthPrsCount,
         cardioPrs:   cardioPrsCount,
         foodStreak:  foodStreakV,
@@ -615,13 +547,11 @@ export default function Dashboard() {
   // confirm step — no native Alert prompt needed. Web behaves the same way.
   async function handleDelete(item: AnyItem) {
     const table =
-      item._kind === 'rom'     ? 'rom_records'
-    : item._kind === 'weighin' ? 'bodyweight'
+      item._kind === 'weighin' ? 'bodyweight'
     : item._kind === 'calorie' ? 'calorie_logs'
     : 'efforts'
 
-    if (item._kind === 'rom')      setRecentROM(prev => prev.filter(r => r.id !== item.id))
-    else if (item._kind === 'weighin') setRecentBW(prev => prev.filter(b => b.id !== item.id))
+    if (item._kind === 'weighin') setRecentBW(prev => prev.filter(b => b.id !== item.id))
     else if (item._kind === 'calorie') setRecentCalories(prev => prev.filter(c => c.id !== item.id))
     else setRecentEfforts(prev => prev.filter(e => e.id !== item.id))
 
@@ -631,7 +561,6 @@ export default function Dashboard() {
   // Merge + sort + cap to 5 (matches web)
   const allActivity: AnyItem[] = [
     ...recentEfforts.map(e => ({ ...e, _kind: 'effort' as const })),
-    ...recentROM.map(r => ({ ...r, _kind: 'rom' as const })),
     ...recentBW.map(b => ({ ...b, _kind: 'weighin' as const })),
     ...recentCalories.map(c => ({ ...c, _kind: 'calorie' as const })),
   ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5)
@@ -782,7 +711,7 @@ export default function Dashboard() {
         {/* Stats footer — border-top.
             Locked May 24 2026: replaced the older weekly-training-streak
             + member-since chips with a 4-chip set that pulls from the
-            three real data sources (efforts/ROM, food_logs, hr_samples,
+            three real data sources (efforts, food_logs, hr_samples,
             bodyweight). Every chip is gated on `value != null` so first-
             time users with no data don't see empty/placeholder chips —
             only the metrics that have data show up. */}
@@ -856,7 +785,7 @@ export default function Dashboard() {
               We don't try to color-by-goal because the chip's correct
               interpretation depends on whether they're cutting,
               bulking, or maintaining. The sign carries the meaning. */}
-          {weeklyWeightKg != null && (() => {
+          {weeklyWeightKg != null ? (() => {
             const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
             const inUnit = pUnit === 'kg' ? weeklyWeightKg : weeklyWeightKg / 0.453592
             const rounded = Math.round(inUnit * 10) / 10
@@ -874,11 +803,36 @@ export default function Dashboard() {
                   />
                 </View>
                 <Text style={[d.statChipText, { color: colors.mutedForeground }]}>
-                  {` ${pUnit} in last 7 days`}
+                  {` ${pUnit} since last weigh-in`}
                 </Text>
               </View>
             )
-          })()}
+          })() : recentBW.length > 0 ? (() => {
+            // Fallback: only one weigh-in so far (nothing to compare against) —
+            // show the current weight so the chip still appears right after the
+            // user logs their first/only weight.
+            const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
+            const latest = recentBW[0]
+            const kg = latest.unit === 'lb' ? latest.weight * 0.453592 : latest.weight
+            const inUnit = pUnit === 'kg' ? kg : kg / 0.453592
+            const rounded = (Math.round(inUnit * 10) / 10).toFixed(1)
+            return (
+              <View style={[d.statChip, d.statChipSlate]}>
+                <Text style={d.statChipEmoji}>⚖️</Text>
+                <View style={d.statChipNum}>
+                  <TickerNumber
+                    value={rounded}
+                    fontSize={11}
+                    color={colors.foreground}
+                    fontWeight="700"
+                  />
+                </View>
+                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>
+                  {` ${pUnit} · latest`}
+                </Text>
+              </View>
+            )
+          })() : null}
         </View>
         </AnimateRise>
 

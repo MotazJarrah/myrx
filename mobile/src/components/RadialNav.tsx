@@ -45,7 +45,6 @@
  * Centre button = Dashboard. Tap → /dashboard. Long-press → bloom.
  *
  * Hidden pages (still routable, just not in the arc):
- *   • mobility — kept for future, no entry point until UX is decided.
  *   • history  — deleted entirely from the codebase May 28 2026.
  *   • settings — reachable from Dashboard's gear icon.
  *

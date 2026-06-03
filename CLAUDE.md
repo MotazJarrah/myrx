@@ -2098,7 +2098,7 @@ Promote in order of decision energy: training prescription comes first (strength
 ### Where each domain stands today
 - **Strength** — coaching surface. Done.
 - **Cardio** — tracking surface today; next up for promotion (in progress).
-- **Mobility** — tracking surface (ROM logs).
+- **Mobility** — ❌ **REMOVED (June 2026).** The legacy ROM-tracking feature was deleted everywhere: the mobile page (`mobile/app/(app)/mobility.tsx`), the mobile + web `ROMVisualizer`, the dashboard ROM feed/PR logic, and the web admin surfaces (`AdminMobilityDetail`, `AdminClientMobility`, the `rom_records` queries in AdminOverview/AdminFeed/AdminDashboard/AdminUserActivity/AdminUserDetail, the `/admin/.../effort/mobility/` route, the Navbar item, `MOBILITY_MOVEMENTS`). RETAINED: the `rom_records` DB table (historical data; no UI reads it) and the `delete-user`/export edge functions that clean it. Remaining incidental mentions are legal-doc prose and the UNRELATED cardio "Mobility" crawl-movement subtype (crab walk / bear crawl) — both intentionally kept.
 - **Bodyweight** — tracking surface (weight + goal).
 - **Calories / Nutrition** — tracking surface (food log, macros, daily target).
 - **Sleep / Water / Habits** — not built. To be decided whether they ship as first-party builds or as Apple Health / Google Fit integrations (Trainerize uses the integration path for sleep — worth copying).
@@ -2106,7 +2106,7 @@ Promote in order of decision energy: training prescription comes first (strength
 ### Roadmap order (rough, not locked)
 1. Cardio → coaching surface (NEXT)
 2. Bodyweight → coaching surface
-3. Mobility → coaching surface
+3. ~~Mobility → coaching surface~~ (Mobility removed entirely, June 2026)
 4. Calories → coaching surface
 5. Sleep / Water / Habits → tracking surfaces, likely via Apple Health / Google Fit integrations
 
@@ -2225,7 +2225,7 @@ The role model is shifting from today's two-tier (admin → end user) to a three
 20. **Public (B2C) tier prices — locked (revised May 25 2026).** All one-time payments, lifetime access at that tier once purchased.
     | Tier | Pages unlocked | One-time price |
     |---|---|---|
-    | Free | Strength + Cardio + Mobility | $0 |
+    | Free | Strength + Cardio | $0 |
     | CoreRX | Free + Bodyweight + Calories | $39 (one-time) |
     | FullRX | CoreRX + Heart + Hydration + Sleep | $59 (one-time) |
 
@@ -2978,7 +2978,7 @@ The big design specs (animation Patterns 1-7, all the locked detail-card specs f
 | StrengthDetail           | `src/pages/StrengthDetail.jsx`              | ✅ shipped (per-exercise history + best-effort badges; all rep-based, isometric, assisted, carry, band-assist, knee-assist modes covered). |
 | Cardio                   | `src/pages/Cardio.jsx`                      | ✅ shipped                                                         |
 | CardioDetail             | `src/pages/CardioDetail.jsx`                | ✅ shipped                                                         |
-| Mobility                 | `src/pages/Mobility.jsx`                    | ✅ shipped (commit-on-release ROM editor)                          |
+| Mobility                 | `src/pages/Mobility.jsx`                    | ❌ REMOVED June 2026 — legacy ROM tracking deleted (mobile + web); rom_records table retained, no UI |
 | Bodyweight               | `src/pages/Bodyweight.jsx`                  | ✅ shipped                                                         |
 | Calories                 | `src/pages/Calories.jsx`                    | ✅ shipped (FoodLogDrawer + barcode scan)                          |
 | History                  | `src/pages/History.jsx`                     | ✅ shipped                                                         |
@@ -2988,7 +2988,7 @@ The big design specs (animation Patterns 1-7, all the locked detail-card specs f
 | Auth (signin only)       | `src/pages/Auth.jsx`                        | Web is sign-in only since web sign-up moved to `/signup`. Forgot-password lives here, sends a magic link via `supabase.auth.resetPasswordForEmail`. Defensive `?mode=signup` redirect to `/signup` for old emails / external links. Mobile keeps fingerprint sign-in via `expo-local-authentication` + `expo-secure-store`; Android App Links via `public/.well-known/assetlinks.json` |
 | Sign-up journey          | `src/pages/Signup.jsx`                      | ✅ 19-screen onboarding (welcome → units → modality → magic ×3 → body data ×4 → whats-next → email + password + email-OTP → name → phone + phone-OTP → photo → notifications → welcome-end). Email OTP via Supabase auth, phone OTP via Twilio Verify edge functions. 512px JPEG avatar via crop+downscale. Step + data persisted to sessionStorage so app-switching to read SMS doesn't reset progress. |
 | CompleteProfile          | `src/components/CompleteProfile.jsx`        | ✅ Recovery mini-journey for users with `auth.users` row but incomplete `profiles` row. Mirrors Signup design (welcome → units → sex → dob → height → weight → name → phone+OTP → photo → done). `ProtectedLayout` gates on `isProfileComplete()` (`src/lib/profile.js` — checks full_name + gender + birthdate + current_weight + current_height) so the mini-journey doesn't kick the user out mid-flow when phone-otp partially writes the row. Done screen waits for explicit "Open my dashboard" click. |
-| MobilityDetail           | `src/pages/MobilityDetail.jsx`              | ⏳ pending (mobile already exposes ROM data inline)                |
+| MobilityDetail           | `src/pages/MobilityDetail.jsx`              | ❌ REMOVED June 2026 (never shipped)                                |
 | Landing                  | `src/pages/Landing.jsx`                     | N/A — mobile launches straight to sign-in/dashboard                |
 | Admin portal (15+ pages) | `src/pages/admin/...`                       | N/A — web-only by design                                           |
 
@@ -3275,7 +3275,6 @@ mobile/
 │       ├── dashboard.tsx               # ✅ Dashboard.jsx
 │       ├── strength.tsx                # ✅ Strength.jsx
 │       ├── cardio.tsx                  # ✅ Cardio.jsx
-│       ├── mobility.tsx                # ✅ Mobility.jsx (commit-on-release ROM editor)
 │       ├── bodyweight.tsx              # ✅ Bodyweight.jsx
 │       ├── calories.tsx                # ✅ Calories.jsx (FoodLogDrawer + barcode)
 │       ├── history.tsx                 # ✅ History.jsx
@@ -3283,11 +3282,10 @@ mobile/
 │       └── effort/
 │           ├── strength/[exercise].tsx # ✅ StrengthDetail.jsx
 │           └── cardio/[activity].tsx   # ✅ CardioDetail.jsx
-│       # MobilityDetail.jsx — pending; mobile already exposes ROM data inline
 ├── src/
 │   ├── theme.ts                        # design tokens (HSL strings) + alpha() + Tailwind palette
 │   ├── components/                     # AnimateRise, DeleteAction, TickerNumber, NumericInput, MovementSearch,
-│   │                                   # LineChart, UnitToggle, Slider, ROMVisualizer, CalorieStrip,
+│   │                                   # LineChart, UnitToggle, Slider, CalorieStrip,
 │   │                                   # BarcodeScanner, FoodLogDrawer, ChatSheet, SuggestionSheet,
 │   │                                   # MessageActions, Select, ShellSkeleton, Skeleton, LoadingScreen,
 │   │                                   # OTPInput, PasswordInput, PasswordStrengthMeter, StepDots, KeyboardScreen,
@@ -4888,7 +4886,6 @@ src/pages/Dashboard.jsx      — Profile card with animated stat pills, training
                                monthly PRs, member-since badge
 src/pages/Strength.jsx
 src/pages/Cardio.jsx
-src/pages/Mobility.jsx       — ROM tracking
 src/pages/Bodyweight.jsx
 src/pages/Calories.jsx
 src/pages/History.jsx
@@ -5194,7 +5191,7 @@ Admins (`is_superuser = true`) see an "Admin Portal" button in the client nav, o
 ### Core tracking
 - [x] Strength logging (sets × reps × weight, 1RM estimates)
 - [x] Cardio logging (distance, time, pace)
-- [x] Mobility / ROM tracking with ROMVisualizer
+- [x] ~~Mobility / ROM tracking with ROMVisualizer~~ — REMOVED June 2026 (legacy; rom_records table retained, no UI)
 - [x] Bodyweight tracking with charts
 - [x] Calorie logging with daily targets
 - [x] **Food logging** — USDA FoodData Central search, per-item entries in `food_logs`,

@@ -25,7 +25,7 @@
  * exposes levels 1-3.
  */
 
-import { ACTIVITY_FACTORS } from './calorieFormulas'
+import { ACTIVITY_FACTORS, calcTimeline } from './calorieFormulas'
 
 // ── Macro presets ─────────────────────────────────────────────────────────────
 
@@ -650,6 +650,14 @@ export function evaluateRealism(input: {
   const goalWeightKg = deriveGoalWeightKg(currentWeightKg, pace, tdee, activity, bodyFat)
   const split        = isGain ? predictLeanFatSplit(lbDelta, activity, bodyFat) : null
 
+  // Timeline = the SAME calc the Calories page + coach view run on the saved
+  // goal, so signup, the detail page, and the coach all show ONE number.
+  // monthsBest = the achievable "how short it could take" figure. Falls back
+  // to the pace's nominal box (e.g. maintain → 0) when the calc can't apply.
+  const tlEnergyAdj        = Math.round(tdee * paceOpt.energy_balance_pct)
+  const tlCalc             = calcTimeline(currentWeightKg, goalWeightKg, tlEnergyAdj, SELF_COACHED_CORRECTION_FACTOR, paceOpt.energy_balance_pct)
+  const timelineMonthsCalc = tlCalc && tlCalc.mode !== 'mismatch' ? tlCalc.monthsBest : paceOpt.timeline_months
+
   // ── Rule scan ───────────────────────────────────────────────────────
   // Order matters: more-specific rules push first so the consolidated
   // suggestion picks the tighter fix. Issues array stays sorted in
@@ -945,7 +953,7 @@ export function evaluateRealism(input: {
     summary,
     outcomeLb:               lbDelta,
     goalWeightKg,
-    timelineMonths:          paceOpt.timeline_months,
+    timelineMonths:          timelineMonthsCalc,
     split,
     issues:                  sortedIssues,
     consolidatedSuggestion,

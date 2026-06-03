@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'wouter'
 import { supabase } from '../../lib/supabase'
 import {
-  Users, Dumbbell, Activity, Flower2,
+  Users, Dumbbell, Activity,
   Flame, Weight, ChevronRight, TrendingUp,
 } from 'lucide-react'
 import TickerNumber from '../../components/TickerNumber'
@@ -22,15 +22,9 @@ function formatDate(ts) {
 
 function tabForItem(item) {
   if (item._kind === 'effort')  return 'activity'
-  if (item._kind === 'rom')     return 'activity'
   if (item._kind === 'weighin') return 'body'
   if (item._kind === 'calorie') return 'calories'
   return 'profile'
-}
-
-function fmtMovement(key) {
-  if (!key) return '—'
-  return key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }
 
 // ── Clickable stat tile ───────────────────────────────────────────────────────
@@ -97,7 +91,7 @@ export default function AdminOverview() {
   const cached = dataCache.get(OV_KEY)
 
   const [users,     setUsers]     = useState(cached?.users     ?? [])
-  const [stats,     setStats]     = useState(cached?.stats     ?? { strengthPRs: 0, cardioPRs: 0, mobilityPRs: 0, nutritionActive: 0, weighIns: 0 })
+  const [stats,     setStats]     = useState(cached?.stats     ?? { strengthPRs: 0, cardioPRs: 0, nutritionActive: 0, weighIns: 0 })
   const [feed,      setFeed]      = useState(cached?.feed      ?? [])
   const [attention, setAttention] = useState(cached?.attention ?? [])
   const [loading,   setLoading]   = useState(!cached)
@@ -109,16 +103,13 @@ export default function AdminOverview() {
       const fourteenAgoISO = new Date(now - 14 * 86_400_000).toISOString()
       const sevenDaysDate  = new Date(now - 7  * 86_400_000).toISOString().split('T')[0]
 
-      const [usersRes, effortsRes, romRes, calRes, bwRes, plansRes,
-             feedEffRes, feedBwRes, feedCalRes, feedRomRes] = await Promise.all([
+      const [usersRes, effortsRes, calRes, bwRes, plansRes,
+             feedEffRes, feedBwRes, feedCalRes] = await Promise.all([
         supabase.rpc('get_users_for_admin'),
         supabase.from('efforts').select('user_id, label, value, type, created_at')
           .in('type', ['strength', 'cardio'])
           .gte('created_at', fourteenAgoISO)
           .limit(2000),
-        supabase.from('rom_records').select('user_id, movement_key, degrees, created_at')
-          .gte('created_at', fourteenAgoISO)
-          .limit(1000),
         supabase.from('calorie_logs').select('user_id, log_date')
           .gte('log_date', sevenDaysDate)
           .limit(2000),
@@ -130,7 +121,6 @@ export default function AdminOverview() {
         supabase.from('efforts').select('id, user_id, label, type, created_at').order('created_at', { ascending: false }).limit(8),
         supabase.from('bodyweight').select('id, user_id, weight, unit, created_at').order('created_at', { ascending: false }).limit(8),
         supabase.from('calorie_logs').select('id, user_id, log_date, calories').order('log_date', { ascending: false }).limit(8),
-        supabase.from('rom_records').select('id, user_id, movement_key, degrees, created_at').order('created_at', { ascending: false }).limit(8),
       ])
 
       const allUsers = usersRes.data || []
@@ -147,23 +137,6 @@ export default function AdminOverview() {
       const strengthPRs = computePRClients(strengthEfforts, weekAgoISO, parse1RM, true)
       const cardioPRs   = computePRClients(cardioEfforts,   weekAgoISO, parsePaceSecs, false)
 
-      const romData = romRes.data || []
-      const romByKey = {}
-      romData.forEach(r => {
-        const k = `${r.user_id}||${r.movement_key}`
-        if (!romByKey[k]) romByKey[k] = { recent: [], older: [], userId: r.user_id }
-        if (r.created_at >= weekAgoISO) romByKey[k].recent.push(r.degrees)
-        else romByKey[k].older.push(r.degrees)
-      })
-      const mobilityPRClients = new Set()
-      Object.values(romByKey).forEach(({ userId, recent, older }) => {
-        if (!recent.length) return
-        const recentMax = Math.max(...recent)
-        if (!older.length && recentMax > 0) { mobilityPRClients.add(userId); return }
-        if (older.length && recentMax > Math.max(...older)) mobilityPRClients.add(userId)
-      })
-      const mobilityPRs = mobilityPRClients.size
-
       // ── Nutrition active: ≥3 days logged this week ────────────────────────
 
       const calByUser = {}
@@ -178,7 +151,7 @@ export default function AdminOverview() {
       const weighInUsers = new Set((bwRes.data || []).map(b => b.user_id))
       const weighIns = weighInUsers.size
 
-      setStats({ strengthPRs, cardioPRs, mobilityPRs, nutritionActive, weighIns })
+      setStats({ strengthPRs, cardioPRs, nutritionActive, weighIns })
 
       // ── Smart "Needs attention" list ──────────────────────────────────────
       // Priority: 1=no plan  2=goal reached  3=inactive 14d  4=not logging nutrition
@@ -186,10 +159,9 @@ export default function AdminOverview() {
       const goalReachedIds = new Set(
         (plansRes.data || []).filter(p => p.goal_reached).map(p => p.user_id)
       )
-      const activeUserIds = new Set([
-        ...(effortsRes.data || []).map(e => e.user_id),
-        ...romData.map(r => r.user_id),
-      ])
+      const activeUserIds = new Set(
+        (effortsRes.data || []).map(e => e.user_id),
+      )
       const calLogUserIds = new Set((calRes.data || []).map(c => c.user_id))
 
       const attentionList = allUsers
@@ -223,7 +195,6 @@ export default function AdminOverview() {
         ...(feedEffRes.data || []).map(e => ({ ...e, _kind: 'effort',  _ts: e.created_at })),
         ...(feedBwRes.data  || []).map(b => ({ ...b, _kind: 'weighin', _ts: b.created_at })),
         ...(feedCalRes.data || []).map(c => ({ ...c, _kind: 'calorie', _ts: c.log_date + 'T12:00:00.000Z' })),
-        ...(feedRomRes.data || []).map(r => ({ ...r, _kind: 'rom',     _ts: r.created_at })),
       ]
         .sort((a, b) => new Date(b._ts) - new Date(a._ts))
         .slice(0, 20)
@@ -232,7 +203,7 @@ export default function AdminOverview() {
       setFeed(merged)
       setLoading(false)
 
-      dataCache.set(OV_KEY, { users: allUsers, stats: { strengthPRs, cardioPRs, mobilityPRs, nutritionActive, weighIns }, feed: merged, attention: attentionList })
+      dataCache.set(OV_KEY, { users: allUsers, stats: { strengthPRs, cardioPRs, nutritionActive, weighIns }, feed: merged, attention: attentionList })
     }
     load()
   }, [])
@@ -243,7 +214,6 @@ export default function AdminOverview() {
     if (kind === 'effort')  return type === 'strength' ? <Dumbbell className="h-3.5 w-3.5" /> : <Activity className="h-3.5 w-3.5" />
     if (kind === 'weighin') return <Weight  className="h-3.5 w-3.5" />
     if (kind === 'calorie') return <Flame   className="h-3.5 w-3.5" />
-    if (kind === 'rom')     return <Flower2 className="h-3.5 w-3.5" />
     return null
   }
 
@@ -251,7 +221,6 @@ export default function AdminOverview() {
     if (kind === 'effort')  return type === 'strength' ? 'bg-blue-500/10 text-blue-400' : 'bg-amber-500/10 text-amber-400'
     if (kind === 'weighin') return 'bg-emerald-500/10 text-emerald-400'
     if (kind === 'calorie') return 'bg-red-500/10 text-red-400'
-    if (kind === 'rom')     return 'bg-fuchsia-500/10 text-fuchsia-400'
     return 'bg-muted text-muted-foreground'
   }
 
@@ -259,7 +228,6 @@ export default function AdminOverview() {
     if (item._kind === 'effort')  return item.label
     if (item._kind === 'weighin') return `Weigh-in · ${item.weight} ${item.unit}`
     if (item._kind === 'calorie') return `Intake · ${item.calories} kcal`
-    if (item._kind === 'rom')     return `${fmtMovement(item.movement_key)} · ${item.degrees}°`
     return '—'
   }
 
@@ -267,7 +235,6 @@ export default function AdminOverview() {
     { label: 'Total Clients',    value: users.length,          sub: 'all enrolled',                  icon: Users,    color: 'text-primary',    bg: 'bg-primary/10',    href: '/admin/clients' },
     { label: 'Strength PRs',     value: stats.strengthPRs,     sub: 'new 1RM highs · 7 days',        icon: Dumbbell, color: 'text-blue-400',   bg: 'bg-blue-500/10',   href: '/admin/clients' },
     { label: 'Cardio PRs',       value: stats.cardioPRs,       sub: 'best pace · 7 days',            icon: Activity, color: 'text-amber-400',  bg: 'bg-amber-500/10',  href: '/admin/clients' },
-    { label: 'Mobility PRs',     value: stats.mobilityPRs,     sub: 'new ROM highs · 7 days',        icon: Flower2,  color: 'text-fuchsia-400', bg: 'bg-fuchsia-500/10', href: '/admin/clients' },
     { label: 'Nutrition Active', value: stats.nutritionActive,  sub: 'logged ≥3 days this week',     icon: Flame,    color: 'text-red-400',    bg: 'bg-red-500/10',    href: '/admin/nutrition' },
     { label: 'Weigh-ins',        value: stats.weighIns,         sub: 'logged bodyweight · 7 days',   icon: TrendingUp, color: 'text-emerald-400', bg: 'bg-emerald-500/10', href: '/admin/progress' },
   ]

@@ -113,17 +113,20 @@ export function calcMacros(dailyTargetCals, goalWeightKg, proteinLevelKey, fatLe
 /**
  * Timeline to goal.
  *
- * Modes:
- *  • 'standard'  — pure thermodynamics (7700 kcal = 1 kg fat). Used when goal direction
- *                   matches energy direction (deficit + lower goal, surplus + higher goal).
- *  • 'recomp'    — Body recomposition window: small goal change (≤ 2 kg) AND mild energy
- *                   balance (|pct| ≤ 15%). Math-based timeline doesn't apply because muscle
- *                   gain offsets fat loss; returns a fixed "3–6 months" estimate.
- *  • 'mismatch'  — Goal direction opposes energy direction outside the recomp window.
- *                   Returns null timeline so caller can show a warning.
+ * ONE shared projection for every goal (7700 kcal ≈ 1 kg). The mode only changes
+ * the label/notes, NOT the number:
+ *  • 'standard'  — normal loss/gain goal.
+ *  • 'recomp'    — small goal change (≤ 2 kg) AND mild energy balance (|pct| ≤ 15%).
+ *                   Same achievable estimate as 'standard', just tagged so the UI can
+ *                   add a "scale moves slowly here" note (muscle gain offsets fat loss,
+ *                   so treat it as a best case). It used to show a fixed slow band that
+ *                   read as static — now it shows how short it could actually take.
+ *  • 'mismatch'  — the calorie direction opposes the goal direction; no timeline is
+ *                   valid, so the caller shows a warning instead.
  *
- * /20 = worst-case 20 committed days per month.
- * correctionFactor (e.g. 0.8) gives the realistic upper-bound estimate.
+ * /20 ≈ a realistic ~20 on-plan days per month (nobody is perfect every day) — this is
+ * the motivating "how short it could take" number. correctionFactor (e.g. 0.8) gives the
+ * conservative end for tougher stretches.
  */
 export function calcTimeline(currentWeightKg, goalWeightKg, energyAdjustment, correctionFactor, energyPct = null) {
   const weightDiff = Math.abs(currentWeightKg - goalWeightKg)
@@ -131,48 +134,31 @@ export function calcTimeline(currentWeightKg, goalWeightKg, energyAdjustment, co
 
   const isLoss = currentWeightKg > goalWeightKg
 
-  // Direction of energy: negative = pushes weight down, positive = pushes weight up
+  // Direction of energy: negative pushes weight down, positive pushes it up.
   const directionMatches = (isLoss && energyAdjustment < 0) || (!isLoss && energyAdjustment > 0)
 
-  // Recomp window: ≤ 2 kg goal change AND mild energy balance (|pct| ≤ 15% if known,
-  // else fall back to ≤ 350 kcal/day adjustment)
+  // Calorie direction opposes the goal → unreachable; show a warning. Applies to
+  // small/recomp goals too (a tiny lose-goal on a surplus still won't get there).
+  if (!directionMatches) {
+    return { mode: 'mismatch', weightDiffKg: weightDiff, isLoss }
+  }
+
+  const dailyAmount = Math.abs(energyAdjustment)
+  if (dailyAmount === 0) return null
+
+  // One achievable projection for every goal. Recomp is NOT a slower number — it's
+  // the same estimate, tagged so the UI can add a "scale moves slowly" note.
+  const totalCals       = weightDiff * 7700
+  const monthsBest      = (totalCals / dailyAmount) / 20
+  const monthsRealistic = (totalCals / (dailyAmount * correctionFactor)) / 20
+
   const mildEnergy = energyPct != null
     ? Math.abs(energyPct) <= 0.15
     : Math.abs(energyAdjustment) <= 350
   const isRecomp = weightDiff <= 2 && mildEnergy
 
-  if (isRecomp) {
-    // Recomp net weight change is ~0.25–0.5 kg/month (research consensus)
-    // because muscle gain offsets fat loss (or vice versa).
-    const monthsBest      = Math.max(1, Math.ceil(weightDiff / 0.5))
-    const monthsRealistic = Math.max(2, Math.ceil(weightDiff / 0.25))
-    return {
-      mode:            'recomp',
-      monthsBest,
-      monthsRealistic,
-      weightDiffKg:    weightDiff,
-      isLoss,
-    }
-  }
-
-  if (!directionMatches) {
-    return {
-      mode:         'mismatch',
-      weightDiffKg: weightDiff,
-      isLoss,
-    }
-  }
-
-  // Standard thermodynamic projection
-  const dailyAmount = Math.abs(energyAdjustment)
-  if (dailyAmount === 0) return null
-
-  const totalCals       = weightDiff * 7700
-  const monthsBest      = (totalCals / dailyAmount) / 20
-  const monthsRealistic = (totalCals / (dailyAmount * correctionFactor)) / 20
-
   return {
-    mode:            'standard',
+    mode:            isRecomp ? 'recomp' : 'standard',
     monthsBest:      Math.ceil(monthsBest),
     monthsRealistic: Math.ceil(monthsRealistic),
     weightDiffKg:    weightDiff,

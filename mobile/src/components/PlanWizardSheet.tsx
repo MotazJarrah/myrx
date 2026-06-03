@@ -55,7 +55,7 @@ import {
   formatLbDelta, formatWeightFromKg, formatProteinPerWeight,
   type BodyFatBand, type WeightUnit,
 } from '../lib/planPresets'
-import { FAT_LEVELS, PROTEIN_LEVELS, calcBMR } from '../lib/calorieFormulas'
+import { FAT_LEVELS, PROTEIN_LEVELS, calcBMR, calcTimeline } from '../lib/calorieFormulas'
 import BodyCompPicker from './BodyCompPicker'
 import TickerNumber from './TickerNumber'
 import { colors, alpha, palette, withAlpha, fonts } from '../theme'
@@ -606,7 +606,18 @@ function PaceScreen({
             return `— in ${monthTxt}`
           }
           const lbDelta  = predictLbDeltaForPace(key, tdee, activity, bodyFat)
-          const monthTxt = opt.timeline_months === 1 ? '1 month' : `${opt.timeline_months} months`
+          // Time-to-goal = the SAME calc the Calories page + coach view run, so
+          // the number the user commits to at signup matches what they see
+          // afterward. Falls back to the pace's nominal box if it can't apply.
+          const goalKg      = currentWeightKg != null
+            ? deriveGoalWeightKg(currentWeightKg, key, tdee, activity, bodyFat)
+            : null
+          const tlEnergyAdj = Math.round(tdee * opt.energy_balance_pct)
+          const tlCalc      = (currentWeightKg != null && goalKg != null)
+            ? calcTimeline(currentWeightKg, goalKg, tlEnergyAdj, SELF_COACHED_CORRECTION_FACTOR, opt.energy_balance_pct)
+            : null
+          const tlMonths    = tlCalc && tlCalc.mode !== 'mismatch' ? tlCalc.monthsBest : opt.timeline_months
+          const monthTxt = tlMonths === 1 ? '1 month' : `${tlMonths} months`
           return `${formatLbDelta(lbDelta, weightUnit, { withSign: true })} in ${monthTxt}`
         })()
         // Lean/fat split for GAIN rows. Null on loss/maintain — those

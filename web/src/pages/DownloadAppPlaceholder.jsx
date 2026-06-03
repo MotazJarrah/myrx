@@ -51,7 +51,7 @@ export default function DownloadAppPlaceholder() {
           </h1>
           <p className="text-sm text-muted-foreground leading-relaxed">
             Your athlete account lives on the MyRX mobile app —
-            track strength, cardio, mobility, and nutrition from your phone,
+            track strength, cardio, and nutrition from your phone,
             wherever your training happens.
           </p>
         </div>

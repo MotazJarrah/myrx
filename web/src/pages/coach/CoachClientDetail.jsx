@@ -227,22 +227,26 @@ export default function CoachClientDetail() {
 
       const lowestBpm = hrRes.data?.[0]?.bpm ?? null
 
-      let weightDiff = null
-      const bw = bw14Res.data || []
-      if (bw.length >= 2) {
-        const weekAgoTs = new Date(weekAgoISO).getTime()
-        const recent    = bw.find(r => new Date(r.created_at).getTime() >= weekAgoTs)
-        const older     = bw.find(r => new Date(r.created_at).getTime() <  weekAgoTs)
-        if (recent && older) {
-          const recentKg = toKg(parseFloat(recent.weight), recent.unit || 'lb')
-          const olderKg  = toKg(parseFloat(older.weight),  older.unit  || 'lb')
-          const diffKg   = recentKg - olderKg
-          const coachUnit = coachProfile?.weight_unit || 'lb'
+      // Weight change since the previous weigh-in (latest minus the one before
+      // it); falls back to the current weight when there's only one log so the
+      // chip still appears right after a weigh-in.
+      let weightDiff   = null
+      let latestWeight = null
+      const bw = [...(bw14Res.data || [])].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+      const coachUnit = coachProfile?.weight_unit || 'lb'
+      if (bw.length > 0) {
+        const latestKg = toKg(parseFloat(bw[0].weight), bw[0].unit || 'lb')
+        latestWeight = coachUnit === 'kg' ? latestKg : latestKg / 0.453592
+        if (bw.length >= 2) {
+          const prevKg = toKg(parseFloat(bw[1].weight), bw[1].unit || 'lb')
+          const diffKg = latestKg - prevKg
           weightDiff = coachUnit === 'kg' ? diffKg : diffKg / 0.453592
         }
       }
 
-      setSnapshot({ strengthPRsThisMonth, cardioPRsThisMonth, foodStreak, lowestBpm, weightDiff })
+      setSnapshot({ strengthPRsThisMonth, cardioPRsThisMonth, foodStreak, lowestBpm, weightDiff, latestWeight })
     }
     loadSnapshot()
   }, [id, snapshotKey, coachProfile?.weight_unit])
@@ -303,7 +307,8 @@ export default function CoachClientDetail() {
     (snapshot.cardioPRsThisMonth > 0) ||
     (snapshot.foodStreak > 0) ||
     (snapshot.lowestBpm != null) ||
-    (snapshot.weightDiff != null)
+    (snapshot.weightDiff != null) ||
+    (snapshot.latestWeight != null)
   )
 
   return (
@@ -450,11 +455,15 @@ export default function CoachClientDetail() {
                 ❤️ <TickerNumber value={snapshot.lowestBpm} /> bpm low (7d)
               </SnapshotBadge>
             )}
-            {snapshot.weightDiff != null && (
+            {snapshot.weightDiff != null ? (
               <SnapshotBadge color="zinc">
-                ⚖️ {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {coachProfile?.weight_unit || 'lb'} this week
+                ⚖️ {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {coachProfile?.weight_unit || 'lb'} since last weigh-in
               </SnapshotBadge>
-            )}
+            ) : snapshot.latestWeight != null ? (
+              <SnapshotBadge color="zinc">
+                ⚖️ <TickerNumber value={Math.round(snapshot.latestWeight * 10) / 10} /> {coachProfile?.weight_unit || 'lb'} · latest
+              </SnapshotBadge>
+            ) : null}
           </div>
         )}
       </div>

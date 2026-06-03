@@ -86,7 +86,6 @@ const AdminProfile        = lazy(() => import('./pages/admin/AdminProfile'))
 const AdminUserDetail     = lazy(() => import('./pages/admin/AdminUserDetail'))
 const AdminEffortDetail   = lazy(() => import('./pages/admin/AdminEffortDetail'))
 const AdminCardioDetail   = lazy(() => import('./pages/admin/AdminCardioDetail'))
-const AdminMobilityDetail = lazy(() => import('./pages/admin/AdminMobilityDetail'))
 const AdminMessages       = lazy(() => import('./pages/admin/AdminMessages'))
 // AdminLibraries is the unified page that hosts Movements + Foods as
 // tabs (May 28 2026 nav rebuild). The child pages still exist as their
@@ -315,7 +314,6 @@ function ProtectedLayout() {
                   Locked May 28 2026 after the Archive → Exports rename. */}
               <Route path="/admin/archive"      component={() => <Redirect to="/admin/exports?tab=archive" />} />
               <Route path="/admin/profile"      component={AdminProfile} />
-              <Route path="/admin/user/:userId/effort/mobility/:movement" component={AdminMobilityDetail} />
               <Route path="/admin/user/:userId/effort/cardio/:slug"       component={AdminCardioDetail} />
               <Route path="/admin/user/:userId/effort/:kind/:slug"        component={AdminEffortDetail} />
               <Route path="/admin/user/:id"                               component={AdminUserDetail} />
