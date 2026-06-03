@@ -376,10 +376,34 @@ TASKS = [
      "CLAUDE.md (CAPTURE-FIRST bullet); scripts/build_task_pipeline_xlsx.py",
      "2026-06-03"),
 
-    ("T052", "Hydration: count non-water fluids toward goal", "Hydration", "Mobile", "Pending",
+    ("T052", "Hydration: count non-water fluids toward goal", "Hydration", "Mobile", "In progress",
      "User wants the hydration goal to feel realistic — almost nobody drinks the full plain-water target every day. Asked whether science supports counting non-water fluids. Answer = yes: National Academies (IOM 2004) frames the daily target as TOTAL water from all sources (~80% from beverages of every kind, ~20% from food); Maughan et al. 2016 Beverage Hydration Index shows milk / juice / oral-rehydration hydrate AS WELL AS or better than water, and coffee / tea / soda ~= water (the 'caffeine dehydrates you' idea is a myth at normal intake, Killer 2014); alcohol is the real diuretic exception. Presented a decision on how granular to count fluids. Sub-task of T016 (hydration page redesign).",
-     "User to pick the counting model: (1) all non-alcoholic beverages count 1:1, (2) science-weighted per-drink multipliers (BHI), or (3) hybrid — 1:1 for non-alcoholic, alcohol discounted/excluded. Then reframe goal as 'total fluid' + add a fluid-type logging UI on the hydration page.",
+     "DECIDED 2026-06-03 = option 2 (science-weighted Beverage Hydration Index multipliers). Curated eligible drinks + multipliers: water / sparkling water / coffee / tea / diet-or-zero soda = 1.0, milk = 1.5 (the one allowed calorie drink, and the best-hydrating). Effective hydration = sum(ml x multiplier) vs the 35 ml/kg goal. Umbrella for build sub-tasks T053 (fast picker), T054 (eligibility messaging), T055 (log shows the drink), T056 (non-intimidating progress display).",
      "mobile/app/(app)/hydration.tsx",
+     "2026-06-03"),
+
+    ("T053", "Hydration: fast drink picker (no dropdowns)", "Hydration", "Mobile", "Pending",
+     "User: need a clever picker for drink TYPE + SIZE that's fast to tap — explicitly NO dropdowns (a dropdown puts selection effort on the user and won't go well). Proposed two-tap design on one sheet: row of drink-type tiles (icon + tiny label: Water / Sparkling / Coffee / Tea / Diet soda / Milk) + a row of VESSEL-icon size chips (glass / cup / mug / bottle / large bottle mapped to common ml) instead of numbers; optional 'custom' chip opens the existing PhantomWheel for an exact amount.",
+     "Build after the progress-display direction (T056) is locked. Confirm the eligible type list + the vessel-size presets with the user.",
+     "mobile/app/(app)/hydration.tsx; PhantomWheel for custom path",
+     "2026-06-03"),
+
+    ("T054", "Hydration: eligibility messaging", "Hydration", "Mobile", "Pending",
+     "User: make it explicit that only zero-calorie, low-calorie, milk, and non-alcoholic drinks count. Plan: the picker only ever offers eligible drink types (no alcohol, no full-sugar drinks) — that curation is itself the clearest signal — plus a short static info-pill explainer (intent-only per the info-pill rule, no formulas): roughly 'Only no/low-calorie, non-alcoholic drinks count toward hydration — plus milk. Sugary and alcoholic drinks don't.'",
+     "Write the final copy + wire the info pill. Confirm whether borderline drinks (juice, sports drinks) are excluded (current read: yes — they're calorie drinks; milk is the sole calorie exception).",
+     "mobile/app/(app)/hydration.tsx",
+     "2026-06-03"),
+
+    ("T055", "Hydration: log shows what was drunk", "Hydration", "Mobile", "Pending",
+     "User: the log should show what was drunk, not just a fluid total. Plan: each entry row shows drink icon + type + size + time (e.g. 'Milk · 250 ml · 9:14a'), optionally its hydration contribution.",
+     "Build the per-entry log row; decide whether to surface the per-drink multiplier contribution.",
+     "mobile/app/(app)/hydration.tsx",
+     "2026-06-03"),
+
+    ("T056", "Hydration: non-intimidating progress display", "Hydration", "Mobile", "Pending",
+     "User: raw fluid value (e.g. '2547 ml') is too intimidating as the headline — wants something friendlier. Options proposed: (A) percent + mascot mood, (B) 'cups' metaphor (effective hydration / ~250 ml -> N cups; milk visibly fills 1.5, making the science tangible), (C) rising water level in the existing PixelScene tied to the mascot (pure visual, most on-brand). Recommended C as the headline with a quiet 'cups' readout, raw ml only on tap.",
+     "User to pick A / B / C (recommended C + cups readout). Then build into the hydration page over the existing HydrationPet + PixelScene.",
+     "mobile/app/(app)/hydration.tsx; HydrationPet.tsx; PixelScene.tsx",
      "2026-06-03"),
 ]
 
