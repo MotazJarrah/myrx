@@ -2760,7 +2760,7 @@ The component reads from `profiles` + `coach_subscriptions` + `billing_events` d
 ---
 
 ## What This Is
-A React + Vite SPA (web, frozen) + React Native / Expo app (mobile, active) — a fitness coaching platform per the mission above. Clients track strength, cardio, mobility, bodyweight, and calories. Admins (coaches) manage clients, review progress, and communicate via chat/suggestions.
+A React + Vite SPA (web — **coach portal + admin portal ONLY**; athletes have zero web surfaces, see "Web / Mobile role rule") + React Native / Expo app (mobile — the sole athlete surface, active) — a fitness coaching platform per the mission above. Athletes track strength, cardio, mobility, bodyweight, and calories on mobile. Coaches/admins manage clients, review progress, and communicate via chat/suggestions through the web portals.
 
 ---
 
@@ -2937,7 +2937,7 @@ Every new testable feature ships with a corresponding XLSX in `docs/testing/<fea
 
 There is a **React Native (Expo) port of this app** at `C:\Users\motaz\OneDrive\Desktop\MyRX\mobile\`. It targets the same Supabase backend.
 
-**⚠ Web freeze REVERSED (unlocked 2026-05-23).** Mobile and web are now BOTH active surfaces. Every mobile feature that landed between 2026-05-12 and 2026-05-23 (multi-portion picker, self-coached plan wizard + edit chips + goal-reached, food drawer fixes, Heart page, Samsung Health integration UI, all new Strength detail variants like weighted-standard adp zones / BW consolidated tier pager / assisted machine / carry zones / iso milestones / sled work consolidated, all new Cardio coaching surfaces like PaceDetail E/T/V zones / AirBike / Rucking / StairMill / Swimming consolidated / Concept2 erg watts, etc.) is now WEB DEBT that must be ported back to the web app.
+**⚠ SUPERSEDED by the "Web / Mobile role rule" (locked 2026-05-27). There is NO athlete web app — nothing in this section about a "web freeze," "freeze reversal," porting mobile surfaces to web, a web "Client View" at `myrxfit.com/dashboard` / `/strength` / `/cardio`, or a "1:1 web↔mobile mirror" applies anymore.** On 2026-05-27 every athlete web surface was deleted (the 13 page files were moved to `docs/_archive/web-athlete-pages/`); athletes are mobile-ONLY and web is the coach portal + admin portal exclusively. There is nothing to port mobile→web and no athlete mirror to maintain. The paragraphs below this banner are kept only for history. The only live cross-surface concerns now: (a) the shared Supabase backend (schema / RLS / triggers / edge functions), and (b) the coach/admin portals' OWN read-only views of athlete data (`AdminUserDetail`, `AdminEffortDetail`, `AdminCardioDetail`, `AdminMobilityDetail`, `AdminClientMobility`, `CoachClientDetail`, `MacroPlanEditor`, …) — when athlete data SHAPE or domain logic changes on mobile (formula constants, label/parse formats, new columns), check whether these web-native views need the matching update.
 
 Reason for the reversal: the user QAs their own client experience on web (via the "Client View" link in the admin portal that drops them into their own end-user account at `myrxfit.com/dashboard`, `/strength`, `/cardio`, etc.). With web frozen, that experience visibly diverged from mobile and the user surfaced it as a regression — *"none of the mobile updates we did were reflected to the admin client view, we need to reflect all updates code by code, line by line"*.
 

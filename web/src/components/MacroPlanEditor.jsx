@@ -27,7 +27,7 @@
 
 import { useState, useMemo, useEffect, useLayoutEffect, useRef } from 'react'
 import {
-  AlertCircle, Check, Loader2, RotateCcw, TrendingDown, TrendingUp,
+  AlertCircle, Check, Loader2, TrendingDown, TrendingUp,
   Utensils, Info, Sparkles,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -566,7 +566,6 @@ export default function MacroPlanEditor({
     const kg = existingPlan.goal_weight_kg
     return String(initUnit === 'lb' ? Math.round(kg / 0.453592 * 10) / 10 : Math.round(kg * 10) / 10)
   })
-  const [resettingGoal, setResettingGoal] = useState(false)
 
   // Display-formatted starting weight in the active unit (lb or kg)
   const startingWeightDisplay = useMemo(() => {
@@ -730,27 +729,6 @@ export default function MacroPlanEditor({
     }
   }
 
-  async function handleResetGoal() {
-    if (!existingPlan) return
-    setResettingGoal(true)
-    const updates = {
-      goal_reached:       false,
-      starting_weight_kg: weight_kg || null,
-      goal_weight_kg:     null,
-    }
-    const { error: err } = await supabase
-      .from('calorie_plans').update(updates).eq('user_id', user.id)
-    if (err) {
-      setError(`Reset failed: ${err.message}`)
-    } else {
-      onPlanSaved?.({ ...existingPlan, ...updates })
-      // Start auto-syncs from profile.current_weight — no local state to reset.
-      setGoalWeightKg('')
-      setGoalRaw('')
-    }
-    setResettingGoal(false)
-  }
-
   const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
 
   // Activity options derived from ACTIVITY_FACTORS
@@ -798,17 +776,6 @@ export default function MacroPlanEditor({
 
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold">Macro Plan variables</h2>
-            {existingPlan && existingPlan.goal_weight_kg != null && (
-              <button
-                type="button"
-                onClick={handleResetGoal}
-                disabled={resettingGoal}
-                className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-              >
-                <RotateCcw className="h-3 w-3" />
-                {resettingGoal ? 'Resetting…' : 'Reset goal'}
-              </button>
-            )}
           </div>
 
           {existingPlan?.goal_reached && (
@@ -853,7 +820,7 @@ export default function MacroPlanEditor({
 
           {/* Weight target — Start is read-only (always current weight) */}
           <div>
-            <SectionLabel hint="Start is auto-synced from the latest bodyweight log. Reset goal to begin a new phase.">Weight target</SectionLabel>
+            <SectionLabel hint="Start is auto-synced from the latest bodyweight log. Saving the plan begins a new phase from there.">Weight target</SectionLabel>
             <div className="flex items-stretch gap-2">
               <div className="grid flex-1 grid-cols-2 gap-3">
                 <div>

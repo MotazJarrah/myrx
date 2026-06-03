@@ -503,6 +503,29 @@ export default function Calories() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, stripRefreshKey])
 
+  // Live refresh — a coach can edit this client's calorie plan + weight goal
+  // from the admin portal, and weigh-ins land from the Bodyweight page. Without
+  // a subscription the page would show a stale plan/goal until a full remount.
+  // Mirrors the chat/profile realtime pattern: any change to this user's
+  // calorie_plans or bodyweight row re-runs the page fetch via stripRefreshKey.
+  useEffect(() => {
+    if (!user) return
+    const channel = supabase
+      .channel(`calories-sync-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'calorie_plans', filter: `user_id=eq.${user.id}` },
+        () => setStripRefreshKey(k => k + 1),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bodyweight', filter: `user_id=eq.${user.id}` },
+        () => setStripRefreshKey(k => k + 1),
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [user])
+
   function handleDrawerEntriesChange(day: string, entries: any[]) {
     if (day === TODAY) setTodayEntries(entries as CalorieFoodEntry[])
     setStripRefreshKey(k => k + 1)
