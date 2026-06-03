@@ -369,6 +369,12 @@ TASKS = [
      "User/legal decision on whether to remove the ROM data-category language.",
      "web/src/pages/legal/{PrivacyPolicy,DataProcessingAgreement,CoachAgreement}.jsx",
      "2026-06-03"),
+
+    ("T051", "Capture-first workflow rule", "Infra/Docs", "Process", "Done",
+     "Locked 2026-06-03 at the user's request: every time the user raises ANY point that needs fixing or discussion — big or small (bug, design tweak, decision, idea, 'look into X') — the FIRST action BEFORE replying is to log it here as a new Pending task with the next T### id, then answer (and tell the user the id). It stays Pending until actually done/decided, then flips to Done/Deferred/Parked/Reverted. Encoded as the CAPTURE-FIRST mandate in CLAUDE.md so it persists across sessions.",
+     "Ongoing discipline — applies to every future turn. Nothing to build.",
+     "CLAUDE.md (CAPTURE-FIRST bullet); scripts/build_task_pipeline_xlsx.py",
+     "2026-06-03"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
@@ -438,6 +444,12 @@ def main():
         ("We fork across many sessions and lose track of what's open / where we stopped. This is the single "
          "remembered list. Every task has a stable numeric ID (T001, T002, ...). Refer to one with "
          "\"pick up T021\" and this sheet says exactly where we left off and what's next.", Font(size=11), 60),
+        ("", None, 8),
+        ("CAPTURE-FIRST RULE (locked 2026-06-03)", Font(bold=True, size=12, color="111721"), 22),
+        ("Every time a point comes up that needs fixing or discussion — ANY size — it gets logged here as a "
+         "Pending task with a new T### id BEFORE the assistant replies, then it's answered. It stays Pending "
+         "until the work is actually done/decided, then flips to Done (or Deferred/Parked/Reverted). Small "
+         "items are exactly what gets lost, so nothing is too small to capture.", Font(size=11), 60),
         ("", None, 8),
         ("STATUS VALUES", Font(bold=True, size=12, color="111721"), 22),
         ("Done — shipped (and usually deployed/committed).", Font(size=11), 18),
