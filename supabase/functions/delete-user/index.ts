@@ -110,7 +110,6 @@ const USER_DATA_TABLES: ReadonlyArray<{ table: string; column: string }> = Objec
   { table: 'food_logs',         column: 'user_id' },
   { table: 'hr_samples',        column: 'user_id' },
   { table: 'messages',          column: 'user_id' },
-  { table: 'rom_records',       column: 'user_id' },
   { table: 'step_samples',      column: 'user_id' },
   { table: 'user_integrations', column: 'user_id' },
   { table: 'wearable_workouts', column: 'user_id' },

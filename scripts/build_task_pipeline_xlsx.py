@@ -45,6 +45,7 @@ STATUS_FILLS = {
     "Deferred":    PatternFill("solid", fgColor="E0E7FF"),  # indigo-100
     "Parked":      PatternFill("solid", fgColor="F1F5F9"),  # slate-100
     "Reverted":    PatternFill("solid", fgColor="FEE2E2"),  # red-100
+    "Closed":      PatternFill("solid", fgColor="E5E7EB"),  # gray-200 — dropped / won't do
 }
 ZEBRA = PatternFill("solid", fgColor="F8FAFC")
 
@@ -140,9 +141,9 @@ TASKS = [
      "deletions + edits across mobile + web; commit 86b88c3",
      "2026-06-03"),
 
-    ("T013", "Radial-nav background recolor", "Navigation", "Mobile", "Reverted",
+    ("T013", "Radial-nav background recolor", "Navigation", "Mobile", "Closed",
      "Experiment: recolor the radial-nav dome from near-black to dark MyRX-green. Tried hsl(73,70,12) -> hsl(73,45,8) -> hsl(100,45,7); user disliked all. Reverted COLOR_DOME back to colors.background — RadialNav.tsx matches the committed version exactly.",
-     "Radial-nav design rework is still wanted by the user but the green direction is rejected. Re-open when the user picks a new direction.",
+     "CLOSED 2026-06-03 per user. Green direction rejected + already reverted; not pursuing a radial-nav redesign for now. Reopen if the user picks a new direction.",
      "mobile RadialNav.tsx (reverted)",
      "2026-06-03"),
 
@@ -304,9 +305,9 @@ TASKS = [
      "prior"),
 
     # ── Pending / roadmap ──
-    ("T040", "Direct per-platform integrations", "Integrations", "Cross", "Pending",
+    ("T040", "Direct per-platform integrations", "Integrations", "Cross", "Closed",
      "Strategy locked May 18 2026 after Samsung Health didn't bridge HR/workouts to Health Connect: build dedicated integrations per platform. Build order: Strava -> Fitbit -> Apple HealthKit -> Samsung SDK -> Garmin -> Whoop -> Polar. Cross-cutting infra: OAuth callback worker, webhook receiver worker, user_integrations table, token-refresh cron, per-platform mappers. HC stays as a fallback.",
-     "Not started. First three (Strava/Fitbit/HealthKit) have no approval delay; the rest are gated on developer-program approvals (apply in parallel). See docs/integrations/developer-program-applications.md.",
+     "CLOSED 2026-06-03 per user — not pursuing direct per-platform wearable integrations for now. Health Connect Phase 1 (T036) remains in the app as the Android path. Reopen if revisited; the build order + infra notes above are preserved.",
      "(planned) workers/oauth, workers/webhooks, mobile/src/lib/integrations/; CLAUDE.md integrations spec",
      "prior"),
 
@@ -358,15 +359,15 @@ TASKS = [
      "scripts/d1_migrate/sync_usda.mjs, sync_on.mjs",
      "prior"),
 
-    ("T049", "Drop rom_records table (post-Mobility)", "Mobility", "Backend", "Deferred",
-     "After T012 removed the Mobility UI, the rom_records table is orphaned (no UI reads it; delete-user/export functions still clean it). Dropping it is destructive (deletes historical ROM data) so it was intentionally left for the user to decide.",
-     "User decision: keep (historical) or drop. If drop, also remove the table refs in the delete-user/export edge functions.",
+    ("T049", "Drop rom_records table (post-Mobility)", "Mobility", "Backend", "Done",
+     "After T012 removed the Mobility UI, the rom_records table was orphaned (no UI reads it). Dropping it is destructive (deletes historical ROM data) so it waited for user OK.",
+     "DONE 2026-06-03 per user 'run 8'. Migration 20260603d_drop_rom_records: patched anonymize_account_now() to drop its 'DELETE FROM rom_records' line, then DROP TABLE rom_records CASCADE (RLS policies + activity-log trigger went with it). Verified gone; only trg_log_data_activity keeps a harmless dead 'rom_records' CASE-string branch. delete-user edge-fn source had its rom_records entry removed (per-table try/catch made it non-fatal anyway) — needs a routine `supabase functions deploy delete-user` (non-urgent, admin-only path).",
      "supabase rom_records table; delete-user/admin-user-management functions",
      "2026-06-03"),
 
-    ("T050", "Scrub Mobility from legal docs", "Mobility/Legal", "Web", "Deferred",
-     "Privacy Policy / DPA / Coach Agreement still list 'mobility / range-of-motion assessments' as a collected data category. Left untouched in T012 because legal copy is sensitive (and historical rom_records data still exists).",
-     "User/legal decision on whether to remove the ROM data-category language.",
+    ("T050", "Scrub Mobility from legal docs", "Mobility/Legal", "Web", "Done",
+     "Privacy Policy / DPA / Coach Agreement listed 'mobility / range-of-motion' as a collected data category. Left until T012's owner OK'd it.",
+     "DONE 2026-06-03 per user 'run 9'. Removed the mobility/ROM wording: PrivacyPolicy (workout-entries list + 'mobility / range-of-motion assessments' + 'ROM records' in the deletion paragraph), DataProcessingAgreement ('mobility ROM'), CoachAgreement ('Mobility' in the training-logs line). Ships with the next web deploy.",
      "web/src/pages/legal/{PrivacyPolicy,DataProcessingAgreement,CoachAgreement}.jsx",
      "2026-06-03"),
 
@@ -524,6 +525,7 @@ def main():
         ("Deferred — intentionally postponed (waiting on something or a user decision).", Font(size=11), 18),
         ("Parked — discussed then set aside; needs a user decision to re-open.", Font(size=11), 18),
         ("Reverted — was tried, then undone.", Font(size=11), 18),
+        ("Closed — dropped / won't do for now (can be reopened).", Font(size=11), 18),
         ("", None, 8),
         ("HOW TO UPDATE (the .xlsx is GENERATED, do not hand-edit)", Font(bold=True, size=12, color="111721"), 22),
         ("1. Edit the TASKS list in scripts/build_task_pipeline_xlsx.py (add a row / flip a status / update the "

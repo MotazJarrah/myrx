@@ -118,7 +118,7 @@ export default function CoachAgreement() {
       <ul>
         <li>Identifying information (name, email, phone, avatar) the Client provided to MyRX.</li>
         <li>Body data (age, gender, weight, height, body-fat band) and weight history.</li>
-        <li>Training logs across Strength, Cardio, Mobility, and any other surface MyRX adds.</li>
+        <li>Training logs across Strength, Cardio, and any other surface MyRX adds.</li>
         <li>Food logs, calorie targets, and macro splits.</li>
         <li>Heart-rate samples, sleep data, hydration entries, step counts, and other wearable-synced data.</li>
         <li>Chat messages exchanged between you and that Client.</li>

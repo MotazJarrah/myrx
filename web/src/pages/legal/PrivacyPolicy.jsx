@@ -40,8 +40,8 @@ export default function PrivacyPolicy() {
         </li>
         <li>
           <strong>Activity logs</strong>: workout entries (strength, cardio,
-          mobility, bodyweight), nutrition and calorie logs, lesson interactions,
-          mobility / range-of-motion assessments, personal records.
+          bodyweight), nutrition and calorie logs, lesson interactions,
+          personal records.
         </li>
         <li>
           <strong>Coach communications</strong>: messages between you and your
@@ -327,8 +327,8 @@ export default function PrivacyPolicy() {
         image) is permanently scrubbed and replaced with the placeholder
         "Deleted User." Your authentication credentials (email, password
         hash) are scrubbed and banned from re-registration. Your training
-        data — efforts, bodyweight history, calorie and food logs, ROM
-        records, calorie plan, wearable-synced data — is permanently
+        data — efforts, bodyweight history, calorie and food logs,
+        calorie plan, wearable-synced data — is permanently
         deleted. Anonymization is irreversible.
       </p>
       <p>

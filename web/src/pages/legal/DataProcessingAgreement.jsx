@@ -104,7 +104,7 @@ export default function DataProcessingAgreement() {
       <ul>
         <li>Identifying data: name, email, phone, avatar, date of birth, gender.</li>
         <li>Body data: height, weight, weight history, body-fat band.</li>
-        <li>Health and fitness data: training logs, calorie logs, food entries, mobility ROM, heart-rate samples, sleep duration / staging, hydration, step counts.</li>
+        <li>Health and fitness data: training logs, calorie logs, food entries, heart-rate samples, sleep duration / staging, hydration, step counts.</li>
         <li>Wearable-synced data from connected devices (Samsung Health, Apple Health, Garmin, Whoop, Polar, Fitbit, Strava).</li>
         <li>Communications: messages exchanged between Coach and Client in the in-app chat.</li>
       </ul>
