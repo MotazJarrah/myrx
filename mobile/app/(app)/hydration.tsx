@@ -47,8 +47,7 @@ import AnimateRise from '../../src/components/AnimateRise'
 import DeleteAction from '../../src/components/DeleteAction'
 import TickerNumber from '../../src/components/TickerNumber'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
-import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated'
-import { GlassWater, Droplets, Coffee, Leaf, CupSoda, Milk, type LucideIcon } from 'lucide-react-native'
+import { GlassWater, Droplets, Coffee, Leaf, CupSoda, Milk, ChevronLeft, type LucideIcon } from 'lucide-react-native'
 import PhantomWheel from '../../src/components/PhantomWheel'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
@@ -334,6 +333,9 @@ export default function Hydration() {
   const [customVal, setCustomVal]   = useState(fluidUnit === 'mL' ? 300 : 10)
   const [showExact, setShowExact]   = useState(false)
 
+  // Keep the custom-amount default sensible for the active unit.
+  useEffect(() => { setCustomVal(fluidUnit === 'mL' ? 300 : 10) }, [fluidUnit])
+
   useEffect(() => {
     if (!user) return
     supabase
@@ -425,6 +427,12 @@ export default function Hydration() {
     if (cacheKey) dataCache.set(cacheKey, reconciled)
   }
 
+  // Pick a size from the size view → log it, then return to the type grid.
+  function logSize(sz: number) {
+    if (selType) addDrink(selType, sz)
+    setSelType(null)
+  }
+
   async function deleteEntry(id: string) {
     const remaining = logs.filter(l => l.id !== id)
     setLogs(remaining)
@@ -444,6 +452,10 @@ export default function Hydration() {
   // readout to flip to the exact effective-vs-target volume (T056).
   const cupsTarget  = Math.max(1, Math.round(targetMl / 250))
   const cupsDone    = Math.round(todayEffectiveMl / 250)
+
+  // Selected drink (size-picker state) — null = show the type grid.
+  const selMeta = selType ? DRINK_BY_TYPE[selType] : null
+  const SelIcon = selMeta?.Icon ?? null
 
   const hasWeight = bwKg != null || ((profile as any)?.current_weight ?? 0) > 0
   const targetAttribution = hasWeight
@@ -488,44 +500,52 @@ export default function Hydration() {
                   : `Log your first sip to start the day.`}
             </Text>
 
-            {/* Drink picker — tap a type, then a size. No dropdowns (T053). */}
+            {/* Drink picker — pick a type, then it's REPLACED by that drink's
+                sizes (tap ‹ to choose a different drink). No expansion (T061). */}
             <View style={s.pickerWrap}>
-              <View style={s.typeRow}>
-                {DRINKS.map(d => {
-                  const active = d.type === selType
-                  const Icon = d.Icon
-                  return (
-                    <Pressable
-                      key={d.type}
-                      onPress={() => setSelType(active ? null : d.type)}
-                      style={({ pressed }) => [s.typeTile, active && s.typeTileActive, pressed && s.chipPressed]}
-                    >
-                      <Icon size={20} color={active ? d.color : colors.mutedForeground} />
-                      <Text style={[s.typeLabel, active && s.typeLabelActive]} numberOfLines={1}>{d.label}</Text>
-                    </Pressable>
-                  )
-                })}
-              </View>
-
-              {selType && (
-                <Animated.View entering={FadeInUp.duration(180)} exiting={FadeOutUp.duration(140)} style={s.sizeRow}>
-                  {sizes.map(sz => (
-                    <Pressable
-                      key={sz}
-                      onPress={() => addDrink(selType, sz)}
-                      style={({ pressed }) => [s.sizeChip, pressed && s.chipPressed]}
-                    >
-                      <Text style={s.sizeChipText}>{sz}</Text>
-                      <Text style={s.sizeChipUnit}>{fluidUnit}</Text>
-                    </Pressable>
-                  ))}
-                  <Pressable
-                    onPress={() => setCustomOpen(true)}
-                    style={({ pressed }) => [s.sizeChip, s.sizeChipAlt, pressed && s.chipPressed]}
-                  >
-                    <Text style={s.sizeChipAltText}>Custom</Text>
+              {selType === null ? (
+                <View style={s.typeRow}>
+                  {DRINKS.map(d => {
+                    const Icon = d.Icon
+                    return (
+                      <Pressable
+                        key={d.type}
+                        onPress={() => setSelType(d.type)}
+                        style={({ pressed }) => [s.typeTile, pressed && s.chipPressed]}
+                      >
+                        <Icon size={20} color={d.color} />
+                        <Text style={s.typeLabel} numberOfLines={1}>{d.label}</Text>
+                      </Pressable>
+                    )
+                  })}
+                </View>
+              ) : (
+                <View style={s.sizeWrap}>
+                  <Pressable onPress={() => setSelType(null)} style={({ pressed }) => [s.sizeHeader, pressed && s.chipPressed]}>
+                    <ChevronLeft size={18} color={colors.mutedForeground} />
+                    {SelIcon && <SelIcon size={18} color={selMeta?.color} />}
+                    <Text style={s.sizeHeaderText}>{selMeta?.label}</Text>
+                    <Text style={s.sizeHeaderHint}>Change drink</Text>
                   </Pressable>
-                </Animated.View>
+                  <View style={s.sizeRow}>
+                    {sizes.map(sz => (
+                      <Pressable
+                        key={sz}
+                        onPress={() => logSize(sz)}
+                        style={({ pressed }) => [s.sizeChip, pressed && s.chipPressed]}
+                      >
+                        <Text style={s.sizeChipText}>{sz}</Text>
+                        <Text style={s.sizeChipUnit}>{fluidUnit}</Text>
+                      </Pressable>
+                    ))}
+                    <Pressable
+                      onPress={() => setCustomOpen(true)}
+                      style={({ pressed }) => [s.sizeChip, s.sizeChipAlt, pressed && s.chipPressed]}
+                    >
+                      <Text style={s.sizeChipAltText}>Custom</Text>
+                    </Pressable>
+                  </View>
+                </View>
               )}
 
               {/* Eligibility note (T054) — what counts, plain-language. */}
@@ -560,7 +580,7 @@ export default function Hydration() {
                 unit={` ${fluidUnit}`}
               />
               <Pressable
-                onPress={() => { if (selType && customVal > 0) addDrink(selType, customVal); setCustomOpen(false) }}
+                onPress={() => { if (selType && customVal > 0) addDrink(selType, customVal); setCustomOpen(false); setSelType(null) }}
                 style={({ pressed }) => [s.modalLogBtn, pressed && s.chipPressed]}
               >
                 <Text style={s.modalLogText}>Log drink</Text>
@@ -767,6 +787,10 @@ const s = StyleSheet.create({
   typeLabel:       { fontSize: 12, color: colors.mutedForeground, fontFamily: fonts.sans[600] },
   typeLabelActive: { color: colors.foreground },
 
+  sizeWrap:        { gap: 10 },
+  sizeHeader:      { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+  sizeHeaderText:  { fontSize: 15, color: colors.foreground, fontFamily: fonts.sans[700] },
+  sizeHeaderHint:  { fontSize: 12, color: colors.mutedForeground, marginLeft: 'auto' },
   sizeRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 2 },
   sizeChip: {
     flexDirection: 'row',

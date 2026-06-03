@@ -411,6 +411,30 @@ TASKS = [
      "None.",
      "mobile/app/(app)/hydration.tsx",
      "2026-06-03"),
+
+    ("T058", "Hydration: remove the rising-water pond", "Hydration", "Mobile", "Done",
+     "User doesn't want the 'water flowing' effect in the pixel art. Revert the T056 PixelScene water Rects + the fillFrac prop wiring on HydrationPet/PixelScene. Keep the cups readout (that part stays) — only the in-scene water is removed.",
+     "DONE 2026-06-03: removed the water Group from PixelScene + the fillFrac prop on PixelScene & HydrationPet. Scene is back to the original day/night art; the cups readout stays as the progress indicator.",
+     "mobile/src/components/PixelScene.tsx; HydrationPet.tsx",
+     "2026-06-03"),
+
+    ("T059", "Hydration BUG: fl-oz unit not applied + picker dead", "Hydration", "Mobile", "In progress",
+     "After switching Settings fluid unit to fl oz, the hydration page stayed in mL AND the picker buttons stopped responding. Regression from the T052-T056 build. Diagnose: (a) does Settings write fluid_unit='oz' and does the profile propagate to the page; (b) why the picker Pressables stopped firing (suspect the FadeInUp Animated.View / Modal / half-loaded bundle).",
+     "Settings writes fluid_unit='oz'/'mL' (confirmed); the page derives fluidUnit + sizes reactively from profile, so a correct profile shows oz. The dead-touch triad (picker + delete + unit all frozen at once) most likely a half-applied Fast Refresh — no clean reload was possible (adb couldn't reach the phone). Rewrote the picker, removing the Animated.View expansion (the likely real culprit). CONFIRM after a FULL app restart; if oz still doesn't show, investigate whether a Settings save propagates the profile context to the other tabs.",
+     "mobile/app/(app)/hydration.tsx; settings.tsx; AuthContext",
+     "2026-06-03"),
+
+    ("T060", "Hydration BUG: log entries won't delete", "Hydration", "Mobile", "In progress",
+     "Deleting today's log rows did nothing. deleteEntry itself was unchanged, so the regression is likely the new log-row layout (lucide Icon intercepting touches inside DeleteAction) or the same page-wide dead-touch issue as T059.",
+     "DeleteAction + deleteEntry are unchanged & correct (two-tap: tap trash -> red check -> deletes). The dead delete was part of the same page-wide frozen-touch symptom as T059, not delete-specific. Should clear with the rewrite + a clean reload. CONFIRM after restart (tap the trash icon on a row, then the red check).",
+     "mobile/app/(app)/hydration.tsx; DeleteAction.tsx",
+     "2026-06-03"),
+
+    ("T061", "Hydration: picker REPLACES, not expands", "Hydration", "Mobile", "Done",
+     "User rejects the expanding picker. Wanted behaviour: tapping a drink type REPLACES the type-tile row with the size buttons for that drink (with a back / change-drink affordance), instead of revealing an extra row below. Removes the FadeInUp inline expansion entirely.",
+     "DONE 2026-06-03: picker is now a two-state swap — the 6-type grid is REPLACED by the chosen drink's size buttons (250/350/500 + Custom) with a 'Change drink' back button (ChevronLeft); logging a size returns to the grid. No FadeInUp expansion. tsc clean.",
+     "mobile/app/(app)/hydration.tsx",
+     "2026-06-03"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
