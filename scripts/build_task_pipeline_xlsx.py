@@ -432,7 +432,7 @@ TASKS = [
 
     ("T061", "Hydration: picker REPLACES, not expands", "Hydration", "Mobile", "Done",
      "User rejects the expanding picker. Wanted behaviour: tapping a drink type REPLACES the type-tile row with the size buttons for that drink (with a back / change-drink affordance), instead of revealing an extra row below. Removes the FadeInUp inline expansion entirely.",
-     "DONE 2026-06-03: picker is now a two-state swap — the 6-type grid is REPLACED by the chosen drink's size buttons (250/350/500 + Custom) with a 'Change drink' back button (ChevronLeft); logging a size returns to the grid. No FadeInUp expansion. tsc clean.",
+     "DONE 2026-06-03: picker is now a two-state swap — the 6-type grid is REPLACED by the chosen drink's size buttons (250/350/500 + Custom); logging a size returns to the grid. No FadeInUp expansion. Refined per user: the size view's header is back-only — a ‹ ChevronLeft + the selected drink's icon/label, tappable to return to the grid; removed the redundant 'Change drink' hint text (it read as a second back method).",
      "mobile/app/(app)/hydration.tsx",
      "2026-06-03"),
 

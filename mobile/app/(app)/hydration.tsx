@@ -529,7 +529,6 @@ export default function Hydration() {
                     <ChevronLeft size={18} color={colors.mutedForeground} />
                     {SelIcon && <SelIcon size={18} color={selMeta?.color} />}
                     <Text style={s.sizeHeaderText}>{selMeta?.label}</Text>
-                    <Text style={s.sizeHeaderHint}>Change drink</Text>
                   </Pressable>
                   <View style={s.sizeRow}>
                     {sizes.map(sz => (
@@ -794,7 +793,6 @@ const s = StyleSheet.create({
   sizeWrap:        { gap: 10 },
   sizeHeader:      { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
   sizeHeaderText:  { fontSize: 15, color: colors.foreground, fontFamily: fonts.sans[700] },
-  sizeHeaderHint:  { fontSize: 12, color: colors.mutedForeground, marginLeft: 'auto' },
   sizeRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 2 },
   sizeChip: {
     flexDirection: 'row',
