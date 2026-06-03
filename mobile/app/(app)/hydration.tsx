@@ -444,7 +444,6 @@ export default function Hydration() {
                   ? `${fmtVolume(remainingMl, fluidUnit)} ${fluidUnit} to go today. Steady sips through the day beats chugging it all at once.`
                   : `Log your first sip to start the day.`}
             </Text>
-            <Text style={s.attribution}>{targetAttribution}</Text>
 
             {/* Quick-add — a cup and a bottle */}
             <View style={s.chipsRow}>
@@ -459,6 +458,10 @@ export default function Hydration() {
                 </Pressable>
               ))}
             </View>
+
+            {/* Science attribution — matches the tinyText footer credit used on
+                the strength / cardio detail pages (left-aligned, muted, 11px). */}
+            <Text style={s.attribution}>{targetAttribution}</Text>
           </View>
         </AnimateRise>
 
@@ -571,7 +574,7 @@ const s = StyleSheet.create({
   },
 
   helper:        { fontSize: 13, color: colors.foreground, lineHeight: 18, textAlign: 'center' },
-  attribution:   { fontSize: 11, color: colors.mutedForeground, textAlign: 'center' },
+  attribution:   { fontSize: 11, color: colors.mutedForeground, lineHeight: 16 },
 
   // Quick-add chips
   chipsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },

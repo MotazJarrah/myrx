@@ -402,8 +402,14 @@ TASKS = [
 
     ("T056", "Hydration: non-intimidating progress display", "Hydration", "Mobile", "Pending",
      "User: raw fluid value (e.g. '2547 ml') is too intimidating as the headline — wants something friendlier. Options proposed: (A) percent + mascot mood, (B) 'cups' metaphor (effective hydration / ~250 ml -> N cups; milk visibly fills 1.5, making the science tangible), (C) rising water level in the existing PixelScene tied to the mascot (pure visual, most on-brand). Recommended C as the headline with a quiet 'cups' readout, raw ml only on tap.",
-     "User to pick A / B / C (recommended C + cups readout). Then build into the hydration page over the existing HydrationPet + PixelScene.",
+     "DECIDED 2026-06-03 = option C (rising water level in the PixelScene as the headline) + a quiet 'cups' readout; raw ml only on tap. Build pending as part of the T052 feature.",
      "mobile/app/(app)/hydration.tsx; HydrationPet.tsx; PixelScene.tsx",
+     "2026-06-03"),
+
+    ("T057", "Hydration: attribution styling to match other pages", "Hydration", "Mobile", "Done",
+     "User: the hydration attribution should look like the credit line on other detail pages — the small dimmed dot-separated footer (strength 'Epley · Brzycki · Lombardi averaged', cardio 'Riegel · Daniels' · Seiler ...'). FIXED 2026-06-03: hydration's s.attribution now matches the house tinyText style (muted, 11px, lineHeight 16, left-aligned) and was moved to the BOTTOM of the progress card as a footer credit — same placement as strength/cardio (it used to be centered between the readout and the quick-add chips).",
+     "None.",
+     "mobile/app/(app)/hydration.tsx",
      "2026-06-03"),
 ]
 
