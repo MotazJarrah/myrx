@@ -49,7 +49,6 @@ import { NumericInput } from '../../src/components/NumericInput'
 import AnimateRise from '../../src/components/AnimateRise'
 import Skeleton from '../../src/components/Skeleton'
 import BodyCompPicker from '../../src/components/BodyCompPicker'
-import CoachInviteCodeCard from '../../src/components/CoachInviteCodeCard'
 import BillingTab from '../../src/components/BillingTab'
 import { type BodyFatBand } from '../../src/lib/planPresets'
 import { Select } from '../../src/components/Select'
@@ -1280,11 +1279,6 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
   const [weightUnit,   setWeightUnit]   = useState<string>(profile?.weight_unit   ?? 'lb')
   const [heightUnit,   setHeightUnit]   = useState<string>(profile?.height_unit   ?? 'imperial')
   const [distanceUnit, setDistanceUnit] = useState<string>(profile?.distance_unit ?? 'km')
-  // Per-user pool-distance preference. Separate from `distance_unit` because
-  // someone running miles outdoors might still swim meters indoors (Olympic
-  // pools are 50m worldwide). Defaults to 'm' to match international
-  // convention. May 17 2026 — see Swimming detail card spec in CLAUDE.md.
-  const [swimUnit,     setSwimUnit]     = useState<string>(((profile as any)?.swim_unit as string | undefined) ?? 'm')
   // Short-date format — 'mdy' = MM/DD (imperial), 'dmy' = DD/MM (metric).
   // Used by date-displaying surfaces like the Sleep Clock center label.
   // Persists via the same 'misc fields' update batch as swim_unit (not in
@@ -1292,6 +1286,9 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
   const [dateFormat,   setDateFormat]   = useState<'mdy' | 'dmy'>(
     (profile?.date_format as 'mdy' | 'dmy' | null | undefined) ?? 'mdy',
   )
+  // Fluid (water) unit — 'oz' (imperial) or 'mL' (metric). Added with the
+  // Hydration page; persists in the same misc-fields batch as swim_unit.
+  const [fluidUnit,    setFluidUnit]    = useState<string>(((profile as any)?.fluid_unit as string | undefined) ?? 'oz')
 
   const initHeight = heightToDisplay(profile?.current_height, profile?.height_unit ?? 'imperial')
   const [currentWeight, setCurrentWeight] = useState<string>(
@@ -1492,7 +1489,10 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
         .from('profiles')
         .update({
           meal_slots_default:  mealSlots,
-          swim_unit:           swimUnit,
+          // Swim unit follows the single Distance preference now
+          // (imperial → yards, metric → meters) — no separate toggle.
+          swim_unit:           distanceUnit === 'mi' ? 'yd' : 'm',
+          fluid_unit:          fluidUnit,
           date_format:         dateFormat,
           // body_fat_band added May 24 2026 — third Body stats field
           // alongside weight + height. Same column used by the wizard's
@@ -1519,14 +1519,6 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
 
   return (
     <View style={s.formGap}>
-
-      {/* Coach invite code — manual fallback for the email-mismatch
-          edge case (athlete signed up with a different email than the
-          one their coach invited). Card is hidden for coaches + admins
-          inside the component itself (they can't accept invites). */}
-      <AnimateRise>
-        <CoachInviteCodeCard />
-      </AnimateRise>
 
       {/* Preferred units — column-aligned imperial vs metric. The
           column headers (added May 24 2026) sit once above the first
@@ -1558,26 +1550,21 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
           </View>
         </View>
 
+        {/* Distance covers running/cycling (mi/km) AND swimming (yd/m) —
+            one imperial-vs-metric choice drives both. */}
         <View style={s.field}>
           <Text style={s.label}>Distance</Text>
           <View style={s.unitGrid}>
-            <UnitCard selected={distanceUnit === 'mi'} onPress={() => setDistanceUnit('mi')} label="mi" sub="Miles" />
-            <UnitCard selected={distanceUnit === 'km'} onPress={() => setDistanceUnit('km')} label="km" sub="Kilometres" />
+            <UnitCard selected={distanceUnit === 'mi'} onPress={() => setDistanceUnit('mi')} label="mi · yd" sub="Miles & yards" />
+            <UnitCard selected={distanceUnit === 'km'} onPress={() => setDistanceUnit('km')} label="km · m" sub="Km & metres" />
           </View>
         </View>
 
-        {/* Swimming distance is separate from running/cycling distance —
-            international pools are 25m / 50m, US recreational pools are
-            25 yards. Most users only swim one, so the preference lives
-            on its own row rather than coupling to the outdoor distance
-            toggle. Order was [m, yd] before May 24 2026; flipped to
-            [yd, m] so this row matches the imperial-left / metric-right
-            order of the rows above (and the new column headers). */}
         <View style={s.field}>
-          <Text style={s.label}>Swim distance</Text>
+          <Text style={s.label}>Fluid</Text>
           <View style={s.unitGrid}>
-            <UnitCard selected={swimUnit === 'yd'} onPress={() => setSwimUnit('yd')} label="yd" sub="Yards" />
-            <UnitCard selected={swimUnit === 'm'}  onPress={() => setSwimUnit('m')}  label="m"  sub="Meters" />
+            <UnitCard selected={fluidUnit === 'oz'} onPress={() => setFluidUnit('oz')} label="oz" sub="Fluid ounces" />
+            <UnitCard selected={fluidUnit === 'mL'} onPress={() => setFluidUnit('mL')} label="mL" sub="Millilitres" />
           </View>
         </View>
 

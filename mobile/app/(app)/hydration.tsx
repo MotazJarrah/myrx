@@ -5,10 +5,9 @@
  * Layout (top-to-bottom):
  *   1. Header — "Hydration" h1 + today's date subtext.
  *   2. Today's progress card (AnimateRise delay 0)
- *      ├─ Circular Skia progress ring (cyan), TickerNumber for current amount,
- *      │  helper text + bodyweight-based attribution. Ring fill animates
- *      │  smoothly as the user logs new entries.
- *      └─ Three quick-add chips (8/12/16 oz OR 250/350/500 mL) inside the same card.
+ *      ├─ HydrationPet (day/night PixelScene + pace-aware pixel-slime mascot)
+ *      │  as the hero, current/target readout + bodyweight-based attribution.
+ *      └─ Two quick-add buttons (Cup / Bottle) inside the same card.
  *   3. 7-day chart (AnimateRise delay 250) — Skia bar chart with dashed target line.
  *   4. Today's log list (AnimateRise delay 500) — DeleteAction tap-confirm per row.
  *
@@ -23,14 +22,11 @@
  *     profiles.current_weight + profiles.weight_unit.
  *   – Fallback when weight is missing: 64 oz / 1900 mL (classic 8 glasses).
  *
- * Rendering — GPU-backed via @shopify/react-native-skia. The progress ring
- * and the 7-day chart each paint inside a single Skia <Canvas>. The ring's
- * fill is animated via a Reanimated shared value feeding useDerivedValue,
- * so the arc smoothly extends whenever the user logs a new entry (without
- * the React render cycle being driven per frame). Text labels (axis ticks,
- * day labels) remain absolute-positioned RN <Text> overlays above the
- * canvas per Pattern 9. See HrRangeChart.tsx + LineChart.tsx for the two
- * most-relevant reference implementations.
+ * Rendering — GPU-backed via @shopify/react-native-skia. The mascot scene
+ * (HydrationPet) and the 7-day chart each paint inside Skia <Canvas>es. Text
+ * labels (axis ticks, day labels) remain absolute-positioned RN <Text>
+ * overlays above the canvas per Pattern 9. See HrRangeChart.tsx +
+ * LineChart.tsx for the two most-relevant reference implementations.
  *
  * NOTE (v1 scope): Wearable hydration integration (Samsung Health
  * DataTypes.HYDRATION, Apple HealthKit dietaryWater, etc.) is OUT OF SCOPE.
@@ -40,12 +36,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
 import {
-  Canvas, Path, Group, Skia, vec, DashPathEffect, type SkPath,
+  Canvas, Path, Group, Skia, DashPathEffect, type SkPath,
 } from '@shopify/react-native-skia'
-import {
-  useSharedValue, useDerivedValue, withTiming,
-} from 'react-native-reanimated'
-import { router } from 'expo-router'  // TEMP — Aquos animation spike nav (remove with the spike)
+import HydrationPet from '../../src/components/HydrationPet'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import { dataCache } from '../../src/lib/cache'
@@ -58,10 +51,13 @@ import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 // Canonical conversion constants. All math stays in mL internally; we only
 // switch to oz/mL at display + chip-tap time.
 const ML_PER_OZ = 29.5735
-const OZ_PER_LB = 0.67       // bodyweight target multiplier (oz/lb)
-const ML_PER_KG = 50         // bodyweight target multiplier (mL/kg)
-const FALLBACK_OZ = 64       // 8 × 8oz glasses
-const FALLBACK_ML = 1900
+const LB_TO_KG = 0.45359237
+// Daily drinking-water target: 35 mL per kg of bodyweight at rest — the
+// evidence-based standard endorsed by the U.S. National Academies (IOM) and
+// Mayo Clinic (Vivanti, Eur J Clin Nutr 2012). Cross-checks against the
+// National Academies (3.7 L men / 2.7 L women total water) and EFSA
+// (2.5 / 2.0 L) after backing out the ~20% of water that comes from food.
+const ML_PER_KG_TARGET = 35
 
 function ozToMl(oz: number): number { return oz * ML_PER_OZ }
 function mlToOz(ml: number): number { return ml / ML_PER_OZ }
@@ -74,21 +70,20 @@ function fmtVolume(ml: number, unit: 'oz' | 'mL'): string {
   return String(Math.round(mlToOz(ml)))
 }
 
-/** Compute today's target in mL from profile bodyweight; fallback if missing. */
-function targetMlForProfile(profile: { current_weight: number | null; weight_unit: string | null; fluid_unit?: 'oz' | 'mL' | null } | null): number {
-  if (!profile?.current_weight || profile.current_weight <= 0) {
-    return (profile?.fluid_unit ?? 'oz') === 'mL' ? FALLBACK_ML : ozToMl(FALLBACK_OZ)
-  }
-  if (profile.weight_unit === 'kg') {
-    return profile.current_weight * ML_PER_KG
-  }
-  // Default to lb when weight_unit is null or 'lb'.
-  return ozToMl(profile.current_weight * OZ_PER_LB)
+/** Convert a bodyweight reading to kg (rows store weight in their own unit). */
+function toKg(weight: number, unit: string | null | undefined): number {
+  return unit === 'lb' ? weight * LB_TO_KG : weight
+}
+/** No logged weight — fall back to population beverage targets (National Academies). */
+function defaultTargetMl(gender: string | null | undefined): number {
+  if (gender === 'male') return 3000
+  if (gender === 'female') return 2200
+  return 2500
 }
 
-// Quick-add chips per the locked spec (3 each, no custom).
-const OZ_CHIPS = [8, 12, 16] as const
-const ML_CHIPS = [250, 350, 500] as const
+// Two quick-add sizes — a cup and a bottle.
+const OZ_DRINKS = [{ label: 'Cup', amount: 8 }, { label: 'Bottle', amount: 16 }] as const
+const ML_DRINKS = [{ label: 'Cup', amount: 250 }, { label: 'Bottle', amount: 500 }] as const
 
 // ── DB row ───────────────────────────────────────────────────────────────────
 
@@ -113,80 +108,6 @@ function dateKey(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
-}
-
-// ── Progress ring (Skia, animated) ────────────────────────────────────────────
-
-interface RingProps {
-  pct:    number      // 0..1 (clamped at 1)
-  size:   number
-  stroke: number
-  color:  string
-  trackColor: string
-}
-
-/**
- * Animated circular progress ring rendered on a Skia canvas.
- *
- * The progress arc is built as a partial circle path inside useDerivedValue
- * so the path re-builds on each shared-value frame. The shared value
- * (`progress`) tweens from its previous value to the new `pct` via
- * withTiming whenever the prop changes — so adding a chip-tap entry makes
- * the arc smoothly extend rather than snap. Track is static (full circle).
- *
- * The arc is rotated -90° in math-space (i.e. it starts at 12 o'clock and
- * sweeps clockwise) by passing `-90` as the start angle to addArc.
- */
-function ProgressRing({ pct, size, stroke, color, trackColor }: RingProps) {
-  const r = (size - stroke) / 2
-  const c = size / 2
-
-  // Tween the arc's sweep fraction; React renders are still cheap because
-  // only the shared value drives the per-frame work.
-  const progress = useSharedValue(Math.max(0, Math.min(1, pct)))
-  useEffect(() => {
-    progress.value = withTiming(Math.max(0, Math.min(1, pct)), { duration: 400 })
-  }, [pct, progress])
-
-  // Static track path (full circle outline) — built once.
-  const trackPath = useMemo(() => {
-    const path = Skia.Path.Make()
-    path.addCircle(c, c, r)
-    return path
-  }, [c, r])
-
-  // Animated progress arc path. Rebuilt on every shared-value tick on the
-  // UI thread (worklet). Uses addArc on a bounding rect so the result is a
-  // genuine arc (not a wedge with radial lines). startAngle=-90 means "12
-  // o'clock"; sweep is in degrees, positive = clockwise.
-  const arcPath = useDerivedValue(() => {
-    const path = Skia.Path.Make()
-    if (progress.value <= 0) return path
-    const sweep = 360 * progress.value
-    const rect = { x: c - r, y: c - r, width: r * 2, height: r * 2 }
-    path.addArc(rect, -90, sweep)
-    return path
-  })
-
-  return (
-    <Canvas style={{ width: size, height: size }}>
-      {/* Track — full-circle outline at very low opacity */}
-      <Path
-        path={trackPath}
-        color={trackColor}
-        style="stroke"
-        strokeWidth={stroke}
-      />
-      {/* Progress arc — sweep grows as `pct` grows */}
-      <Path
-        path={arcPath}
-        color={color}
-        style="stroke"
-        strokeWidth={stroke}
-        strokeCap="round"
-      />
-    </Canvas>
-  )
 }
 
 // ── 7-day bar chart (Skia) ──────────────────────────────────────────────────
@@ -341,9 +262,34 @@ export default function Hydration() {
   const { user, profile } = useAuth()
 
   const fluidUnit: 'oz' | 'mL' = ((profile as any)?.fluid_unit as 'oz' | 'mL' | null) ?? 'oz'
-  const chips                  = fluidUnit === 'mL' ? ML_CHIPS : OZ_CHIPS
+  const quickAdds              = fluidUnit === 'mL' ? ML_DRINKS : OZ_DRINKS
 
-  const targetMl = useMemo(() => targetMlForProfile(profile as any), [profile])
+  // Latest logged bodyweight drives the target (falls back to the profile
+  // weight, then a sex-based estimate). Fetched once per user.
+  const [bwKg, setBwKg] = useState<number | null>(null)
+  useEffect(() => {
+    if (!user) return
+    supabase
+      .from('bodyweight')
+      .select('weight, unit, created_at')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        const row = (data as { weight: number; unit: string | null }[] | null)?.[0]
+        if (row?.weight) setBwKg(toKg(Number(row.weight), row.unit))
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  const targetMl = useMemo(() => {
+    const profileKg = (profile as any)?.current_weight
+      ? toKg(Number((profile as any).current_weight), (profile as any).weight_unit)
+      : null
+    const kg = bwKg ?? profileKg
+    if (kg && kg > 0) return Math.round(kg * ML_PER_KG_TARGET)
+    return defaultTargetMl((profile as any)?.gender)
+  }, [bwKg, profile])
 
   // Last-7-days window (today inclusive). We fetch in one shot and bucket
   // client-side so today's "current" total and the 7-day chart share data.
@@ -355,6 +301,7 @@ export default function Hydration() {
 
   const cacheKey = user ? `hydration:${user.id}` : null
   const [logs, setLogs] = useState<WaterLog[]>(() => (cacheKey ? dataCache.get<WaterLog[]>(cacheKey) ?? [] : []))
+  const [drinks, setDrinks] = useState(0)   // bumps on each log → drives the pet's drink reaction
 
   useEffect(() => {
     if (!user) return
@@ -411,12 +358,11 @@ export default function Hydration() {
     return out
   }, [logs])
 
-  const pct = targetMl > 0 ? todayMl / targetMl : 0
-
   // ── Actions ────────────────────────────────────────────────────────────────
 
   async function addAmount(displayAmount: number) {
     if (!user) return
+    setDrinks(d => d + 1)   // pet plays Eat + a hop
     const amountMl = fluidUnit === 'mL' ? displayAmount : ozToMl(displayAmount)
     // Optimistic insert with a temporary id so the ring + chart move instantly.
     const tempId = `temp-${Date.now()}`
@@ -465,11 +411,10 @@ export default function Hydration() {
   const remainingMl    = Math.max(0, targetMl - todayMl)
   const overTarget     = todayMl > targetMl
 
-  const targetAttribution = (profile as any)?.current_weight
-    ? (profile?.weight_unit === 'kg'
-        ? `Bodyweight × 50 mL/kg`
-        : `Bodyweight × 0.67 oz/lb`)
-    : `Default — log your weight for a personalized target`
+  const hasWeight = bwKg != null || ((profile as any)?.current_weight ?? 0) > 0
+  const targetAttribution = hasWeight
+    ? `35 mL/kg bodyweight · National Academies · Mayo Clinic · EFSA`
+    : `Sex-based estimate · National Academies · EFSA — log your weight to personalize`
 
   return (
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
@@ -481,47 +426,15 @@ export default function Hydration() {
           <Text style={s.sub}>Track your water intake and reach your daily goal.</Text>
         </View>
 
-        {/* ── TEMP: Aquos animation spike (Rive vs Skia bake-off) ──
-            Throwaway dev entry point so the two companion prototypes can be
-            compared on-device. Remove this whole block (+ the expo-router
-            import + app/rive-spike.tsx + app/skia-spike.tsx) once a path is
-            chosen. */}
-        <View style={s.spikeCard}>
-          <Text style={s.spikeLabel}>Aquos animation — compare</Text>
-          <View style={s.spikeRow}>
-            <Pressable style={s.spikeBtn} onPress={() => router.push('/rive-spike' as any)}>
-              <Text style={s.spikeBtnText}>Rive version</Text>
-            </Pressable>
-            <Pressable style={s.spikeBtn} onPress={() => router.push('/skia-spike' as any)}>
-              <Text style={s.spikeBtnText}>Skia version</Text>
-            </Pressable>
-          </View>
-        </View>
-
         {/* ── Today's progress + quick-add chips ── */}
         <AnimateRise delay={0}>
           <View style={s.card}>
-            {/* Progress ring with center value */}
-            <View style={s.ringWrap}>
-              <ProgressRing
-                pct={pct}
-                size={200}
-                stroke={14}
-                color={palette.cyan[400]}
-                trackColor={withAlpha(palette.cyan[400], 0.15)}
-              />
-              <View style={s.ringCenter} pointerEvents="none">
-                <View style={s.ringValueRow}>
-                  <TickerNumber
-                    value={currentDisplay}
-                    fontSize={36}
-                    fontWeight="700"
-                    color={palette.cyan[400]}
-                  />
-                </View>
-                <Text style={s.ringUnit}>{fluidUnit}</Text>
-                <Text style={s.ringSub}>of {targetDisplay} {fluidUnit}</Text>
-              </View>
+            {/* Hydration mascot — the day/night scene + pace-aware pet,
+                replaces the old daily-total ring */}
+            <HydrationPet todayMl={todayMl} targetMl={targetMl} drinkNonce={drinks} />
+            <View style={s.petStats}>
+              <TickerNumber value={currentDisplay} fontSize={30} fontWeight="700" color={palette.cyan[400]} />
+              <Text style={s.petStatsSub}>of {targetDisplay} {fluidUnit}</Text>
             </View>
 
             <Text style={s.helper}>
@@ -533,16 +446,16 @@ export default function Hydration() {
             </Text>
             <Text style={s.attribution}>{targetAttribution}</Text>
 
-            {/* Quick-add chips */}
+            {/* Quick-add — a cup and a bottle */}
             <View style={s.chipsRow}>
-              {chips.map(amt => (
+              {quickAdds.map(d => (
                 <Pressable
-                  key={amt}
-                  onPress={() => addAmount(amt)}
-                  style={({ pressed }) => [s.chip, pressed && s.chipPressed]}
+                  key={d.label}
+                  onPress={() => addAmount(d.amount)}
+                  style={({ pressed }) => [s.drinkBtn, pressed && s.chipPressed]}
                 >
-                  <Text style={s.chipValue}>+{amt}</Text>
-                  <Text style={s.chipUnit}>{fluidUnit}</Text>
+                  <Text style={s.drinkLabel}>{d.label}</Text>
+                  <Text style={s.drinkValue}>+{d.amount} {fluidUnit}</Text>
                 </Pressable>
               ))}
             </View>
@@ -644,28 +557,8 @@ const s = StyleSheet.create({
   h1:  { fontSize: 20, fontWeight: '600', color: colors.foreground, letterSpacing: -0.4 },
   sub: { fontSize: 14, color: colors.mutedForeground, marginTop: 2 },
 
-  // TEMP — Aquos animation spike entry (remove with the spike)
-  spikeCard: {
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: withAlpha(palette.myrx.lime, 0.4),
-    borderRadius: 12,
-    padding: 12,
-    gap: 8,
-    backgroundColor: withAlpha(palette.myrx.lime, 0.05),
-  },
-  spikeLabel: { fontSize: 11, fontFamily: fonts.sans[700], color: palette.myrx.lime, textTransform: 'uppercase', letterSpacing: 1 },
-  spikeRow: { flexDirection: 'row', gap: 10 },
-  spikeBtn: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: withAlpha(palette.myrx.lime, 0.14),
-    borderWidth: 1,
-    borderColor: withAlpha(palette.myrx.lime, 0.3),
-  },
-  spikeBtnText: { fontSize: 13, fontFamily: fonts.sans[700], color: colors.foreground },
+  petStats: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', gap: 6 },
+  petStatsSub: { color: colors.mutedForeground, fontSize: 14, fontFamily: fonts.sans[500], paddingBottom: 4 },
 
   // Card chrome — matches bodyweight / dashboard
   card: {
@@ -677,31 +570,24 @@ const s = StyleSheet.create({
     gap: 14,
   },
 
-  // Progress ring
-  ringWrap:    { alignItems: 'center', justifyContent: 'center', height: 200, position: 'relative' },
-  ringCenter:  { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
-  ringValueRow:{ flexDirection: 'row', alignItems: 'flex-end' },
-  ringUnit:    { fontSize: 12, color: colors.mutedForeground, marginTop: 2, letterSpacing: 0.4 },
-  ringSub:     { fontSize: 12, color: colors.mutedForeground, marginTop: 6 },
-
   helper:        { fontSize: 13, color: colors.foreground, lineHeight: 18, textAlign: 'center' },
   attribution:   { fontSize: 11, color: colors.mutedForeground, textAlign: 'center' },
 
   // Quick-add chips
   chipsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  chip: {
+  drinkBtn: {
     flex: 1,
     backgroundColor: withAlpha(palette.cyan[500], 0.10),
     borderColor: withAlpha(palette.cyan[500], 0.40),
     borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 12,
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
-    gap: 2,
+    gap: 3,
   },
   chipPressed: { opacity: 0.65 },
-  chipValue:   { fontSize: 18, fontWeight: '700', color: palette.cyan[400], fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'] },
-  chipUnit:    { fontSize: 11, color: colors.mutedForeground, letterSpacing: 0.4 },
+  drinkLabel:  { fontSize: 15, color: colors.foreground, fontFamily: fonts.sans[700] },
+  drinkValue:  { fontSize: 13, color: palette.cyan[400], fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'] },
 
   // Chart
   chartHeading:      { fontSize: 14, fontWeight: '600', color: colors.foreground },

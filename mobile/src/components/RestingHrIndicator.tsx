@@ -445,36 +445,6 @@ export default function RestingHrIndicator({
       </View>
 
       <Text style={ss.oneLineTip}>{oneLineTip}</Text>
-
-      <View style={ss.tipsList}>
-        <TipRow
-          color={palette.emerald[400]}
-          title="Easy aerobic cardio (Z2)"
-          body="30–60 min at a conversational pace, 3–5×/week. The single biggest driver of lower resting HR — improves cardiac stroke volume."
-        />
-        <TipRow
-          color={palette.sky[400]}
-          title="Sleep 7–9 hours"
-          body="Poor sleep can raise resting HR 5–10 bpm. Track over weeks — bad-sleep weeks usually show up as a bump in this number."
-        />
-        <TipRow
-          color={palette.amber[400]}
-          title="Hydration + caffeine"
-          body="Dehydration adds 5–10 bpm; heavy caffeine adds 5–15. Aim for ~3 L water/day and watch coffee timing in the afternoon."
-        />
-      </View>
-    </View>
-  )
-}
-
-function TipRow({ color, title, body }: { color: string; title: string; body: string }) {
-  return (
-    <View style={ss.tipRow}>
-      <View style={[ss.tipDot, { backgroundColor: color }]} />
-      <View style={{ flex: 1 }}>
-        <Text style={ss.tipTitle}>{title}</Text>
-        <Text style={ss.tipBody}>{body}</Text>
-      </View>
     </View>
   )
 }
@@ -589,31 +559,5 @@ const ss = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
     marginTop: 8,
-  },
-  tipsList: {
-    marginTop: 10,
-    gap:       10,
-  },
-  tipRow: {
-    flexDirection: 'row',
-    gap:           10,
-    alignItems:    'flex-start',
-  },
-  tipDot: {
-    width:        8,
-    height:       8,
-    borderRadius: 4,
-    marginTop:    5,
-  },
-  tipTitle: {
-    color:      colors.foreground,
-    fontSize:   12,
-    fontWeight: '700',
-  },
-  tipBody: {
-    color:    colors.mutedForeground,
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 2,
   },
 })

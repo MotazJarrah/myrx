@@ -107,6 +107,34 @@ function fmtTime(iso: string | null): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
+/**
+ * Local calendar-day key (YYYY-MM-DD) for an ISO timestamp — buckets a
+ * reading by the user's LOCAL day, not UTC. `measured_at.slice(0,10)` used
+ * the UTC date, which slid evening readings into the next day for users in
+ * negative-UTC timezones (and broke "is this today?").
+ */
+function localDayKey(input: string | Date): string {
+  const d = typeof input === 'string' ? new Date(input) : input
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/**
+ * "When" label for the latest-HR card. Shows just the time if the reading is
+ * from today; otherwise prefixes "yesterday" or the month/day so a reading
+ * from a previous day never masquerades as today's.
+ */
+function fmtWhen(iso: string): string {
+  const d = new Date(iso)
+  const key = localDayKey(d)
+  if (key === localDayKey(new Date())) return fmtTime(iso)
+  const y = new Date(); y.setDate(y.getDate() - 1)
+  if (key === localDayKey(y)) return `yesterday ${fmtTime(iso)}`
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${fmtTime(iso)}`
+}
+
 function fmtDuration(s: number | null | undefined): string {
   if (!s) return '—'
   const m = Math.floor(s / 60)
@@ -298,19 +326,28 @@ function approximateZonesFromAggregates(
   return buckets
 }
 
+/** An empty day placeholder (no readings) for padding the 7-day window. */
+function emptyDay(day: string): DailySummary {
+  return {
+    day, avg: null, min: null, max: null, resting: null,
+    samples: 0, peakRangeLow: null, peakRangeHigh: null,
+    workoutCount: 0, timeInZone: null,
+  }
+}
+
 function summariseByDay(hrSamples: HrSampleRow[], workouts: WorkoutRow[], hrMax: number): DailySummary[] {
   const buckets = new Map<string, { hr: HrSampleRow[]; wo: WorkoutRow[] }>()
 
   // Seed with HR sample days
   for (const s of hrSamples) {
-    const day = s.measured_at.slice(0, 10)
+    const day = localDayKey(s.measured_at)
     const cell = buckets.get(day) ?? { hr: [], wo: [] }
     cell.hr.push(s)
     buckets.set(day, cell)
   }
   // Merge in workout days
   for (const w of workouts) {
-    const day = w.start_at.slice(0, 10)
+    const day = localDayKey(w.start_at)
     const cell = buckets.get(day) ?? { hr: [], wo: [] }
     cell.wo.push(w)
     buckets.set(day, cell)
@@ -532,22 +569,43 @@ export default function HeartPage() {
   const hrMax = useMemo(() => estimateHrMax(profile?.birthdate), [profile?.birthdate])
   const daily = useMemo(() => summariseByDay(hrSamples, workouts, hrMax), [hrSamples, workouts, hrMax])
   const todaySummary = useMemo(() => {
-    const today = startOfTodayIso().slice(0, 10)
+    const today = localDayKey(new Date())
     return daily.find(d => d.day === today) ?? null
+  }, [daily])
+
+  // The full 7-day window as calendar days (oldest → newest), padding any day
+  // with no readings (e.g. today before the watch has synced HR) with an empty
+  // placeholder so the chart + history always show all 7 days, not just the
+  // days that happen to have data.
+  const dailyFull = useMemo(() => {
+    const keys: string[] = []
+    const now = new Date()
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(now.getDate() - i)
+      keys.push(localDayKey(d))
+    }
+    const byDay = new Map(daily.map(d => [d.day, d]))
+    return keys.map(k => byDay.get(k) ?? emptyDay(k))
   }, [daily])
 
   const todaySteps   = useMemo(() => todayStepsTotal(stepRows), [stepRows])
   const latestSample = useMemo(() => latestHr(hrSamples),       [hrSamples])
 
-  // 7-day stats fall back to the whole week when there's no data for today
-  const restingThisWeek = useMemo(() => {
+  // 7-day fallback for the Resting card when today has no reading yet — the
+  // AVERAGE of the daily lows (matches the resting-HR indicator + the "Avg of
+  // daily lows" chip). Previously this was Math.min (the week's single lowest
+  // day), which disagreed with every other resting number on the page.
+  const restingFallback = useMemo(() => {
     const restings = daily.map(d => d.resting).filter((v): v is number => v != null)
-    return restings.length > 0 ? Math.min(...restings) : null
+    return restings.length > 0
+      ? Math.round(restings.reduce((a, b) => a + b, 0) / restings.length)
+      : null
   }, [daily])
 
   // Chart series — per-day resting dot + avg dot + workout-driven peak band
   const chartData = useMemo<HrDayPoint[]>(
-    () => daily.map(d => ({
+    () => dailyFull.map(d => ({
       day:           d.day,
       resting:       d.resting,
       avg:           d.avg,
@@ -556,7 +614,7 @@ export default function HeartPage() {
       workoutCount:  d.workoutCount,
       timeInZone:    d.timeInZone ?? undefined,
     })),
-    [daily],
+    [dailyFull],
   )
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -633,24 +691,24 @@ export default function HeartPage() {
               value={latestSample ?? 0}
               unit="bpm"
               hint={latestSample != null && hrSamples.length > 0
-                ? fmtTime(hrSamples[hrSamples.length - 1].measured_at)
+                ? fmtWhen(hrSamples[hrSamples.length - 1].measured_at)
                 : '—'}
               accent={palette.red[400]}
             />
             <StatCard
               icon={<Activity size={16} color={palette.emerald[400]} />}
-              label="Resting (today)"
-              value={todaySummary?.resting ?? restingThisWeek ?? 0}
+              label="Resting"
+              value={todaySummary?.resting ?? restingFallback ?? '—'}
               unit="bpm"
-              hint={todaySummary ? 'today’s low' : 'last 7 days'}
+              hint={todaySummary?.resting != null ? 'today’s low' : '7-day avg'}
               accent={palette.emerald[400]}
             />
             <StatCard
               icon={<TrendingUp size={16} color={palette.sky[400]} />}
               label="Avg today"
-              value={todaySummary?.avg ?? 0}
+              value={todaySummary?.avg ?? '—'}
               unit="bpm"
-              hint={todaySummary ? `${todaySummary.samples} readings` : 'no data today'}
+              hint={todaySummary?.avg != null ? `${todaySummary.samples} readings` : 'no readings today'}
               accent={palette.sky[400]}
             />
             <StatCard
@@ -786,7 +844,7 @@ export default function HeartPage() {
             const bandsRows     = bandsForUser(ageForRows, genderForRows)
             const classify      = (v: number) => classifyResting(v, bandsRows).color
 
-            return daily.slice().reverse().map((d, idx) => {
+            return dailyFull.slice().reverse().map((d, idx) => {
               const peak = Math.max(d.max ?? 0, d.peakRangeHigh ?? 0) || null
               const low  = d.resting ?? d.min ?? null
 
@@ -877,11 +935,14 @@ function StatCard({
 }: {
   icon:   React.ReactNode
   label:  string
-  value:  number
+  value:  number | string
   unit:   string
   hint:   string
   accent: string
 }) {
+  // Only show the unit beside a real number — a "—" placeholder shouldn't
+  // read as "— bpm".
+  const showUnit = !!unit && typeof value === 'number'
   return (
     <View style={[s.statCard, { borderColor: withAlpha(accent, 0.20) }]}>
       <View style={s.statHead}>
@@ -890,7 +951,7 @@ function StatCard({
       </View>
       <View style={s.statValueRow}>
         <TickerNumber value={value} style={[s.statValue, { color: accent }]} />
-        {!!unit && <Text style={[s.statUnit, { color: accent }]}>{unit}</Text>}
+        {showUnit && <Text style={[s.statUnit, { color: accent }]}>{unit}</Text>}
       </View>
       <Text style={s.statHint}>{hint}</Text>
     </View>

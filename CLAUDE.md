@@ -1709,7 +1709,7 @@ Android-only wearable / health-platform funnel. Google Health Connect is the uni
 - `mobile/app.json` — `plugins` array includes `react-native-health-connect` first (rationale intent filter) followed by `./plugins/withHealthConnectPermissions` (data-type permissions). Order matters: the second plugin appends to whatever AndroidManifest the first one produced.
 - `mobile/src/lib/healthConnect.ts` — service module. Lazy-requires the native module (so iOS doesn't blow up on module load); exports `availability()`, `initialize()`, `requestPermissions()`, `grantedPermissions()`, `disconnect()`, `fetchRecentWorkouts(days)`, `fetchRecentHeartRate(days)`. All async, all safe-default on iOS.
 - `mobile/src/lib/lastSyncStorage.ts` — per-integration last-sync timestamp persistence in AsyncStorage. Keyed by `myrx.lastSync.<integration>` where integration ∈ `'healthConnect' | 'appleHealthKit' | 'strava' | 'garmin' | 'whoop' | 'polar'`. Also exports `formatLastSync(iso)` for human-friendly "5 min ago" / "yesterday" strings.
-- `mobile/app/(app)/profile.tsx` — `ConnectTab` shows the Health Connect row with Connect / Sync now / Disconnect actions wired up. Other 5 integration rows (Apple Health, Strava, Garmin, Whoop, Polar Flow) remain "Coming soon" placeholders.
+- `mobile/app/(app)/settings.tsx` — `ConnectTab` shows the Health Connect row with Connect / Sync now / Disconnect actions wired up. Other 5 integration rows (Apple Health, Strava, Garmin, Whoop, Polar Flow) remain "Coming soon" placeholders.
 
 **Native rebuild required:**
 
@@ -1823,7 +1823,7 @@ HC stays in the app as a FALLBACK for users on non-Samsung Android devices whose
 - **Java 17+, Kotlin coroutines, kotlin-parcelize plugin.** Already in place via Expo SDK 54 + JBR 21.
 - **Native module shape.** `mobile/android/app/src/main/java/com/myrx/app/samsung/SamsungHealthModule.kt` exposes: `isAvailable()`, `getPermissionStatus()`, `requestPermissions()`, `readHeartRate(startMs, endMs)`, `readSteps(startMs, endMs)`, `readWorkouts(startMs, endMs)`. Registered via `SamsungHealthPackage.kt` added to `MainApplication.getPackages()`.
 - **JS-side service.** `mobile/src/lib/integrations/samsungHealth.ts` mirrors the Polar / Health Connect shape (`availability()`, `requestConnect()`, `getStatus()`, `disconnect()`, `syncRecent(daysBack)`). Sync writes into `hr_samples`, `step_samples`, and `wearable_workouts` Supabase tables with idempotent upsert keyed on `(user_id, source, source_record_id)`.
-- **Connect tab.** Samsung Health gets a dedicated card on the Connect tab (`profile.tsx::ConnectTab`) between Health Connect and Polar — Connect / Sync now / Disconnect actions mirror the Health Connect pattern.
+- **Connect tab.** Samsung Health gets a dedicated card on the Connect tab (`settings.tsx::ConnectTab`) between Health Connect and Polar — Connect / Sync now / Disconnect actions mirror the Health Connect pattern.
 - **Config plugin.** `mobile/plugins/withSamsungHealth.js` survives `expo prebuild --clean`. It patches AndroidManifest (`<package name="com.sec.android.app.shealth"/>` in `<queries>`), `app/build.gradle` (kotlin-parcelize + AAR fileTree + gson + lifecycle-runtime-ktx + kotlinx-coroutines-android), and MainApplication.kt (SamsungHealthPackage import + registration).
 - **Verification path.** Once the AAR is in place and the dev-client APK rebuilt via `npx expo run:android`, Settings → Connect → Samsung Health → Connect launches Samsung Health's permission dialog → grant → Sync now pulls last 7 days of HR + step buckets + workouts into Supabase.
 
@@ -2534,7 +2534,7 @@ MyRX has been built Android-first since day one. The `mobile/` Expo project has 
 Android handles these as runtime prompts driven by `<uses-permission>` declarations in `mobile/android/app/src/main/AndroidManifest.xml` lines 2-17. iOS requires PRE-DECLARED human-readable strings in Info.plist or the app crashes when the permission is requested.
 - [ ] `NSCameraUsageDescription` — already styled prose at `mobile/app.json` line 53 (expo-camera plugin `cameraPermission`). Verify carried into iOS Info.plist via the expo-camera plugin.
 - [ ] `NSFaceIDUsageDescription` — already at `mobile/app.json` line 61 (`faceIDPermission` via expo-local-authentication). Verify iOS injection.
-- [ ] `NSHealthShareUsageDescription` — net new. Mirror Samsung Health blurb from `mobile/app/(app)/profile.tsx` line 2118.
+- [ ] `NSHealthShareUsageDescription` — net new. Mirror Samsung Health blurb from `mobile/app/(app)/settings.tsx` line 2118.
 - [ ] `NSHealthUpdateUsageDescription` — net new (only if writing back; v1 is read-only — set to a forward-looking string anyway since v2 will write).
 - [ ] `NSPhotoLibraryUsageDescription` — for avatar upload via expo-image-picker.
 - [ ] `NSPhotoLibraryAddUsageDescription` — only if we ever export workout images.
@@ -2559,7 +2559,7 @@ Samsung Health is the canonical Android integration: `mobile/android/app/src/mai
 - [ ] Wire `last_sync` storage via existing `mobile/src/lib/lastSyncStorage.ts` (the `'appleHealthKit'` integration key is already in the union — line 20).
 - [ ] Heart page (`mobile/app/(app)/heart.tsx`) and Sleep page (pending — see proposed spec) must auto-switch source from `samsung_health` → `apple_healthkit` on iOS. Per-second HR log path: Samsung exposes `ExerciseSession.log[].heartRate`; HealthKit exposes `HKQuantityTypeIdentifierHeartRate` series — write a normaliser so `wearable_workouts.raw_meta.hr_log` JSONB stays the same shape across platforms.
 - [ ] Add the `apple_healthkit` platform to the `user_integrations` RLS INSERT/UPDATE policies (`access_token IS NULL` guard already in place — migration `user_integrations_allow_owner_native_sdk_writes` covers it).
-- [ ] Update `mobile/app/(app)/profile.tsx` Connect tab — the "Apple Health" placeholder at line 2118 graduates to a functional row mirroring the Health Connect / Samsung Health rows.
+- [ ] Update `mobile/app/(app)/settings.tsx` Connect tab — the "Apple Health" placeholder at line 2118 graduates to a functional row mirroring the Health Connect / Samsung Health rows.
 
 ### 6. Sign in with Apple (MANDATORY if any social-login is offered)
 App Store Review Guideline 4.8: any app offering third-party social login MUST also offer Sign in with Apple. We don't currently offer social login — but if we add Google / GitHub coach-signup before iOS launch, SIWA becomes mandatory.
@@ -2582,7 +2582,7 @@ Pre-launch checklist items 14-20 already cover App Store Connect IAP — extendi
 - [ ] Edge function: receipt validation endpoint (calls Apple's `verifyReceipt` / App Store Server API). Mirror what'll eventually exist for Google Play Developer API.
 
 ### 9. SMS auto-fill (built-in on iOS, library on Android)
-Android uses `react-native-sms-user-consent` (lazy-required at `mobile/app/(app)/profile.tsx` line 56-60). iOS auto-fills natively via `UITextContentType.oneTimeCode` — no library needed.
+Android uses `react-native-sms-user-consent` (lazy-required at `mobile/app/(app)/settings.tsx` line 56-60). iOS auto-fills natively via `UITextContentType.oneTimeCode` — no library needed.
 - [ ] Verify every OTP input across the codebase has `textContentType="oneTimeCode"` + `autoComplete="sms-otp"` props set: `mobile/src/components/OTPInput.tsx` line 102 ✓, signup OTP screens, password-reset OTP, phone-OTP, email-OTP.
 - [ ] Verify SMS body format from Supabase + Twilio Verify is compatible with iOS auto-fill heuristic (code must appear near the end of the message).
 
@@ -2611,14 +2611,14 @@ These spots in the code already document iOS as a follow-up. Each becomes an act
 - [ ] `mobile/src/lib/healthConnect.ts` lines 9, 14, 41-43, 92, 112, 229, 277 — iOS safe-default branches. Replace with HealthKit dispatch once integration ships.
 - [ ] `mobile/src/lib/integrations/samsungHealth.ts` lines 95, 132 — iOS unsupported_platform return; route to HealthKit on iOS via platform check.
 - [ ] `mobile/src/lib/integrations/polar.ts` line 74 — note that OAuth callback handles iOS Universal Link (AASA must be live first).
-- [ ] `mobile/app/(app)/profile.tsx` lines 2101, 2118, 2360, 2384 — "Apple HealthKit support coming for iOS" placeholder copy. Swap once HealthKit lands.
+- [ ] `mobile/app/(app)/settings.tsx` lines 2101, 2118, 2360, 2384 — "Apple HealthKit support coming for iOS" placeholder copy. Swap once HealthKit lands.
 - [ ] `CLAUDE.md` line 1525, 1627, 1676 — wearable strategy markers; update when HealthKit migration ships.
 
 ### 14. Apple-specific UI / behaviour parity
 - [ ] iOS Safari does NOT support `screen.orientation.lock` (per CLAUDE.md line 3812-3817) — barcode scanner gracefully degrades. Confirm visible "align horizontally" hint is sufficient on iPhone.
 - [ ] Swipe-back gesture: `mobile/app/(auth)/sign-up.tsx` line 3176 notes Android hardware back works; iOS uses edge-swipe — verify every full-screen modal allows edge-swipe-to-dismiss.
 - [ ] iOS Keyboard: `mobile/src/components/KeyboardScreen.tsx` line 7-19 already handles `behavior="padding"` for iOS. Run on physical iPhone to confirm.
-- [ ] Date picker: `mobile/app/(app)/profile.tsx` line 251, 415, 1024 — iOS uses inline picker, Android uses imperative dialog. Already coded conditionally.
+- [ ] Date picker: `mobile/app/(app)/settings.tsx` line 251, 415, 1024 — iOS uses inline picker, Android uses imperative dialog. Already coded conditionally.
 
 ### 15. EAS Build + Submit for iOS
 - [ ] `eas.json` extended with `ios` build profile (development + preview + production).
@@ -3013,7 +3013,7 @@ When in doubt, audit the rendered surface for ANY brand mark (image OR text) bef
 - **`profile.is_superuser`** hides the two share-with-coach toggles on the Settings page (admin has no coach). Applied in:
   - `src/pages/EditProfile.jsx` (end-user web, when admin is in client view) — `isAdmin` check
   - `src/pages/admin/tabs/AdminUserProfile.jsx` (admin's own profile via `/admin/profile`) — `isOwnProfile` prop
-  - `mobile/app/(app)/profile.tsx` (mobile, defensive) — `isAdmin` check
+  - `mobile/app/(app)/settings.tsx` (mobile, defensive) — `isAdmin` check
 - **Profile refresh no longer unmounts the route tree.** `App.jsx` `ProtectedLayout` only renders `<ShellSkeleton />` when `profile` is `null` (initial load), not on every `refreshProfile()` call. Mirrors mobile's `(app)/_layout.tsx` guard.
 
 ### Mobile auth infrastructure (shipped)
@@ -3279,7 +3279,7 @@ mobile/
 │       ├── bodyweight.tsx              # ✅ Bodyweight.jsx
 │       ├── calories.tsx                # ✅ Calories.jsx (FoodLogDrawer + barcode)
 │       ├── history.tsx                 # ✅ History.jsx
-│       ├── profile.tsx                 # ✅ EditProfile.jsx (Profile + Settings tabs)
+│       ├── settings.tsx                 # ✅ EditProfile.jsx (Profile + Settings tabs)
 │       └── effort/
 │           ├── strength/[exercise].tsx # ✅ StrengthDetail.jsx
 │           └── cardio/[activity].tsx   # ✅ CardioDetail.jsx
@@ -3338,7 +3338,7 @@ mobile/
 - **`(auth)/_layout.tsx` redirects to `/(app)` only when `isProfileComplete(profile)` is true** — not just `profile` truthy. The signup journey writes profile fields incrementally (email-OTP success writes body data; phone-OTP writes phone + verified_at; etc.); without the completeness check, mid-journey users would bounce to dashboard before required fields exist.
 - **`(app)/_layout.tsx` only shows `<ShellSkeleton />` when `profile === null`** (initial cold load). Subsequent `refreshProfile()` calls flip `profileLoading=true` briefly but we keep the existing UI mounted so route state (scroll position, active tab, form inputs) survives. Mirrors web's `ProtectedLayout`.
 - **AsyncStorage key `myrx.signup.state`** persists `{ step, data }` across the signup journey. Survives app-switching (e.g. user leaves to read the SMS code) — the journey resumes at the same step on return.
-- **Settings → Chat card admin gate:** the two share-with-coach toggles are hidden on `profile.tsx` when `profile.is_superuser === true`. Only `Enter to send` shows. Same gate exists on web (`EditProfile.jsx`'s `isAdmin` check + `AdminUserProfile.jsx`'s `isOwnProfile` prop).
+- **Settings → Chat card admin gate:** the two share-with-coach toggles are hidden on `settings.tsx` when `profile.is_superuser === true`. Only `Enter to send` shows. Same gate exists on web (`EditProfile.jsx`'s `isAdmin` check + `AdminUserProfile.jsx`'s `isOwnProfile` prop).
 - **Mobility's slider commits on gesture-end only.** During a Pan, only `x.value` (UI-thread shared value) updates. Live mannequin animation is deferred until tested on a real device — emulator software rendering can't keep up with per-frame SVG repaints.
 - **Deleted-user detection (`AuthContext.tsx`):** after `getSession()`, validates the session against the auth server with `getUser()`. If 401 (user was hard-deleted), signs out cleanly so the app doesn't crash trying to fetch the missing profile.
 - **Android quirk — `fontFamily` + `fontWeight` don't combine.** When `fontFamily` points at a registered custom font (Geist, JetBrainsMono — the only families this app loads), do NOT also set `fontWeight` on the same style. Android's renderer can't auto-resolve the weight against a custom family, and the dual hint makes the renderer silently fall back to the system default. Encode the weight into the family name instead (`fonts.sans[700]` is `Geist_700Bold`, `fonts.mono[600]` is `JetBrainsMono_600SemiBold`). iOS tolerates the combination, so this is Android-only — but every style in the app must be Android-safe.
@@ -5303,14 +5303,29 @@ const [, setLeaf1] = useRiveBoolean(riveRef, 'leaf1')   // setLeaf1(true) should
 ### Introspection tooling
 `C:/Users/motaz/riv-introspect/` — Node scripts using `@rive-app/canvas-advanced-single` with headless DOM shims. **The richer `Image` shim that fires `onload` via `queueMicrotask` is REQUIRED** or `rive.load()` hangs forever on the plant's embedded image mesh (a minimal Image stub never resolves). Node 22's `navigator` is read-only — do NOT shim it. Scripts: `introspect.mjs` (artboards + SM inputs), `nesting.mjs` (probe artboard prototype methods), `probe.mjs` (`inputByPath(name,path)` grid), `vmcheck.mjs` (view models + properties). Run `node <script>.mjs [path-to-riv]` — inspects any `.riv` offline without rendering.
 
-### CURRENT BLOCKER + suspected failure modes (debug here next)
-Data-binding plant-spike built/bundled/rebuilt/deployed OK (no JS or rive errors in logcat, plant renders), but per-leaf control is NOT visually confirmed. Investigate in order:
-1. **Agent's data binding may be incomplete** — `PlantControl.leafN` properties exist but may not be *bound* to track N's leaf `active` (the stub `LeafControlScript` hints at this). **VERIFY IN THE RIVE EDITOR**: open file 2328827, use the editor's preview/**Testing** panel to toggle `PlantControl.leafN` and watch a single leaf open. This proves the binding BEFORE touching app code. If unbound, wire them (or redo — see "recommended approach").
-2. **AutoBind(true) may not bind PlantControl** — it auto-binds the artboard's DEFAULT VM instance. Inspector showed `Model=PlantControl, Instance=Instance` (likely a default exists). If AutoBind fails, try `dataBinding={BindByName('PlantControl')}`.
-3. **useRiveBoolean path may be wrong** — tried `'leaf1'`; if nested/different the setter silently no-ops.
-4. **Nested leaf SMs may not be running** — if a leaf instance plays a fixed timeline instead of its `State Machine 1`, its `active` never takes effect.
+### CURRENT STATUS — binding CONFIRMED broken; Build Agent is a DEAD END (June 1 2026, session 2)
 
-**Recommended next-session approach:** verify/repair the bindings IN the Rive editor with eyes on the canvas FIRST (toggle `PlantControl.leafN` in the editor's Testing panel → watch one leaf open), then re-export → re-bundle → `npx expo run:android` → test. If the Agent's data binding is broken/hard to fix, switch to the simpler, more runtime-robust **state-machine approach**: add a Number input `growth` (0–5) on the plant SM with 6 states opening one more leaf each, OR expose 5 plain boolean SM inputs — both drive cleanly via `setInputState(...)` with zero data-binding complexity. The user already paid for CADET, so re-editing + re-exporting is free until they downgrade.
+**The binding is broken — PROVEN in the editor.** Opened file 2328827, Animate mode → played State Machine 1 (eyes start closed), opened the Data panel (the `PlantControl` instance), set `leaf1`–`leaf5` ALL true, zoomed to fit: **zero eyes opened.** The Build Agent only declared the VM + 5 boolean properties + a no-op stub; it NEVER wired `leafN` → each leaf's `active`. ("leaf on" still opens all 5; the per-leaf VM does nothing.)
+
+**The in-editor Build Agent CANNOT fix this — confirmed, do NOT keep trying it.** Across two sessions it produced ONLY empty stub scripts (`LeafControlScript`, then `AddLeaf1Input` — both just comments + `return function(){ return {} }`). When pushed for a single SM boolean it stated outright: *"that's a manual process in Rive's GUI since the API limitations prevent programmatic state machine input additions"* and that the VM *"requires manual setup in the editor (adding a listener to the nested state machine)… which is why they weren't working."* **Takeaway: the Build Agent can write scripts but CANNOT add state-machine inputs OR create data-bind edges. Both real fix-paths are manual GUI surgery.** Don't burn another Agent run on this.
+
+**Two manual-GUI fix paths remain (Agent can't do either):**
+1. **Data-bind edges** (easier manual build): bind each nested leaf instance's `active` input to `PlantControl.leafN`. VM + properties already exist, so it's ~5 edges, no new states/timelines. RUNTIME RISK: rive-react-native nested-artboard data-binding is the fragile path (see failure modes below) — verify on-device before trusting it.
+2. **State-machine inputs** (harder manual build, runtime-PROVEN): add 5 boolean SM inputs (or a Number `growth` 0–5) on State Machine 1 + states/transitions/timelines that open leaves cumulatively, mirroring how "leaf on" already opens all 5. Drives via `setInputState(...)` — the SAME API already proven to work for "leaf on" at runtime. Much more GUI work to build.
+
+**Runtime failure modes to watch (data-bind route):**
+- `AutoBind(true)` auto-binds the artboard's DEFAULT VM instance (Inspector: `Model=PlantControl, Instance=Instance`). If it doesn't bind, try `dataBinding={BindByName('PlantControl')}`.
+- `useRiveBoolean('leaf1')` path may be wrong/nested → setter silently no-ops.
+- Nested leaf SMs must be running for `active` to take effect. NOTE: "leaf on" proves the nested actives DO animate at runtime when driven through the parent SM — which is why the SM-input path is the safer runtime bet.
+
+**Rig structure (mapped this session — exact paths for the manual fix):**
+- Artboard `plant` → `controls` (group) → `track 1`..`track 5` (bones, follow-path constrained) → each `track N` → `leaf N` (a GROUP) → `leaf` (the NESTED ARTBOARD instance: `Source: leaf`, `Mode: Node`, `Model: Inherit`). The nested `leaf` instance plays its own `State Machine 1` + `leaf loop`; its eye open/close is controlled by the leaf artboard's own boolean input `active`.
+- Parent `plant` State Machine 1 = `Entry` / `Any State` / `Exit` / `event-off` / `event-on`, driven by the boolean input `leaf on` (opens/closes ALL five at once — the `leafs on`/`leafs off` timelines key every nested `active`).
+- The nested `active` input is NOT shown as a directly-bindable/keyable row when you select the `leaf` instance (only `Model: Inherit` + a data-bind diamond + the Animations list appear). That's why neither manual path has an obvious one-click gesture — controlling a nested artboard input is the advanced "components / nested view models" workflow (set the nested instance's Data Bind → Model, then connect its input to a parent VM property).
+
+**KEY UNBLOCK — data-bind DOES work at runtime in rive-react-native (workaround for issue #348):** open issue rive-app/rive-react-native#348 ("data binding doesn't trigger the state machine until you press the artboard") has a CONFIRMED workaround: **call `riveRef.play()` immediately after each `useRiveBoolean` setter** — that fires the SM evaluation with no user press. So the data-bind path IS viable end-to-end. Combined with the VM + `leaf1..leaf5` already existing AND the plant-spike app code already written, that makes **data-bind the recommended path**. Remaining work: (a) create the 5 binding edges in the editor [intricate — nested-instance Data Bind Model + connect each input to `leafN`], verify each in the editor PREVIEW (toggle `leaf1` → leaf opens); (b) add `riveRef.play()` after the setters in `plant-spike.tsx`/`hydration.tsx`; (c) re-export → rebuild → verify on-device. The SM-input path stays the fallback if the editor binding proves un-doable.
+
+**Cleanup debt in the rig:** the Agent left TWO junk stub code files (`LeafControlScript`, `AddLeaf1Input`) and a partially-set-up `PlantControl` VM. Delete the junk scripts before final export (keep the VM — the data-bind path uses it).
 
 **Once per-leaf works:** wire into `mobile/app/(app)/hydration.tsx` — count taps/hydration, **2 clicks (tunable const) = +1 leaf**, map daily-water-% → open-leaf-count (0–5), fire the water animation near 100%. Then DELETE all spike screens + the hydration dashed card + throwaway assets, and add the **BradleyConners (CC BY)** credit.
 

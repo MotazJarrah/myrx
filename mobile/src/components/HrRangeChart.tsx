@@ -630,7 +630,7 @@ export default function HrRangeChart({
                     <View style={[styles.detailsDot, { backgroundColor: ZONE_COLORS[peakZone.id === 'below' ? 'z1' : peakZone.id] }]} />
                     <Text style={styles.detailsKey}>Peak</Text>
                     <Text style={[styles.detailsVal, { color: ZONE_COLORS[peakZone.id === 'below' ? 'z1' : peakZone.id] }]}>
-                      {d.peakRangeLow}–{d.peakRangeHigh} <Text style={styles.detailsUnit}>bpm</Text>
+                      {d.peakRangeHigh} <Text style={styles.detailsUnit}>bpm</Text>
                     </Text>
                   </View>
                 )}
