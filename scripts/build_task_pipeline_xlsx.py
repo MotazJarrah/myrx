@@ -437,7 +437,7 @@ TASKS = [
      "2026-06-03"),
 
     ("T062", "Hydration attribution: drop mL + source-names-first", "Hydration", "Mobile", "Done",
-     "User: the attribution still read '35 mL/kg bodyweight ...' — so it showed mL even with oz selected, and its FORMAT didn't match other pages (which lead with source NAMES: strength 'Epley · Brzycki · Lombardi ...', cardio 'Riegel · Daniels' ...'). This is what the earlier 'unit stayed in mL' (T059) actually referred to — the hardcoded mL in this line, not the size buttons. FIXED 2026-06-03: targetAttribution is now unit-free + source-names-first — hasWeight 'National Academies · Mayo Clinic · EFSA · by bodyweight'; no-weight 'National Academies · EFSA · sex-based estimate'. (Dropped the 'log your weight to personalize' prose for format parity; the 35 mL/kg science stays in the code comment.)",
+     "The attribution's FORMAT didn't match other pages (which lead with source NAMES then a method descriptor: strength 'Epley · Brzycki · Lombardi averaged · % of bodyweight'). First pass dropped the unit entirely; user then said they're FINE with mL showing — just wanted the format fixed. FINAL 2026-06-03: source-names-first, science descriptor LAST — hasWeight 'National Academies · Mayo Clinic · EFSA · 35 mL/kg bodyweight'; no-weight 'National Academies · EFSA · sex-based estimate'. Also the earlier 'unit stayed in mL' (T059) was this line, not the size buttons.",
      "None.",
      "mobile/app/(app)/hydration.tsx",
      "2026-06-03"),
