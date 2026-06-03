@@ -418,15 +418,15 @@ TASKS = [
      "mobile/src/components/PixelScene.tsx; HydrationPet.tsx",
      "2026-06-03"),
 
-    ("T059", "Hydration BUG: fl-oz unit not applied + picker dead", "Hydration", "Mobile", "In progress",
+    ("T059", "Hydration BUG: fl-oz unit not applied + picker dead", "Hydration", "Mobile", "Done",
      "After switching Settings fluid unit to fl oz, the hydration page stayed in mL AND the picker buttons stopped responding. Regression from the T052-T056 build. Diagnose: (a) does Settings write fluid_unit='oz' and does the profile propagate to the page; (b) why the picker Pressables stopped firing (suspect the FadeInUp Animated.View / Modal / half-loaded bundle).",
-     "UPDATE 2026-06-03: the 'unit stayed mL' part was the ATTRIBUTION line (hardcoded '35 mL/kg ...') — fixed in T062. The size buttons DO switch with the unit (they derive from profile). The dead picker/delete touches were the page-wide frozen-touch symptom (half-applied Fast Refresh + the Animated.View expansion, now removed). Picker/delete still to CONFIRM after a clean restart; if they remain dead, dig into that specific surface with the app reachable.",
+     "RESOLVED 2026-06-03: the 'unit stayed mL' part was the ATTRIBUTION line (fixed in T062); the size buttons derive from profile and switch with the unit. The dead picker/delete touches were the page-wide frozen-touch symptom (half-applied Fast Refresh + the now-removed Animated.View expansion). Closed per user 'this is done' — they've been interacting with the live picker through every follow-up tweak, so touches work.",
      "mobile/app/(app)/hydration.tsx; settings.tsx; AuthContext",
      "2026-06-03"),
 
-    ("T060", "Hydration BUG: log entries won't delete", "Hydration", "Mobile", "In progress",
+    ("T060", "Hydration BUG: log entries won't delete", "Hydration", "Mobile", "Done",
      "Deleting today's log rows did nothing. deleteEntry itself was unchanged, so the regression is likely the new log-row layout (lucide Icon intercepting touches inside DeleteAction) or the same page-wide dead-touch issue as T059.",
-     "DeleteAction + deleteEntry are unchanged & correct (two-tap: tap trash -> red check -> deletes). The dead delete was part of the same page-wide frozen-touch symptom as T059, not delete-specific. Should clear with the rewrite + a clean reload. CONFIRM after restart (tap the trash icon on a row, then the red check).",
+     "RESOLVED 2026-06-03: DeleteAction + deleteEntry were unchanged & correct (two-tap: trash -> red check). The dead delete was the same page-wide frozen-touch symptom as T059, now cleared. Closed per user 'this is done'.",
      "mobile/app/(app)/hydration.tsx; DeleteAction.tsx",
      "2026-06-03"),
 
