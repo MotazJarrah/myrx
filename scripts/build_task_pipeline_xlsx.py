@@ -384,7 +384,7 @@ TASKS = [
 
     ("T053", "Hydration: fast drink picker (no dropdowns)", "Hydration", "Mobile", "Pending",
      "User: need a clever picker for drink TYPE + SIZE that's fast to tap — explicitly NO dropdowns (a dropdown puts selection effort on the user and won't go well). Proposed two-tap design on one sheet: row of drink-type tiles (icon + tiny label: Water / Sparkling / Coffee / Tea / Diet soda / Milk) + a row of VESSEL-icon size chips (glass / cup / mug / bottle / large bottle mapped to common ml) instead of numbers; optional 'custom' chip opens the existing PhantomWheel for an exact amount.",
-     "Build after the progress-display direction (T056) is locked. Confirm the eligible type list + the vessel-size presets with the user.",
+     "REFINED 2026-06-03 (user): size presets must be REALISTIC PER DRINK TYPE, not one shared size row — a 750 ml 'large bottle' of soda or milk isn't a real choice. Proposed per-type vessels: Water = Glass 250 / Bottle 500 / Large 1 L; Sparkling = Glass 250 / Can 330 / Bottle 500; Coffee = Espresso 60 / Cup 250 / Large 350; Tea = Cup 250 / Mug 350 / Large 450; Diet soda = Glass 250 / Can 330 / Bottle 500; Milk = Small 150 / Glass 250 / Large 350. Plus a Custom chip (PhantomWheel). Awaiting user confirm, then build.",
      "mobile/app/(app)/hydration.tsx; PhantomWheel for custom path",
      "2026-06-03"),
 
