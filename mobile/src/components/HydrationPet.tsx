@@ -148,6 +148,7 @@ export default function HydrationPet({
   const hour = now.getHours() + now.getMinutes() / 60
 
   const pct = targetMl > 0 ? todayMl / targetMl : 0
+  const fillFrac = Math.max(0, Math.min(1, pct))   // pond level in the scene
   const mood = moodAnim(hour, pct)
 
   // frame ticker
@@ -197,7 +198,7 @@ export default function HydrationPet({
   return (
     <View style={s.wrap}>
       <View style={[s.screen, { width: size, height: size }]}>
-        <PixelScene size={size} hour={hour} radius={20} />
+        <PixelScene size={size} hour={hour} radius={20} fillFrac={fillFrac} />
         <Animated.View style={[s.petWrap, hopStyle, { bottom: size * 0.12 }]}>
           <Canvas style={{ width: PET, height: PET }}>
             {isExtra

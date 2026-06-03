@@ -89,7 +89,7 @@ function discCells(cx: number, cy: number, r: number): [number, number][] {
   return out
 }
 
-export default function PixelScene({ size, hour, radius = 18 }: { size: number; hour: number; radius?: number }) {
+export default function PixelScene({ size, hour, radius = 18, fillFrac = 0 }: { size: number; hour: number; radius?: number; fillFrac?: number }) {
   const [tick, setTick] = useState(0)
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), TICK_MS)
@@ -157,6 +157,12 @@ export default function PixelScene({ size, hour, radius = 18 }: { size: number; 
   const sunRayOp = (0.4 + 0.35 * Math.sin(tick * 0.12)) * day
   const cloudOp = day * 0.55
 
+  // rising "pond" — fills the lower scene with hydration progress (0..1).
+  const waterFrac = Math.max(0, Math.min(1, fillFrac))
+  const waterH = size * 0.66 * waterFrac
+  const waterTopY = size - waterH
+  const waterShimmer = 0.45 + 0.14 * Math.sin(tick * 0.1)
+
   return (
     <Canvas style={{ width: size, height: size }}>
       <Group clip={rrect(rect(0, 0, size, size), radius, radius)}>
@@ -182,6 +188,14 @@ export default function PixelScene({ size, hour, radius = 18 }: { size: number; 
         {/* ground */}
         <Path path={statics.groundFill} color={GROUND} />
         <Path path={statics.groundEdge} color={GROUND_TOP} />
+
+        {/* rising pond — hydration progress fills from the bottom up */}
+        {waterFrac > 0 && (
+          <Group>
+            <Rect x={0} y={waterTopY} width={size} height={waterH} color={withAlpha('#36d6f0', 0.28)} />
+            <Rect x={0} y={waterTopY} width={size} height={Math.max(2, cell * 0.45)} color={withAlpha('#8af0ff', waterShimmer)} />
+          </Group>
+        )}
 
         {/* faint LCD scanlines */}
         <Path path={statics.scan} color={withAlpha('#000000', 0.10)} />

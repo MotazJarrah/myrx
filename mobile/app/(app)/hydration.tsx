@@ -5,22 +5,23 @@
  * Layout (top-to-bottom):
  *   1. Header — "Hydration" h1 + today's date subtext.
  *   2. Today's progress card (AnimateRise delay 0)
- *      ├─ HydrationPet (day/night PixelScene + pace-aware pixel-slime mascot)
- *      │  as the hero, current/target readout + bodyweight-based attribution.
- *      └─ Two quick-add buttons (Cup / Bottle) inside the same card.
+ *      ├─ HydrationPet (day/night PixelScene + pace-aware pixel-slime mascot
+ *      │  whose pond rises with progress), a friendly "cups" readout (tap →
+ *      │  exact mL), and the drink picker (type + size).
+ *      └─ Eligibility note + bodyweight-based attribution footer.
  *   3. 7-day chart (AnimateRise delay 250) — Skia bar chart with dashed target line.
  *   4. Today's log list (AnimateRise delay 500) — DeleteAction tap-confirm per row.
  *
  * Storage model:
- *   – water_logs.amount_ml is the canonical column (always mL).
+ *   – water_logs.amount_ml is the RAW volume drunk (always mL).
+ *   – water_logs.drink_type tags the beverage; effective hydration =
+ *     amount_ml × Beverage-Hydration-Index multiplier (water / sparkling /
+ *     coffee / tea / soda = 1.0, milk = 1.5). Progress = effective mL.
  *   – profiles.fluid_unit controls display: 'oz' (default) or 'mL'.
- *   – Quick-add chips are unit-locked per the spec; tapping a chip converts
- *     to mL before insert.
  *
  * Target derivation:
- *   – Daily target = current_weight × 0.67 oz/lb (≈50 mL/kg), pulled from
- *     profiles.current_weight + profiles.weight_unit.
- *   – Fallback when weight is missing: 64 oz / 1900 mL (classic 8 glasses).
+ *   – Daily target = current_weight × 35 mL/kg, from the latest logged
+ *     bodyweight (falls back to profiles.current_weight, then a sex estimate).
  *
  * Rendering — GPU-backed via @shopify/react-native-skia. The mascot scene
  * (HydrationPet) and the 7-day chart each paint inside Skia <Canvas>es. Text
@@ -34,7 +35,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
+import { View, Text, ScrollView, Pressable, StyleSheet, Modal } from 'react-native'
 import {
   Canvas, Path, Group, Skia, DashPathEffect, type SkPath,
 } from '@shopify/react-native-skia'
@@ -46,6 +47,9 @@ import AnimateRise from '../../src/components/AnimateRise'
 import DeleteAction from '../../src/components/DeleteAction'
 import TickerNumber from '../../src/components/TickerNumber'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
+import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated'
+import { GlassWater, Droplets, Coffee, Leaf, CupSoda, Milk, type LucideIcon } from 'lucide-react-native'
+import PhantomWheel from '../../src/components/PhantomWheel'
 
 // ── Volume helpers ───────────────────────────────────────────────────────────
 // Canonical conversion constants. All math stays in mL internally; we only
@@ -81,9 +85,27 @@ function defaultTargetMl(gender: string | null | undefined): number {
   return 2500
 }
 
-// Two quick-add sizes — a cup and a bottle.
-const OZ_DRINKS = [{ label: 'Cup', amount: 8 }, { label: 'Bottle', amount: 16 }] as const
-const ML_DRINKS = [{ label: 'Cup', amount: 250 }, { label: 'Bottle', amount: 500 }] as const
+// ── Drink registry — eligible beverages + Beverage-Hydration-Index multipliers.
+// Only no/low-calorie, non-alcoholic drinks (+ milk) are offered, so the picker
+// itself enforces eligibility (T054). Multipliers from Maughan et al. 2016
+// (AJCN): water / sparkling / coffee / tea / diet-soda hydrate ~like water
+// (1.0); milk's protein + fat + salts make it linger → 1.5.
+type DrinkType = 'water' | 'sparkling' | 'coffee' | 'tea' | 'soda' | 'milk'
+interface DrinkMeta { type: DrinkType; label: string; multiplier: number; Icon: LucideIcon; color: string }
+const DRINKS: DrinkMeta[] = [
+  { type: 'water',     label: 'Water',     multiplier: 1.0, Icon: GlassWater, color: palette.cyan[400] },
+  { type: 'sparkling', label: 'Sparkling', multiplier: 1.0, Icon: Droplets,   color: palette.sky[400] },
+  { type: 'coffee',    label: 'Coffee',    multiplier: 1.0, Icon: Coffee,     color: palette.amber[400] },
+  { type: 'tea',       label: 'Tea',       multiplier: 1.0, Icon: Leaf,       color: palette.emerald[400] },
+  { type: 'soda',      label: 'Diet soda', multiplier: 1.0, Icon: CupSoda,    color: palette.violet[400] },
+  { type: 'milk',      label: 'Milk',      multiplier: 1.5, Icon: Milk,       color: palette.blue[300] },
+]
+const DRINK_BY_TYPE = DRINKS.reduce((m, d) => { m[d.type] = d; return m }, {} as Record<DrinkType, DrinkMeta>)
+function multiplierFor(t: string): number { return DRINK_BY_TYPE[t as DrinkType]?.multiplier ?? 1 }
+
+// One realistic shared size set for every drink (mL or oz), plus a Custom wheel.
+const SIZES_ML = [250, 350, 500]
+const SIZES_OZ = [8, 12, 16]
 
 // ── DB row ───────────────────────────────────────────────────────────────────
 
@@ -91,6 +113,7 @@ interface WaterLog {
   id:         string
   user_id:    string
   amount_ml:  number
+  drink_type: string
   logged_at:  string
   created_at: string
 }
@@ -262,7 +285,7 @@ export default function Hydration() {
   const { user, profile } = useAuth()
 
   const fluidUnit: 'oz' | 'mL' = ((profile as any)?.fluid_unit as 'oz' | 'mL' | null) ?? 'oz'
-  const quickAdds              = fluidUnit === 'mL' ? ML_DRINKS : OZ_DRINKS
+  const sizes                  = fluidUnit === 'mL' ? SIZES_ML : SIZES_OZ
 
   // Latest logged bodyweight drives the target (falls back to the profile
   // weight, then a sex-based estimate). Fetched once per user.
@@ -303,6 +326,13 @@ export default function Hydration() {
   const [logs, setLogs] = useState<WaterLog[]>(() => (cacheKey ? dataCache.get<WaterLog[]>(cacheKey) ?? [] : []))
   const [drinks, setDrinks] = useState(0)   // bumps on each log → drives the pet's drink reaction
 
+  // Picker state — selected drink type, the Custom-amount wheel, and the
+  // cups↔exact readout toggle.
+  const [selType, setSelType]       = useState<DrinkType | null>(null)
+  const [customOpen, setCustomOpen] = useState(false)
+  const [customVal, setCustomVal]   = useState(fluidUnit === 'mL' ? 300 : 10)
+  const [showExact, setShowExact]   = useState(false)
+
   useEffect(() => {
     if (!user) return
     supabase
@@ -323,10 +353,11 @@ export default function Hydration() {
 
   const todayKey = useMemo(() => dateKey(new Date()), [])
 
-  const todayMl = useMemo(() => {
+  // Effective hydration = sum(raw mL × BHI multiplier). Milk over-counts 1.5×.
+  const todayEffectiveMl = useMemo(() => {
     return logs
       .filter(l => dateKey(new Date(l.logged_at)) === todayKey)
-      .reduce((s, l) => s + Number(l.amount_ml), 0)
+      .reduce((s, l) => s + Number(l.amount_ml) * multiplierFor(l.drink_type), 0)
   }, [logs, todayKey])
 
   const todayLogs = useMemo(() => {
@@ -353,23 +384,24 @@ export default function Hydration() {
     for (const l of logs) {
       const k = dateKey(new Date(l.logged_at))
       const idx = idxByKey[k]
-      if (idx != null) out[idx].ml += Number(l.amount_ml)
+      if (idx != null) out[idx].ml += Number(l.amount_ml) * multiplierFor(l.drink_type)
     }
     return out
   }, [logs])
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
-  async function addAmount(displayAmount: number) {
+  async function addDrink(type: DrinkType, displayAmount: number) {
     if (!user) return
     setDrinks(d => d + 1)   // pet plays Eat + a hop
     const amountMl = fluidUnit === 'mL' ? displayAmount : ozToMl(displayAmount)
-    // Optimistic insert with a temporary id so the ring + chart move instantly.
+    // Optimistic insert with a temporary id so the pet + chart move instantly.
     const tempId = `temp-${Date.now()}`
     const optimistic: WaterLog = {
       id: tempId,
       user_id: user.id,
       amount_ml: amountMl,
+      drink_type: type,
       logged_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
     }
@@ -378,13 +410,12 @@ export default function Hydration() {
 
     const { data, error } = await supabase
       .from('water_logs')
-      .insert({ user_id: user.id, amount_ml: amountMl })
+      .insert({ user_id: user.id, amount_ml: amountMl, drink_type: type })
       .select()
       .single()
 
     if (error || !data) {
-      // Roll back optimistic insert on failure — surface nothing visible
-      // beyond the bar regressing; the chip stays available for retry.
+      // Roll back optimistic insert on failure — the chip stays for retry.
       setLogs(logs)
       return
     }
@@ -406,10 +437,12 @@ export default function Hydration() {
   // Hero figures rendered with TickerNumber — current value rolls slot-machine
   // style on every chip tap. Target stays static (changes only when profile
   // weight changes).
-  const currentDisplay = fmtVolume(todayMl, fluidUnit)
-  const targetDisplay  = fmtVolume(targetMl, fluidUnit)
-  const remainingMl    = Math.max(0, targetMl - todayMl)
-  const overTarget     = todayMl > targetMl
+  const remainingMl = Math.max(0, targetMl - todayEffectiveMl)
+  const overTarget  = todayEffectiveMl >= targetMl
+  // Friendly "cups" readout — a cup ≈ 250 mL of effective hydration. Tap the
+  // readout to flip to the exact effective-vs-target volume (T056).
+  const cupsTarget  = Math.max(1, Math.round(targetMl / 250))
+  const cupsDone    = Math.round(todayEffectiveMl / 250)
 
   const hasWeight = bwKg != null || ((profile as any)?.current_weight ?? 0) > 0
   const targetAttribution = hasWeight
@@ -431,11 +464,20 @@ export default function Hydration() {
           <View style={s.card}>
             {/* Hydration mascot — the day/night scene + pace-aware pet,
                 replaces the old daily-total ring */}
-            <HydrationPet todayMl={todayMl} targetMl={targetMl} drinkNonce={drinks} />
-            <View style={s.petStats}>
-              <TickerNumber value={currentDisplay} fontSize={30} fontWeight="700" color={palette.cyan[400]} />
-              <Text style={s.petStatsSub}>of {targetDisplay} {fluidUnit}</Text>
-            </View>
+            <HydrationPet todayMl={todayEffectiveMl} targetMl={targetMl} drinkNonce={drinks} />
+            <Pressable style={s.petStats} onPress={() => setShowExact(v => !v)}>
+              {showExact ? (
+                <>
+                  <TickerNumber value={fmtVolume(todayEffectiveMl, fluidUnit)} fontSize={30} fontWeight="700" color={palette.cyan[400]} />
+                  <Text style={s.petStatsSub}>of {fmtVolume(targetMl, fluidUnit)} {fluidUnit}</Text>
+                </>
+              ) : (
+                <>
+                  <TickerNumber value={String(cupsDone)} fontSize={30} fontWeight="700" color={palette.cyan[400]} />
+                  <Text style={s.petStatsSub}>of {cupsTarget} cups</Text>
+                </>
+              )}
+            </Pressable>
 
             <Text style={s.helper}>
               {overTarget
@@ -445,18 +487,50 @@ export default function Hydration() {
                   : `Log your first sip to start the day.`}
             </Text>
 
-            {/* Quick-add — a cup and a bottle */}
-            <View style={s.chipsRow}>
-              {quickAdds.map(d => (
-                <Pressable
-                  key={d.label}
-                  onPress={() => addAmount(d.amount)}
-                  style={({ pressed }) => [s.drinkBtn, pressed && s.chipPressed]}
-                >
-                  <Text style={s.drinkLabel}>{d.label}</Text>
-                  <Text style={s.drinkValue}>+{d.amount} {fluidUnit}</Text>
-                </Pressable>
-              ))}
+            {/* Drink picker — tap a type, then a size. No dropdowns (T053). */}
+            <View style={s.pickerWrap}>
+              <View style={s.typeRow}>
+                {DRINKS.map(d => {
+                  const active = d.type === selType
+                  const Icon = d.Icon
+                  return (
+                    <Pressable
+                      key={d.type}
+                      onPress={() => setSelType(active ? null : d.type)}
+                      style={({ pressed }) => [s.typeTile, active && s.typeTileActive, pressed && s.chipPressed]}
+                    >
+                      <Icon size={20} color={active ? d.color : colors.mutedForeground} />
+                      <Text style={[s.typeLabel, active && s.typeLabelActive]} numberOfLines={1}>{d.label}</Text>
+                    </Pressable>
+                  )
+                })}
+              </View>
+
+              {selType && (
+                <Animated.View entering={FadeInUp.duration(180)} exiting={FadeOutUp.duration(140)} style={s.sizeRow}>
+                  {sizes.map(sz => (
+                    <Pressable
+                      key={sz}
+                      onPress={() => addDrink(selType, sz)}
+                      style={({ pressed }) => [s.sizeChip, pressed && s.chipPressed]}
+                    >
+                      <Text style={s.sizeChipText}>{sz}</Text>
+                      <Text style={s.sizeChipUnit}>{fluidUnit}</Text>
+                    </Pressable>
+                  ))}
+                  <Pressable
+                    onPress={() => setCustomOpen(true)}
+                    style={({ pressed }) => [s.sizeChip, s.sizeChipAlt, pressed && s.chipPressed]}
+                  >
+                    <Text style={s.sizeChipAltText}>Custom</Text>
+                  </Pressable>
+                </Animated.View>
+              )}
+
+              {/* Eligibility note (T054) — what counts, plain-language. */}
+              <Text style={s.eligNote}>
+                Only no- and low-calorie, non-alcoholic drinks count toward hydration — milk included.
+              </Text>
             </View>
 
             {/* Science attribution — matches the tinyText footer credit used on
@@ -464,6 +538,31 @@ export default function Hydration() {
             <Text style={s.attribution}>{targetAttribution}</Text>
           </View>
         </AnimateRise>
+
+        {/* Custom-amount sheet — the existing PhantomWheel for an exact volume */}
+        <Modal visible={customOpen} transparent animationType="fade" onRequestClose={() => setCustomOpen(false)}>
+          <Pressable style={s.modalBackdrop} onPress={() => setCustomOpen(false)}>
+            <Pressable style={s.modalSheet} onPress={() => {}}>
+              <Text style={s.modalTitle}>
+                Custom amount{selType ? ` · ${DRINK_BY_TYPE[selType].label}` : ''}
+              </Text>
+              <PhantomWheel
+                value={customVal}
+                onChange={setCustomVal}
+                step={fluidUnit === 'mL' ? 25 : 1}
+                min={0}
+                max={fluidUnit === 'mL' ? 2000 : 64}
+                unit={` ${fluidUnit}`}
+              />
+              <Pressable
+                onPress={() => { if (selType && customVal > 0) addDrink(selType, customVal); setCustomOpen(false) }}
+                style={({ pressed }) => [s.modalLogBtn, pressed && s.chipPressed]}
+              >
+                <Text style={s.modalLogText}>Log drink</Text>
+              </Pressable>
+            </Pressable>
+          </Pressable>
+        </Modal>
 
         {/* ── 7-day chart ── */}
         <AnimateRise delay={250}>
@@ -503,8 +602,9 @@ export default function Hydration() {
               </View>
               <View>
                 {todayLogs.map((l, idx) => {
-                  const ml = Number(l.amount_ml)
-                  const display = fmtVolume(ml, fluidUnit)
+                  const meta = DRINK_BY_TYPE[(l.drink_type as DrinkType)] ?? DRINK_BY_TYPE.water
+                  const Icon = meta.Icon
+                  const display = fmtVolume(Number(l.amount_ml), fluidUnit)
                   const time = new Date(l.logged_at).toLocaleTimeString(undefined, {
                     hour: 'numeric', minute: '2-digit',
                   })
@@ -513,9 +613,13 @@ export default function Hydration() {
                       <DeleteAction onDelete={() => deleteEntry(l.id)}>
                         <View style={s.logRow}>
                           <View style={s.logRowLeft}>
-                            <View style={s.tag}>
-                              <Text style={s.tagText}>Water</Text>
-                            </View>
+                            <Icon size={16} color={meta.color} />
+                            <Text style={s.logName} numberOfLines={1}>{meta.label}</Text>
+                            {meta.multiplier !== 1 && (
+                              <View style={s.multBadge}>
+                                <Text style={s.multBadgeText}>×{meta.multiplier}</Text>
+                              </View>
+                            )}
                             <Text style={s.logDate} numberOfLines={1}>{time}</Text>
                           </View>
                           <Text style={s.logAmount}>{display} {fluidUnit}</Text>
@@ -638,4 +742,53 @@ const s = StyleSheet.create({
   tagText:   { fontSize: 10, fontWeight: '500', color: palette.cyan[400] },
   logDate:   { fontSize: 14, color: colors.mutedForeground, flex: 1 },
   logAmount: { fontFamily: fonts.mono[500], fontSize: 14, fontVariant: ['tabular-nums'], fontWeight: '500', color: colors.foreground, flexShrink: 0 },
+
+  // Drink picker
+  pickerWrap: { gap: 10 },
+  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
+  typeTile: {
+    width: '31%',
+    minWidth: 92,
+    backgroundColor: withAlpha(palette.cyan[500], 0.06),
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    gap: 6,
+  },
+  typeTileActive: { backgroundColor: withAlpha(palette.cyan[500], 0.14), borderColor: withAlpha(palette.cyan[500], 0.5) },
+  typeLabel:       { fontSize: 12, color: colors.mutedForeground, fontFamily: fonts.sans[600] },
+  typeLabelActive: { color: colors.foreground },
+
+  sizeRow: { flexDirection: 'row', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 2 },
+  sizeChip: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 3,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: withAlpha(palette.cyan[500], 0.10),
+    borderColor: withAlpha(palette.cyan[500], 0.4),
+    borderWidth: 1,
+  },
+  sizeChipText:    { fontSize: 16, color: colors.foreground, fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'] },
+  sizeChipUnit:    { fontSize: 12, color: palette.cyan[400], fontFamily: fonts.sans[500] },
+  sizeChipAlt:     { backgroundColor: 'transparent', borderColor: colors.border },
+  sizeChipAltText: { fontSize: 14, color: colors.mutedForeground, fontFamily: fonts.sans[600] },
+
+  eligNote: { fontSize: 11, color: colors.mutedForeground, lineHeight: 15, textAlign: 'center' },
+
+  // Custom-amount modal
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  modalSheet:    { width: '100%', maxWidth: 340, backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1, borderRadius: 16, padding: 20, gap: 14, alignItems: 'center' },
+  modalTitle:    { fontSize: 15, color: colors.foreground, fontFamily: fonts.sans[700] },
+  modalLogBtn:   { alignSelf: 'stretch', backgroundColor: palette.cyan[500], borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
+  modalLogText:  { fontSize: 15, color: colors.background, fontFamily: fonts.sans[700] },
+
+  // Log-row additions
+  logName:       { fontSize: 14, color: colors.foreground, fontFamily: fonts.sans[600], flexShrink: 1 },
+  multBadge:     { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 9999, backgroundColor: withAlpha(palette.blue[400], 0.15), flexShrink: 0 },
+  multBadgeText: { fontSize: 10, color: palette.blue[300], fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'] },
 })
