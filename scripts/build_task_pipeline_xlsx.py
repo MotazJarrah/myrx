@@ -442,6 +442,24 @@ TASKS = [
      "None.",
      "mobile/app/(app)/hydration.tsx",
      "2026-06-03"),
+
+    ("T063", "Dashboard stat pills: uniform size + grid layout", "Dashboard", "Cross", "Pending",
+     "User wants all stat pills EXACTLY the same size, laid out with '3 on each side' and the last pill centered under them (reads as a 2-column grid: 3 left + 3 right + 7th centered; could also mean 3-per-row — to confirm). Today the 7 pills wrap with text-driven variable widths. Needs fixed-width pills + terse uniform wording so they fit. Mobile dashboard + admin + coach (mirror).",
+     "Confirm layout (2-col vs 3-per-row) + the terse label set + a single 'Last 30 days' caption above the group so each pill stays short. Then build fixed-width equal pills on all 3 surfaces (last-if-odd centers via centered flex-wrap).",
+     "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
+     "2026-06-03"),
+
+    ("T064", "Weight pill: show change only, not current weight", "Dashboard", "Cross", "Pending",
+     "User: the weight pill must always show weight CHANGE, never the current weight. Today it falls back to current weight when there's only one weigh-in. Remove that fallback; show change only and hide the pill when there's nothing to compare.",
+     "Compute change over the last 30 days (latest − earliest weigh-in in the window) per T065; hide if <2 logs in the window. All 3 surfaces.",
+     "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
+     "2026-06-03"),
+
+    ("T065", "Standardize stat windows to rolling 'last 30 days'", "Dashboard", "Cross", "Pending",
+     "User: replace 'this month' (calendar) with 'in last 30 days' (rolling) on the PR pills, and unify the other stats to the same 30-day window for consistency + simpler math. Proposed mapping: Strength/Cardio PRs = best-ever within last 30d; Food = days logged in last 30d (today it's a 14-day STREAK — would become a count); Lowest HR = min bpm last 30d; Weight = change over last 30d (T064); Sleep = avg hrs last 30d; Hydration = days hit goal last 30d. Nuance to confirm: lowest-HR over 30d is more anomaly-prone than 7d (more samples).",
+     "Confirm the per-metric mapping (esp. food streak->count + HR 30d), then update logic + wording on all 3 surfaces.",
+     "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
+     "2026-06-03"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
