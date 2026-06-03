@@ -445,7 +445,7 @@ TASKS = [
 
     ("T063", "Dashboard stat pills: uniform size + grid layout", "Dashboard", "Cross", "Pending",
      "User wants all stat pills EXACTLY the same size, laid out with '3 on each side' and the last pill centered under them (reads as a 2-column grid: 3 left + 3 right + 7th centered; could also mean 3-per-row — to confirm). Today the 7 pills wrap with text-driven variable widths. Needs fixed-width pills + terse uniform wording so they fit. Mobile dashboard + admin + coach (mirror).",
-     "Confirm layout (2-col vs 3-per-row) + the terse label set + a single 'Last 30 days' caption above the group so each pill stays short. Then build fixed-width equal pills on all 3 surfaces (last-if-odd centers via centered flex-wrap).",
+     "CONFIRMED 2026-06-03: layout A — two columns (3 pills left / 3 right / 7th centered under them). Labels accepted: 'N Strength', 'N Cardio', 'N Food', 'N HR low', '+/-N kg', 'Nh Sleep', 'N Water' (with emoji), under one 'Last 30 days' caption so each pill stays short + equal-width. Build on all 3 surfaces (centered flex-wrap so a lone last pill centers).",
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
@@ -459,6 +459,12 @@ TASKS = [
      "User: replace 'this month' (calendar) with 'in last 30 days' (rolling) on the PR pills, and unify the other stats to the same 30-day window for consistency + simpler math. Proposed mapping: Strength/Cardio PRs = best-ever within last 30d; Food = days logged in last 30d (today it's a 14-day STREAK — would become a count); Lowest HR = min bpm last 30d; Weight = change over last 30d (T064); Sleep = avg hrs last 30d; Hydration = days hit goal last 30d. Nuance to confirm: lowest-HR over 30d is more anomaly-prone than 7d (more samples).",
      "Confirm the per-metric mapping (esp. food streak->count + HR 30d), then update logic + wording on all 3 surfaces.",
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
+     "2026-06-03"),
+
+    ("T066", "Redeploy delete-user edge function (rom_records removal)", "Backend", "Backend", "Done",
+     "Flagged during T049 (rom_records drop): the delete-user edge function's SOURCE had its rom_records table-list entry removed, but the LIVE function still needed a deploy. Tracked as its own row (not buried in the closed T049) after the user's process callout.",
+     "DONE 2026-06-03: deployed via MCP deploy_edge_function (CLI had no access token). delete-user is now version 12 (was 11), verify_jwt on; live USER_DATA_TABLES no longer includes rom_records. Source was already committed in 6a58fc3 — this was the runtime push.",
+     "supabase/functions/delete-user/index.ts",
      "2026-06-03"),
 ]
 
