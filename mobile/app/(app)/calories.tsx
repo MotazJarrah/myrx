@@ -906,7 +906,7 @@ export default function Calories() {
                 the "what's next" prompt (Update plan / Switch to
                 maintenance / Keep going) inside its own body when
                 goal is reached. */}
-            {result.timeline && !goalReached && (
+            {result.timeline && !plan.goal_reached && (
               <TimelineCard result={result} plan={plan} profile={profile} TrendIcon={TrendIcon} trendHue={trendHue} />
             )}
           </>
@@ -1073,6 +1073,13 @@ function TimelineCard({
 }) {
   const tl = result.timeline
   if (!tl) return null
+  // Goal already reached (sticky DB flag) → no timeline projection and no
+  // "different directions" mismatch note; both are noise once the goal is hit.
+  // The CurrentWeightGoal card carries the "what's next" prompt instead. Gated
+  // on plan.goal_reached (NOT the live `goalReached` recompute, which is
+  // suppressed for coach-managed clients) so it works for coached + self-
+  // coached alike.
+  if (plan.goal_reached) return null
   const pUnit = profile?.weight_unit || 'lb'
 
   // Self-coached alignment (May 24 2026 fix): when the user IS self-
