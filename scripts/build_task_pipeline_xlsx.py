@@ -432,7 +432,7 @@ TASKS = [
 
     ("T061", "Hydration: picker REPLACES, not expands", "Hydration", "Mobile", "Done",
      "User rejects the expanding picker. Wanted behaviour: tapping a drink type REPLACES the type-tile row with the size buttons for that drink (with a back / change-drink affordance), instead of revealing an extra row below. Removes the FadeInUp inline expansion entirely.",
-     "DONE 2026-06-03: picker is now a two-state swap — the 6-type grid is REPLACED by the chosen drink's size buttons (250/350/500 + Custom); logging a size returns to the grid. No FadeInUp expansion. Refined per user: the size view's header is back-only — a ‹ ChevronLeft + the selected drink's icon/label, tappable to return to the grid; removed the redundant 'Change drink' hint text (it read as a second back method).",
+     "DONE 2026-06-03: picker is a two-state swap — the 6-type grid is REPLACED by the chosen drink's size buttons; logging a size returns to the grid. No FadeInUp expansion. Refined per user: (a) size-view header is back-only — a ‹ ChevronLeft + the selected drink's icon/label, tappable to return to the grid (removed the redundant 'Change drink' hint); (b) removed the Custom button entirely — sizes are the 3 presets only (250/350/500 mL or 8/12/16 oz), and the PhantomWheel modal + its state/imports/styles came out with it (no dead code).",
      "mobile/app/(app)/hydration.tsx",
      "2026-06-03"),
 

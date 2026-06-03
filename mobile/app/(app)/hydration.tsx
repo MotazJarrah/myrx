@@ -35,7 +35,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { View, Text, ScrollView, Pressable, StyleSheet, Modal } from 'react-native'
+import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
 import {
   Canvas, Path, Group, Skia, DashPathEffect, type SkPath,
 } from '@shopify/react-native-skia'
@@ -48,8 +48,6 @@ import DeleteAction from '../../src/components/DeleteAction'
 import TickerNumber from '../../src/components/TickerNumber'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 import { GlassWater, Droplets, Coffee, Leaf, CupSoda, Milk, ChevronLeft, type LucideIcon } from 'lucide-react-native'
-import PhantomWheel from '../../src/components/PhantomWheel'
-import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
 // ── Volume helpers ───────────────────────────────────────────────────────────
 // Canonical conversion constants. All math stays in mL internally; we only
@@ -328,13 +326,8 @@ export default function Hydration() {
 
   // Picker state — selected drink type, the Custom-amount wheel, and the
   // cups↔exact readout toggle.
-  const [selType, setSelType]       = useState<DrinkType | null>(null)
-  const [customOpen, setCustomOpen] = useState(false)
-  const [customVal, setCustomVal]   = useState(fluidUnit === 'mL' ? 300 : 10)
-  const [showExact, setShowExact]   = useState(false)
-
-  // Keep the custom-amount default sensible for the active unit.
-  useEffect(() => { setCustomVal(fluidUnit === 'mL' ? 300 : 10) }, [fluidUnit])
+  const [selType, setSelType]     = useState<DrinkType | null>(null)
+  const [showExact, setShowExact] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -541,12 +534,6 @@ export default function Hydration() {
                         <Text style={s.sizeChipUnit}>{fluidUnit}</Text>
                       </Pressable>
                     ))}
-                    <Pressable
-                      onPress={() => setCustomOpen(true)}
-                      style={({ pressed }) => [s.sizeChip, s.sizeChipAlt, pressed && s.chipPressed]}
-                    >
-                      <Text style={s.sizeChipAltText}>Custom</Text>
-                    </Pressable>
                   </View>
                 </View>
               )}
@@ -562,36 +549,6 @@ export default function Hydration() {
             <Text style={s.attribution}>{targetAttribution}</Text>
           </View>
         </AnimateRise>
-
-        {/* Custom-amount sheet — the existing PhantomWheel for an exact volume */}
-        <Modal visible={customOpen} transparent animationType="fade" onRequestClose={() => setCustomOpen(false)}>
-          {/* GestureHandlerRootView is required INSIDE the modal so the
-              PhantomWheel's Pan works on Android (modals render in a separate
-              view hierarchy that the app-root GH provider doesn't reach). */}
-          <GestureHandlerRootView style={{ flex: 1 }}>
-          <Pressable style={s.modalBackdrop} onPress={() => setCustomOpen(false)}>
-            <Pressable style={s.modalSheet} onPress={() => {}}>
-              <Text style={s.modalTitle}>
-                Custom amount{selType ? ` · ${DRINK_BY_TYPE[selType].label}` : ''}
-              </Text>
-              <PhantomWheel
-                value={customVal}
-                onChange={setCustomVal}
-                step={fluidUnit === 'mL' ? 25 : 1}
-                min={0}
-                max={fluidUnit === 'mL' ? 2000 : 64}
-                unit={` ${fluidUnit}`}
-              />
-              <Pressable
-                onPress={() => { if (selType && customVal > 0) addDrink(selType, customVal); setCustomOpen(false); setSelType(null) }}
-                style={({ pressed }) => [s.modalLogBtn, pressed && s.chipPressed]}
-              >
-                <Text style={s.modalLogText}>Log drink</Text>
-              </Pressable>
-            </Pressable>
-          </Pressable>
-          </GestureHandlerRootView>
-        </Modal>
 
         {/* ── 7-day chart ── */}
         <AnimateRise delay={250}>
@@ -807,17 +764,7 @@ const s = StyleSheet.create({
   },
   sizeChipText:    { fontSize: 16, color: colors.foreground, fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'] },
   sizeChipUnit:    { fontSize: 12, color: palette.cyan[400], fontFamily: fonts.sans[500] },
-  sizeChipAlt:     { backgroundColor: 'transparent', borderColor: colors.border },
-  sizeChipAltText: { fontSize: 14, color: colors.mutedForeground, fontFamily: fonts.sans[600] },
-
   eligNote: { fontSize: 11, color: colors.mutedForeground, lineHeight: 15, textAlign: 'center' },
-
-  // Custom-amount modal
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  modalSheet:    { width: '100%', maxWidth: 340, backgroundColor: colors.card, borderColor: colors.border, borderWidth: 1, borderRadius: 16, padding: 20, gap: 14, alignItems: 'center' },
-  modalTitle:    { fontSize: 15, color: colors.foreground, fontFamily: fonts.sans[700] },
-  modalLogBtn:   { alignSelf: 'stretch', backgroundColor: palette.cyan[500], borderRadius: 12, paddingVertical: 13, alignItems: 'center' },
-  modalLogText:  { fontSize: 15, color: colors.background, fontFamily: fonts.sans[700] },
 
   // Log-row additions
   logName:       { fontSize: 14, color: colors.foreground, fontFamily: fonts.sans[600], flexShrink: 1 },
