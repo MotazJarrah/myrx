@@ -50,6 +50,7 @@ import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 import Animated, { FadeInUp, FadeOutUp } from 'react-native-reanimated'
 import { GlassWater, Droplets, Coffee, Leaf, CupSoda, Milk, type LucideIcon } from 'lucide-react-native'
 import PhantomWheel from '../../src/components/PhantomWheel'
+import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
 // ── Volume helpers ───────────────────────────────────────────────────────────
 // Canonical conversion constants. All math stays in mL internally; we only
@@ -541,6 +542,10 @@ export default function Hydration() {
 
         {/* Custom-amount sheet — the existing PhantomWheel for an exact volume */}
         <Modal visible={customOpen} transparent animationType="fade" onRequestClose={() => setCustomOpen(false)}>
+          {/* GestureHandlerRootView is required INSIDE the modal so the
+              PhantomWheel's Pan works on Android (modals render in a separate
+              view hierarchy that the app-root GH provider doesn't reach). */}
+          <GestureHandlerRootView style={{ flex: 1 }}>
           <Pressable style={s.modalBackdrop} onPress={() => setCustomOpen(false)}>
             <Pressable style={s.modalSheet} onPress={() => {}}>
               <Text style={s.modalTitle}>
@@ -562,6 +567,7 @@ export default function Hydration() {
               </Pressable>
             </Pressable>
           </Pressable>
+          </GestureHandlerRootView>
         </Modal>
 
         {/* ── 7-day chart ── */}
