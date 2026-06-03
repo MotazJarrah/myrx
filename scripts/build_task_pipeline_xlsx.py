@@ -445,7 +445,7 @@ TASKS = [
 
     ("T063", "Dashboard stat pills: uniform size + grid layout", "Dashboard", "Cross", "Pending",
      "User wants all stat pills EXACTLY the same size, laid out with '3 on each side' and the last pill centered under them (reads as a 2-column grid: 3 left + 3 right + 7th centered; could also mean 3-per-row — to confirm). Today the 7 pills wrap with text-driven variable widths. Needs fixed-width pills + terse uniform wording so they fit. Mobile dashboard + admin + coach (mirror).",
-     "CONFIRMED 2026-06-03: layout A — two columns (3 pills left / 3 right / 7th centered under them). Labels accepted: 'N Strength', 'N Cardio', 'N Food', 'N HR low', '+/-N kg', 'Nh Sleep', 'N Water' (with emoji), under one 'Last 30 days' caption so each pill stays short + equal-width. Build on all 3 surfaces (centered flex-wrap so a lone last pill centers).",
+     "CONFIRMED 2026-06-03: layout A — two columns (3 pills left / 3 right / 7th centered under them), all pills EXACTLY equal size (fixed width + min-height; centered flex-wrap so a lone last pill centers). NO shared 'Last 30 days' caption — windows differ per pill (PRs 'last 30 days', Food 'last 14 days', HR '7d', Sleep '7 nights', Hydration '7d'), so each keeps its own window text; the equal SIZE comes from the fixed box (text wraps inside). Build on all 3 surfaces.",
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
@@ -455,9 +455,9 @@ TASKS = [
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
-    ("T065", "Standardize stat windows to rolling 'last 30 days'", "Dashboard", "Cross", "Pending",
-     "User: replace 'this month' (calendar) with 'in last 30 days' (rolling) on the PR pills, and unify the other stats to the same 30-day window for consistency + simpler math. Proposed mapping: Strength/Cardio PRs = best-ever within last 30d; Food = days logged in last 30d (today it's a 14-day STREAK — would become a count); Lowest HR = min bpm last 30d; Weight = change over last 30d (T064); Sleep = avg hrs last 30d; Hydration = days hit goal last 30d. Nuance to confirm: lowest-HR over 30d is more anomaly-prone than 7d (more samples).",
-     "Confirm the per-metric mapping (esp. food streak->count + HR 30d), then update logic + wording on all 3 surfaces.",
+    ("T065", "PR pills: 'this month' -> rolling 'last 30 days'", "Dashboard", "Cross", "Pending",
+     "CORRECTED 2026-06-03 (user): ONLY the PR pills change — 'this month' (calendar) becomes 'last 30 days' (rolling 30-day window); the count logic switches from monthStart to a 30-day cutoff (a PR counts if the best-ever for that exercise/activity was hit within the last 30 days). Every OTHER pill KEEPS its existing window + wording: Food stays 'last 14 days' (still a STREAK, not a count), Lowest HR stays 'last 7 days', Sleep stays '7 nights', Hydration stays '7d', Weight stays 'since last weigh-in'. My earlier 'unify everything to 30d' reading was wrong.",
+     "Change Strength + Cardio PR counts from calendar-month to a rolling 30-day cutoff + reword to 'last 30 days', on mobile + admin + coach. Leave every other pill's window untouched.",
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
