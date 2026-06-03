@@ -375,6 +375,12 @@ TASKS = [
      "Ongoing discipline — applies to every future turn. Nothing to build.",
      "CLAUDE.md (CAPTURE-FIRST bullet); scripts/build_task_pipeline_xlsx.py",
      "2026-06-03"),
+
+    ("T052", "Hydration: count non-water fluids toward goal", "Hydration", "Mobile", "Pending",
+     "User wants the hydration goal to feel realistic — almost nobody drinks the full plain-water target every day. Asked whether science supports counting non-water fluids. Answer = yes: National Academies (IOM 2004) frames the daily target as TOTAL water from all sources (~80% from beverages of every kind, ~20% from food); Maughan et al. 2016 Beverage Hydration Index shows milk / juice / oral-rehydration hydrate AS WELL AS or better than water, and coffee / tea / soda ~= water (the 'caffeine dehydrates you' idea is a myth at normal intake, Killer 2014); alcohol is the real diuretic exception. Presented a decision on how granular to count fluids. Sub-task of T016 (hydration page redesign).",
+     "User to pick the counting model: (1) all non-alcoholic beverages count 1:1, (2) science-weighted per-drink multipliers (BHI), or (3) hybrid — 1:1 for non-alcoholic, alcohol discounted/excluded. Then reframe goal as 'total fluid' + add a fluid-type logging UI on the hydration page.",
+     "mobile/app/(app)/hydration.tsx",
+     "2026-06-03"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
