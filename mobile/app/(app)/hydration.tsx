@@ -458,9 +458,13 @@ export default function Hydration() {
   const SelIcon = selMeta?.Icon ?? null
 
   const hasWeight = bwKg != null || ((profile as any)?.current_weight ?? 0) > 0
+  // Unit-free, source-names-first — matches the strength/cardio attribution
+  // format ("Epley · Brzycki · ..."). The 35 mL/kg science lives in the
+  // ML_PER_KG_TARGET comment above, not in this line, so it never clashes with
+  // the user's oz/mL setting.
   const targetAttribution = hasWeight
-    ? `35 mL/kg bodyweight · National Academies · Mayo Clinic · EFSA`
-    : `Sex-based estimate · National Academies · EFSA — log your weight to personalize`
+    ? `National Academies · Mayo Clinic · EFSA · by bodyweight`
+    : `National Academies · EFSA · sex-based estimate`
 
   return (
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">

@@ -420,7 +420,7 @@ TASKS = [
 
     ("T059", "Hydration BUG: fl-oz unit not applied + picker dead", "Hydration", "Mobile", "In progress",
      "After switching Settings fluid unit to fl oz, the hydration page stayed in mL AND the picker buttons stopped responding. Regression from the T052-T056 build. Diagnose: (a) does Settings write fluid_unit='oz' and does the profile propagate to the page; (b) why the picker Pressables stopped firing (suspect the FadeInUp Animated.View / Modal / half-loaded bundle).",
-     "Settings writes fluid_unit='oz'/'mL' (confirmed); the page derives fluidUnit + sizes reactively from profile, so a correct profile shows oz. The dead-touch triad (picker + delete + unit all frozen at once) most likely a half-applied Fast Refresh — no clean reload was possible (adb couldn't reach the phone). Rewrote the picker, removing the Animated.View expansion (the likely real culprit). CONFIRM after a FULL app restart; if oz still doesn't show, investigate whether a Settings save propagates the profile context to the other tabs.",
+     "UPDATE 2026-06-03: the 'unit stayed mL' part was the ATTRIBUTION line (hardcoded '35 mL/kg ...') — fixed in T062. The size buttons DO switch with the unit (they derive from profile). The dead picker/delete touches were the page-wide frozen-touch symptom (half-applied Fast Refresh + the Animated.View expansion, now removed). Picker/delete still to CONFIRM after a clean restart; if they remain dead, dig into that specific surface with the app reachable.",
      "mobile/app/(app)/hydration.tsx; settings.tsx; AuthContext",
      "2026-06-03"),
 
@@ -433,6 +433,12 @@ TASKS = [
     ("T061", "Hydration: picker REPLACES, not expands", "Hydration", "Mobile", "Done",
      "User rejects the expanding picker. Wanted behaviour: tapping a drink type REPLACES the type-tile row with the size buttons for that drink (with a back / change-drink affordance), instead of revealing an extra row below. Removes the FadeInUp inline expansion entirely.",
      "DONE 2026-06-03: picker is now a two-state swap — the 6-type grid is REPLACED by the chosen drink's size buttons (250/350/500 + Custom) with a 'Change drink' back button (ChevronLeft); logging a size returns to the grid. No FadeInUp expansion. tsc clean.",
+     "mobile/app/(app)/hydration.tsx",
+     "2026-06-03"),
+
+    ("T062", "Hydration attribution: drop mL + source-names-first", "Hydration", "Mobile", "Done",
+     "User: the attribution still read '35 mL/kg bodyweight ...' — so it showed mL even with oz selected, and its FORMAT didn't match other pages (which lead with source NAMES: strength 'Epley · Brzycki · Lombardi ...', cardio 'Riegel · Daniels' ...'). This is what the earlier 'unit stayed in mL' (T059) actually referred to — the hardcoded mL in this line, not the size buttons. FIXED 2026-06-03: targetAttribution is now unit-free + source-names-first — hasWeight 'National Academies · Mayo Clinic · EFSA · by bodyweight'; no-weight 'National Academies · EFSA · sex-based estimate'. (Dropped the 'log your weight to personalize' prose for format parity; the 35 mL/kg science stays in the code comment.)",
+     "None.",
      "mobile/app/(app)/hydration.tsx",
      "2026-06-03"),
 ]
