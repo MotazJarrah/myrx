@@ -558,8 +558,9 @@ The bottom tab bar replacement. A single floating circular button at screen-bott
 - **Positioning model**: root is `position: 'absolute', bottom: 0` of the AppShell container. Does NOT reserve flex space — `ScrollView` fills the entire shell height behind it, and the dome scrim provides the visual clearance around the button.
 - **Centre button**: hollow white 2px ring, `colors.background` bg, glyph = CURRENT PAGE's icon (dynamic via `usePathname`, falls back to Dashboard icon for off-nav routes like `/profile`). Single tap → navigates to Dashboard; long-press → menu blooms. Glyph cross-fades lime→white via a finger-position check against `CENTER_BTN_RADIUS` (lime when finger over centre or menu closed; white once finger has moved off — doubles as the "release here to cancel" hint).
 - **Orbit composition (LOCKED slot order, left → right):**
-  - Inner ring (layer 2, 3 items): Strength · Mobility · Cardio  (angles 140°, 90°, 40°)
-  - Outer ring (layer 1, 4 items): Bodyweight · Heart · Calories · History  (angles 155°, 110°, 70°, 25°)
+  - Inner ring (layer 2, 3 items): Strength · Bodyweight · Cardio  (angles 140°, 90°, 40°)
+  - Outer ring (layer 1, 4 items): Sleep · Heart · Calories · Hydration  (angles 155°, 110°, 70°, 25°)
+  - (Synced 2026-06-03 to match `RadialNav.tsx`: Mobility was removed in the June 2026 mobility teardown and History isn't in the nav; Sleep + Hydration are the two fullrx orbit pages. Bodyweight moved to the inner-top slot.)
   - Dashboard SWAPS into the slot of whichever orbit page the user is currently on (when on Dashboard itself, no swap — orbit shows the 7 non-Dashboard pages in their natural slots).
 - **Orbit chrome** (every state): hollow white 1.5px ring, `colors.background` bg, glyph cross-fades white → lime on hover via 120 ms `useDerivedValue` + `interpolateColor`. Bg and border NEVER change; only the glyph colour shifts on hover.
 - **Labels**: 10px white Geist Medium below — wait, ABOVE — each orbit icon (anchored via `bottom: ICON_DIAM + LABEL_GAP` on the wrapper so the label sits LABEL_GAP=4 above the icon's top edge). Fades in with the menu via the parent wrapper's opacity.
