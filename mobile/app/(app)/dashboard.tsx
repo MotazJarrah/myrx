@@ -783,7 +783,7 @@ export default function Dashboard() {
             )}
             <Text style={d.coachBadgeText} numberOfLines={1}>
               <Text style={d.coachBadgeMuted}>Coached by </Text>
-              <Text style={d.coachBadgeName}>{coachInfo.full_name}</Text>
+              <Text style={d.coachBadgeName}>{(coachInfo.full_name ?? '').trim().split(' ')[0]}</Text>
             </Text>
           </View>
         )}

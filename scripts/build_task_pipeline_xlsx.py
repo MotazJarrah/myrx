@@ -520,6 +520,18 @@ TASKS = [
      "DONE 2026-06-04: count pills now show muted 'no recent strength PRs / no recent cardio PRs / no recent food' (accent-tinted, like the measurement empties) when the count is 0, and the number+label only when > 0. Mobile + admin + coach; built + deployed. All 7 pills now read consistently — a value when there's something recent, 'no recent <metric>' otherwise.",
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-04"),
+
+    ("T076", "Mobile 'Coached by' shows full name, should be first only", "Dashboard", "Mobile", "Done",
+     "On the client's mobile dashboard the 'Coached by …' badge showed the coach's FULL name (e.g. 'Coached by Taz Jarrah'); should show first name only ('Coached by Taz'). The coachInfo handler already stripped to split(' ')[0], but a stale cached coachInfo (hydrated from dataCache before the stripping shipped) rendered the full name.",
+     "Fixed: the badge now strips to the first word at RENDER time — (coachInfo.full_name ?? '').trim().split(' ')[0] — so it shows first name only regardless of what's cached. (Athlete dashboard is mobile-only, no web mirror.)",
+     "mobile dashboard.tsx",
+     "2026-06-04"),
+
+    ("T077", "Mobile sign-in heading 'Sign in to MyRX' -> 'Sign in'", "Auth", "Mobile", "Done",
+     "Mobile sign-in page had an eyebrow 'Sign in' + a title 'Sign in to MyRX' (redundant); user wants just 'Sign in'.",
+     "Fixed: removed the redundant eyebrow and set the title to 'Sign in' (single clean heading). Web Auth.jsx differs — heading is 'Welcome back' + subtitle 'Sign in to continue to MyRX', not the same string — so left as-is (mobile-only fix).",
+     "mobile/app/(auth)/sign-in.tsx; web Auth.jsx",
+     "2026-06-04"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────

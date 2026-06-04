@@ -314,8 +314,7 @@ export default function SignIn() {
                   in the header), so the title says "your account"
                   rather than repeating it in plain text. */}
               <View>
-                <Text style={s.eyebrow}>Sign in</Text>
-                <Text style={s.title}>Sign in to MyRX</Text>
+                <Text style={s.title}>Sign in</Text>
               </View>
 
               <View style={s.card}>
