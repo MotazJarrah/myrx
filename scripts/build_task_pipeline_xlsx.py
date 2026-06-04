@@ -544,6 +544,12 @@ TASKS = [
      "Phase 1 (build pages): add read-only mirror tabs AdminUserSleep / AdminUserHydration / AdminUserHeart (styled like existing admin tabs: Recharts, design tokens), wired into AdminUserDetail. Built via parallel agents 2026-06-04. Phase 2 (per-page, one at a time): align every tab first-view to the athlete exactly + add coaching elements.",
      "web/src/pages/admin/tabs/AdminUser{Sleep,Hydration,Heart}.jsx; web/src/pages/admin/AdminUserDetail.jsx; mirror mobile/app/(app)/{sleep,hydration,heart}.tsx",
      "2026-06-04"),
+
+    ("T080", "Efforts page — align coach view to athlete + coaching add-ons", "Coach/Admin", "Web", "In progress",
+     "Per-page pass (Phase 2 of T079), starting with Efforts at user request 2026-06-04. Goal: make the admin Efforts tab's FIRST view show what the athlete sees on their Strength + Cardio pages (read-only, no inputs — coach input is a separate track), then propose coaching add-ons. Open structural question: athlete has SEPARATE Strength + Cardio pages; admin combines them into one 'Efforts' tab (AdminUserActivity.jsx: filter pills + per-movement cards -> detail route). Decide split-vs-combined + remove the Add-effort input.",
+     "STRUCTURE DECIDED 2026-06-04: keep ONE combined Efforts tab with an internal Strength|Cardio segmented toggle (dropped 'All', default Strength). LIST-VIEW read-only mirror DONE + deployed 2026-06-04 — removed the Add-effort form + backdate + button; AdminUserActivity is now read-only (207->193 lines). NEXT: (a) coaching add-ons for the list (candidates: last-trained recency, stalled-lift flag, training frequency/volume trend, PR timeline, strength/cardio balance, adherence/consistency) — suggest, user picks; (b) DETAIL-SCREEN rebuild — admin detail routes (AdminEffortDetail = bare 10-tile grid; AdminCardioDetail = old pace model w/ banned 'lower=faster') don't mirror the athlete coaching surfaces; also remove swipe-delete there for read-only.",
+     "web/src/pages/admin/tabs/AdminUserActivity.jsx; web AdminEffortDetail/AdminCardioDetail; mirror mobile/app/(app)/{strength,cardio}.tsx + effort detail pages",
+     "2026-06-04"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────

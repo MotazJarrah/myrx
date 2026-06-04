@@ -1,40 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { supabase } from '../../../lib/supabase'
-import { STRENGTH_MOVEMENTS, CARDIO_MOVEMENTS, ISOMETRIC_EXERCISE_NAMES, getCardioMode } from '../../../lib/movements'
-import { estimate1RM } from '../../../lib/formulas'
-import MovementSearch from '../../../components/MovementSearch'
-import {
-  Dumbbell, Activity, Plus, ChevronRight,
-  Loader2, Check, AlertCircle, X, Timer,
-} from 'lucide-react'
-
-// ── Time helpers ──────────────────────────────────────────────────────────────
-
-function parseTimeStr(str) {
-  if (!str) return null
-  const parts = str.split(':').map(Number)
-  if (parts.some(n => isNaN(n))) return null
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
-  if (parts.length === 2) return parts[0] * 60 + parts[1]
-  return null
-}
-
-function applyTimeMask(raw) {
-  const digits = raw.replace(/\D/g, '').slice(0, 6)
-  if (!digits) return ''
-  if (digits.length <= 2) return digits
-  if (digits.length <= 4) return `${digits.slice(0, -2)}:${digits.slice(-2)}`
-  return `${digits.slice(0, -4)}:${digits.slice(-4, -2)}:${digits.slice(-2)}`
-}
-
-function fmtDuration(secs) {
-  if (!secs) return '0s'
-  const m = Math.floor(secs / 60), s = secs % 60
-  if (m === 0) return `${s}s`
-  if (s === 0) return `${m}m`
-  return `${m}m ${s}s`
-}
+import { Dumbbell, Activity, ChevronRight } from 'lucide-react'
 
 // Cardio direction-aware best parser — mirrors AdminUserDetail's parseCardioBest
 // (and mobile dashboard's). Returns { val, lowerBetter } so the caller picks the
@@ -52,253 +19,6 @@ function parseCardioBest(v) {
   }
   const m = v.match(/(\d+(?:\.\d+)?)/)
   return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
-}
-
-// ── Add Effort Form ───────────────────────────────────────────────────────────
-
-function AddEffortForm({ userId, onSaved, onClose }) {
-  const [type,         setType]         = useState(null)
-  const [exerciseName, setExerciseName] = useState('')
-  const [reps,         setReps]         = useState('')
-  const [weightVal,    setWeightVal]    = useState('')
-  const [weightUnit,   setWeightUnit]   = useState('lb')
-  const [timeStr,      setTimeStr]      = useState('')
-  const [distVal,      setDistVal]      = useState('')
-  const [distUnit,     setDistUnit]     = useState('km')
-  const [date,         setDate]         = useState(() => new Date().toISOString().split('T')[0])
-  const [saving,       setSaving]       = useState(false)
-  const [error,        setError]        = useState('')
-
-  const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
-
-  // Strength derived state
-  const isIsometric = exerciseName ? ISOMETRIC_EXERCISE_NAMES.has(exerciseName) : false
-  const durSecs     = parseTimeStr(timeStr) || 0
-  const r           = Number(reps)
-  const w           = Number(weightVal)
-  const liveOneRM   = !isIsometric && r >= 1 && r <= 30 && reps && w > 0
-    ? estimate1RM(w, r)
-    : null
-  const canSaveStrength = isIsometric ? durSecs >= 1 : liveOneRM != null
-
-  useEffect(() => { setTimeStr(''); setReps(''); setWeightVal('') }, [isIsometric])
-
-  // Cardio derived state
-  const cardioMode = exerciseName && type === 'cardio' ? getCardioMode(exerciseName) : 'pace'
-  const distKm     = distUnit === 'mi' ? (Number(distVal) || 0) * 1.60934 : (Number(distVal) || 0)
-  const timeSecs   = parseTimeStr(timeStr) || 0
-
-  const livePaceKm = (() => {
-    if (cardioMode !== 'pace' || distKm <= 0 || !timeSecs) return null
-    const sec = timeSecs / distKm
-    return `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}/km`
-  })()
-
-  const canSaveCardio = cardioMode === 'pace' ? (distKm > 0 && timeSecs > 0) : timeSecs > 0
-
-  useEffect(() => { setDistVal(''); setTimeStr('') }, [cardioMode])
-
-  function resetForm() {
-    setExerciseName(''); setReps(''); setWeightVal(''); setTimeStr('')
-    setDistVal('')
-  }
-
-  async function handleSave(e) {
-    e.preventDefault()
-    setError('')
-    setSaving(true)
-    try {
-      // Use actual current time for today; UTC noon (Z) for past dates so we
-      // never create a future timestamp regardless of the admin's local timezone.
-      const today = new Date().toISOString().split('T')[0]
-      const ts    = date === today
-        ? new Date().toISOString()
-        : new Date(date + 'T12:00:00Z').toISOString()
-
-      if (type === 'strength') {
-        if (!exerciseName.trim()) throw new Error('Enter an exercise name.')
-        let label, value
-        if (isIsometric) {
-          label = `${exerciseName} · ${durSecs} sec`
-          value = `${durSecs} sec`
-        } else {
-          label = `${exerciseName} · ${w} ${weightUnit} × ${reps}`
-          value = `Est. 1RM ${liveOneRM} ${weightUnit}`
-        }
-        const { error: err } = await supabase.from('efforts').insert({
-          user_id: userId, type: 'strength', label, value, created_at: ts,
-        })
-        if (err) throw err
-
-      } else if (type === 'cardio') {
-        if (!exerciseName.trim()) throw new Error('Enter an activity name.')
-        const label = cardioMode === 'pace'
-          ? `${exerciseName} · ${parseFloat(Number(distVal).toFixed(3))} ${distUnit} in ${timeStr}`
-          : `${exerciseName} · ${timeStr}`
-        const value = cardioMode === 'pace' ? livePaceKm : timeStr
-        const { error: err } = await supabase.from('efforts').insert({
-          user_id: userId, type: 'cardio', label, value, created_at: ts,
-        })
-        if (err) throw err
-      }
-
-      onSaved?.()
-      onClose()
-    } catch (err) {
-      setError(err.message || 'Failed to save.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <form onSubmit={handleSave} className="rounded-xl border border-border bg-card p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold">Add effort</p>
-        <button type="button" onClick={onClose} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent transition-colors">
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      {/* Type selector */}
-      <div>
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Type</p>
-        <div className="flex gap-2">
-          {[
-            { id: 'strength', label: 'Strength', icon: Dumbbell, cls: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
-            { id: 'cardio',   label: 'Cardio',   icon: Activity, cls: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
-          ].map(t => {
-            const Icon = t.icon
-            return (
-              <button key={t.id} type="button"
-                onClick={() => { setType(t.id); resetForm() }}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-semibold transition-all ${
-                  type === t.id ? t.cls : 'border-border text-muted-foreground hover:bg-accent'
-                }`}
-              >
-                <Icon className="h-3.5 w-3.5" />{t.label}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* ── Strength ── */}
-      {type === 'strength' && (
-        <div className="space-y-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Exercise</p>
-            <MovementSearch value={exerciseName} onChange={setExerciseName} movements={STRENGTH_MOVEMENTS} placeholder="Search or type exercise…" />
-          </div>
-
-          {isIsometric ? (
-            <>
-              <div>
-                <p className="text-[10px] text-muted-foreground mb-1">Duration</p>
-                <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
-              </div>
-              {durSecs >= 1 && (
-                <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
-                  <div className="flex items-center gap-2"><Timer className="h-3.5 w-3.5 text-blue-400" /><span className="text-xs text-muted-foreground">Hold duration</span></div>
-                  <span className="font-mono text-base tabular-nums font-bold text-blue-400">{fmtDuration(durSecs)}</span>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1.35fr 1fr' }}>
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Reps</p>
-                  <input type="number" value={reps} onChange={e => setReps(e.target.value)} min="1" max="30" className={inputCls} />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Weight</p>
-                  <input type="number" step="0.5" value={weightVal} onChange={e => setWeightVal(e.target.value)} className={inputCls} />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Unit</p>
-                  <select value={weightUnit} onChange={e => setWeightUnit(e.target.value)} className={inputCls}>
-                    <option>lb</option><option>kg</option>
-                  </select>
-                </div>
-              </div>
-              {liveOneRM && (
-                <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
-                  <div className="flex items-center gap-2"><Dumbbell className="h-3.5 w-3.5 text-blue-400" /><span className="text-xs text-muted-foreground">Estimated 1RM</span></div>
-                  <span className="font-mono text-base tabular-nums font-bold text-blue-400">{liveOneRM} {weightUnit}</span>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ── Cardio ── */}
-      {type === 'cardio' && (
-        <div className="space-y-3">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Activity</p>
-            <MovementSearch value={exerciseName} onChange={setExerciseName} movements={CARDIO_MOVEMENTS} placeholder="Search or type activity…" />
-          </div>
-
-          {cardioMode === 'duration' ? (
-            <>
-              <div>
-                <p className="text-[10px] text-muted-foreground mb-1">Duration</p>
-                <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
-              </div>
-              {timeSecs > 0 && (
-                <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
-                  <div className="flex items-center gap-2"><Timer className="h-3.5 w-3.5 text-amber-400" /><span className="text-xs text-muted-foreground">Session time</span></div>
-                  <span className="font-mono text-base tabular-nums font-bold text-amber-400">{timeStr}</span>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 0.9fr 1.35fr' }}>
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Distance</p>
-                  <input type="number" step="0.01" value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Unit</p>
-                  <select value={distUnit} onChange={e => setDistUnit(e.target.value)} className={inputCls}>
-                    <option value="km">km</option><option value="mi">mi</option>
-                  </select>
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Time</p>
-                  <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
-                </div>
-              </div>
-              {livePaceKm && (
-                <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
-                  <div className="flex items-center gap-2"><Activity className="h-3.5 w-3.5 text-amber-400" /><span className="text-xs text-muted-foreground">Live pace</span></div>
-                  <span className="font-mono text-base tabular-nums font-bold text-amber-400">{livePaceKm}</span>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Date + save */}
-      {type && (
-        <div className="space-y-3">
-          <div>
-            <p className="text-[10px] text-muted-foreground mb-1">Date</p>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} />
-          </div>
-          {error && <div className="flex items-center gap-2 text-xs text-destructive"><AlertCircle className="h-3.5 w-3.5 shrink-0" />{error}</div>}
-          <button type="submit" disabled={saving || (type === 'strength' && !canSaveStrength) || (type === 'cardio' && !canSaveCardio)}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
-            {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save entry</>}
-          </button>
-        </div>
-      )}
-    </form>
-  )
 }
 
 // ── Move card ─────────────────────────────────────────────────────────────────
@@ -332,13 +52,11 @@ function MoveCard({ label, type, count, stat, onClick }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function AdminUserActivity({ userId, onEffortSaved }) {
-  const [, navigate]  = useLocation()
-  const [efforts,  setEfforts]  = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [filter,   setFilter]   = useState('all')
-  const [showForm, setShowForm] = useState(false)
-  const [refresh,  setRefresh]  = useState(0)
+export default function AdminUserActivity({ userId }) {
+  const [, navigate] = useLocation()
+  const [efforts, setEfforts] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [view,    setView]    = useState('strength')
 
   useEffect(() => {
     async function load() {
@@ -351,7 +69,7 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
       setLoading(false)
     }
     load()
-  }, [userId, refresh])
+  }, [userId])
 
   // ── Group by exercise name ────────────────────────────────────────────────
   const { strengthMoves, cardioMoves } = useMemo(() => {
@@ -416,94 +134,59 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
     return { strengthMoves, cardioMoves }
   }, [efforts])
 
-  // Available filters (only show if data exists)
-  const availableFilters = [
-    'all',
-    ...(strengthMoves.length > 0 ? ['strength'] : []),
-    ...(cardioMoves.length   > 0 ? ['cardio']   : []),
-  ]
-
-  const visibleMoves = useMemo(() => {
-    if (filter === 'strength') return strengthMoves
-    if (filter === 'cardio')   return cardioMoves
-    return [...strengthMoves, ...cardioMoves]
-  }, [filter, strengthMoves, cardioMoves])
-
-  const totalMoves = strengthMoves.length + cardioMoves.length
+  const visibleMoves = view === 'cardio' ? cardioMoves : strengthMoves
 
   function handleMoveClick(move) {
     navigate(`/admin/user/${userId}/effort/${move.type}/${encodeURIComponent(move.label)}`)
   }
 
-  const FILTER_LABELS = { all: 'All', strength: 'Strength', cardio: 'Cardio' }
-
   return (
     <div className="space-y-4">
 
-      {/* Header row */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        {/* Filter pills */}
-        <div className="flex gap-1.5 flex-wrap">
-          {availableFilters.map(f => (
+      {/* Segmented Strength ⇄ Cardio toggle */}
+      <div className="border border-border rounded-lg p-0.5 inline-flex">
+        {[
+          { id: 'strength', label: 'Strength', icon: Dumbbell },
+          { id: 'cardio',   label: 'Cardio',   icon: Activity },
+        ].map(t => {
+          const Icon = t.icon
+          const active = view === t.id
+          return (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                filter === f
+              key={t.id}
+              onClick={() => setView(t.id)}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                active
                   ? 'bg-primary text-primary-foreground'
-                  : 'border border-border text-muted-foreground hover:text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              {FILTER_LABELS[f]}
-              {f !== 'all' && (() => {
-                const n = f === 'strength' ? strengthMoves.length : cardioMoves.length
-                return n > 0 ? ` (${n})` : ''
-              })()}
+              <Icon className="h-3.5 w-3.5" />{t.label}
             </button>
-          ))}
-        </div>
-
-        {/* Add button */}
-        <button onClick={() => setShowForm(f => !f)}
-          className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity shrink-0">
-          <Plus className="h-3.5 w-3.5" /> Add effort
-        </button>
+          )
+        })}
       </div>
 
-      {/* Add form */}
-      {showForm && (
-        <AddEffortForm
-          userId={userId}
-          onSaved={() => {
-            setRefresh(r => r + 1)
-            onEffortSaved?.()
-          }}
-          onClose={() => setShowForm(false)}
-        />
-      )}
-
-      {/* Strength + cardio move cards */}
+      {/* Move cards for the selected type */}
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
-      ) : totalMoves === 0 ? (
+      ) : visibleMoves.length === 0 ? (
         <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">
-          No efforts logged yet.
+          {view === 'cardio' ? 'No cardio logged yet' : 'No strength logged yet'}
         </div>
       ) : (
-        visibleMoves.length > 0 && (
-          <div className="space-y-2">
-            {visibleMoves.map(move => (
-              <MoveCard
-                key={`${move.type}-${move.label}`}
-                label={move.label}
-                type={move.type}
-                count={move.count}
-                stat={move.stat}
-                onClick={() => handleMoveClick(move)}
-              />
-            ))}
-          </div>
-        )
+        <div className="space-y-2">
+          {visibleMoves.map(move => (
+            <MoveCard
+              key={`${move.type}-${move.label}`}
+              label={move.label}
+              type={move.type}
+              count={move.count}
+              stat={move.stat}
+              onClick={() => handleMoveClick(move)}
+            />
+          ))}
+        </div>
       )}
     </div>
   )
