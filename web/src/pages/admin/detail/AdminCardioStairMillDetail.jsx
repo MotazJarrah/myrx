@@ -5,26 +5,33 @@
  * Fires for the single activity `StairMill` (movements.cardio_mode = 'duration',
  * but StairMill short-circuits the generic duration route into its own
  * coaching surface). Progression is anchored on FLOORS PER MINUTE (FPM) —
- * floors ÷ minutes — and split across three science-backed adaptation zones
- * (ENDURANCE / THRESHOLD / VO2 MAX).
+ * floors ÷ minutes — across three science-backed adaptation zones
+ * (ENDURANCE / THRESHOLD / VO2 MAX), arranged by Seiler's polarized model.
  *
  * Faithfully reproduces the athlete surface defined in:
- *   - CLAUDE.md → "StairMill detail card — locked design spec"
- *   - mobile/app/(app)/effort/cardio/[activity].tsx (StairMillDetail branch
- *     + STAIRMILL_ZONE_CONFIG / buildStairMillZoneRx / getStairMillZoneCue)
+ *   - mobile/app/(app)/effort/cardio/[activity].tsx → function StairMillDetail
+ *     (+ STAIRMILL_ZONE_CONFIG / buildStairMillZoneRx / getStairMillZoneCue /
+ *      classifyStairMillEffortZone / daysSinceLastStairMillEffortInZone /
+ *      generateStairMillPlanQueue)
  *   - mobile/src/lib/movements.ts (parseStairMillLabel /
  *     floorsPerMinFromEffort / genderBaselineFloorsPerMin / isStairMillActivity)
  *
- * Sections, top to bottom (matching the athlete):
- *   1. Header       — "StairMill" + "Best — N floors/min" (TickerNumber) +
- *                     STAIR CLIMBING category pill
- *   2. Plan card    — zone pill row (VO2 MAX / THRESHOLD / ENDURANCE, hardest-
- *                     first, click to switch) + tappable info panel (whyText)
- *   3. Hero card    — 4 stacked rows (floors / time / FPM target / rest) with
- *                     TickerNumber on the big numbers + full coaching cue
- *   4. Chart        — Recharts FPM-over-time line, NOT reversed (higher =
- *                     better), peak-FPM dashed reference line
- *   5. Efforts log  — chronological list, per-effort DELETE kept (SwipeDelete)
+ * The MOBILE CODE IS THE SOLE SOURCE OF TRUTH for this surface — the athlete
+ * uses the SAME plan-queue tile model that running's PaceDetail does (NOT the
+ * earlier zone-pill / 4-row-hero design). Mirrors:
+ *
+ * Sections, top to bottom (matching the athlete + AdminCardioPaceDetail):
+ *   1. Header        — "StairMill" + "Best — N floors/min" (TickerNumber) +
+ *                      STAIR CLIMBING category pill (or cold-start subtitle)
+ *   2. Progression   — selected-step HERO (zone info pill + workout / time /
+ *      plan card       climb-rate rows + full coaching cue) and a horizontal
+ *                      8-tile queue from generateStairMillPlanQueue. The tile
+ *                      row IS the navigation; the hero shows the SELECTED
+ *                      tile's prescription. Default selection = step 0 (the
+ *                      next system-recommended session per Seiler's rules).
+ *   3. Chart         — Recharts FPM-over-time line, NOT reversed (higher =
+ *                      better progress = line trends up), peak-FPM dashed ref.
+ *   4. Efforts log   — chronological list, per-effort DELETE kept (SwipeDelete).
  *
  * READ-ONLY: no log / add form. Delete is intentionally retained (the coach
  * is allowed to delete a client's efforts).
@@ -32,21 +39,28 @@
  * AMBER accent end-to-end (cardio theme), NOT blue.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * Why the FPM + zone math is re-implemented inline:
+ * Why the FPM + zone + plan-queue math is re-implemented inline:
  * web/src/lib/movements.js does NOT export the StairMill helpers
  * (parseStairMillLabel / floorsPerMinFromEffort / genderBaselineFloorsPerMin)
- * or the zone config (STAIRMILL_ZONE_CONFIG / buildStairMillZoneRx /
- * getStairMillZoneCue) — those all live mobile-side. Rather than mutate the
- * frozen web lib, every needed piece is reproduced here verbatim from
- * mobile so the projections match the athlete exactly.
+ * or the zone config + queue generator (STAIRMILL_ZONE_CONFIG /
+ * buildStairMillZoneRx / getStairMillZoneCue / generateStairMillPlanQueue) —
+ * those all live mobile-side. Rather than mutate the frozen web lib, every
+ * needed piece is reproduced here verbatim from mobile so the projections
+ * match the athlete exactly.
+ *
+ * Web substitutions for mobile-only primitives:
+ *   - Skia/Reanimated tile row → plain horizontal-scroll tile row +
+ *     click-to-select (no physical pill slide). Mirrors AdminCardioPaceDetail.
+ *   - LineChart (react-native-svg) → Recharts (matching AdminCardioPaceDetail).
+ *   - DeleteAction (gesture-handler swipe) → SwipeDelete (web).
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../../lib/supabase'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
-import { ArrowLeft, ChevronLeft, ChevronRight, Info } from 'lucide-react'
+import { ArrowLeft, Info } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -54,7 +68,7 @@ import {
 
 // ── Time helper (mirror of mobile fmtSecs) ────────────────────────────────────
 function fmtSecs(totalSecs) {
-  if (!totalSecs && totalSecs !== 0) return '—'
+  if (totalSecs == null) return '—'
   const h = Math.floor(totalSecs / 3600)
   const m = Math.floor((totalSecs % 3600) / 60)
   const s = Math.round(totalSecs % 60)
@@ -101,9 +115,10 @@ function genderBaselineFloorsPerMin(gender) {
 }
 
 // ── Zone config (verbatim mirror of mobile STAIRMILL_ZONE_CONFIG) ─────────────
-// Hardest-first slot order: VO2 → THRESHOLD → ENDURANCE.
-const STAIRMILL_ZONE_ORDER = ['vo2', 'threshold', 'aerobic']
-
+// Hardest-first slot order is VO2 → THRESHOLD → ENDURANCE; the plan-queue
+// generator references zones by key, so no explicit ORDER constant is needed
+// here (the athlete's STAIRMILL_ZONE_ORDER is only used by its zone-pill
+// carousel, which the plan-queue tile model replaced).
 const STAIRMILL_ZONE_CONFIG = Object.freeze({
   vo2: {
     label:       'VO2 MAX',
@@ -140,6 +155,7 @@ const STAIRMILL_ZONE_CONFIG = Object.freeze({
  *   targetFpm    = max(1, peakFpm × intensity)
  *   floorsPerRep = max(1, round(targetFpm × durationMin))
  *   estSecs      = round(durationMin × 60)
+ * `shortWork` abbreviates "floors" → "fl" (matches the mobile hero row 1).
  */
 function buildStairMillZoneRx(zone, peakFpm) {
   const cfg          = STAIRMILL_ZONE_CONFIG[zone]
@@ -152,7 +168,6 @@ function buildStairMillZoneRx(zone, peakFpm) {
     estimatedSecsPerRep,
     reps:     cfg.reps,
     restSecs: cfg.restSecs,
-    // hero row 1 abbreviates "floors" → "fl" (matches mobile)
     shortWork: cfg.reps === 1 ? `${floorsPerRep} fl` : `${cfg.reps} × ${floorsPerRep} fl`,
   }
 }
@@ -170,7 +185,87 @@ function getStairMillZoneCue(zone, rx) {
   return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at max effort (~${fmtSecs(rx.estimatedSecsPerRep)} each). Full recovery ${Math.round(rx.restSecs / 60)} min between reps.`
 }
 
-// ── Misc helpers ──────────────────────────────────────────────────────────────
+// ── Plan queue — Seiler polarized sequencing (verbatim mirror of mobile) ───────
+// classifyStairMillEffortZone / daysSinceLastStairMillEffortInZone /
+// generateStairMillPlanQueue reproduced exactly so the queue matches the
+// athlete. Same five polarized rules running's queue uses:
+//   1. No hard back-to-back
+//   2. Don't let VO2 go stale (10+ days)
+//   3. Don't let Threshold go stale (7+ days)
+//   4. Anti-stagnation interleave after 3 Endurance steps
+//   5. Default Endurance (→ ~80/20 polarized split)
+
+function classifyStairMillEffortZone(label, peakFpm) {
+  const parsed = parseStairMillLabel(label)
+  if (!parsed || !parsed.timeSecs || peakFpm <= 0) return 'aerobic'
+  const fpm = floorsPerMinFromEffort(parsed.floors, parsed.timeSecs)
+  if (fpm <= 0) return 'aerobic'
+  if (fpm >= peakFpm * 1.00) return 'vo2'
+  if (fpm >= peakFpm * 0.75) return 'threshold'
+  return 'aerobic'
+}
+
+function daysSinceLastStairMillEffortInZone(efforts, zone, peakFpm) {
+  for (let i = efforts.length - 1; i >= 0; i--) {
+    if (classifyStairMillEffortZone(efforts[i].label, peakFpm) === zone) {
+      return (Date.now() - new Date(efforts[i].created_at).getTime()) / 86_400_000
+    }
+  }
+  return 999
+}
+
+function generateStairMillPlanQueue(efforts, peakFpm, count = 8) {
+  if (peakFpm <= 0) return []
+
+  const lastEffort  = efforts[efforts.length - 1]
+  const lastZone    = lastEffort ? classifyStairMillEffortZone(lastEffort.label, peakFpm) : null
+  const daysSinceT0 = daysSinceLastStairMillEffortInZone(efforts, 'threshold', peakFpm)
+  const daysSinceV0 = daysSinceLastStairMillEffortInZone(efforts, 'vo2',       peakFpm)
+
+  const zoneQueue  = []
+  let virtualLast  = lastZone
+  let virtualDaysT = daysSinceT0
+  let virtualDaysV = daysSinceV0
+  let endurStreak  = 0
+  let lastHard     = null
+
+  for (let i = 0; i < count; i++) {
+    let next
+    if (virtualLast === 'threshold' || virtualLast === 'vo2') {
+      next = 'aerobic'                                        // Rule 1: no hard back-to-back
+    } else if (virtualDaysV >= 10) {
+      next = 'vo2'                                            // Rule 2: VO2 stale
+    } else if (virtualDaysT >= 7) {
+      next = 'threshold'                                      // Rule 3: Threshold stale
+    } else if (endurStreak >= 3) {
+      next = lastHard === 'threshold' ? 'vo2' : 'threshold'   // Rule 4: interleave a hard
+    } else {
+      next = 'aerobic'                                        // Rule 5: default to Endurance
+    }
+
+    zoneQueue.push(next)
+
+    virtualLast = next
+    if (next === 'aerobic') {
+      endurStreak++
+    } else {
+      endurStreak = 0
+      lastHard = next
+    }
+    const gapDays = next === 'aerobic' ? 1 : 2
+    virtualDaysT = next === 'threshold' ? 0 : virtualDaysT + gapDays
+    virtualDaysV = next === 'vo2'       ? 0 : virtualDaysV + gapDays
+  }
+
+  return zoneQueue.map(zone => {
+    const rx        = buildStairMillZoneRx(zone, peakFpm)
+    const cue       = getStairMillZoneCue(zone, rx)
+    const zoneLabel = STAIRMILL_ZONE_CONFIG[zone].label
+    return { zone, rx, cue, shortWork: rx.shortWork, zoneLabel }
+  })
+}
+
+// ── Misc date helpers ──────────────────────────────────────────────────────────
 function fmtDate(iso) {
   const d = new Date(iso)
   const sameYear = d.getFullYear() === new Date().getFullYear()
@@ -205,10 +300,13 @@ export default function AdminCardioStairMillDetail({
   const [loading, setLoading] = useState(true)
   const [gender, setGender]   = useState(null)
 
-  // Active zone + info-panel state. Default landing zone = VO2 (slot 0 of the
-  // hardest-first carousel, matching the athlete's universal "open on slot 0").
-  const [selZone, setSelZone]           = useState('vo2')
-  const [zoneInfoOpen, setZoneInfoOpen] = useState(false)
+  // Progression-plan UI state — same model as AdminCardioPaceDetail:
+  //   selectedStepIdx → which queue tile drives the hero (default 0 = next step)
+  //   zoneInfoOpen    → inline "why this zone" panel toggle
+  const [selectedStepIdx, setSelectedStepIdx] = useState(0)
+  const [zoneInfoOpen, setZoneInfoOpen]       = useState(false)
+
+  const tileEls = useRef({})   // step idx → DOM node, for scroll-into-view
 
   // ── Load efforts + profile gender ────────────────────────────────────────────
   useEffect(() => {
@@ -260,25 +358,30 @@ export default function AdminCardioStairMillDetail({
   const effectiveRate = peakFpm > 0 ? peakFpm : baselineFpm
   const hasLoggedRate = peakFpm > 0
 
-  // ── Selected-zone prescription + cue ─────────────────────────────────────────
-  const selZoneCfg = STAIRMILL_ZONE_CONFIG[selZone]
-  const selRx      = useMemo(
-    () => buildStairMillZoneRx(selZone, effectiveRate),
-    [selZone, effectiveRate]
+  // ── Plan queue (Seiler polarized sequencing) — regenerated live per render. ──
+  // Mirrors the athlete: tile 0 is the next system-recommended session, and
+  // the tile row is the navigation. The hero below shows the SELECTED tile.
+  const planQueue = useMemo(
+    () => generateStairMillPlanQueue(entries, effectiveRate, 8),
+    [entries, effectiveRate],
   )
-  const selCue = useMemo(() => getStairMillZoneCue(selZone, selRx), [selZone, selRx])
 
-  // ── Zone navigation (click chevrons / pill) ──────────────────────────────────
-  const zoneIdx   = STAIRMILL_ZONE_ORDER.indexOf(selZone)
-  const canGoPrev = zoneIdx > 0
-  const canGoNext = zoneIdx < STAIRMILL_ZONE_ORDER.length - 1
-
-  function navigateZone(dir) {
-    const next = STAIRMILL_ZONE_ORDER[zoneIdx + dir]
-    if (!next || next === selZone) return
-    setSelZone(next)
-    setZoneInfoOpen(false)   // auto-close info panel on zone change (Pattern 5)
+  // When the queue regenerates (e.g. after a delete), reset the selection to
+  // step 0 and close the info panel. Done at RENDER time via React's
+  // "adjust state when a prop changes" pattern (store previous value, compare
+  // during render, setState during render) — NOT in an effect. Mirrors the
+  // identical guard in AdminCardioPaceDetail.
+  const queueSig = `${planQueue.length}:${planQueue[0]?.zone ?? ''}`
+  const [seenQueueSig, setSeenQueueSig] = useState(queueSig)
+  if (seenQueueSig !== queueSig) {
+    setSeenQueueSig(queueSig)
+    if (selectedStepIdx !== 0) setSelectedStepIdx(0)
+    if (zoneInfoOpen) setZoneInfoOpen(false)
   }
+
+  const selectedStep = planQueue[selectedStepIdx] ?? planQueue[0] ?? null
+  const selectedRx   = selectedStep?.rx ?? null
+  const selectedCfg  = selectedStep ? STAIRMILL_ZONE_CONFIG[selectedStep.zone] : null
 
   // ── Chart data — FPM over time (NOT reversed: higher = better progress) ──────
   const chartData = useMemo(() => entries
@@ -295,6 +398,15 @@ export default function AdminCardioStairMillDetail({
   const maxV   = values.length ? Math.max(...values) : 10
   const pad    = (maxV - minV) * 0.15 || 1
   const bestForChart = peakFpm > 0 ? peakFpm : null
+
+  function selectStep(idx) {
+    setSelectedStepIdx(idx)
+    setZoneInfoOpen(false)
+    requestAnimationFrame(() => {
+      const el = tileEls.current[idx]
+      if (el?.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    })
+  }
 
   function backFn() {
     if (onBack) return onBack()
@@ -337,119 +449,126 @@ export default function AdminCardioStairMillDetail({
       ) : (
         <>
           {/* ── 2. Progression plan card ── */}
-          <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
-            <h2 className="text-sm font-bold">Your progression plan</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              This is the client's personalized adaptation plan — three zones, each anchored on their climb rate.
-            </p>
+          {selectedStep && selectedRx && selectedCfg && (
+            <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
+              <h2 className="text-sm font-bold">Your progression plan</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                This is the client's personalized adaptation plan — follow it to see their results improve.
+              </p>
 
-            {/* Zone pill row — single active pill flanked by chevrons.
-                Web stays simple click-to-navigate (no swipe choreography). */}
-            <div className="mt-3 mb-2 flex items-center justify-center gap-3">
-              <div className="flex w-14 items-center justify-end">
-                {canGoPrev && (
+              {/* NEXT STEP hero — driven by the SELECTED tile (default: step 0).
+                  3 stacked rows (workout / time / climb rate). Rest lives in
+                  the cue line, mirroring the athlete (no separate rest row). */}
+              <div
+                className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] p-4"
+                style={{ minHeight: 220 }}
+              >
+                {/* Zone info pill (top-right) — tappable for "why this zone". */}
+                <div className="flex justify-end">
                   <button
-                    onClick={() => navigateZone(-1)}
-                    aria-label="Previous zone"
-                    className="text-amber-400/80 hover:text-amber-400 transition-colors"
+                    onClick={() => setZoneInfoOpen(o => !o)}
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5"
                   >
-                    <ChevronLeft className="h-5 w-5 -mr-2" />
-                    <ChevronLeft className="h-5 w-5 -mt-5" />
+                    <span className="whitespace-nowrap text-[10px] font-bold uppercase tracking-widest text-amber-400">
+                      {selectedCfg.label}
+                    </span>
+                    <Info className="h-3 w-3 text-amber-400" />
                   </button>
+                </div>
+
+                {/* Inline "why this zone" info panel (the WHY, not the prescription). */}
+                {zoneInfoOpen && (
+                  <div className="mt-1 rounded-md border border-amber-500/15 bg-card/60 px-2.5 py-2">
+                    <p className="mb-1 text-xs font-bold text-foreground">{selectedCfg.label}</p>
+                    <p className="text-[11px] leading-4 text-muted-foreground">{selectedCfg.whyText}</p>
+                  </div>
                 )}
+
+                {/* Three big rows: value (TickerNumber) on the left, descriptor right. */}
+                <div className="mt-2 space-y-3.5">
+                  {/* Row 1 — workout shape (floors). */}
+                  <div className="flex items-end justify-between gap-3">
+                    <TickerNumber value={selectedRx.shortWork} className="font-mono text-3xl font-bold text-amber-400" />
+                    <span className="shrink pb-1 text-right text-xs text-muted-foreground">
+                      {selectedRx.reps === 1 ? 'total climb' : 'per rep'}
+                    </span>
+                  </div>
+                  {/* Row 2 — estimated time. */}
+                  <div className="flex items-end justify-between gap-3">
+                    <TickerNumber value={fmtSecs(selectedRx.estimatedSecsPerRep)} className="font-mono text-3xl font-bold text-amber-400" />
+                    <span className="shrink pb-1 text-right text-xs text-muted-foreground">
+                      {selectedRx.reps === 1 ? 'to complete' : 'per rep'}
+                    </span>
+                  </div>
+                  {/* Row 3 — target FPM (climb rate). */}
+                  <div className="flex items-end justify-between gap-3">
+                    <TickerNumber value={`${selectedRx.targetFpm.toFixed(1)} fl/min`} className="font-mono text-3xl font-bold text-amber-400" />
+                    <span className="shrink pb-1 text-right text-xs text-muted-foreground">climb rate</span>
+                  </div>
+                </div>
+
+                {/* Thin separator + full coaching cue. */}
+                <div className="mt-2.5 border-t border-amber-500/15 pt-2.5">
+                  <p className="text-sm text-foreground">{selectedStep.cue}</p>
+                </div>
               </div>
 
-              <div className="rounded-full border border-amber-500 bg-amber-500/15 px-4 py-2">
-                <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-amber-400">
-                  {selZoneCfg.label}
-                </span>
-              </div>
-
-              <div className="flex w-14 items-center">
-                {canGoNext && (
-                  <button
-                    onClick={() => navigateZone(1)}
-                    aria-label="Next zone"
-                    className="text-amber-400/80 hover:text-amber-400 transition-colors"
-                  >
-                    <ChevronRight className="h-5 w-5 -mr-2" />
-                    <ChevronRight className="h-5 w-5 -mt-5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* ── 3. Hero card — 4 stacked rows (floors / time / FPM / rest) ── */}
-            <div
-              className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] p-4"
-              style={{ minHeight: 220 }}
-            >
-              {/* Tappable zone info pill (right-aligned). */}
-              <div className="flex justify-end">
-                <button
-                  onClick={() => setZoneInfoOpen(o => !o)}
-                  className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5"
+              {/* COMING UP — 8-tile horizontal scroll queue. Tap a tile to
+                  preview that step's prescription in the hero above. The tile
+                  row is the navigation (the athlete uses chevrons between
+                  tiles; web stays click-to-select with a › separator). */}
+              <p className="mt-4 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Coming up
+              </p>
+              <div className="relative">
+                <div
+                  className="flex items-center gap-1 overflow-x-auto py-1 px-0.5 scrollbar-hide"
+                  style={{ scrollbarWidth: 'none' }}
                 >
-                  <span className="whitespace-nowrap text-[10px] font-bold uppercase tracking-widest text-amber-400">
-                    {selZoneCfg.label}
-                  </span>
-                  <Info className="h-3 w-3 text-amber-400" />
-                </button>
+                  {planQueue.map((step, idx) => {
+                    const isSelected = selectedStepIdx === idx
+                    const isLast     = idx === planQueue.length - 1
+                    return (
+                      <div key={idx} className="flex items-center">
+                        <button
+                          ref={el => { tileEls.current[idx] = el }}
+                          onClick={() => selectStep(idx)}
+                          className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-2.5 transition-colors ${
+                            isSelected
+                              ? 'border-amber-500 bg-amber-500/15'
+                              : 'border-border bg-card/40 hover:border-amber-500/40'
+                          }`}
+                          style={{ minWidth: 84 }}
+                        >
+                          <span className={`text-[9px] font-bold uppercase tracking-wider ${isSelected ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                            {step.zoneLabel}
+                          </span>
+                          <span className={`mt-0.5 whitespace-nowrap font-mono text-sm font-bold tabular-nums ${isSelected ? 'text-amber-400' : 'text-foreground'}`}>
+                            {step.shortWork}
+                          </span>
+                          <span className={`mt-0.5 whitespace-nowrap font-mono text-[10px] tabular-nums leading-none ${isSelected ? 'text-amber-400/70' : 'text-muted-foreground/60'}`}>
+                            {fmtSecs(step.rx.estimatedSecsPerRep)}
+                          </span>
+                        </button>
+                        {!isLast && (
+                          <span className="px-0.5 text-amber-400/60 select-none" aria-hidden="true">›</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-card to-transparent" />
+                <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-card to-transparent" />
               </div>
 
-              {/* Inline "why this zone" info panel (the WHY, not the prescription). */}
-              {zoneInfoOpen && (
-                <div className="mt-1 rounded-md border border-amber-500/15 bg-card/60 px-2.5 py-2">
-                  <p className="mb-1 text-xs font-bold text-foreground">{selZoneCfg.label}</p>
-                  <p className="text-[11px] leading-4 text-muted-foreground">{selZoneCfg.whyText}</p>
-                </div>
-              )}
+              {/* Science attribution (verbatim mirror of the athlete). */}
+              <p className="mt-3 text-[11px] text-muted-foreground">
+                Seiler polarized 80/20 · session shapes from Allison / Honda / Boreham · ACSM
+              </p>
+            </AnimateRise>
+          )}
 
-              {/* Four big rows: value on the left, descriptor on the right. */}
-              <div className="mt-2 space-y-3.5">
-                {/* Row 1 — workout shape (floors). */}
-                <div className="flex items-end justify-between gap-3">
-                  <TickerNumber value={selRx.shortWork} className="font-mono text-3xl font-bold text-amber-400" />
-                  <span className="shrink pb-1 text-right text-xs text-muted-foreground">
-                    {selRx.reps === 1 ? 'total climb' : 'per rep'}
-                  </span>
-                </div>
-                {/* Row 2 — estimated time. */}
-                <div className="flex items-end justify-between gap-3">
-                  <TickerNumber value={fmtSecs(selRx.estimatedSecsPerRep)} className="font-mono text-3xl font-bold text-amber-400" />
-                  <span className="shrink pb-1 text-right text-xs text-muted-foreground">
-                    {selRx.reps === 1 ? 'to complete' : 'per rep'}
-                  </span>
-                </div>
-                {/* Row 3 — target FPM rate. */}
-                <div className="flex items-end justify-between gap-3">
-                  <TickerNumber value={`${selRx.targetFpm.toFixed(1)} fl/min`} className="font-mono text-3xl font-bold text-amber-400" />
-                  <span className="shrink pb-1 text-right text-xs text-muted-foreground">climb rate</span>
-                </div>
-                {/* Row 4 — rest between reps (intervals only). */}
-                <div className="flex items-end justify-between gap-3">
-                  <TickerNumber
-                    value={selRx.reps === 1 ? 'None' : fmtSecs(selRx.restSecs)}
-                    className="font-mono text-3xl font-bold text-amber-400"
-                  />
-                  <span className="shrink pb-1 text-right text-xs text-muted-foreground">
-                    {selRx.reps === 1 ? 'continuous' : 'rest between reps'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Thin separator + full coaching cue. */}
-              <div className="mt-2.5 border-t border-amber-500/15 pt-2.5">
-                <p className="text-sm text-foreground">{selCue}</p>
-              </div>
-            </div>
-
-            <p className="mt-3 text-[11px] text-muted-foreground">
-              Seiler polarized 80/20 · session shapes from Allison / Honda / Boreham · ACSM
-            </p>
-          </AnimateRise>
-
-          {/* ── 4. FPM-over-time chart (higher = better, NOT reversed) ── */}
+          {/* ── 3. FPM-over-time chart (higher = better, NOT reversed) ── */}
           {chartData.length >= 1 && (
             <AnimateRise delay={250} className="rounded-xl border border-border bg-card p-4">
               <p className="mb-3 text-xs font-semibold text-muted-foreground">Climb rate over time</p>
@@ -507,7 +626,7 @@ export default function AdminCardioStairMillDetail({
         </>
       )}
 
-      {/* ── 5. Efforts log (chronological, with per-effort delete) ── */}
+      {/* ── 4. Efforts log (chronological, with per-effort delete) ── */}
       {!loading && (
         <AnimateRise delay={500}>
           {entries.length === 0 ? (
@@ -516,6 +635,9 @@ export default function AdminCardioStairMillDetail({
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="border-b border-border px-4 py-3">
+                <h2 className="text-sm font-semibold">All entries</h2>
+              </div>
               <div className="divide-y divide-border">
                 {[...entries].reverse().map(e => {
                   const p   = parseStairMillLabel(e.label)
