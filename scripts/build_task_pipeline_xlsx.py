@@ -514,6 +514,12 @@ TASKS = [
      "RESOLVED 2026-06-04 — NOT a phantom inserter, it's real test taps. The rows' amounts are EXACTLY 236.588 / 354.882 / 473.176 ml = 8 / 12 / 16 oz (the hydration page's oz quick-add/picker presets run through ozToMl()); logged_at = created_at, clustered in bursts seconds apart on 2026-05-29 + 05-30 (rasp_86, ~18 rows) and 06-03 22:53 (motaz, 1 row) — i.e. manual button-mashing during the hydration-page dev/test sessions. The ONLY water_logs INSERT in the whole codebase is hydration.tsx addDrink (tap-triggered; grep confirmed nothing auto-inserts — sync/HC/Samsung/migrations don't write water_logs, they only DELETE in delete-user). 'No log showing' = the page's log list shows TODAY only (these are past days); 'pill says 0' = computeHydrationDaysHit counts days HITTING the daily goal in 7d (=0, each day was under goal) but rows exist so it reads 0 not 'no recent'. CLEANUP DONE 2026-06-04 (user said yes): deleted all 19 junk rows (rasp_86 18 + motaz 1) scoped by user_id; both accounts now read 0 water_logs. No code change — nothing was auto-inserting.",
      "mobile hydration.tsx; src/lib/healthConnect.ts, integrations/*; supabase functions/migrations",
      "2026-06-04"),
+
+    ("T075", "Stat pills: a 0 count should read 'no recent', not '0'", "Dashboard", "Cross", "Done",
+     "User (admin screenshot): count pills show '0 cardio PRs · 30d' and '0 food days · 14d' while measurement pills show 'no recent weight/HR/sleep/water' — inconsistent. The count-vs-measurement split I built shows the number even at 0 for PRs/food. Make the count pills read the muted 'no recent ...' empty state (accent-tinted, like the measurement empties) when the count is 0, and show the number only when > 0. (0 PRs = no PR set in the window — the client may still have trained — so 'no recent strength/cardio PRs' is accurate.)",
+     "DONE 2026-06-04: count pills now show muted 'no recent strength PRs / no recent cardio PRs / no recent food' (accent-tinted, like the measurement empties) when the count is 0, and the number+label only when > 0. Mobile + admin + coach; built + deployed. All 7 pills now read consistently — a value when there's something recent, 'no recent <metric>' otherwise.",
+     "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
+     "2026-06-04"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────

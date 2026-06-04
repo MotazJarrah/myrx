@@ -493,20 +493,34 @@ export default function CoachClientDetail() {
             even with no signal. */}
         {snapshot && (
           <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-            {/* Strength PRs — FREE. Last 30 days (count; shows 0 when none). */}
+            {/* Strength PRs — FREE. Last 30 days; "no recent strength PRs" when none. */}
             {tierRank >= TIER_RANK.free && snapshot.strengthPRsThisMonth != null && (
-              <SnapshotBadge color="blue">
-                <Dumbbell className="h-3 w-3 shrink-0 text-blue-400" />
-                <TickerNumber value={snapshot.strengthPRsThisMonth} /> strength PR{snapshot.strengthPRsThisMonth !== 1 ? 's' : ''} · 30d
-              </SnapshotBadge>
+              snapshot.strengthPRsThisMonth > 0 ? (
+                <SnapshotBadge color="blue">
+                  <Dumbbell className="h-3 w-3 shrink-0 text-blue-400" />
+                  <TickerNumber value={snapshot.strengthPRsThisMonth} /> strength PR{snapshot.strengthPRsThisMonth !== 1 ? 's' : ''} · 30d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="blue" muted>
+                  <Dumbbell className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent strength PRs
+                </SnapshotBadge>
+              )
             )}
 
-            {/* Cardio PRs — FREE. Last 30 days (count; shows 0 when none). */}
+            {/* Cardio PRs — FREE. Last 30 days; "no recent cardio PRs" when none. */}
             {tierRank >= TIER_RANK.free && snapshot.cardioPRsThisMonth != null && (
-              <SnapshotBadge color="amber">
-                <Activity className="h-3 w-3 shrink-0 text-amber-400" />
-                <TickerNumber value={snapshot.cardioPRsThisMonth} /> cardio PR{snapshot.cardioPRsThisMonth !== 1 ? 's' : ''} · 30d
-              </SnapshotBadge>
+              snapshot.cardioPRsThisMonth > 0 ? (
+                <SnapshotBadge color="amber">
+                  <Activity className="h-3 w-3 shrink-0 text-amber-400" />
+                  <TickerNumber value={snapshot.cardioPRsThisMonth} /> cardio PR{snapshot.cardioPRsThisMonth !== 1 ? 's' : ''} · 30d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="amber" muted>
+                  <Activity className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent cardio PRs
+                </SnapshotBadge>
+              )
             )}
 
             {/* Weight change — CORERX. Last 30 days (latest − earliest weigh-in). */}
@@ -539,12 +553,19 @@ export default function CoachClientDetail() {
               )
             )}
 
-            {/* Food — CORERX. Distinct days logged in last 14 (count; shows 0). */}
+            {/* Food — CORERX. Distinct days logged in last 14; "no recent food" when none. */}
             {tierRank >= TIER_RANK.corerx && snapshot.foodStreak != null && (
-              <SnapshotBadge color="red">
-                <Flame className="h-3 w-3 shrink-0 text-red-400" />
-                <TickerNumber value={snapshot.foodStreak} /> food day{snapshot.foodStreak !== 1 ? 's' : ''} · 14d
-              </SnapshotBadge>
+              snapshot.foodStreak > 0 ? (
+                <SnapshotBadge color="red">
+                  <Flame className="h-3 w-3 shrink-0 text-red-400" />
+                  <TickerNumber value={snapshot.foodStreak} /> food day{snapshot.foodStreak !== 1 ? 's' : ''} · 14d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="red" muted>
+                  <Flame className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent food
+                </SnapshotBadge>
+              )
             )}
 
             {/* Avg sleep — FULLRX. Last 7 nights; "no recent sleep" when empty. */}

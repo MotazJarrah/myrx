@@ -799,26 +799,44 @@ export default function Dashboard() {
           {/* Strength PRs — FREE. Last 30 days (count; shows 0 when none). */}
           {tierRank >= TIER_RANK.free && strengthPRs != null && (
             <View style={[d.statChip, d.statChipBlue]}>
-              <Dumbbell size={12} color={palette.blue[400]} style={d.statChipIcon} />
-              <View style={d.statChipNum}>
-                <TickerNumber value={strengthPRs} fontSize={11} color={palette.blue[400]} fontWeight="700" />
-              </View>
-              <Text style={[d.statChipText, { color: palette.blue[400] }]}>
-                {' '}strength PR{strengthPRs !== 1 ? 's' : ''} · 30d
-              </Text>
+              {strengthPRs > 0 ? (
+                <>
+                  <Dumbbell size={12} color={palette.blue[400]} style={d.statChipIcon} />
+                  <View style={d.statChipNum}>
+                    <TickerNumber value={strengthPRs} fontSize={11} color={palette.blue[400]} fontWeight="700" />
+                  </View>
+                  <Text style={[d.statChipText, { color: palette.blue[400] }]}>
+                    {' '}strength PR{strengthPRs !== 1 ? 's' : ''} · 30d
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Dumbbell size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                  <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent strength PRs</Text>
+                </>
+              )}
             </View>
           )}
 
           {/* Cardio PRs — FREE. Last 30 days (count; shows 0 when none). */}
           {tierRank >= TIER_RANK.free && cardioPRs != null && (
             <View style={[d.statChip, d.statChipAmber]}>
-              <Activity size={12} color={palette.amber[400]} style={d.statChipIcon} />
-              <View style={d.statChipNum}>
-                <TickerNumber value={cardioPRs} fontSize={11} color={palette.amber[400]} fontWeight="700" />
-              </View>
-              <Text style={[d.statChipText, { color: palette.amber[400] }]}>
-                {' '}cardio PR{cardioPRs !== 1 ? 's' : ''} · 30d
-              </Text>
+              {cardioPRs > 0 ? (
+                <>
+                  <Activity size={12} color={palette.amber[400]} style={d.statChipIcon} />
+                  <View style={d.statChipNum}>
+                    <TickerNumber value={cardioPRs} fontSize={11} color={palette.amber[400]} fontWeight="700" />
+                  </View>
+                  <Text style={[d.statChipText, { color: palette.amber[400] }]}>
+                    {' '}cardio PR{cardioPRs !== 1 ? 's' : ''} · 30d
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Activity size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                  <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent cardio PRs</Text>
+                </>
+              )}
             </View>
           )}
 
@@ -872,13 +890,22 @@ export default function Dashboard() {
           {/* Food — CORERX. Distinct days logged in the last 14 (count; shows 0). */}
           {tierRank >= TIER_RANK.corerx && foodStreak != null && (
             <View style={[d.statChip, d.statChipRed]}>
-              <Flame size={12} color={palette.red[400]} style={d.statChipIcon} />
-              <View style={d.statChipNum}>
-                <TickerNumber value={foodStreak} fontSize={11} color={palette.red[400]} fontWeight="700" />
-              </View>
-              <Text style={[d.statChipText, { color: palette.red[400] }]}>
-                {' '}food day{foodStreak !== 1 ? 's' : ''} · 14d
-              </Text>
+              {foodStreak > 0 ? (
+                <>
+                  <Flame size={12} color={palette.red[400]} style={d.statChipIcon} />
+                  <View style={d.statChipNum}>
+                    <TickerNumber value={foodStreak} fontSize={11} color={palette.red[400]} fontWeight="700" />
+                  </View>
+                  <Text style={[d.statChipText, { color: palette.red[400] }]}>
+                    {' '}food day{foodStreak !== 1 ? 's' : ''} · 14d
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Flame size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                  <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent food</Text>
+                </>
+              )}
             </View>
           )}
 
