@@ -36,6 +36,24 @@ function fmtDuration(secs) {
   return `${m}m ${s}s`
 }
 
+// Cardio direction-aware best parser — mirrors AdminUserDetail's parseCardioBest
+// (and mobile dashboard's). Returns { val, lowerBetter } so the caller picks the
+// right direction per activity:
+//   • Pace activities ("5:30/km", "1:55/500m"): lower is better
+//   • Speed / rate (cal/min, floors/min) / distance: higher is better
+// The `\b` after the unit alternation stops "/min" being misread as pace via "/mi".
+function parseCardioBest(v) {
+  if (!v) return null
+  const isPace = /\/(km|mi|500m|100m)\b/.test(v)
+  if (isPace) {
+    const m = v.match(/(\d+):(\d+)/)
+    if (!m) return null
+    return { val: parseInt(m[1], 10) * 60 + parseInt(m[2], 10), lowerBetter: true }
+  }
+  const m = v.match(/(\d+(?:\.\d+)?)/)
+  return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
+}
+
 // ── Add Effort Form ───────────────────────────────────────────────────────────
 
 function AddEffortForm({ userId, onSaved, onClose }) {
@@ -356,15 +374,18 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
           }
         }
       } else if (e.type === 'cardio') {
-        if (!cardioMap[name]) cardioMap[name] = { count: 0, bestSecs: null, bestPaceStr: null }
+        if (!cardioMap[name]) cardioMap[name] = { count: 0, bestVal: null, bestStr: null }
         cardioMap[name].count++
-        // Pace format: "5:00/km"
-        const pace = e.value?.match(/^(\d+):(\d{2})\/km$/)
-        if (pace) {
-          const secs = parseInt(pace[1]) * 60 + parseInt(pace[2])
-          if (cardioMap[name].bestSecs === null || secs < cardioMap[name].bestSecs) {
-            cardioMap[name].bestSecs    = secs
-            cardioMap[name].bestPaceStr = e.value
+        // Direction-aware best across ALL cardio formats (pace, speed, cal/min,
+        // floors/min, distance) — not just "/km" pace.
+        const parsed = parseCardioBest(e.value)
+        if (parsed) {
+          const c = cardioMap[name]
+          const better = c.bestVal === null
+            || (parsed.lowerBetter ? parsed.val < c.bestVal : parsed.val > c.bestVal)
+          if (better) {
+            c.bestVal = parsed.val
+            c.bestStr = e.value
           }
         }
       }
@@ -386,8 +407,8 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
         label: name,
         count: d.count,
         type:  'cardio',
-        stat:  d.bestPaceStr
-          ? `${d.count} ${d.count === 1 ? 'entry' : 'entries'} · Best ${d.bestPaceStr}`
+        stat:  d.bestStr
+          ? `${d.count} ${d.count === 1 ? 'entry' : 'entries'} · Best ${d.bestStr}`
           : `${d.count} ${d.count === 1 ? 'entry' : 'entries'}`,
       }))
       .sort((a, b) => b.count - a.count)

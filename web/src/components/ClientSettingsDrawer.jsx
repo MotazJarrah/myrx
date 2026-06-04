@@ -6,11 +6,11 @@
  * `/coach/client/:id` (viewerRole='coach'). Single component → admin↔coach
  * mirror is automatic per the CLAUDE.md mirror rule.
  *
- * v1 (May 26 2026): wraps the existing AdminUserProfile sub-component
- * which already has the Edit profile / Edit settings forms. These were
- * previously rendered inside the Profile tab of AdminUserDetail; this
- * drawer pulls them BEHIND the gear icon so the top-level tabs are pure
- * read-only dashboards.
+ * v1 (May 26 2026): wraps the shared AccountSettings component (the
+ * Edit profile / Edit settings forms). These were previously rendered
+ * inside the Profile tab of AdminUserDetail; this drawer pulls them
+ * BEHIND the gear icon so the top-level tabs are pure read-only
+ * dashboards.
  *
  * v2 (next iteration): split into 3 tabs (Account / Preferences /
  * Security) matching the end-user /profile shape. Security tab gets

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
-import { Weight, Plus, Check, AlertCircle } from 'lucide-react'
+import { Weight, Plus, Check, AlertCircle, Loader2 } from 'lucide-react'
 import SwipeDelete from '../../../components/SwipeDelete'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceDot } from 'recharts'
 

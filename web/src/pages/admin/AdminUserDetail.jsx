@@ -7,7 +7,6 @@ import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
 import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign, Download, FileDown, Weight, Heart, Flame, Moon, Droplet } from 'lucide-react'
 
-import AdminUserProfile   from './tabs/AdminUserProfile'
 import AdminUserActivity  from './tabs/AdminUserActivity'
 import AdminUserBody      from './tabs/AdminUserBody'
 import AdminUserCalories  from './tabs/AdminUserCalories'
@@ -489,7 +488,7 @@ export default function AdminUserDetail() {
   const [activeTab,    setActiveTab]    = useState(() => {
     const params   = new URLSearchParams(window.location.search)
     const urlTab   = params.get('tab')
-    const validTabs = ['dashboard', 'activity', 'body', 'calories', 'timeline']
+    const validTabs = ['dashboard', 'activity', 'body', 'calories', 'billing', 'timeline']
     if (urlTab && validTabs.includes(urlTab)) return urlTab
     // Legacy: old 'profile' tab → new 'dashboard'
     const stored = localStorage.getItem(`admin-user-tab-${id}`)

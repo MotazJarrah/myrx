@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../../lib/supabase'
-import { Flame, Plus, Check, AlertCircle, Trash2 } from 'lucide-react'
+import { Flame, Plus, Check, AlertCircle, Trash2, Loader2 } from 'lucide-react'
 import SwipeDelete from '../../../components/SwipeDelete'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { calcFullPlan } from '../../../lib/calorieFormulas'
@@ -388,7 +388,7 @@ export default function AdminUserCalories({ userId, existingPlan, profile, admin
           <div className="flex gap-2">
             <button type="submit" disabled={saving}
               className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
-              {saving ? 'Saving…' : <><Check className="h-3.5 w-3.5" /> Save</>}
+              {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</> : <><Check className="h-3.5 w-3.5" /> Save</>}
             </button>
             <button type="button" onClick={() => { setShowForm(false); setSaveErr('') }}
               className="rounded-lg border border-border px-4 py-2 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors">
