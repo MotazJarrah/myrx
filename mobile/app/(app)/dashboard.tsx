@@ -480,10 +480,6 @@ export default function Dashboard() {
       // the Heart page's resting-HR filter so the chip mirrors what
       // they see there).
       supabase.from('hr_samples').select('bpm').eq('user_id', user.id).is('workout_id', null).gte('measured_at', sevenDaysAgoISO),
-      // Weekly weight diff — 14-day window of bodyweight logs so
-      // computeWeeklyWeightDiff can find both a "last week" and "this
-      // week" anchor point.
-      supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', user.id).gte('created_at', fourteenDaysAgoISO).order('created_at', { ascending: false }),
       // Coach info — SECURITY DEFINER RPC; returns the caller's linked
       // coach or the admin superuser fallback (or null). Drives the
       // "Coached by [name]" badge in the profile card.
@@ -492,7 +488,7 @@ export default function Dashboard() {
       supabase.from('sleep_sessions').select('duration_s').eq('user_id', user.id).gte('start_at', sevenDaysAgoISO),
       // Hydration — last 7 days of water logs for the days-hit-goal chip.
       supabase.from('water_logs').select('amount_ml, drink_type, logged_at').eq('user_id', user.id).gte('logged_at', sevenDaysAgoISO),
-    ]).then(([efRes, bwRes, calRes, allEffRes, foodLogRes, hrRes, bwWindowRes, coachRes, sleepRes, waterRes]) => {
+    ]).then(([efRes, bwRes, calRes, allEffRes, foodLogRes, hrRes, coachRes, sleepRes, waterRes]) => {
       const efforts  = efRes.data  ?? []
       const bw       = bwRes.data  ?? []
       const calories = (calRes.data ?? []).map((r: any) => ({ ...r, created_at: r.log_date + 'T12:00:00' }))
@@ -510,9 +506,10 @@ export default function Dashboard() {
       const hrSamples    = (hrRes.data ?? []) as { bpm: number }[]
       const lowestHRv    = hrSamples.length > 0 ? Math.min(...hrSamples.map(s => s.bpm)) : null
 
-      // Weekly weight diff — kg, signed (negative = lost weight).
-      const bwWindow     = (bwWindowRes.data ?? []) as { weight: number; unit: string; created_at: string }[]
-      const weeklyDiff   = computeWeeklyWeightDiff(bwWindow)
+      // Weight change — signed kg between the 2 most-recent weigh-ins.
+      // Uses `bw` (latest 5, unbounded by date) so the change still shows
+      // when the previous weigh-in is older than 2 weeks (T068).
+      const weeklyDiff   = computeWeeklyWeightDiff(bw as { weight: number; unit: string; created_at: string }[])
       const weeklyKgVal  = weeklyDiff ? weeklyDiff.deltaKg : null
 
       // Sleep avg (hours) + hydration days-hit-goal (last 7). Goal comes from
@@ -771,75 +768,56 @@ export default function Dashboard() {
             time users with no data don't see empty/placeholder chips —
             only the metrics that have data show up. */}
         <View style={d.statsRow}>
-          {/* 🏆 Strength PRs — blue (strength domain theme).
-              Counts: for each exercise, +1 PR if highest Est. 1RM ever
-              was hit this calendar month. */}
+          {/* Strength PRs — blue. Per-exercise best 1RM hit in the last 30 days. */}
           {strengthPRs != null && (
             <View style={[d.statChip, d.statChipBlue]}>
-              <Text style={d.statChipEmoji}>🏆</Text>
               <View style={d.statChipNum}>
                 <TickerNumber value={strengthPRs} fontSize={11} color={palette.blue[400]} fontWeight="700" />
               </View>
               <Text style={[d.statChipText, { color: palette.blue[400] }]}>
-                {' '}strength PR{strengthPRs !== 1 ? 's' : ''} last 30 days
+                {' '}strength PR{strengthPRs !== 1 ? 's' : ''} · 30d
               </Text>
             </View>
           )}
 
-          {/* 🏆 Cardio PRs — amber (cardio domain theme).
-              Counts: for each cardio activity, +1 PR if best-ever value
-              was hit this calendar month. Direction (lower vs higher
-              better) is per-metric — see parseCardioBest(). */}
+          {/* Cardio PRs — amber. Per-activity best hit in the last 30 days. */}
           {cardioPRs != null && (
             <View style={[d.statChip, d.statChipAmber]}>
-              <Text style={d.statChipEmoji}>🏆</Text>
               <View style={d.statChipNum}>
                 <TickerNumber value={cardioPRs} fontSize={11} color={palette.amber[400]} fontWeight="700" />
               </View>
               <Text style={[d.statChipText, { color: palette.amber[400] }]}>
-                {' '}cardio PR{cardioPRs !== 1 ? 's' : ''} last 30 days
+                {' '}cardio PR{cardioPRs !== 1 ? 's' : ''} · 30d
               </Text>
             </View>
           )}
 
-          {/* 🍴 Food log streak — consecutive days, walked backward
-              from today (or yesterday if no log yet today). Renders
-              only when streak > 0 so a user who's never logged food
-              doesn't see a "0 day" chip. */}
+          {/* Food — distinct days logged in the last 14. */}
           {foodStreak != null && foodStreak > 0 && (
             <View style={[d.statChip, d.statChipRed]}>
-              <Text style={d.statChipEmoji}>🍴</Text>
               <View style={d.statChipNum}>
                 <TickerNumber value={foodStreak} fontSize={11} color={palette.red[400]} fontWeight="700" />
               </View>
               <Text style={[d.statChipText, { color: palette.red[400] }]}>
-                {' '}day{foodStreak !== 1 ? 's' : ''} logged in last 14 days
+                {' '}food day{foodStreak !== 1 ? 's' : ''} · 14d
               </Text>
             </View>
           )}
 
-          {/* ❤️ Lowest ambient HR over last 7 days — matches the
-              Heart page's resting-HR filter (workout_id IS NULL).
-              Emerald color mirrors the Heart page's resting-HR band. */}
+          {/* Lowest ambient HR over the last 7 days. */}
           {lowestHR7d != null && (
             <View style={[d.statChip, d.statChipEmerald]}>
-              <Text style={d.statChipEmoji}>❤️</Text>
               <View style={d.statChipNum}>
                 <TickerNumber value={lowestHR7d} fontSize={11} color={palette.emerald[400]} fontWeight="700" />
               </View>
               <Text style={[d.statChipText, { color: palette.emerald[400] }]}>
-                {' '}bpm low in last 7 days
+                {' '}low bpm · 7d
               </Text>
             </View>
           )}
 
-          {/* ⚖️ Weight change over the last week — diff between
-              latest log in last 7 days and latest log between 8–14
-              days ago. Slate-colored regardless of direction; the sign
-              tells the user which way it moved (+ = gained, − = lost).
-              We don't try to color-by-goal because the chip's correct
-              interpretation depends on whether they're cutting,
-              bulking, or maintaining. The sign carries the meaning. */}
+          {/* Weight change since the last weigh-in (signed). Change-only —
+              hides when there's only one weigh-in to compare. */}
           {weeklyWeightKg != null ? (() => {
             const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
             const inUnit = pUnit === 'kg' ? weeklyWeightKg : weeklyWeightKg / 0.453592
@@ -848,44 +826,36 @@ export default function Dashboard() {
             const abs = Math.abs(rounded).toFixed(1)
             return (
               <View style={[d.statChip, d.statChipSlate]}>
-                <Text style={d.statChipEmoji}>⚖️</Text>
                 <View style={d.statChipNum}>
-                  <TickerNumber
-                    value={`${sign}${abs}`}
-                    fontSize={11}
-                    color={colors.foreground}
-                    fontWeight="700"
-                  />
+                  <TickerNumber value={`${sign}${abs}`} fontSize={11} color={colors.foreground} fontWeight="700" />
                 </View>
                 <Text style={[d.statChipText, { color: colors.mutedForeground }]}>
-                  {` ${pUnit} since last weigh-in`}
+                  {` ${pUnit} change`}
                 </Text>
               </View>
             )
           })() : null}
 
-          {/* 😴 Avg sleep over the last 7 nights (Sleep page chip). */}
+          {/* Avg sleep over the last 7 nights. */}
           {avgSleepH != null && (
             <View style={[d.statChip, d.statChipIndigo]}>
-              <Text style={d.statChipEmoji}>😴</Text>
               <View style={d.statChipNum}>
                 <TickerNumber value={avgSleepH} fontSize={11} color={palette.indigo[400]} fontWeight="700" />
               </View>
               <Text style={[d.statChipText, { color: palette.indigo[400] }]}>
-                {`h avg sleep · 7 nights`}
+                {`h sleep · 7d`}
               </Text>
             </View>
           )}
 
-          {/* 💧 Days the water goal was hit, last 7 (Hydration page chip). */}
+          {/* Days the water goal was hit, last 7. */}
           {hydrationDays != null && (
             <View style={[d.statChip, d.statChipCyan]}>
-              <Text style={d.statChipEmoji}>💧</Text>
               <View style={d.statChipNum}>
                 <TickerNumber value={hydrationDays} fontSize={11} color={palette.cyan[400]} fontWeight="700" />
               </View>
               <Text style={[d.statChipText, { color: palette.cyan[400] }]}>
-                {` day${hydrationDays !== 1 ? 's' : ''} hit water goal · 7d`}
+                {` water day${hydrationDays !== 1 ? 's' : ''} · 7d`}
               </Text>
             </View>
           )}
@@ -1049,10 +1019,10 @@ const d = StyleSheet.create({
   // chips form 3 rows of 2 and a lone 7th centers (justifyContent: center on
   // the row). minHeight keeps them equal-height even when a label wraps.
   statChip: {
-    width: '48%', minHeight: 44,
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: 12, borderWidth: 1,
+    width: '48%', minHeight: 34,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: 8, paddingVertical: 7,
+    borderRadius: 10, borderWidth: 1,
   },
   statChipBlue:    { borderColor: withAlpha(palette.blue[500],    0.30), backgroundColor: withAlpha(palette.blue[500],    0.10) },
   statChipAmber:   { borderColor: withAlpha(palette.amber[500],   0.30), backgroundColor: withAlpha(palette.amber[500],   0.10) },
@@ -1069,7 +1039,7 @@ const d = StyleSheet.create({
   statChipCyan:    { borderColor: withAlpha(palette.cyan[500],   0.30), backgroundColor: withAlpha(palette.cyan[500],   0.10) },
   statChipEmoji: { fontSize: 11, marginRight: 4 },
   statChipNum:   { marginRight: 0 },
-  statChipText:  { fontSize: 11, fontWeight: '500', flex: 1 },
+  statChipText:  { fontSize: 11, fontWeight: '500' },
 
   // Activity card header — `flex items-center justify-between border-b px-5 py-3.5`
   activityHeader: {

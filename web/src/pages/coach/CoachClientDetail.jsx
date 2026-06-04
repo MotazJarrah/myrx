@@ -110,7 +110,7 @@ function SnapshotBadge({ children, color }) {
     cyan:    'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
-    <span className={`flex items-center justify-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium text-center w-[48%] min-h-[2.75rem] ${cls}`}>
+    <span className={`flex items-center justify-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium text-center leading-tight w-[48%] min-h-[2.25rem] ${cls}`}>
       {children}
     </span>
   )
@@ -189,7 +189,7 @@ export default function CoachClientDetail() {
         supabase.from('efforts').select('created_at, label, value, type').eq('user_id', id).limit(5000),
         supabase.from('food_logs').select('log_date').eq('user_id', id).gte('log_date', fourteenDate).order('log_date', { ascending: false }).limit(50),
         supabase.from('hr_samples').select('bpm').eq('user_id', id).is('workout_id', null).gte('measured_at', weekAgoISO).order('bpm', { ascending: true }).limit(1),
-        supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', id).gte('created_at', fourteenAgoISO).order('created_at', { ascending: false }).limit(50),
+        supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(50),
         supabase.from('sleep_sessions').select('duration_s').eq('user_id', id).gte('start_at', weekAgoISO).limit(50),
         supabase.from('water_logs').select('amount_ml, drink_type, logged_at').eq('user_id', id).gte('logged_at', weekAgoISO).limit(500),
       ])
@@ -463,37 +463,37 @@ export default function CoachClientDetail() {
           <div className="mt-3 flex flex-wrap justify-center gap-1.5">
             {snapshot.strengthPRsThisMonth > 0 && (
               <SnapshotBadge color="blue">
-                🏆 <TickerNumber value={snapshot.strengthPRsThisMonth} /> Strength PR{snapshot.strengthPRsThisMonth !== 1 ? 's' : ''} last 30 days
+                <TickerNumber value={snapshot.strengthPRsThisMonth} /> strength PR{snapshot.strengthPRsThisMonth !== 1 ? 's' : ''} · 30d
               </SnapshotBadge>
             )}
             {snapshot.cardioPRsThisMonth > 0 && (
               <SnapshotBadge color="amber">
-                🏆 <TickerNumber value={snapshot.cardioPRsThisMonth} /> Cardio PR{snapshot.cardioPRsThisMonth !== 1 ? 's' : ''} last 30 days
+                <TickerNumber value={snapshot.cardioPRsThisMonth} /> cardio PR{snapshot.cardioPRsThisMonth !== 1 ? 's' : ''} · 30d
               </SnapshotBadge>
             )}
             {snapshot.foodStreak > 0 && (
               <SnapshotBadge color="red">
-                🍴 <TickerNumber value={snapshot.foodStreak} /> day{snapshot.foodStreak !== 1 ? 's' : ''} logged in last 14 days
+                <TickerNumber value={snapshot.foodStreak} /> food day{snapshot.foodStreak !== 1 ? 's' : ''} · 14d
               </SnapshotBadge>
             )}
             {snapshot.lowestBpm != null && (
               <SnapshotBadge color="green">
-                ❤️ <TickerNumber value={snapshot.lowestBpm} /> bpm low (7d)
+                <TickerNumber value={snapshot.lowestBpm} /> low bpm · 7d
               </SnapshotBadge>
             )}
             {snapshot.weightDiff != null && (
               <SnapshotBadge color="zinc">
-                ⚖️ {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {coachProfile?.weight_unit || 'lb'} since last weigh-in
+                {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {coachProfile?.weight_unit || 'lb'} change
               </SnapshotBadge>
             )}
             {snapshot.avgSleepH != null && (
               <SnapshotBadge color="indigo">
-                😴 <TickerNumber value={snapshot.avgSleepH} />h avg sleep · 7 nights
+                <TickerNumber value={snapshot.avgSleepH} />h sleep · 7d
               </SnapshotBadge>
             )}
             {snapshot.hydrationDays != null && (
               <SnapshotBadge color="cyan">
-                💧 <TickerNumber value={snapshot.hydrationDays} /> day{snapshot.hydrationDays !== 1 ? 's' : ''} hit water goal · 7d
+                <TickerNumber value={snapshot.hydrationDays} /> water day{snapshot.hydrationDays !== 1 ? 's' : ''} · 7d
               </SnapshotBadge>
             )}
           </div>
