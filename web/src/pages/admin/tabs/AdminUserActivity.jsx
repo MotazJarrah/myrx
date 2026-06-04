@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { supabase } from '../../../lib/supabase'
+import { useMovements } from '../../../hooks/useMovements'
 import { Dumbbell, Activity, ChevronRight } from 'lucide-react'
 
 // Cardio direction-aware best parser — mirrors AdminUserDetail's parseCardioBest
@@ -21,9 +22,67 @@ function parseCardioBest(v) {
   return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
 }
 
+// ── Variant-family collapse helpers (mirror the athlete index) ─────────────────
+//
+// The athlete's "Your movements" (mobile/app/(app)/strength.tsx) and "Your
+// activities" (mobile/app/(app)/cardio.tsx) lists collapse variant families
+// into a single row keyed by the BASE name, with a small badge for the
+// most-recently-trained (or highest-reached) variant. We replicate that here
+// so the coach sees the same shape. Navigation for a collapsed row targets the
+// BASE / consolidated route — the admin detail dispatchers
+// (AdminEffortDetail + AdminCardioDetail) already special-case those base
+// names and self-fetch every variant's efforts.
+
+// Bodyweight assist tiers — highest tier reached drives the badge.
+// FULL RX (no assist) > BAND (band only) > KNEE (knee only) > B+K (both).
+const BW_TIER_RANK = { 'band+knee': 1, 'knee': 2, 'band': 3, 'rx': 4 }
+const BW_TIER_BADGE = { 'band+knee': 'B+K', 'knee': 'KNEE', 'band': 'BAND', 'rx': 'FULL RX' }
+
+function bwTierFromVariantName(name) {
+  if (name.endsWith(' [Band + Knee]')) return 'band+knee'
+  if (name.endsWith(' [Knee]'))        return 'knee'
+  if (name.endsWith(' [Band]'))        return 'band'
+  return 'rx'
+}
+
+function bwBaseName(name) {
+  return name
+    .replace(/ \[Band \+ Knee\]$/, '')
+    .replace(/ \[Band\]$/, '')
+    .replace(/ \[Knee\]$/, '')
+}
+
+// Sled Work — two parallel variants ([Push] / [Drag]) collapse into one
+// "Sled Work" row, badge = most-recently-logged variant.
+const SLED_WORK_BASE_NAME = 'Sled Work'
+function sledVariantFromName(name) {
+  if (name === 'Sled Work [Push]') return 'push'
+  if (name === 'Sled Work [Drag]') return 'drag'
+  return null
+}
+
+// Swimming — four stroke variants ([Freestyle] / [Backstroke] / [Breaststroke]
+// / [Butterfly], plus legacy bare "Swimming") collapse into one "Swimming"
+// row, badge = most-recently-logged stroke.
+const SWIMMING_BASE_NAME = 'Swimming'
+const SWIM_STROKE_BADGE = {
+  freestyle: 'FREE', backstroke: 'BACK', breaststroke: 'BREAST', butterfly: 'FLY',
+}
+function isSwimHead(head) {
+  return head === SWIMMING_BASE_NAME || head.startsWith('Swimming [')
+}
+function swimStrokeFromHead(head) {
+  // Bare "Swimming" (legacy effort labels) defaults to freestyle — same as the
+  // athlete's parseSwimStroke read path.
+  const m = head.match(/^Swimming\s+\[(\w+)\]$/i)
+  if (!m) return 'freestyle'
+  const stroke = m[1].toLowerCase()
+  return SWIM_STROKE_BADGE[stroke] ? stroke : 'freestyle'
+}
+
 // ── Move card ─────────────────────────────────────────────────────────────────
 
-function MoveCard({ label, type, count, stat, onClick }) {
+function MoveCard({ label, type, count, stat, badge, onClick }) {
   const meta = {
     strength: { icon: Dumbbell, cls: 'bg-blue-500/10 text-blue-400',       chip: 'bg-blue-500/10 text-blue-400 border-blue-500/20'       },
     cardio:   { icon: Activity, cls: 'bg-amber-500/10 text-amber-400',     chip: 'bg-amber-500/10 text-amber-400 border-amber-500/20'     },
@@ -42,6 +101,14 @@ function MoveCard({ label, type, count, stat, onClick }) {
         <p className="truncate text-sm font-medium">{label}</p>
         <p className="text-[11px] text-muted-foreground">{stat || `${count} ${count === 1 ? 'entry' : 'entries'}`}</p>
       </div>
+      {/* Variant badge — shown only for collapsed families (bodyweight tier,
+          Sled Work PUSH/DRAG, Swimming stroke). Mirrors the athlete index's
+          small variant chip. */}
+      {badge && (
+        <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded border shrink-0 ${meta.chip}`}>
+          {badge}
+        </span>
+      )}
       <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${meta.chip}`}>
         {type.charAt(0).toUpperCase() + type.slice(1)}
       </span>
@@ -58,6 +125,10 @@ export default function AdminUserActivity({ userId }) {
   const [loading, setLoading] = useState(true)
   const [view,    setView]    = useState('strength')
 
+  // Movements table (cached) — used to detect equipment / bodyweight tier
+  // eligibility, exactly as the athlete index does via useMovements().
+  const dbMovements = useMovements()
+
   useEffect(() => {
     async function load() {
       setLoading(true)
@@ -71,73 +142,154 @@ export default function AdminUserActivity({ userId }) {
     load()
   }, [userId])
 
-  // ── Group by exercise name ────────────────────────────────────────────────
+  // ── Group efforts into collapsed family rows ──────────────────────────────
   const { strengthMoves, cardioMoves } = useMemo(() => {
     const strengthMap = {}
     const cardioMap   = {}
 
+    // efforts arrive newest-first; track the most-recent variant by comparing
+    // created_at so the badge always reflects the latest logged variant
+    // regardless of map insertion order.
     efforts.forEach(e => {
-      // Exercise name is everything before the first ' · '
-      const name = e.label.split(' · ')[0]
+      // Exercise / activity name is everything before the first ' · '
+      const head = e.label.split(' · ')[0]
+      const ts   = new Date(e.created_at).getTime()
 
       if (e.type === 'strength') {
-        if (!strengthMap[name]) strengthMap[name] = { count: 0, best1RM: null, unit: 'lb' }
-        strengthMap[name].count++
+        // ── Sled Work consolidation ────────────────────────────────────────
+        const sledVariant = sledVariantFromName(head)
+        if (sledVariant !== null) {
+          const key = SLED_WORK_BASE_NAME
+          const g = strengthMap[key] ??= {
+            label: key, navName: key, kind: 'sled', count: 0,
+            best1RM: null, unit: 'lb', recentTs: -1, recentVariant: sledVariant,
+          }
+          g.count++
+          if (ts > g.recentTs) { g.recentTs = ts; g.recentVariant = sledVariant }
+          const m = e.value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
+          if (m) {
+            const rm = parseFloat(m[1])
+            if (g.best1RM === null || rm > g.best1RM) { g.best1RM = rm; g.unit = m[2] }
+          }
+          return
+        }
+
+        // ── Bodyweight assist-tier consolidation ───────────────────────────
+        const tier      = bwTierFromVariantName(head)
+        const isVariant = tier !== 'rx'
+        const base      = isVariant ? bwBaseName(head) : head
+        const rec       = dbMovements.find(m => m.name === base)
+        const isBodyweight = rec?.equipment === 'bodyweight'
+        // Only Pull-Up / Dip / Chin-Up family (band/knee eligible) movements
+        // actually have tier variants — gate the badge on that, mirroring the
+        // athlete's `canHaveTiers`. A plain bodyweight movement (Plank, Leg
+        // Raise) never shows a tier badge even though it's bodyweight.
+        const canHaveTiers = !!(rec?.band_assist || rec?.knee_assist)
+        if (isBodyweight && (isVariant || canHaveTiers)) {
+          const key = base
+          const g = strengthMap[key] ??= {
+            label: key, navName: key, kind: 'bw', count: 0,
+            best1RM: null, unit: 'lb', highestTier: tier, canHaveTiers,
+          }
+          g.count++
+          g.canHaveTiers = g.canHaveTiers || canHaveTiers
+          if (BW_TIER_RANK[tier] > BW_TIER_RANK[g.highestTier]) g.highestTier = tier
+          // Bodyweight tiers store rep-count efforts; weighted Full-RX efforts
+          // store an Est. 1RM. Capture the 1RM when present so the row can show
+          // a best-1RM line for weighted bodyweight work.
+          const m = e.value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
+          if (m) {
+            const rm = parseFloat(m[1])
+            if (g.best1RM === null || rm > g.best1RM) { g.best1RM = rm; g.unit = m[2] }
+          }
+          return
+        }
+
+        // ── Regular strength movement (no variants) ────────────────────────
+        const key = head
+        const g = strengthMap[key] ??= {
+          label: key, navName: key, kind: 'plain', count: 0, best1RM: null, unit: 'lb',
+        }
+        g.count++
         const m = e.value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
         if (m) {
           const rm = parseFloat(m[1])
-          if (strengthMap[name].best1RM === null || rm > strengthMap[name].best1RM) {
-            strengthMap[name].best1RM = rm
-            strengthMap[name].unit    = m[2]
-          }
+          if (g.best1RM === null || rm > g.best1RM) { g.best1RM = rm; g.unit = m[2] }
         }
       } else if (e.type === 'cardio') {
-        if (!cardioMap[name]) cardioMap[name] = { count: 0, bestVal: null, bestStr: null }
-        cardioMap[name].count++
+        // ── Swimming stroke consolidation ──────────────────────────────────
+        if (isSwimHead(head)) {
+          const key = SWIMMING_BASE_NAME
+          const g = cardioMap[key] ??= {
+            label: key, navName: key, kind: 'swim', count: 0,
+            bestVal: null, bestStr: null, recentTs: -1, recentStroke: 'freestyle',
+          }
+          g.count++
+          const stroke = swimStrokeFromHead(head)
+          if (ts > g.recentTs) { g.recentTs = ts; g.recentStroke = stroke }
+          const parsed = parseCardioBest(e.value)
+          if (parsed) {
+            const better = g.bestVal === null
+              || (parsed.lowerBetter ? parsed.val < g.bestVal : parsed.val > g.bestVal)
+            if (better) { g.bestVal = parsed.val; g.bestStr = e.value }
+          }
+          return
+        }
+
+        // ── Regular cardio activity (no variants) ──────────────────────────
+        const key = head
+        const g = cardioMap[key] ??= {
+          label: key, navName: key, kind: 'plain', count: 0, bestVal: null, bestStr: null,
+        }
+        g.count++
         // Direction-aware best across ALL cardio formats (pace, speed, cal/min,
         // floors/min, distance) — not just "/km" pace.
         const parsed = parseCardioBest(e.value)
         if (parsed) {
-          const c = cardioMap[name]
-          const better = c.bestVal === null
-            || (parsed.lowerBetter ? parsed.val < c.bestVal : parsed.val > c.bestVal)
-          if (better) {
-            c.bestVal = parsed.val
-            c.bestStr = e.value
-          }
+          const better = g.bestVal === null
+            || (parsed.lowerBetter ? parsed.val < g.bestVal : parsed.val > g.bestVal)
+          if (better) { g.bestVal = parsed.val; g.bestStr = e.value }
         }
       }
     })
 
-    const strengthMoves = Object.entries(strengthMap)
-      .map(([name, d]) => ({
-        label: name,
-        count: d.count,
-        type:  'strength',
-        stat:  d.best1RM !== null
-          ? `${d.count} ${d.count === 1 ? 'entry' : 'entries'} · Best 1RM ${d.best1RM} ${d.unit}`
-          : `${d.count} ${d.count === 1 ? 'entry' : 'entries'}`,
+    const entryStr = n => `${n} ${n === 1 ? 'entry' : 'entries'}`
+
+    const strengthMoves = Object.values(strengthMap)
+      .map(d => ({
+        label:   d.label,
+        navName: d.navName,
+        count:   d.count,
+        type:    'strength',
+        stat:    d.best1RM !== null ? `${entryStr(d.count)} · Best 1RM ${d.best1RM} ${d.unit}` : entryStr(d.count),
+        badge:
+          d.kind === 'sled' ? (d.recentVariant === 'push' ? 'PUSH' : 'DRAG')
+          : d.kind === 'bw'  ? (d.canHaveTiers ? BW_TIER_BADGE[d.highestTier] : null)
+          : null,
       }))
       .sort((a, b) => b.count - a.count)
 
-    const cardioMoves = Object.entries(cardioMap)
-      .map(([name, d]) => ({
-        label: name,
-        count: d.count,
-        type:  'cardio',
-        stat:  d.bestStr
-          ? `${d.count} ${d.count === 1 ? 'entry' : 'entries'} · Best ${d.bestStr}`
-          : `${d.count} ${d.count === 1 ? 'entry' : 'entries'}`,
+    const cardioMoves = Object.values(cardioMap)
+      .map(d => ({
+        label:   d.label,
+        navName: d.navName,
+        count:   d.count,
+        type:    'cardio',
+        stat:    d.bestStr ? `${entryStr(d.count)} · Best ${d.bestStr}` : entryStr(d.count),
+        badge:   d.kind === 'swim' ? SWIM_STROKE_BADGE[d.recentStroke] : null,
       }))
       .sort((a, b) => b.count - a.count)
 
     return { strengthMoves, cardioMoves }
-  }, [efforts])
+  }, [efforts, dbMovements])
 
   const visibleMoves = view === 'cardio' ? cardioMoves : strengthMoves
 
   function handleMoveClick(move) {
-    navigate(`/admin/user/${userId}/effort/${move.type}/${encodeURIComponent(move.label)}`)
+    // Navigate to the BASE / consolidated route. The admin detail dispatchers
+    // (AdminEffortDetail / AdminCardioDetail) recognise "Sled Work",
+    // "Swimming", and bodyweight base names and self-fetch every variant.
+    navigate(`/admin/user/${userId}/effort/${move.type}/${encodeURIComponent(move.navName)}`)
   }
 
   return (
@@ -178,11 +330,12 @@ export default function AdminUserActivity({ userId }) {
         <div className="space-y-2">
           {visibleMoves.map(move => (
             <MoveCard
-              key={`${move.type}-${move.label}`}
+              key={`${move.type}-${move.navName}`}
               label={move.label}
               type={move.type}
               count={move.count}
               stat={move.stat}
+              badge={move.badge}
               onClick={() => handleMoveClick(move)}
             />
           ))}
