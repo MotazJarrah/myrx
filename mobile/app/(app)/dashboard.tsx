@@ -463,6 +463,7 @@ export default function Dashboard() {
     const now             = Date.now()
     const sevenDaysAgoISO    = new Date(now -  7 * 86400000).toISOString()
     const fourteenDaysAgoISO = new Date(now - 14 * 86400000).toISOString()
+    const thirtyDaysAgoISO   = new Date(now - 30 * 86400000).toISOString()
     const fourteenDaysAgoDay = fourteenDaysAgoISO.slice(0, 10)  // YYYY-MM-DD for food_logs.log_date
 
     Promise.all([
@@ -480,6 +481,8 @@ export default function Dashboard() {
       // the Heart page's resting-HR filter so the chip mirrors what
       // they see there).
       supabase.from('hr_samples').select('bpm').eq('user_id', user.id).is('workout_id', null).gte('measured_at', sevenDaysAgoISO),
+      // Weight change — every weigh-in in the last 30 days (latest − earliest).
+      supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', user.id).gte('created_at', thirtyDaysAgoISO).order('created_at', { ascending: false }),
       // Coach info — SECURITY DEFINER RPC; returns the caller's linked
       // coach or the admin superuser fallback (or null). Drives the
       // "Coached by [name]" badge in the profile card.
@@ -488,7 +491,7 @@ export default function Dashboard() {
       supabase.from('sleep_sessions').select('duration_s').eq('user_id', user.id).gte('start_at', sevenDaysAgoISO),
       // Hydration — last 7 days of water logs for the days-hit-goal chip.
       supabase.from('water_logs').select('amount_ml, drink_type, logged_at').eq('user_id', user.id).gte('logged_at', sevenDaysAgoISO),
-    ]).then(([efRes, bwRes, calRes, allEffRes, foodLogRes, hrRes, coachRes, sleepRes, waterRes]) => {
+    ]).then(([efRes, bwRes, calRes, allEffRes, foodLogRes, hrRes, bw30Res, coachRes, sleepRes, waterRes]) => {
       const efforts  = efRes.data  ?? []
       const bw       = bwRes.data  ?? []
       const calories = (calRes.data ?? []).map((r: any) => ({ ...r, created_at: r.log_date + 'T12:00:00' }))
@@ -506,11 +509,14 @@ export default function Dashboard() {
       const hrSamples    = (hrRes.data ?? []) as { bpm: number }[]
       const lowestHRv    = hrSamples.length > 0 ? Math.min(...hrSamples.map(s => s.bpm)) : null
 
-      // Weight change — signed kg between the 2 most-recent weigh-ins.
-      // Uses `bw` (latest 5, unbounded by date) so the change still shows
-      // when the previous weigh-in is older than 2 weeks (T068).
-      const weeklyDiff   = computeWeeklyWeightDiff(bw as { weight: number; unit: string; created_at: string }[])
-      const weeklyKgVal  = weeklyDiff ? weeklyDiff.deltaKg : null
+      // Weight change over the rolling 30-day window — latest minus earliest
+      // weigh-in IN the window. null when <2 weigh-ins in 30 days; the pill
+      // then shows a "no recent weight" placeholder rather than hiding (T069).
+      const toKgLocal    = (w: number, u: string) => u === 'lb' ? w * 0.453592 : w
+      const bw30         = (bw30Res.data ?? []) as { weight: number; unit: string; created_at: string }[]
+      const weeklyKgVal  = bw30.length >= 2
+        ? toKgLocal(Number(bw30[0].weight), bw30[0].unit) - toKgLocal(Number(bw30[bw30.length - 1].weight), bw30[bw30.length - 1].unit)
+        : null
 
       // Sleep avg (hours) + hydration days-hit-goal (last 7). Goal comes from
       // the freshly-fetched bodyweight rows (35 mL/kg); chips hide on no data.
@@ -768,7 +774,7 @@ export default function Dashboard() {
             time users with no data don't see empty/placeholder chips —
             only the metrics that have data show up. */}
         <View style={d.statsRow}>
-          {/* Strength PRs — blue. Per-exercise best 1RM hit in the last 30 days. */}
+          {/* Strength PRs — last 30 days (count; shows 0 when none). */}
           {strengthPRs != null && (
             <View style={[d.statChip, d.statChipBlue]}>
               <View style={d.statChipNum}>
@@ -780,7 +786,7 @@ export default function Dashboard() {
             </View>
           )}
 
-          {/* Cardio PRs — amber. Per-activity best hit in the last 30 days. */}
+          {/* Cardio PRs — last 30 days (count; shows 0 when none). */}
           {cardioPRs != null && (
             <View style={[d.statChip, d.statChipAmber]}>
               <View style={d.statChipNum}>
@@ -792,8 +798,8 @@ export default function Dashboard() {
             </View>
           )}
 
-          {/* Food — distinct days logged in the last 14. */}
-          {foodStreak != null && foodStreak > 0 && (
+          {/* Food — distinct days logged in the last 14 (count; shows 0). */}
+          {foodStreak != null && (
             <View style={[d.statChip, d.statChipRed]}>
               <View style={d.statChipNum}>
                 <TickerNumber value={foodStreak} fontSize={11} color={palette.red[400]} fontWeight="700" />
@@ -804,61 +810,68 @@ export default function Dashboard() {
             </View>
           )}
 
-          {/* Lowest ambient HR over the last 7 days. */}
-          {lowestHR7d != null && (
-            <View style={[d.statChip, d.statChipEmerald]}>
-              <View style={d.statChipNum}>
-                <TickerNumber value={lowestHR7d} fontSize={11} color={palette.emerald[400]} fontWeight="700" />
-              </View>
-              <Text style={[d.statChipText, { color: palette.emerald[400] }]}>
-                {' '}low bpm · 7d
-              </Text>
-            </View>
-          )}
-
-          {/* Weight change since the last weigh-in (signed). Change-only —
-              hides when there's only one weigh-in to compare. */}
-          {weeklyWeightKg != null ? (() => {
-            const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
-            const inUnit = pUnit === 'kg' ? weeklyWeightKg : weeklyWeightKg / 0.453592
-            const rounded = Math.round(inUnit * 10) / 10
-            const sign = rounded > 0.05 ? '+' : rounded < -0.05 ? '−' : ''
-            const abs = Math.abs(rounded).toFixed(1)
-            return (
-              <View style={[d.statChip, d.statChipSlate]}>
+          {/* Lowest ambient HR — last 7 days. Always shown; "no recent" when empty. */}
+          <View style={[d.statChip, d.statChipEmerald]}>
+            {lowestHR7d != null ? (
+              <>
                 <View style={d.statChipNum}>
-                  <TickerNumber value={`${sign}${abs}`} fontSize={11} color={colors.foreground} fontWeight="700" />
+                  <TickerNumber value={lowestHR7d} fontSize={11} color={palette.emerald[400]} fontWeight="700" />
                 </View>
-                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>
-                  {` ${pUnit} change`}
-                </Text>
-              </View>
-            )
-          })() : null}
+                <Text style={[d.statChipText, { color: palette.emerald[400] }]}>{' '}low bpm · 7d</Text>
+              </>
+            ) : (
+              <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent HR</Text>
+            )}
+          </View>
 
-          {/* Avg sleep over the last 7 nights. */}
-          {avgSleepH != null && (
-            <View style={[d.statChip, d.statChipIndigo]}>
-              <View style={d.statChipNum}>
-                <TickerNumber value={avgSleepH} fontSize={11} color={palette.indigo[400]} fontWeight="700" />
-              </View>
-              <Text style={[d.statChipText, { color: palette.indigo[400] }]}>
-                {`h sleep · 7d`}
-              </Text>
-            </View>
-          )}
+          {/* Weight change over the last 30 days (latest − earliest weigh-in). */}
+          <View style={[d.statChip, d.statChipSlate]}>
+            {weeklyWeightKg != null ? (() => {
+              const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
+              const inUnit = pUnit === 'kg' ? weeklyWeightKg : weeklyWeightKg / 0.453592
+              const rounded = Math.round(inUnit * 10) / 10
+              const sign = rounded > 0.05 ? '+' : rounded < -0.05 ? '−' : ''
+              const abs = Math.abs(rounded).toFixed(1)
+              return (
+                <>
+                  <View style={d.statChipNum}>
+                    <TickerNumber value={`${sign}${abs}`} fontSize={11} color={colors.foreground} fontWeight="700" />
+                  </View>
+                  <Text style={[d.statChipText, { color: colors.mutedForeground }]}>{` ${pUnit} · 30d`}</Text>
+                </>
+              )
+            })() : (
+              <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent weight</Text>
+            )}
+          </View>
 
-          {/* Days the water goal was hit, last 7. */}
-          {hydrationDays != null && (
-            <View style={[d.statChip, d.statChipCyan]}>
-              <View style={d.statChipNum}>
-                <TickerNumber value={hydrationDays} fontSize={11} color={palette.cyan[400]} fontWeight="700" />
-              </View>
-              <Text style={[d.statChipText, { color: palette.cyan[400] }]}>
-                {` water day${hydrationDays !== 1 ? 's' : ''} · 7d`}
-              </Text>
-            </View>
-          )}
+          {/* Avg sleep — last 7 nights. Always shown; "no recent" when empty. */}
+          <View style={[d.statChip, d.statChipIndigo]}>
+            {avgSleepH != null ? (
+              <>
+                <View style={d.statChipNum}>
+                  <TickerNumber value={avgSleepH} fontSize={11} color={palette.indigo[400]} fontWeight="700" />
+                </View>
+                <Text style={[d.statChipText, { color: palette.indigo[400] }]}>{`h sleep · 7d`}</Text>
+              </>
+            ) : (
+              <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent sleep</Text>
+            )}
+          </View>
+
+          {/* Days the water goal was hit — last 7. Always shown; "no recent" when empty. */}
+          <View style={[d.statChip, d.statChipCyan]}>
+            {hydrationDays != null ? (
+              <>
+                <View style={d.statChipNum}>
+                  <TickerNumber value={hydrationDays} fontSize={11} color={palette.cyan[400]} fontWeight="700" />
+                </View>
+                <Text style={[d.statChipText, { color: palette.cyan[400] }]}>{` water day${hydrationDays !== 1 ? 's' : ''} · 7d`}</Text>
+              </>
+            ) : (
+              <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent water</Text>
+            )}
+          </View>
         </View>
         </AnimateRise>
 

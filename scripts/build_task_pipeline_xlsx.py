@@ -473,6 +473,12 @@ TASKS = [
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
+    ("T069", "Dashboard pills: window-based compute + 'no recent data' (don't hide)", "Dashboard", "Cross", "In progress",
+     "User rejected T068's 'latest-N-logs' weight computation — wants every pill computed STRICTLY over its designated rolling window (PRs 30d, food 14d, HR/sleep/hydration 7d, weight = its own designated window). And instead of HIDING a pill when its window has no data, ALWAYS show the pill with a 'no recent data' placeholder (also keeps the fixed 3+3+1 / 7-pill layout stable). Weight window was not specified — assistant designating 30 days (shown as '· 30d'), easily changed.",
+     "MOBILE DONE + reloaded 2026-06-03: weight = change over rolling 30d (latest − earliest weigh-in in the 30d window; reverted the latest-5-logs hack), shown '±N lb · 30d' or 'no recent weight'; all pills always render — count pills (strength/cardio/food) show 0, measurement pills (HR/weight/sleep/water) show 'no recent <metric>' when empty. WEB (admin + coach) MIRROR PENDING the user's confirmation of the mobile look + the 30d weight window.",
+     "mobile dashboard.tsx; (then) web AdminUserDetail.jsx, CoachClientDetail.jsx",
+     "2026-06-03"),
+
     ("T068", "Dashboard weight pill missing (change-only edge)", "Dashboard", "Cross", "Done",
      "After T064 made the weight pill change-only (no current-weight fallback), it vanished from the user's dashboard. Cause: the change needs 2 weigh-ins inside the dashboard's fetch window, and the user has <2 in range (their previous weigh-in is older than the window). User flagged the missing pill.",
      "DONE 2026-06-03: change now computes from the 2 most-recent weigh-ins regardless of date — mobile reuses the latest-5 `bw` fetch; web admin + coach dropped the 14-day gte on their bodyweight query. Still change-only (hides only when there's genuinely one weigh-in ever). Built + deployed.",
