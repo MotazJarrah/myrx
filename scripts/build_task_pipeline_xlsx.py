@@ -153,10 +153,10 @@ TASKS = [
      "(planned) mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
-    ("T015", "Admin vs Coach client-view design parity", "Coach/Admin", "Web", "In progress",
-     "User noted the admin and coach portals don't present the client 'preview' identically. Both render the same MacroPlanEditor (identical), so the difference is in the surrounding wrappers (admin has Food Log/Manual Logs/Macro Plan sub-tabs; coach shows just the editor behind a 'Manage macros' gate) + different tab sets/profile cards.",
-     "Resuming 2026-06-04: user wants to work on this right after the task-pipeline update. Next: scope which surface is the reference and align the other.",
-     "web admin/tabs/AdminUserCalories.jsx; coach/CoachClientDetail.jsx",
+    ("T015", "Admin vs Coach client-view design parity", "Coach/Admin", "Web", "Parked",
+     "Audited 2026-06-04: the two client pages are already mostly identical (same Dashboard/Efforts/Bodyweight/Calories tabs + same Age/Gender/Phone/Weight/Height profile card). Real diffs: (a) Admin has 2 extra tabs (Billing, Activity Feed) — admin-only by nature; (b) the Calories tab differs — Admin renders the rich AdminUserCalories.jsx (Food Log / Manual Logs / Macro Plan sub-tabs), Coach renders just the inline Macro Plan editor gated behind 'Manage macros'.",
+     "PAUSED by user 2026-06-04 — resume later, asking scoping questions ONE AT A TIME. Q1 (ready): which is the reference? [A] Coach matches Admin (richer Calories tab; recommended, lowest risk) / [B] Admin matches Coach (simpler) / [C] unify to one shared role-gated component. Confirm assumption: Billing + Activity Feed stay admin-only.",
+     "web admin/tabs/AdminUserCalories.jsx; web admin/AdminUserDetail.jsx; coach/CoachClientDetail.jsx",
      "2026-06-04"),
 
     ("T016", "Hydration page redesign / update", "Hydration", "Mobile", "Done",
