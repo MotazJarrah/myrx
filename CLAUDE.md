@@ -2101,18 +2101,25 @@ Promote in order of decision energy: training prescription comes first (strength
 
 ### Where each domain stands today
 - **Strength** — coaching surface. Done.
-- **Cardio** — tracking surface today; next up for promotion (in progress).
+- **Cardio** — coaching surface. Done (pace / rate-anchored zones across all Group-A activities + Air Bike, Rucking, StairMill, Swimming, Concept2 ergs).
 - **Mobility** — ❌ **REMOVED (June 2026).** The legacy ROM-tracking feature was deleted everywhere: the mobile page (`mobile/app/(app)/mobility.tsx`), the mobile + web `ROMVisualizer`, the dashboard ROM feed/PR logic, and the web admin surfaces (`AdminMobilityDetail`, `AdminClientMobility`, the `rom_records` queries in AdminOverview/AdminFeed/AdminDashboard/AdminUserActivity/AdminUserDetail, the `/admin/.../effort/mobility/` route, the Navbar item, `MOBILITY_MOVEMENTS`). RETAINED: the `rom_records` DB table (historical data; no UI reads it) and the `delete-user`/export edge functions that clean it. Remaining incidental mentions are legal-doc prose and the UNRELATED cardio "Mobility" crawl-movement subtype (crab walk / bear crawl) — both intentionally kept.
-- **Bodyweight** — tracking surface (weight + goal).
-- **Calories / Nutrition** — tracking surface (food log, macros, daily target).
-- **Sleep / Water / Habits** — not built. To be decided whether they ship as first-party builds or as Apple Health / Google Fit integrations (Trainerize uses the integration path for sleep — worth copying).
+- **Bodyweight** — tracking surface (weight + goal). **Coaching-surface promotion CLOSED (June 2026)** — stays a logging/tracking surface by design (user call; ledger T041).
+- **Calories / Nutrition** — tracking surface (food log, macros, daily target, plan wizard + timeline). **Coaching-surface promotion CLOSED (June 2026)** — stays a logging surface by design (user call; ledger T042).
+- **Sleep** — ✅ **coaching surface, built** (`mobile/app/(app)/sleep.tsx`). Does next-step guidance, not just tracking (ledger T043).
+- **Hydration (Water)** — ✅ **coaching surface, built + redesigned** (`mobile/app/(app)/hydration.tsx`; mascot + fluid counting + fast picker; ledger T001 / T016 / T044 / T052-T062).
+- **Habits** — not built. TBD whether first-party or Apple Health / Google Fit integration.
 
-### Roadmap order (rough, not locked)
-1. Cardio → coaching surface (NEXT)
-2. Bodyweight → coaching surface
-3. ~~Mobility → coaching surface~~ (Mobility removed entirely, June 2026)
-4. Calories → coaching surface
-5. Sleep / Water / Habits → tracking surfaces, likely via Apple Health / Google Fit integrations
+### Roadmap order (updated June 2026)
+The coaching-surface roadmap is effectively complete — every surface getting a coaching layer has one:
+1. ✅ Strength — coaching surface (done).
+2. ✅ Cardio — coaching surface (done).
+3. ✅ Sleep — coaching surface (done).
+4. ✅ Hydration — coaching surface (done).
+5. Bodyweight — coaching promotion CLOSED; stays a tracking surface (user call, ledger T041).
+6. Calories — coaching promotion CLOSED; stays a logging surface (user call, ledger T042).
+7. ~~Mobility~~ — removed entirely (June 2026).
+
+Remaining open product work (see `docs/TASK_PIPELINE.xlsx`): finalize the Connect page + sync logic (T047), admin↔coach client-view parity (T015), wire the food-library filter rules into the SYNC scripts (T048), and the iOS launch checklist (T046 — deferred until the app is Android-complete).
 
 ---
 
