@@ -10,6 +10,11 @@ import { projectAllRMs } from '../../lib/formulas'
 import { ArrowLeft } from 'lucide-react'
 import SwipeDelete from '../../components/SwipeDelete'
 import AdminStrengthWeightedDetail from './detail/AdminStrengthWeightedDetail'
+import AdminStrengthBodyweightDetail from './detail/AdminStrengthBodyweightDetail'
+import AdminStrengthAssistedDetail from './detail/AdminStrengthAssistedDetail'
+import AdminStrengthCarryDetail from './detail/AdminStrengthCarryDetail'
+import AdminStrengthIsometricDetail from './detail/AdminStrengthIsometricDetail'
+import AdminStrengthRepsOnlyDetail from './detail/AdminStrengthRepsOnlyDetail'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -117,14 +122,22 @@ export default function AdminEffortDetail() {
   }, [userId, kind, exercise])
 
   // Load this movement's record (strength only) to decide which detail
-  // surface to render — weighted-standard gets the full coaching mirror.
+  // surface to render. Looked up by BASE name (strip band/knee suffixes),
+  // mirroring the athlete StrengthDetail dispatch.
   useEffect(() => {
     if (kind !== 'strength') { setMovement(null); return }
+    // Sled Work consolidated has no movement row under the base name;
+    // the dispatch handles it by exercise name directly.
+    if (exercise === 'Sled Work') { setMovement(null); return }
+    const baseExercise = exercise
+      .replace(/ \[Band \+ Knee\]$/, '')
+      .replace(/ \[Band\]$/, '')
+      .replace(/ \[Knee\]$/, '')
     let alive = true
     setMovement(undefined)
     supabase.from('movements')
-      .select('equipment, unit_lock, uses_pair, weight_ladder_override')
-      .eq('name', exercise)
+      .select('equipment, strength_type, unit_lock, uses_pair, weight_ladder_override')
+      .eq('name', baseExercise)
       .maybeSingle()
       .then(({ data }) => { if (alive) setMovement(data ?? null) })
     return () => { alive = false }
@@ -136,26 +149,51 @@ export default function AdminEffortDetail() {
     else throw error
   }
 
-  // ── Dispatch weighted-standard strength → full coaching mirror ────────────
+  // ── Strength variant dispatch — mirror the athlete StrengthDetail order ────
+  // Read-only coach mirrors; each self-fetches its data + keeps per-effort delete.
   const WEIGHTED_STANDARD_EQUIP = ['barbell', 'dumbbell', 'kettlebell', 'machine', 'strongman']
-  if (kind === 'strength' && movement === undefined) {
-    return <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
+  function goBack() {
+    localStorage.setItem(`admin-user-tab-${userId}`, 'activity')
+    navigate(`/admin/user/${userId}`)
   }
-  if (kind === 'strength' && movement && WEIGHTED_STANDARD_EQUIP.includes(movement.equipment)) {
-    return (
-      <AdminStrengthWeightedDetail
-        userId={userId}
-        exercise={exercise}
-        equipment={movement.equipment}
-        unitLock={movement.unit_lock}
-        usesPair={movement.uses_pair}
-        ladderOverride={movement.weight_ladder_override}
-        onBack={() => {
-          localStorage.setItem(`admin-user-tab-${userId}`, 'activity')
-          navigate(`/admin/user/${userId}`)
-        }}
-      />
-    )
+  if (kind === 'strength') {
+    // Sled Work consolidated — no movement row under the base name.
+    if (exercise === 'Sled Work') {
+      return <AdminStrengthCarryDetail userId={userId} exercise={exercise} onBack={goBack} />
+    }
+    if (movement === undefined) {
+      return <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
+    }
+    if (movement) {
+      const eq = movement.equipment
+      const suffix = / \[Band \+ Knee\]$/.test(exercise) ? 'band+knee'
+        : / \[Band\]$/.test(exercise) ? 'band'
+        : / \[Knee\]$/.test(exercise) ? 'knee'
+        : null
+      if (movement.strength_type === 'isometric')
+        return <AdminStrengthIsometricDetail userId={userId} exercise={exercise} onBack={goBack} />
+      if (eq === 'assisted')
+        return <AdminStrengthAssistedDetail userId={userId} exercise={exercise} onBack={goBack} />
+      if (eq === 'carry')
+        return <AdminStrengthCarryDetail userId={userId} exercise={exercise} onBack={goBack} />
+      if (suffix && eq !== 'bodyweight')
+        return <AdminStrengthRepsOnlyDetail userId={userId} exercise={exercise} assistType={suffix} onBack={goBack} />
+      if (eq === 'bodyweight')
+        return <AdminStrengthBodyweightDetail userId={userId} exercise={exercise} onBack={goBack} />
+      if (WEIGHTED_STANDARD_EQUIP.includes(eq))
+        return (
+          <AdminStrengthWeightedDetail
+            userId={userId}
+            exercise={exercise}
+            equipment={eq}
+            unitLock={movement.unit_lock}
+            usesPair={movement.uses_pair}
+            ladderOverride={movement.weight_ladder_override}
+            onBack={goBack}
+          />
+        )
+    }
+    // movement null / unknown equipment → fall through to the legacy bare detail
   }
 
   // ── Compute best 1RM for strength ────────────────────────────────────────
