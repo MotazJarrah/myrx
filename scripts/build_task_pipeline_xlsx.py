@@ -556,6 +556,18 @@ TASKS = [
      "WAVES (verify each): W1 strength variants (AdminStrength{Bodyweight,Assisted,Carry,Isometric,RepsOnly}Detail) -> wire AdminEffortDetail base-name dispatch -> build/deploy/QA; W2 cardio variants -> wire AdminCardioDetail; W3 list variant-collapsing in AdminUserActivity (bodyweight tiers / swim strokes / sled push-drag -> one row+badge). W1 DONE + deployed 2026-06-04: 5 strength variants (bodyweight/assisted/carry+sled/isometric/repsonly) built via parallel agents + wired into AdminEffortDetail base-name dispatch (Sled Work handled by exercise name; isometric via strength_type; band/knee suffix + non-bodyweight -> repsonly); build clean. W2 (cardio) DONE + deployed 2026-06-04: 6 variants (pace incl Concept2 Row/Ski erg; air bike; swimming consolidated; rucking; stairmill; beat-your-best) built via parallel agents; AdminCardioDetail rewritten as a slim dispatcher mirroring the athlete categorizeActivity (Bike Erg -> stationary_bike -> BeatYourBest; Row/Ski Erg -> Pace); build clean. W3 DONE + deployed 2026-06-04: AdminUserActivity collapses bodyweight tiers (base + tier badge FULL RX/BAND/KNEE/B+K via useMovements) / swim strokes (Swimming + FREE/BACK/BREAST/FLY badge) / sled push-drag (Sled Work + PUSH/DRAG badge) into one row each, navigating to the consolidated detail. ALL WAVES COMPLETE — the entire Efforts page (read-only list + every strength & cardio detail variant) now mirrors the athlete with per-effort delete kept. Next for Efforts: the deferred coaching add-ons (recency, stalled flag, frequency, PR timeline, balance, adherence).",
      "web/src/pages/admin/detail/AdminStrength*.jsx + AdminCardio*.jsx; AdminEffortDetail.jsx; AdminCardioDetail.jsx; AdminUserActivity.jsx; mirror mobile [exercise].tsx + [activity].tsx",
      "2026-06-04"),
+
+    ("T082", "Cross-check ALL Efforts detail mirrors vs ACTUAL mobile render + fix", "Coach/Admin", "Web", "In progress",
+     "ROOT CAUSE (user 2026-06-04): the detail mirrors were built partly from the CLAUDE.md 'locked design spec' sections, which LAG the actual mobile code. StairMill was built to the stale zone-pill spec instead of the current mobile tile/plan-queue render, so it doesn't look like mobile. The mobile COMPONENT CODE is the sole source of truth for the visual — CLAUDE.md is context/intent only, not the render spec. Likely affects other variants too.",
+     "Verify+fix agent per surface (6 strength + 6 cardio): read the ACTUAL mobile render for the variant, diff vs the web mirror, fix the web to match the mobile render (Recharts/click-pills substitutions OK; read-only + delete kept). StairMill = full rebuild to the current mobile model. Then build/deploy + user QAs every move. Wave A = strength, Wave B = cardio.",
+     "web/src/pages/admin/detail/AdminStrength*.jsx + AdminCardio*.jsx; mirror mobile [exercise].tsx + [activity].tsx",
+     "2026-06-04"),
+
+    ("T083", "Mobile dashboard pills don't refresh on effort delete", "Dashboard", "Mobile", "In progress",
+     "User 2026-06-04: on the mobile dashboard, deleting an effort does NOT update the stat pills in real time — the user must navigate away and back (which remounts + refetches) to see the corrected pill values. The pills derive from efforts data that isn't refetched/recomputed after an on-dashboard delete.",
+     "Agent: read mobile/app/(app)/dashboard.tsx, find the pill computation + the on-dashboard effort delete, and refresh the pill data immediately after a successful delete (update in-memory state or refetch via the existing pattern). tsc-clean.",
+     "mobile/app/(app)/dashboard.tsx",
+     "2026-06-04"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
