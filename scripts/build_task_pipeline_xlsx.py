@@ -535,8 +535,8 @@ TASKS = [
 
     ("T078", "Finalize the Admin client-detail view", "Coach/Admin", "Web", "In progress",
      "User 2026-06-04 re-scoped the parity task: before mirroring admin->coach (T015), finalize the ADMIN client-detail view first so we have a full understanding of what exists + what needs mirroring. Admin client page = web/src/pages/admin/AdminUserDetail.jsx (shell) with 6 tabs: Dashboard, Efforts (AdminUserActivity), Bodyweight (AdminUserBody), Calories (AdminUserCalories - Food Log/Manual Logs/Macro Plan sub-tabs), Billing, Activity Feed (timeline).",
-     "In progress: inventory each admin client-view tab, then finalize tab-by-tab via one-question-at-a-time Q&A. Mirror to coach (T015) comes after.",
-     "web/src/pages/admin/AdminUserDetail.jsx; web/src/pages/admin/tabs/*.jsx",
+     "Inventory done 2026-06-04. Finalize items: (1) Dashboard tab is an empty 'Snapshot coming soon' placeholder AND it's the DEFAULT landing tab [DECISION]. (2) BUG: AdminUserBody.jsx save-weigh-in button crashes — Loader2 used (l.197) but not imported (l.3) [FIX]. (3) Dead code: tabs/AdminUserProfile.jsx (530 lines) imported (AdminUserDetail l.10) but never rendered; settings drawer uses AccountSettings [FIX]. (4) ?tab=billing deep-link broken — 'billing' missing from validTabs (l.492) [FIX]. (5) Efforts 'Best' cardio stat only parses /km pace; speed/cal-min/floors/mi/500m/100m show nothing — extend to shell's parseCardioBest [FIX]. (6) Calories Food Log: admin can view+delete client food but not add on their behalf [DECISION]. (7) Cosmetic: stale ClientSettingsDrawer docstring + inconsistent save-button feedback styles [FIX]. Clear fixes (2,3,4,5,7) can batch; decisions (1,6) need user. One at a time.",
+     "web/src/pages/admin/AdminUserDetail.jsx; web/src/pages/admin/tabs/*.jsx; components/{BillingView,MacroPlanEditor,AccountSettings,ClientSettingsDrawer}.jsx",
      "2026-06-04"),
 ]
 
