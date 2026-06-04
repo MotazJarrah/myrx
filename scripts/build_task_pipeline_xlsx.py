@@ -153,10 +153,10 @@ TASKS = [
      "(planned) mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
-    ("T015", "Admin vs Coach client-view design parity", "Coach/Admin", "Web", "Parked",
-     "Audited 2026-06-04: the two client pages are already mostly identical (same Dashboard/Efforts/Bodyweight/Calories tabs + same Age/Gender/Phone/Weight/Height profile card). Real diffs: (a) Admin has 2 extra tabs (Billing, Activity Feed) — admin-only by nature; (b) the Calories tab differs — Admin renders the rich AdminUserCalories.jsx (Food Log / Manual Logs / Macro Plan sub-tabs), Coach renders just the inline Macro Plan editor gated behind 'Manage macros'.",
-     "PAUSED by user 2026-06-04 — resume later, asking scoping questions ONE AT A TIME. Q1 (ready): which is the reference? [A] Coach matches Admin (richer Calories tab; recommended, lowest risk) / [B] Admin matches Coach (simpler) / [C] unify to one shared role-gated component. Confirm assumption: Billing + Activity Feed stay admin-only.",
-     "web admin/tabs/AdminUserCalories.jsx; web admin/AdminUserDetail.jsx; coach/CoachClientDetail.jsx",
+    ("T015", "Mirror finalized admin client-view to coach", "Coach/Admin", "Web", "Parked",
+     "Phase 2 of the admin/coach parity work. User re-scoped 2026-06-04: finalize the ADMIN client-detail view first (T078), THEN mirror the finalized result to the coach client view. Audited diffs so far: Admin has 2 extra tabs (Billing, Activity Feed, admin-only by nature) + a richer Calories tab (Food Log / Manual Logs / Macro Plan) vs the coach's inline Macro Plan editor behind 'Manage macros'. Exact mirror scope is TBD until T078 lands.",
+     "BLOCKED on T078 (finalize admin client view). Resume after admin is final: decide per-area what mirrors to coach and what stays admin-only.",
+     "web admin/AdminUserDetail.jsx + tabs/*; coach/CoachClientDetail.jsx",
      "2026-06-04"),
 
     ("T016", "Hydration page redesign / update", "Hydration", "Mobile", "Done",
@@ -531,6 +531,12 @@ TASKS = [
      "Mobile sign-in page had an eyebrow 'Sign in' + a title 'Sign in to MyRX' (redundant); user wants just 'Sign in'.",
      "Fixed: removed the redundant eyebrow and set the title to 'Sign in' (single clean heading). Web Auth.jsx differs — heading is 'Welcome back' + subtitle 'Sign in to continue to MyRX', not the same string — so left as-is (mobile-only fix).",
      "mobile/app/(auth)/sign-in.tsx; web Auth.jsx",
+     "2026-06-04"),
+
+    ("T078", "Finalize the Admin client-detail view", "Coach/Admin", "Web", "In progress",
+     "User 2026-06-04 re-scoped the parity task: before mirroring admin->coach (T015), finalize the ADMIN client-detail view first so we have a full understanding of what exists + what needs mirroring. Admin client page = web/src/pages/admin/AdminUserDetail.jsx (shell) with 6 tabs: Dashboard, Efforts (AdminUserActivity), Bodyweight (AdminUserBody), Calories (AdminUserCalories - Food Log/Manual Logs/Macro Plan sub-tabs), Billing, Activity Feed (timeline).",
+     "In progress: inventory each admin client-view tab, then finalize tab-by-tab via one-question-at-a-time Q&A. Mirror to coach (T015) comes after.",
+     "web/src/pages/admin/AdminUserDetail.jsx; web/src/pages/admin/tabs/*.jsx",
      "2026-06-04"),
 ]
 
