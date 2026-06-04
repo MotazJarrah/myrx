@@ -733,10 +733,56 @@ export default function AdminCardioPaceDetail({ userId, activity, onBack }) {
             <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
               <h2 className="text-sm font-bold">Your progression plan</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Your next step is below. After that, here's what's coming up.
+                This is your personalized adaptation plan — follow it to see your results improve.
               </p>
 
-              {/* NEXT STEP hero — driven by the SELECTED tile (default: step 0). */}
+              {/* Tile row with chevrons between each pair, indicating forward
+                  direction. The tile row IS both the navigation and the
+                  upcoming queue (mobile has no separate "Coming up" section).
+                  Selected tile (default: step 0 = the actual NEXT step) is
+                  highlighted; tapping any tile drives the hero card below. */}
+              <div className="mt-2 flex items-center gap-1 overflow-x-auto py-1 px-0.5 scrollbar-hide" style={{ scrollbarWidth: 'none' }}>
+                {planQueue.map((step, idx) => {
+                  const isSelected = selectedStepIdx === idx
+                  const isLast     = idx === planQueue.length - 1
+                  return (
+                    <div key={idx} className="flex items-center">
+                      <button
+                        ref={el => { tileEls.current[idx] = el }}
+                        onClick={() => selectStep(idx)}
+                        className={`flex shrink-0 flex-col items-start gap-1 rounded-lg border px-2.5 py-2.5 transition-colors ${
+                          isSelected
+                            ? 'border-amber-500 bg-amber-500/[0.12]'
+                            : 'border-border bg-card/40 hover:border-amber-500/40'
+                        }`}
+                        style={{ minWidth: 110 }}
+                      >
+                        <span className={`text-[9px] font-bold uppercase tracking-wider ${isSelected ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                          {CARDIO_ZONE_CONFIG[step.zone].shortLabel}
+                        </span>
+                        <span className={`whitespace-nowrap font-mono text-sm font-bold tabular-nums ${isSelected ? 'text-amber-400' : 'text-foreground'}`}>
+                          {step.shortWork}
+                        </span>
+                        <span className={`whitespace-nowrap font-mono text-xs tabular-nums ${isSelected ? 'text-foreground' : 'text-muted-foreground'}`}>
+                          {step.shortTime}
+                        </span>
+                      </button>
+                      {!isLast && (
+                        <span
+                          className="px-1 text-amber-400/70 select-none"
+                          style={{ transform: 'scaleY(1.3)' }}
+                          aria-hidden="true"
+                        >
+                          ›
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Details card — shows the SELECTED step. Each big value sits on
+                  a row with a small right-aligned descriptor. */}
               <div
                 className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] p-4"
                 style={{ minHeight: 220 }}
@@ -813,57 +859,6 @@ export default function AdminCardioPaceDetail({ userId, activity, onBack }) {
                 </div>
               </div>
 
-              {/* COMING UP — 8-tile horizontal scroll queue. Tap a tile to
-                  preview that step's prescription in the hero above. */}
-              <p className="mt-4 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Coming up
-              </p>
-              <div className="relative">
-                <div
-                  className="flex items-center gap-1 overflow-x-auto py-1 px-0.5 scrollbar-hide"
-                  style={{ scrollbarWidth: 'none' }}
-                >
-                  {planQueue.map((step, idx) => {
-                    const isSelected = selectedStepIdx === idx
-                    const isLast     = idx === planQueue.length - 1
-                    return (
-                      <div key={idx} className="flex items-center">
-                        <button
-                          ref={el => { tileEls.current[idx] = el }}
-                          onClick={() => selectStep(idx)}
-                          className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-2.5 transition-colors ${
-                            isSelected
-                              ? 'border-amber-500 bg-amber-500/15'
-                              : 'border-border bg-card/40 hover:border-amber-500/40'
-                          }`}
-                          style={{ minWidth: 84 }}
-                        >
-                          <span className={`text-[9px] font-bold uppercase tracking-wider ${isSelected ? 'text-amber-400' : 'text-muted-foreground'}`}>
-                            {CARDIO_ZONE_CONFIG[step.zone].shortLabel}
-                          </span>
-                          <span className={`mt-0.5 whitespace-nowrap font-mono text-sm font-bold tabular-nums ${isSelected ? 'text-amber-400' : 'text-foreground'}`}>
-                            {step.shortWork}
-                          </span>
-                          <span className={`mt-0.5 whitespace-nowrap font-mono text-[10px] tabular-nums leading-none ${isSelected ? 'text-amber-400/70' : 'text-muted-foreground/60'}`}>
-                            {step.shortTime}
-                          </span>
-                          {step.restLabel && (
-                            <span className={`mt-0.5 whitespace-nowrap text-[8px] ${isSelected ? 'text-amber-400/60' : 'text-muted-foreground/50'}`}>
-                              {step.restLabel}
-                            </span>
-                          )}
-                        </button>
-                        {!isLast && (
-                          <span className="px-0.5 text-amber-400/60 select-none" aria-hidden="true">›</span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-                <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-card to-transparent" />
-                <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-card to-transparent" />
-              </div>
-
               {/* Science attribution. */}
               <p className="mt-3 text-[11px] text-muted-foreground">
                 Riegel · Daniels' · Seiler · pace zones &amp; polarized 80/20
@@ -879,6 +874,9 @@ export default function AdminCardioPaceDetail({ userId, activity, onBack }) {
                 Log a first {activity} effort and the personalized plan will appear here.
                 Every step adapts to the client's latest pace.
               </p>
+              {/* Copy reframed for the coach surface ("the client's latest pace"
+                  vs the athlete's "your latest pace"). Otherwise verbatim from
+                  mobile PaceDetail's empty state. */}
             </AnimateRise>
           )}
 

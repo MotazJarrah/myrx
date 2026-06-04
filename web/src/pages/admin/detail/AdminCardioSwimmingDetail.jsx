@@ -445,7 +445,7 @@ function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) 
         <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
           <h2 className="text-sm font-bold">Your progression plan</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            This is your personalized adaptation plan — follow it to see results improve.
+            This is the client's personalized adaptation plan — follow it to see their results improve.
           </p>
 
           {/* COMING UP queue — 8 upcoming steps, horizontal scroll with chevrons.

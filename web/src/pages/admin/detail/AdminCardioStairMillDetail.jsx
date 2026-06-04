@@ -23,12 +23,13 @@
  * Sections, top to bottom (matching the athlete + AdminCardioPaceDetail):
  *   1. Header        — "StairMill" + "Best — N floors/min" (TickerNumber) +
  *                      STAIR CLIMBING category pill (or cold-start subtitle)
- *   2. Progression   — selected-step HERO (zone info pill + workout / time /
- *      plan card       climb-rate rows + full coaching cue) and a horizontal
- *                      8-tile queue from generateStairMillPlanQueue. The tile
- *                      row IS the navigation; the hero shows the SELECTED
- *                      tile's prescription. Default selection = step 0 (the
- *                      next system-recommended session per Seiler's rules).
+ *   2. Progression   — help text, then a horizontal 8-tile queue from
+ *      plan card       generateStairMillPlanQueue (the tile row IS the
+ *                      navigation), then the selected-step HERO below it
+ *                      (zone info pill + workout / time / climb-rate rows +
+ *                      full coaching cue). The hero shows the SELECTED tile's
+ *                      prescription. Default selection = step 0 (the next
+ *                      system-recommended session per Seiler's rules).
  *   3. Chart         — Recharts FPM-over-time line, NOT reversed (higher =
  *                      better progress = line trends up), peak-FPM dashed ref.
  *   4. Efforts log   — chronological list, per-effort DELETE kept (SwipeDelete).
@@ -456,6 +457,52 @@ export default function AdminCardioStairMillDetail({
                 This is the client's personalized adaptation plan — follow it to see their results improve.
               </p>
 
+              {/* Tile row with chevrons between each pair, indicating forward
+                  direction. The tile row IS both the navigation and the
+                  upcoming queue (mobile has no separate "Coming up" section).
+                  Selected tile (default: step 0 = the actual NEXT step) is
+                  highlighted; tapping any tile drives the hero card below.
+                  Each tile shows zone / work / time only (no rest line). */}
+              <div className="mt-2 flex items-center gap-1 overflow-x-auto py-1 px-0.5 scrollbar-hide" style={{ scrollbarWidth: 'none' }}>
+                {planQueue.map((step, idx) => {
+                  const isSelected = selectedStepIdx === idx
+                  const isLast     = idx === planQueue.length - 1
+                  return (
+                    <div key={idx} className="flex items-center">
+                      <button
+                        ref={el => { tileEls.current[idx] = el }}
+                        onClick={() => selectStep(idx)}
+                        className={`flex shrink-0 flex-col items-start gap-1 rounded-lg border px-2.5 py-2.5 transition-colors ${
+                          isSelected
+                            ? 'border-amber-500 bg-amber-500/[0.12]'
+                            : 'border-border bg-card/40 hover:border-amber-500/40'
+                        }`}
+                        style={{ minWidth: 110 }}
+                      >
+                        <span className={`text-[9px] font-bold uppercase tracking-wider ${isSelected ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                          {step.zoneLabel}
+                        </span>
+                        <span className={`whitespace-nowrap font-mono text-sm font-bold tabular-nums ${isSelected ? 'text-amber-400' : 'text-foreground'}`}>
+                          {step.shortWork}
+                        </span>
+                        <span className={`whitespace-nowrap font-mono text-xs tabular-nums ${isSelected ? 'text-foreground' : 'text-muted-foreground'}`}>
+                          {fmtSecs(step.rx.estimatedSecsPerRep)}
+                        </span>
+                      </button>
+                      {!isLast && (
+                        <span
+                          className="px-1 text-amber-400/70 select-none"
+                          style={{ transform: 'scaleY(1.3)' }}
+                          aria-hidden="true"
+                        >
+                          ›
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
               {/* NEXT STEP hero — driven by the SELECTED tile (default: step 0).
                   3 stacked rows (workout / time / climb rate). Rest lives in
                   the cue line, mirroring the athlete (no separate rest row). */}
@@ -511,54 +558,6 @@ export default function AdminCardioStairMillDetail({
                 <div className="mt-2.5 border-t border-amber-500/15 pt-2.5">
                   <p className="text-sm text-foreground">{selectedStep.cue}</p>
                 </div>
-              </div>
-
-              {/* COMING UP — 8-tile horizontal scroll queue. Tap a tile to
-                  preview that step's prescription in the hero above. The tile
-                  row is the navigation (the athlete uses chevrons between
-                  tiles; web stays click-to-select with a › separator). */}
-              <p className="mt-4 mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                Coming up
-              </p>
-              <div className="relative">
-                <div
-                  className="flex items-center gap-1 overflow-x-auto py-1 px-0.5 scrollbar-hide"
-                  style={{ scrollbarWidth: 'none' }}
-                >
-                  {planQueue.map((step, idx) => {
-                    const isSelected = selectedStepIdx === idx
-                    const isLast     = idx === planQueue.length - 1
-                    return (
-                      <div key={idx} className="flex items-center">
-                        <button
-                          ref={el => { tileEls.current[idx] = el }}
-                          onClick={() => selectStep(idx)}
-                          className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-2.5 transition-colors ${
-                            isSelected
-                              ? 'border-amber-500 bg-amber-500/15'
-                              : 'border-border bg-card/40 hover:border-amber-500/40'
-                          }`}
-                          style={{ minWidth: 84 }}
-                        >
-                          <span className={`text-[9px] font-bold uppercase tracking-wider ${isSelected ? 'text-amber-400' : 'text-muted-foreground'}`}>
-                            {step.zoneLabel}
-                          </span>
-                          <span className={`mt-0.5 whitespace-nowrap font-mono text-sm font-bold tabular-nums ${isSelected ? 'text-amber-400' : 'text-foreground'}`}>
-                            {step.shortWork}
-                          </span>
-                          <span className={`mt-0.5 whitespace-nowrap font-mono text-[10px] tabular-nums leading-none ${isSelected ? 'text-amber-400/70' : 'text-muted-foreground/60'}`}>
-                            {fmtSecs(step.rx.estimatedSecsPerRep)}
-                          </span>
-                        </button>
-                        {!isLast && (
-                          <span className="px-0.5 text-amber-400/60 select-none" aria-hidden="true">›</span>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-                <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-card to-transparent" />
-                <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-card to-transparent" />
               </div>
 
               {/* Science attribution (verbatim mirror of the athlete). */}

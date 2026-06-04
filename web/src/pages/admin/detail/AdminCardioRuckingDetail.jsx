@@ -514,10 +514,12 @@ export default function AdminCardioRuckingDetail({
           {/* ── 3. Progress charts — two stacked single-axis lines ── */}
           {parsed.length >= 1 && (
             <AnimateRise delay={250} className="rounded-xl border border-border bg-card p-4">
-              <p className="mb-1 text-xs font-semibold text-muted-foreground">Progress over time</p>
+              {/* "Progress over time" is an h2 on mobile (s.h2 = 14px bold
+                  foreground), same visual weight as "Adaptation zone". */}
+              <h2 className="text-sm font-bold">Progress over time</h2>
 
               {/* Pack weight over time. Higher = better → NOT reversed. */}
-              <p className="mb-2 mt-3 text-[11px] text-muted-foreground">Pack weight</p>
+              <p className="mb-2 mt-4 text-xs text-muted-foreground">Pack weight</p>
               {weightChartData.length >= 2 ? (
                 <ResponsiveContainer width="100%" height={150}>
                   <LineChart data={weightChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
@@ -568,7 +570,7 @@ export default function AdminCardioRuckingDetail({
               )}
 
               {/* Distance over time. Higher = better → NOT reversed. */}
-              <p className="mb-2 mt-5 text-[11px] text-muted-foreground">Distance</p>
+              <p className="mb-2 mt-4 text-xs text-muted-foreground">Distance</p>
               {distChartData.length >= 2 ? (
                 <ResponsiveContainer width="100%" height={150}>
                   <LineChart data={distChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
@@ -617,8 +619,6 @@ export default function AdminCardioRuckingDetail({
                   Log a second ruck to see the distance trend.
                 </p>
               )}
-
-              <p className="mt-2 text-[11px] text-muted-foreground">Dashed line = personal best</p>
             </AnimateRise>
           )}
         </>

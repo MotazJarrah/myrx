@@ -403,8 +403,8 @@ export default function AdminCardioBeatYourBestDetail({ userId, activity, onBack
               Riegel projection · 5 canonical distances
             </p>
             <p className="mt-1 text-[11px] italic text-muted-foreground">
-              Variety in training distances refines these targets — the more distances logged, the
-              more accurate the projection.
+              Log sessions at different distances to refine your targets — the more variety in your
+              training history, the more accurate the projection.
             </p>
           </AnimateRise>
 
@@ -462,7 +462,7 @@ export default function AdminCardioBeatYourBestDetail({ userId, activity, onBack
                   Log a second session to see the trend.
                 </p>
               )}
-              <p className="mt-2 text-[11px] text-muted-foreground">Dashed = fastest pace</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">Dashed = your fastest pace</p>
             </AnimateRise>
           )}
         </>
@@ -477,6 +477,9 @@ export default function AdminCardioBeatYourBestDetail({ userId, activity, onBack
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="border-b border-border px-4 py-3">
+                <h2 className="text-sm font-semibold">All entries</h2>
+              </div>
               <div className="divide-y divide-border">
                 {[...efforts].reverse().map(e => {
                   const detail = e.label.split(' · ').slice(1).join(' · ')

@@ -374,7 +374,7 @@ export default function AdminCardioAirBikeDetail({
           <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
             <h2 className="text-sm font-bold">Your progression plan</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Three zones to train, each anchored on the cal/min rate. Pick a zone to switch.
+              Three zones to train, each anchored on your cal/min rate. Swipe the pill to switch zones.
             </p>
 
             {/* Zone pill row — single active pill flanked by chevrons. Web stays
@@ -523,7 +523,7 @@ export default function AdminCardioAirBikeDetail({
                 </p>
               )}
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Higher = better · Dashed = personal best
+                Dashed = personal best
               </p>
             </AnimateRise>
           )}
