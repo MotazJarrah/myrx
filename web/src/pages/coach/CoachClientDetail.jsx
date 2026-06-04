@@ -114,7 +114,11 @@ function resolveTier(p) {
   return p.b2c_subscription_tier ?? 'free'
 }
 
-function SnapshotBadge({ children, color }) {
+// `muted` keeps the accent border + background tint from `color` but forces
+// the TEXT to muted — mirrors mobile's empty-pill treatment (accent chip
+// retained, icon + label rendered grey). The `!text-muted-foreground`
+// override wins over the `text-{accent}-400` baked into the cls string.
+function SnapshotBadge({ children, color, muted }) {
   const cls = {
     blue:    'bg-blue-500/10 border-blue-500/20 text-blue-400',
     amber:   'bg-amber-500/10 border-amber-500/20 text-amber-400',
@@ -126,7 +130,7 @@ function SnapshotBadge({ children, color }) {
     cyan:    'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
-    <span className={`flex items-center justify-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium text-center leading-tight w-[48%] min-h-[2.25rem] ${cls}`}>
+    <span className={`flex items-center justify-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium text-center leading-tight w-[48%] min-h-[2.25rem] ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
       {children}
     </span>
   )
@@ -513,7 +517,7 @@ export default function CoachClientDetail() {
                   {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {coachProfile?.weight_unit || 'lb'} · 30d
                 </SnapshotBadge>
               ) : (
-                <SnapshotBadge color="zinc">
+                <SnapshotBadge color="green" muted>
                   <Weight className="h-3 w-3 shrink-0 text-muted-foreground" />
                   no recent weight
                 </SnapshotBadge>
@@ -528,7 +532,7 @@ export default function CoachClientDetail() {
                   <TickerNumber value={snapshot.lowestBpm} /> low bpm · 7d
                 </SnapshotBadge>
               ) : (
-                <SnapshotBadge color="zinc">
+                <SnapshotBadge color="fuchsia" muted>
                   <Heart className="h-3 w-3 shrink-0 text-muted-foreground" />
                   no recent HR
                 </SnapshotBadge>
@@ -551,7 +555,7 @@ export default function CoachClientDetail() {
                   <TickerNumber value={snapshot.avgSleepH} />h sleep · 7d
                 </SnapshotBadge>
               ) : (
-                <SnapshotBadge color="zinc">
+                <SnapshotBadge color="indigo" muted>
                   <Moon className="h-3 w-3 shrink-0 text-muted-foreground" />
                   no recent sleep
                 </SnapshotBadge>
@@ -566,7 +570,7 @@ export default function CoachClientDetail() {
                   <TickerNumber value={snapshot.hydrationDays} /> water day{snapshot.hydrationDays !== 1 ? 's' : ''} · 7d
                 </SnapshotBadge>
               ) : (
-                <SnapshotBadge color="zinc">
+                <SnapshotBadge color="cyan" muted>
                   <Droplet className="h-3 w-3 shrink-0 text-muted-foreground" />
                   no recent water
                 </SnapshotBadge>

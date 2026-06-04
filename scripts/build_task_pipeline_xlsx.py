@@ -502,6 +502,18 @@ TASKS = [
      "MOBILE DONE 2026-06-03: replicated RadialNav's resolveTier + TIER_RANK in dashboard.tsx; pills reordered to tier/nav order (Strength, Cardio = free; Weight, Heart, Food = corerx; Sleep, Hydration = fullrx) and each gated on `tierRank >= TIER_RANK[pillTier]`. Free user sees 2 pills, corerx 5, fullrx 7; uneven count centers the lone last pill (statsRow justify-center + 48% width). WEB (admin + coach) MIRRORED 2026-06-04 — replicated resolveTier on both files (client tier comes from the admin get_user_for_admin RPC + the coach profiles select('*'), both already return b2c_subscription_tier); reorder + tier-gate + icons + colors + no-recent states + 30d weight; built + deployed. So a coach-attached client (fullrx) shows all 7; a free B2C client shows 2.",
      "mobile dashboard.tsx; (then) web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
+
+    ("T073", "Web empty-state pills lost their accent color (all grey)", "Dashboard", "Web", "Done",
+     "Screenshot (admin client view): the empty 'no recent weight / HR / sleep / water' pills all render grey (zinc) instead of keeping their accent tint, so weight (emerald) and heart (fuchsia) are indistinguishable when empty AND it doesn't match mobile — where an empty pill keeps its accent chip border/bg with muted icon + muted text. The T069-T072 web-mirror agent used color='zinc' for all empty states.",
+     "DONE 2026-06-04 (background agent + assistant deploy): added a `muted` prop to SnapshotBadge — keeps the accent border/bg from `color` but forces text to `!text-muted-foreground`; the 4 empty pills now pass their accent color + muted (weight=green, heart=fuchsia, sleep=indigo, hydration=cyan) with muted icon+text, matching mobile. Both web files; built + deployed.",
+     "web AdminUserDetail.jsx, CoachClientDetail.jsx",
+     "2026-06-04"),
+
+    ("T074", "Phantom water_logs appearing for users who never logged water", "Hydration", "Backend", "Done",
+     "User: water_logs rows exist for accounts that never logged water. rasp_86 (Test Client, id 3d41a692-7c59-4636-bfee-96b76d1bcf3e) shows 2 days logged with NO visible log entries; motaz.jarrah shows 1 day, no log history. The mobile hydration pill reads '0 days' (NOT 'no recent') — so the count path SEES water_logs rows but counts 0 days hitting goal, i.e. rows exist but don't surface in the page's log list and the user doesn't know what's inserting them.",
+     "RESOLVED 2026-06-04 — NOT a phantom inserter, it's real test taps. The rows' amounts are EXACTLY 236.588 / 354.882 / 473.176 ml = 8 / 12 / 16 oz (the hydration page's oz quick-add/picker presets run through ozToMl()); logged_at = created_at, clustered in bursts seconds apart on 2026-05-29 + 05-30 (rasp_86, ~18 rows) and 06-03 22:53 (motaz, 1 row) — i.e. manual button-mashing during the hydration-page dev/test sessions. The ONLY water_logs INSERT in the whole codebase is hydration.tsx addDrink (tap-triggered; grep confirmed nothing auto-inserts — sync/HC/Samsung/migrations don't write water_logs, they only DELETE in delete-user). 'No log showing' = the page's log list shows TODAY only (these are past days); 'pill says 0' = computeHydrationDaysHit counts days HITTING the daily goal in 7d (=0, each day was under goal) but rows exist so it reads 0 not 'no recent'. Offered to delete the junk test rows; awaiting user.",
+     "mobile hydration.tsx; src/lib/healthConnect.ts, integrations/*; supabase functions/migrations",
+     "2026-06-04"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
