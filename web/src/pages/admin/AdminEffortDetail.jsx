@@ -9,6 +9,7 @@ import { supabase } from '../../lib/supabase'
 import { projectAllRMs } from '../../lib/formulas'
 import { ArrowLeft } from 'lucide-react'
 import SwipeDelete from '../../components/SwipeDelete'
+import AdminStrengthWeightedDetail from './detail/AdminStrengthWeightedDetail'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -97,6 +98,7 @@ export default function AdminEffortDetail() {
 
   const [entries,  setEntries]  = useState([])
   const [loading,  setLoading]  = useState(true)
+  const [movement, setMovement] = useState(undefined) // undefined = loading, null = not found
 
   useEffect(() => {
     async function load() {
@@ -114,10 +116,46 @@ export default function AdminEffortDetail() {
     load()
   }, [userId, kind, exercise])
 
+  // Load this movement's record (strength only) to decide which detail
+  // surface to render — weighted-standard gets the full coaching mirror.
+  useEffect(() => {
+    if (kind !== 'strength') { setMovement(null); return }
+    let alive = true
+    setMovement(undefined)
+    supabase.from('movements')
+      .select('equipment, unit_lock, uses_pair, weight_ladder_override')
+      .eq('name', exercise)
+      .maybeSingle()
+      .then(({ data }) => { if (alive) setMovement(data ?? null) })
+    return () => { alive = false }
+  }, [kind, exercise])
+
   async function deleteEntry(id) {
     const { error } = await supabase.from('efforts').delete().eq('id', id)
     if (!error) setEntries(prev => prev.filter(e => e.id !== id))
     else throw error
+  }
+
+  // ── Dispatch weighted-standard strength → full coaching mirror ────────────
+  const WEIGHTED_STANDARD_EQUIP = ['barbell', 'dumbbell', 'kettlebell', 'machine', 'strongman']
+  if (kind === 'strength' && movement === undefined) {
+    return <div className="py-16 text-center text-sm text-muted-foreground">Loading…</div>
+  }
+  if (kind === 'strength' && movement && WEIGHTED_STANDARD_EQUIP.includes(movement.equipment)) {
+    return (
+      <AdminStrengthWeightedDetail
+        userId={userId}
+        exercise={exercise}
+        equipment={movement.equipment}
+        unitLock={movement.unit_lock}
+        usesPair={movement.uses_pair}
+        ladderOverride={movement.weight_ladder_override}
+        onBack={() => {
+          localStorage.setItem(`admin-user-tab-${userId}`, 'activity')
+          navigate(`/admin/user/${userId}`)
+        }}
+      />
+    )
   }
 
   // ── Compute best 1RM for strength ────────────────────────────────────────
