@@ -473,6 +473,12 @@ TASKS = [
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
+    ("T070", "Dashboard pills: page icons + highlight weight pill", "Dashboard", "Cross", "In progress",
+     "User (after seeing the emoji-free pills): use each PAGE's lucide icon on its pill instead of no icon — Strength=Dumbbell, Cardio=Activity, Food=Flame, HR=Heart, Weight=Weight/Scale, Sleep=Moon, Hydration=Droplet (confirm exact icons + accents from the nav/RadialNav). Also the weight pill's slate tint blends into the card background — give it a more visible highlight (a distinct colored border/bg, not clashing with the other 6).",
+     "MOBILE DONE + reloaded 2026-06-03: each pill now leads with its page's lucide icon (Dumbbell / Activity / Flame / Heart / Weight / Moon / Droplet) in the page accent; weight chip switched from the near-invisible slate to a teal tint (border 0.34 / bg 0.12) so it stands out. WEB (admin + coach) mirror still PENDING the user's confirmation, to be bundled with the T069 changes.",
+     "mobile dashboard.tsx; (then) web AdminUserDetail.jsx, CoachClientDetail.jsx",
+     "2026-06-03"),
+
     ("T069", "Dashboard pills: window-based compute + 'no recent data' (don't hide)", "Dashboard", "Cross", "In progress",
      "User rejected T068's 'latest-N-logs' weight computation — wants every pill computed STRICTLY over its designated rolling window (PRs 30d, food 14d, HR/sleep/hydration 7d, weight = its own designated window). And instead of HIDING a pill when its window has no data, ALWAYS show the pill with a 'no recent data' placeholder (also keeps the fixed 3+3+1 / 7-pill layout stable). Weight window was not specified — assistant designating 30 days (shown as '· 30d'), easily changed.",
      "MOBILE DONE + reloaded 2026-06-03: weight = change over rolling 30d (latest − earliest weigh-in in the 30d window; reverted the latest-5-logs hack), shown '±N lb · 30d' or 'no recent weight'; all pills always render — count pills (strength/cardio/food) show 0, measurement pills (HR/weight/sleep/water) show 'no recent <metric>' when empty. WEB (admin + coach) MIRROR PENDING the user's confirmation of the mobile look + the 30d weight window.",

@@ -24,7 +24,7 @@ import {
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import {
-  Dumbbell, Activity, Weight, Flame,
+  Dumbbell, Activity, Weight, Flame, Heart, Moon, Droplet,
   User, Settings as SettingsIcon,
 } from 'lucide-react-native'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
@@ -777,6 +777,7 @@ export default function Dashboard() {
           {/* Strength PRs — last 30 days (count; shows 0 when none). */}
           {strengthPRs != null && (
             <View style={[d.statChip, d.statChipBlue]}>
+              <Dumbbell size={12} color={palette.blue[400]} style={d.statChipIcon} />
               <View style={d.statChipNum}>
                 <TickerNumber value={strengthPRs} fontSize={11} color={palette.blue[400]} fontWeight="700" />
               </View>
@@ -789,6 +790,7 @@ export default function Dashboard() {
           {/* Cardio PRs — last 30 days (count; shows 0 when none). */}
           {cardioPRs != null && (
             <View style={[d.statChip, d.statChipAmber]}>
+              <Activity size={12} color={palette.amber[400]} style={d.statChipIcon} />
               <View style={d.statChipNum}>
                 <TickerNumber value={cardioPRs} fontSize={11} color={palette.amber[400]} fontWeight="700" />
               </View>
@@ -801,6 +803,7 @@ export default function Dashboard() {
           {/* Food — distinct days logged in the last 14 (count; shows 0). */}
           {foodStreak != null && (
             <View style={[d.statChip, d.statChipRed]}>
+              <Flame size={12} color={palette.red[400]} style={d.statChipIcon} />
               <View style={d.statChipNum}>
                 <TickerNumber value={foodStreak} fontSize={11} color={palette.red[400]} fontWeight="700" />
               </View>
@@ -814,18 +817,22 @@ export default function Dashboard() {
           <View style={[d.statChip, d.statChipEmerald]}>
             {lowestHR7d != null ? (
               <>
+                <Heart size={12} color={palette.emerald[400]} style={d.statChipIcon} />
                 <View style={d.statChipNum}>
                   <TickerNumber value={lowestHR7d} fontSize={11} color={palette.emerald[400]} fontWeight="700" />
                 </View>
                 <Text style={[d.statChipText, { color: palette.emerald[400] }]}>{' '}low bpm · 7d</Text>
               </>
             ) : (
-              <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent HR</Text>
+              <>
+                <Heart size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent HR</Text>
+              </>
             )}
           </View>
 
           {/* Weight change over the last 30 days (latest − earliest weigh-in). */}
-          <View style={[d.statChip, d.statChipSlate]}>
+          <View style={[d.statChip, d.statChipTeal]}>
             {weeklyWeightKg != null ? (() => {
               const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
               const inUnit = pUnit === 'kg' ? weeklyWeightKg : weeklyWeightKg / 0.453592
@@ -834,14 +841,18 @@ export default function Dashboard() {
               const abs = Math.abs(rounded).toFixed(1)
               return (
                 <>
+                  <Weight size={12} color={palette.teal[400]} style={d.statChipIcon} />
                   <View style={d.statChipNum}>
-                    <TickerNumber value={`${sign}${abs}`} fontSize={11} color={colors.foreground} fontWeight="700" />
+                    <TickerNumber value={`${sign}${abs}`} fontSize={11} color={palette.teal[400]} fontWeight="700" />
                   </View>
-                  <Text style={[d.statChipText, { color: colors.mutedForeground }]}>{` ${pUnit} · 30d`}</Text>
+                  <Text style={[d.statChipText, { color: palette.teal[400] }]}>{` ${pUnit} · 30d`}</Text>
                 </>
               )
             })() : (
-              <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent weight</Text>
+              <>
+                <Weight size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent weight</Text>
+              </>
             )}
           </View>
 
@@ -849,13 +860,17 @@ export default function Dashboard() {
           <View style={[d.statChip, d.statChipIndigo]}>
             {avgSleepH != null ? (
               <>
+                <Moon size={12} color={palette.indigo[400]} style={d.statChipIcon} />
                 <View style={d.statChipNum}>
                   <TickerNumber value={avgSleepH} fontSize={11} color={palette.indigo[400]} fontWeight="700" />
                 </View>
                 <Text style={[d.statChipText, { color: palette.indigo[400] }]}>{`h sleep · 7d`}</Text>
               </>
             ) : (
-              <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent sleep</Text>
+              <>
+                <Moon size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent sleep</Text>
+              </>
             )}
           </View>
 
@@ -863,13 +878,17 @@ export default function Dashboard() {
           <View style={[d.statChip, d.statChipCyan]}>
             {hydrationDays != null ? (
               <>
+                <Droplet size={12} color={palette.cyan[400]} style={d.statChipIcon} />
                 <View style={d.statChipNum}>
                   <TickerNumber value={hydrationDays} fontSize={11} color={palette.cyan[400]} fontWeight="700" />
                 </View>
                 <Text style={[d.statChipText, { color: palette.cyan[400] }]}>{` water day${hydrationDays !== 1 ? 's' : ''} · 7d`}</Text>
               </>
             ) : (
-              <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent water</Text>
+              <>
+                <Droplet size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent water</Text>
+              </>
             )}
           </View>
         </View>
@@ -1050,6 +1069,9 @@ const d = StyleSheet.create({
   statChipMuted:   { borderColor: colors.border, backgroundColor: alpha(colors.muted, 0.30) },
   statChipIndigo:  { borderColor: withAlpha(palette.indigo[500], 0.30), backgroundColor: withAlpha(palette.indigo[500], 0.10) },
   statChipCyan:    { borderColor: withAlpha(palette.cyan[500],   0.30), backgroundColor: withAlpha(palette.cyan[500],   0.10) },
+  // Weight chip — teal (bodyweight domain) so it isn't a near-invisible slate.
+  statChipTeal:    { borderColor: withAlpha(palette.teal[500],   0.34), backgroundColor: withAlpha(palette.teal[500],   0.12) },
+  statChipIcon:  { marginRight: 4 },
   statChipEmoji: { fontSize: 11, marginRight: 4 },
   statChipNum:   { marginRight: 0 },
   statChipText:  { fontSize: 11, fontWeight: '500' },
