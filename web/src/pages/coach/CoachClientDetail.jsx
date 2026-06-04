@@ -110,7 +110,7 @@ function SnapshotBadge({ children, color }) {
     cyan:    'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${cls}`}>
+    <span className={`flex items-center justify-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium text-center w-[48%] min-h-[2.75rem] ${cls}`}>
       {children}
     </span>
   )
@@ -182,7 +182,7 @@ export default function CoachClientDetail() {
     async function loadSnapshot() {
       const weekAgoISO     = new Date(Date.now() - 7  * 86_400_000).toISOString()
       const fourteenAgoISO = new Date(Date.now() - 14 * 86_400_000).toISOString()
-      const monthStartISO  = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
+      const thirtyAgoISO   = new Date(Date.now() - 30 * 86_400_000).toISOString()
       const fourteenDate   = new Date(Date.now() - 14 * 86_400_000).toISOString().split('T')[0]
 
       const [allEfRes, foodRes, hrRes, bw14Res, sleepRes, waterRes] = await Promise.all([
@@ -206,7 +206,7 @@ export default function CoachClientDetail() {
         }
       })
       const strengthPRsThisMonth = Object.values(bestByExStrength)
-        .filter(({ at }) => at >= monthStartISO).length
+        .filter(({ at }) => at >= thirtyAgoISO).length
 
       const allCardio = (allEfRes.data || []).filter(e => e.type === 'cardio')
       const bestByActCardio = {}
@@ -224,7 +224,7 @@ export default function CoachClientDetail() {
         }
       })
       const cardioPRsThisMonth = Object.values(bestByActCardio)
-        .filter(({ at }) => at >= monthStartISO).length
+        .filter(({ at }) => at >= thirtyAgoISO).length
 
       const foodDates  = [...new Set((foodRes.data || []).map(r => r.log_date))]
       const foodStreak = calcStreak(foodDates)
@@ -460,15 +460,15 @@ export default function CoachClientDetail() {
 
         {/* Stat chips — mirrors mobile dashboard (same as admin) */}
         {hasSnapshot && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap justify-center gap-1.5">
             {snapshot.strengthPRsThisMonth > 0 && (
               <SnapshotBadge color="blue">
-                🏆 <TickerNumber value={snapshot.strengthPRsThisMonth} /> Strength PR{snapshot.strengthPRsThisMonth !== 1 ? 's' : ''} this month
+                🏆 <TickerNumber value={snapshot.strengthPRsThisMonth} /> Strength PR{snapshot.strengthPRsThisMonth !== 1 ? 's' : ''} last 30 days
               </SnapshotBadge>
             )}
             {snapshot.cardioPRsThisMonth > 0 && (
               <SnapshotBadge color="amber">
-                🏆 <TickerNumber value={snapshot.cardioPRsThisMonth} /> Cardio PR{snapshot.cardioPRsThisMonth !== 1 ? 's' : ''} this month
+                🏆 <TickerNumber value={snapshot.cardioPRsThisMonth} /> Cardio PR{snapshot.cardioPRsThisMonth !== 1 ? 's' : ''} last 30 days
               </SnapshotBadge>
             )}
             {snapshot.foodStreak > 0 && (
@@ -481,15 +481,11 @@ export default function CoachClientDetail() {
                 ❤️ <TickerNumber value={snapshot.lowestBpm} /> bpm low (7d)
               </SnapshotBadge>
             )}
-            {snapshot.weightDiff != null ? (
+            {snapshot.weightDiff != null && (
               <SnapshotBadge color="zinc">
                 ⚖️ {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {coachProfile?.weight_unit || 'lb'} since last weigh-in
               </SnapshotBadge>
-            ) : snapshot.latestWeight != null ? (
-              <SnapshotBadge color="zinc">
-                ⚖️ <TickerNumber value={Math.round(snapshot.latestWeight * 10) / 10} /> {coachProfile?.weight_unit || 'lb'} · latest
-              </SnapshotBadge>
-            ) : null}
+            )}
             {snapshot.avgSleepH != null && (
               <SnapshotBadge color="indigo">
                 😴 <TickerNumber value={snapshot.avgSleepH} />h avg sleep · 7 nights

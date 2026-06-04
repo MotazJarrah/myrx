@@ -136,17 +136,16 @@ function parseCardioBest(value: string | null | undefined): { val: number; lower
   return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
 }
 
-/** Reusable "current calendar month" check. Captures year + month at
- *  call time so multiple PR helpers running in the same render produce
- *  consistent buckets. */
-function isThisMonth(ds: string): boolean {
-  const d = new Date(ds)
-  const now = new Date()
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+/** Reusable "within the last 30 days" check (rolling window, not calendar
+ *  month). Captures the cutoff at call time so multiple PR helpers running in
+ *  the same render bucket consistently. */
+function isWithinLast30Days(ds: string): boolean {
+  const t = new Date(ds).getTime()
+  return t >= Date.now() - 30 * 86_400_000
 }
 
 /**
- * Count strength PRs hit this calendar month.
+ * Count strength PRs hit in the last 30 days (rolling window).
  *
  * For each exercise (group key = label.split(' · ')[0]), find the
  * highest-ever Est. 1RM. If that highest was logged this calendar
@@ -169,13 +168,13 @@ function computeStrengthPRsThisMonth(allStrengthEfforts: any[]): number {
   })
   Object.values(byEx).forEach(arr => {
     const best = arr.reduce((b, e) => e.rm > b.rm ? e : b, arr[0])
-    if (isThisMonth(best.date)) count++
+    if (isWithinLast30Days(best.date)) count++
   })
   return count
 }
 
 /**
- * Count cardio PRs hit this calendar month.
+ * Count cardio PRs hit in the last 30 days (rolling window).
  *
  * For each activity (group key = label.split(' · ')[0]), find the
  * best-ever value. "Best" direction depends on the metric — pace-
@@ -201,7 +200,7 @@ function computeCardioPRsThisMonth(allCardioEfforts: any[]): number {
       if (e.lowerBetter) return e.val < b.val ? e : b
       return e.val > b.val ? e : b
     }, arr[0])
-    if (isThisMonth(best.date)) count++
+    if (isWithinLast30Days(best.date)) count++
   })
   return count
 }
@@ -235,8 +234,8 @@ function computeFoodLogStreak(logDates: string[]): number {
 /**
  * Weight change since the previous weigh-in — the latest log minus the one
  * before it (within the window the caller fetches). Returns null when there
- * are fewer than 2 logs to compare; the caller then falls back to showing the
- * current weight so the chip still appears after a single fresh log.
+ * are fewer than 2 logs to compare; the caller then renders nothing — the
+ * weight chip is change-only (no current-weight fallback).
  *
  * Returns the delta in CANONICAL kg; caller converts to display unit.
  */
@@ -782,7 +781,7 @@ export default function Dashboard() {
                 <TickerNumber value={strengthPRs} fontSize={11} color={palette.blue[400]} fontWeight="700" />
               </View>
               <Text style={[d.statChipText, { color: palette.blue[400] }]}>
-                {' '}strength PR{strengthPRs !== 1 ? 's' : ''} this month
+                {' '}strength PR{strengthPRs !== 1 ? 's' : ''} last 30 days
               </Text>
             </View>
           )}
@@ -798,7 +797,7 @@ export default function Dashboard() {
                 <TickerNumber value={cardioPRs} fontSize={11} color={palette.amber[400]} fontWeight="700" />
               </View>
               <Text style={[d.statChipText, { color: palette.amber[400] }]}>
-                {' '}cardio PR{cardioPRs !== 1 ? 's' : ''} this month
+                {' '}cardio PR{cardioPRs !== 1 ? 's' : ''} last 30 days
               </Text>
             </View>
           )}
@@ -860,31 +859,6 @@ export default function Dashboard() {
                 </View>
                 <Text style={[d.statChipText, { color: colors.mutedForeground }]}>
                   {` ${pUnit} since last weigh-in`}
-                </Text>
-              </View>
-            )
-          })() : recentBW.length > 0 ? (() => {
-            // Fallback: only one weigh-in so far (nothing to compare against) —
-            // show the current weight so the chip still appears right after the
-            // user logs their first/only weight.
-            const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
-            const latest = recentBW[0]
-            const kg = latest.unit === 'lb' ? latest.weight * 0.453592 : latest.weight
-            const inUnit = pUnit === 'kg' ? kg : kg / 0.453592
-            const rounded = (Math.round(inUnit * 10) / 10).toFixed(1)
-            return (
-              <View style={[d.statChip, d.statChipSlate]}>
-                <Text style={d.statChipEmoji}>⚖️</Text>
-                <View style={d.statChipNum}>
-                  <TickerNumber
-                    value={rounded}
-                    fontSize={11}
-                    color={colors.foreground}
-                    fontWeight="700"
-                  />
-                </View>
-                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>
-                  {` ${pUnit} · latest`}
                 </Text>
               </View>
             )
@@ -1069,11 +1043,16 @@ const d = StyleSheet.create({
     marginTop: 20, paddingTop: 16,
     borderTopWidth: 1, borderTopColor: colors.border,
     flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+    justifyContent: 'center',
   },
+  // Layout A: every chip the same fixed size — two columns (48% each), so six
+  // chips form 3 rows of 2 and a lone 7th centers (justifyContent: center on
+  // the row). minHeight keeps them equal-height even when a label wraps.
   statChip: {
+    width: '48%', minHeight: 44,
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 10, paddingVertical: 2,
-    borderRadius: 9999, borderWidth: 1,
+    paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 12, borderWidth: 1,
   },
   statChipBlue:    { borderColor: withAlpha(palette.blue[500],    0.30), backgroundColor: withAlpha(palette.blue[500],    0.10) },
   statChipAmber:   { borderColor: withAlpha(palette.amber[500],   0.30), backgroundColor: withAlpha(palette.amber[500],   0.10) },
@@ -1090,7 +1069,7 @@ const d = StyleSheet.create({
   statChipCyan:    { borderColor: withAlpha(palette.cyan[500],   0.30), backgroundColor: withAlpha(palette.cyan[500],   0.10) },
   statChipEmoji: { fontSize: 11, marginRight: 4 },
   statChipNum:   { marginRight: 0 },
-  statChipText:  { fontSize: 11, fontWeight: '500' },
+  statChipText:  { fontSize: 11, fontWeight: '500', flex: 1 },
 
   // Activity card header — `flex items-center justify-between border-b px-5 py-3.5`
   activityHeader: {

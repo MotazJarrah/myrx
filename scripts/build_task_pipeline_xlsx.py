@@ -443,21 +443,21 @@ TASKS = [
      "mobile/app/(app)/hydration.tsx",
      "2026-06-03"),
 
-    ("T063", "Dashboard stat pills: uniform size + grid layout", "Dashboard", "Cross", "Pending",
+    ("T063", "Dashboard stat pills: uniform size + grid layout", "Dashboard", "Cross", "Done",
      "User wants all stat pills EXACTLY the same size, laid out with '3 on each side' and the last pill centered under them (reads as a 2-column grid: 3 left + 3 right + 7th centered; could also mean 3-per-row — to confirm). Today the 7 pills wrap with text-driven variable widths. Needs fixed-width pills + terse uniform wording so they fit. Mobile dashboard + admin + coach (mirror).",
-     "CONFIRMED 2026-06-03: layout A — two columns (3 pills left / 3 right / 7th centered under them), all pills EXACTLY equal size (fixed width + min-height; centered flex-wrap so a lone last pill centers). NO shared 'Last 30 days' caption — windows differ per pill (PRs 'last 30 days', Food 'last 14 days', HR '7d', Sleep '7 nights', Hydration '7d'), so each keeps its own window text; the equal SIZE comes from the fixed box (text wraps inside). Build on all 3 surfaces.",
+     "DONE 2026-06-03: built + deployed on all 3 surfaces. Mobile: statChip width 48% + minHeight 44 + radius 12, statsRow justify-center, statChipText flex:1. Web (admin + coach): SnapshotBadge -> flex w-[48%] min-h-[2.75rem] rounded-xl text-center (was an inline-flex whitespace-nowrap pill), container flex-wrap + justify-center. 6 chips form 3 rows of 2 + lone 7th centered; each pill keeps its own window wording.",
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
-    ("T064", "Weight pill: show change only, not current weight", "Dashboard", "Cross", "Pending",
+    ("T064", "Weight pill: show change only, not current weight", "Dashboard", "Cross", "Done",
      "User: the weight pill must always show weight CHANGE, never the current weight. Today it falls back to current weight when there's only one weigh-in. Remove that fallback; show change only and hide the pill when there's nothing to compare.",
-     "Compute change over the last 30 days (latest − earliest weigh-in in the window) per T065; hide if <2 logs in the window. All 3 surfaces.",
+     "DONE 2026-06-03: weight chip is change-only on all 3 surfaces — removed the '· latest' current-weight fallback (mobile + admin + coach). Shows the signed change since the last weigh-in (latest − previous); the chip hides entirely when there's only one weigh-in to compare.",
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
-    ("T065", "PR pills: 'this month' -> rolling 'last 30 days'", "Dashboard", "Cross", "Pending",
+    ("T065", "PR pills: 'this month' -> rolling 'last 30 days'", "Dashboard", "Cross", "Done",
      "CORRECTED 2026-06-03 (user): ONLY the PR pills change — 'this month' (calendar) becomes 'last 30 days' (rolling 30-day window); the count logic switches from monthStart to a 30-day cutoff (a PR counts if the best-ever for that exercise/activity was hit within the last 30 days). Every OTHER pill KEEPS its existing window + wording: Food stays 'last 14 days' (still a STREAK, not a count), Lowest HR stays 'last 7 days', Sleep stays '7 nights', Hydration stays '7d', Weight stays 'since last weigh-in'. My earlier 'unify everything to 30d' reading was wrong.",
-     "Change Strength + Cardio PR counts from calendar-month to a rolling 30-day cutoff + reword to 'last 30 days', on mobile + admin + coach. Leave every other pill's window untouched.",
+     "DONE 2026-06-03: PR pills use a rolling 30-day cutoff + read 'last 30 days' on all 3 surfaces (mobile: isThisMonth -> isWithinLast30Days; web admin + coach: monthStartISO -> thirtyAgoISO). Every other pill's window left untouched (Food 14d, HR 7d, Sleep 7 nights, Hydration 7d, Weight since last weigh-in).",
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
