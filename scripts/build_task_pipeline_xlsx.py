@@ -490,6 +490,12 @@ TASKS = [
      "DONE 2026-06-03: change now computes from the 2 most-recent weigh-ins regardless of date — mobile reuses the latest-5 `bw` fetch; web admin + coach dropped the 14-day gte on their bodyweight query. Still change-only (hides only when there's genuinely one weigh-in ever). Built + deployed.",
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
+
+    ("T071", "Dashboard weight pill color — distinct from heart", "Dashboard", "Mobile", "Done",
+     "User: the weight pill (teal, from T070) and the heart pill (emerald) read as almost the same color. REVISED direction: give the weight pill the SAME green the Bodyweight page uses (so the pill matches its page), and recolor the HEART pill to something else (off green) so the two are clearly distinguishable.",
+     "DONE 2026-06-03: weight pill now uses EMERALD (the Bodyweight page's accent green — reuses statChipEmerald); heart pill moved to FUCHSIA (new statChipFuchsia). Clearly distinguishable now. Mobile only; web admin+coach inherits both colours when the T069/T070 mirror lands.",
+     "mobile dashboard.tsx",
+     "2026-06-03"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────

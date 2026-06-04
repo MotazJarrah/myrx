@@ -814,14 +814,14 @@ export default function Dashboard() {
           )}
 
           {/* Lowest ambient HR — last 7 days. Always shown; "no recent" when empty. */}
-          <View style={[d.statChip, d.statChipEmerald]}>
+          <View style={[d.statChip, d.statChipFuchsia]}>
             {lowestHR7d != null ? (
               <>
-                <Heart size={12} color={palette.emerald[400]} style={d.statChipIcon} />
+                <Heart size={12} color={palette.fuchsia[400]} style={d.statChipIcon} />
                 <View style={d.statChipNum}>
-                  <TickerNumber value={lowestHR7d} fontSize={11} color={palette.emerald[400]} fontWeight="700" />
+                  <TickerNumber value={lowestHR7d} fontSize={11} color={palette.fuchsia[400]} fontWeight="700" />
                 </View>
-                <Text style={[d.statChipText, { color: palette.emerald[400] }]}>{' '}low bpm · 7d</Text>
+                <Text style={[d.statChipText, { color: palette.fuchsia[400] }]}>{' '}low bpm · 7d</Text>
               </>
             ) : (
               <>
@@ -832,7 +832,7 @@ export default function Dashboard() {
           </View>
 
           {/* Weight change over the last 30 days (latest − earliest weigh-in). */}
-          <View style={[d.statChip, d.statChipTeal]}>
+          <View style={[d.statChip, d.statChipEmerald]}>
             {weeklyWeightKg != null ? (() => {
               const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
               const inUnit = pUnit === 'kg' ? weeklyWeightKg : weeklyWeightKg / 0.453592
@@ -841,11 +841,11 @@ export default function Dashboard() {
               const abs = Math.abs(rounded).toFixed(1)
               return (
                 <>
-                  <Weight size={12} color={palette.teal[400]} style={d.statChipIcon} />
+                  <Weight size={12} color={palette.emerald[400]} style={d.statChipIcon} />
                   <View style={d.statChipNum}>
-                    <TickerNumber value={`${sign}${abs}`} fontSize={11} color={palette.teal[400]} fontWeight="700" />
+                    <TickerNumber value={`${sign}${abs}`} fontSize={11} color={palette.emerald[400]} fontWeight="700" />
                   </View>
-                  <Text style={[d.statChipText, { color: palette.teal[400] }]}>{` ${pUnit} · 30d`}</Text>
+                  <Text style={[d.statChipText, { color: palette.emerald[400] }]}>{` ${pUnit} · 30d`}</Text>
                 </>
               )
             })() : (
@@ -1069,8 +1069,9 @@ const d = StyleSheet.create({
   statChipMuted:   { borderColor: colors.border, backgroundColor: alpha(colors.muted, 0.30) },
   statChipIndigo:  { borderColor: withAlpha(palette.indigo[500], 0.30), backgroundColor: withAlpha(palette.indigo[500], 0.10) },
   statChipCyan:    { borderColor: withAlpha(palette.cyan[500],   0.30), backgroundColor: withAlpha(palette.cyan[500],   0.10) },
-  // Weight chip — teal (bodyweight domain) so it isn't a near-invisible slate.
-  statChipTeal:    { borderColor: withAlpha(palette.teal[500],   0.34), backgroundColor: withAlpha(palette.teal[500],   0.12) },
+  // Heart chip — fuchsia, kept distinct from the weight pill's emerald (the
+  // Bodyweight page's accent green) so the two don't read as the same colour.
+  statChipFuchsia: { borderColor: withAlpha(palette.fuchsia[500], 0.30), backgroundColor: withAlpha(palette.fuchsia[500], 0.10) },
   statChipIcon:  { marginRight: 4 },
   statChipEmoji: { fontSize: 11, marginRight: 4 },
   statChipNum:   { marginRight: 0 },
