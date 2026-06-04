@@ -395,11 +395,12 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
         ) : parsed.length === 0 ? (
           <p className="mt-0.5 text-sm text-muted-foreground">No efforts logged yet</p>
         ) : (
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Best Est. 1RM — <span className="text-blue-400">— {labelUnit} assist</span>
+          <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
+            <span>Best Est. 1RM —</span>
+            <span className="text-blue-400">— {labelUnit} assist</span>
           </p>
         )}
-        <span className="mt-1.5 inline-flex items-center rounded border border-blue-500/30 bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-400">
+        <span className="mt-1 inline-flex items-center rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-400">
           ASSIST MACHINE
         </span>
       </div>
@@ -473,42 +474,38 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                 </div>
               </div>
 
-              {/* Horizontal scrollable tile row 1RM…20RM with fading edges. */}
-              <div className="relative">
-                <div
-                  className="flex gap-2 overflow-x-auto py-1 px-0.5 scrollbar-hide"
-                  style={{ scrollbarWidth: 'none' }}
-                >
-                  {assistProjections.map(({ reps: r, assistance: a, bwPct }) => {
-                    const isSelected = selectedRM === r
-                    return (
-                      <button
-                        key={r}
-                        ref={el => { tileEls.current[r] = el }}
-                        onClick={() => onTilePress(r)}
-                        className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-2.5 transition-colors ${
-                          isSelected
-                            ? 'border-blue-500 bg-blue-500/15'
-                            : 'border-border bg-card/40 hover:border-blue-500/40'
-                        }`}
-                        style={{ minWidth: 68 }}
-                      >
-                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isSelected ? 'text-blue-400' : 'text-muted-foreground'}`}>
-                          {r}RM
-                        </span>
-                        <span className={`mt-0.5 font-mono text-base font-bold tabular-nums ${isSelected ? 'text-blue-400' : 'text-foreground'}`}>
-                          {a}
-                        </span>
-                        <span className={`mt-0.5 font-mono text-[9px] tabular-nums leading-none ${isSelected ? 'text-blue-400/70' : 'text-muted-foreground/50'}`}>
-                          {bwPct}% BW
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-                {/* Fading edges signaling more content off-screen. */}
-                <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-card to-transparent" />
-                <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-card to-transparent" />
+              {/* Horizontal scrollable tile row 1RM…20RM. Plain scroll row —
+                  the athlete component has no fading-edge gradient overlays. */}
+              <div
+                className="-mx-0.5 flex gap-2 overflow-x-auto py-1 px-0.5 scrollbar-hide"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                {assistProjections.map(({ reps: r, assistance: a, bwPct }) => {
+                  const isSelected = selectedRM === r
+                  return (
+                    <button
+                      key={r}
+                      ref={el => { tileEls.current[r] = el }}
+                      onClick={() => onTilePress(r)}
+                      className={`flex shrink-0 flex-col items-center rounded-lg border px-3 py-2.5 transition-colors ${
+                        isSelected
+                          ? 'border-blue-500 bg-blue-500/15'
+                          : 'border-border bg-card/40 hover:border-blue-500/40'
+                      }`}
+                      style={{ minWidth: 68 }}
+                    >
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${isSelected ? 'text-blue-400' : 'text-muted-foreground'}`}>
+                        {r}RM
+                      </span>
+                      <span className={`mt-0.5 font-mono text-base font-bold tabular-nums ${isSelected ? 'text-blue-400' : 'text-foreground'}`}>
+                        {a}
+                      </span>
+                      <span className={`mt-0.5 font-mono text-[9px] tabular-nums leading-none ${isSelected ? 'text-blue-400/70' : 'text-muted-foreground/50'}`}>
+                        {bwPct}% BW
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
 
               <p className="mt-2 text-[11px] text-muted-foreground">

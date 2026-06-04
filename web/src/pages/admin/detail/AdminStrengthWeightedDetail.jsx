@@ -8,16 +8,20 @@
  *  this file is the FIRST of several variants, written to be the reusable
  *  pattern for the rest.)
  *
- * This faithfully reproduces the athlete surface defined in:
- *   - CLAUDE.md → "Weighted Standard next-target card — locked design spec"
- *   - mobile/app/(app)/effort/strength/[exercise].tsx (WeightedStandardDetail branch)
+ * This faithfully reproduces the athlete surface as RENDERED by the mobile
+ * component (the sole source of truth for the visual — CLAUDE.md's "locked
+ * design spec" sections are stale in places, e.g. they claim the hero title
+ * was removed when the code still renders it):
+ *   - mobile/app/(app)/effort/strength/[exercise].tsx
+ *     (StrengthDetail → weighted-standard branch, ~lines 4647-4960)
  *
  * Sections, top to bottom (matching the athlete):
  *   1. Header        — movement name + "Best Est. 1RM — N <unit>" (TickerNumber) + equipment category pill
  *   2. Rep-max card  — adp-zone pill row (STRENGTH/HYPERTROPHY/ENDURANCE, click to switch)
  *                      + horizontal 1RM…20RM tile row + source attribution
- *   3. Hero card     — big target weight (TickerNumber) + equipment footer
- *                      + tappable adp-zone info pill (whyText) + single coaching cue
+ *   3. Hero card     — "Your next training target" title + tappable adp-zone
+ *                      info pill (whyText) + big target weight (TickerNumber)
+ *                      + equipment footer + single coaching cue
  *   4. Chart         — Recharts est-1RM-over-time line + personal-best reference line
  *   5. Efforts log   — chronological list, with per-effort DELETE kept (SwipeDelete)
  *
@@ -589,6 +593,15 @@ export default function AdminStrengthWeightedDetail({
                 className="mt-3 rounded-xl border border-blue-500/30 bg-blue-500/[0.08] p-4"
                 style={{ minHeight: 220 }}
               >
+                {/* Card title — the athlete's NextTargetCallout renders this
+                    "Your next training target" header at the top of the hero
+                    card. (The CLAUDE.md spec claims the title was removed, but
+                    the actual mobile component still renders it via
+                    NextTargetCallout's `title` prop — code is source of truth.) */}
+                <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-blue-400">
+                  Your next training target
+                </p>
+
                 {/* Tappable adp-zone info pill (right-aligned). */}
                 <div className="flex justify-end">
                   <button

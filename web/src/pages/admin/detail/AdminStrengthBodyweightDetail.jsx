@@ -26,13 +26,14 @@
  *                      clickable (weighted progression / rep-only stages).
  *   4. Hero card     — per-tier state: assisted-working / ready-to-graduate /
  *                      graduated / Full RX 4-mode (locked / push / graduation /
- *                      weighted). Big numbers use TickerNumber.
- *   5. Band summary  — read-only summary of the Extra Heavy → Heavy → Medium →
- *                      Light sub-progression (Band / Band+Knee tiers only).
- *                      (SIMPLIFIED — see notes below.)
- *   6. Chart         — Recharts "max attempts over time" line across ALL tiers
+ *                      weighted). Big numbers use TickerNumber. The band-level
+ *                      sub-progression surfaces IMPLICITLY here (band-aware
+ *                      tiles + cue + sub-line under the big number) exactly as
+ *                      the athlete renders it — there is NO separate band
+ *                      summary strip (the athlete has none either).
+ *   5. Chart         — Recharts "max attempts over time" line across ALL tiers
  *                      + personal-best reference line.
- *   7. Efforts log   — chronological list across all tiers, each row carrying a
+ *   6. Efforts log   — chronological list across all tiers, each row carrying a
  *                      tier chip. Per-effort DELETE kept (SwipeDelete).
  *
  * READ-ONLY: no log / add form. Delete is intentionally retained (the coach
@@ -59,11 +60,6 @@
  *       per-number TickerNumber).
  *   S3. The info panel (why-this-tier) toggles open/closed with a simple
  *       conditional render (no FadeInUp / LinearTransition motion).
- *   S4. Band sub-progression is shown both implicitly (band-aware tiles + cue,
- *       faithfully reproduced) AND as an extra read-only "Band progression"
- *       summary strip listing best-reps per band level. The athlete has no
- *       such explicit strip — it's an admin-convenience addition so a coach
- *       can see the whole band ladder at a glance.
  */
 
 import { useState, useEffect, useMemo } from 'react'
@@ -863,7 +859,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
       ) : bwLoggedTiers.length === 0 ? (
         <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
           <p className="text-sm text-muted-foreground">
-            This client hasn't logged any efforts for this movement yet.
+            Log your first effort to start tracking your progression.
           </p>
         </AnimateRise>
       ) : (
@@ -947,46 +943,6 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
                 {renderHeroBody()}
               </div>
             </div>
-
-            {/* ── 5. Band sub-progression summary (SIMPLIFICATION S4) ── */}
-            {hasBandLevels && bandSubState && (
-              <div className="mt-3 rounded-lg border border-border bg-card/40 p-3">
-                <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                  Band progression
-                  {bandSubState.allLevelsCleared
-                    ? ' · all levels cleared'
-                    : <> · current: <span className="text-blue-400">{bandSubState.currentBand}</span></>}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {BAND_LEVELS_PROGRESSION.map(level => {
-                    const reps = bandSubState.bestPerLevel[level] || 0
-                    const cleared = reps >= BW_GRADUATION_REPS
-                    const isCurrent = level === bandSubState.currentBand && !bandSubState.allLevelsCleared
-                    return (
-                      <div
-                        key={level}
-                        className={`flex flex-col items-center rounded-md border px-2.5 py-1.5 ${
-                          isCurrent ? 'border-blue-500 bg-blue-500/15'
-                          : cleared ? 'border-blue-500/40 bg-blue-500/10'
-                                    : 'border-border bg-card/40'
-                        }`}
-                      >
-                        <span className={`text-[10px] font-semibold ${isCurrent || cleared ? 'text-blue-400' : 'text-muted-foreground'}`}>
-                          {level}
-                        </span>
-                        <span className={`font-mono text-sm font-bold tabular-nums ${isCurrent || cleared ? 'text-blue-400' : 'text-foreground'}`}>
-                          {reps > 0 ? reps : '—'}
-                          {cleared && <Check className="ml-0.5 inline h-3 w-3" strokeWidth={3} />}
-                        </span>
-                      </div>
-                    )
-                  })}
-                </div>
-                <p className="mt-2 text-[10px] text-muted-foreground">
-                  Best reps per band level · 10 unbroken reps at a level advances to the next thinner band
-                </p>
-              </div>
-            )}
           </AnimateRise>
 
           {/* ── 6. Chart — max attempts over time, across all tiers ── */}

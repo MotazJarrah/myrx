@@ -446,7 +446,7 @@ function CarrySurface({
 
       let cueLine
       if (!hasTargets) {
-        cueLine = `No ${verb.toLowerCase()} efforts in this zone yet.`
+        cueLine = `Log your first ${verb.toLowerCase()} to see a target.`
       } else if (zoneId === 'max_load') {
         cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — focus on grip and posture`
       } else if (zoneId === 'distance_build') {
@@ -534,8 +534,8 @@ function CarrySurface({
         <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
           <h2 className="text-sm font-bold">Recent bodyweight required</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            We need a recent bodyweight (logged within the last 30 days) to compute this client's
-            strongman tier and zone targets accurately.
+            We need a recent bodyweight to compute this client's strongman tier accurately.
+            They need to log their current weight.
           </p>
         </AnimateRise>
       )}
@@ -647,7 +647,7 @@ function CarrySurface({
       {/* ── 4. Charts (weight + distance over time) ── */}
       {cascadeReady && parsed.length >= 1 && (
         <AnimateRise delay={250} className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs font-semibold text-muted-foreground">Carry progress over time</p>
+          <h2 className="text-sm font-bold">Carry progress over time</h2>
           <MiniChart data={weightChartData} label="Weight"   best={bestWeight}      unit={wUnit} stroke="#60a5fa" />
           <MiniChart data={distChartData}   label="Distance" best={bestDistDisplay} unit={dUnit} stroke="#93c5fd" />
         </AnimateRise>

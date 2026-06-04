@@ -234,9 +234,6 @@ export default function AdminStrengthRepsOnlyDetail({
         ) : (
           <p className="mt-0.5 text-sm text-muted-foreground">{assistLabel} · No efforts logged yet</p>
         )}
-        <span className="mt-1.5 inline-flex items-center rounded border border-blue-500/30 bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-400">
-          STRENGTH
-        </span>
       </div>
 
       {loading ? (
@@ -271,55 +268,49 @@ export default function AdminStrengthRepsOnlyDetail({
           {/* ── 3. Reps-over-time chart ── */}
           {chartData.length >= 1 && (
             <AnimateRise delay={250} className="rounded-xl border border-border bg-card p-4">
-              <p className="mb-3 text-xs font-semibold text-muted-foreground">Reps over time</p>
-              {chartData.length >= 2 ? (
-                <ResponsiveContainer width="100%" height={160}>
-                  <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                      tickLine={false}
-                      axisLine={false}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      domain={[yMin, yMax]}
-                      tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                      tickLine={false}
-                      axisLine={false}
-                      tickCount={4}
-                      allowDecimals={false}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: 8,
-                        fontSize: 12,
-                      }}
-                      formatter={(v) => [`${v}`, 'Reps']}
-                    />
-                    {bestForChart && (
-                      <ReferenceLine y={bestForChart} stroke="#60a5fa" strokeDasharray="4 3" strokeOpacity={0.5} />
-                    )}
-                    <Line
-                      type="monotone"
-                      dataKey="value"
-                      stroke="#60a5fa"
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: '#60a5fa', strokeWidth: 0 }}
-                      activeDot={{ r: 5 }}
-                      isAnimationActive
-                      animationDuration={900}
-                      animationEasing="ease-in-out"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <p className="py-6 text-center text-xs text-muted-foreground">
-                  Log a second effort to see the trend.
-                </p>
-              )}
+              <h2 className="mb-3 text-sm font-bold">Reps over time</h2>
+              <ResponsiveContainer width="100%" height={160}>
+                <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    domain={[yMin, yMax]}
+                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickCount={4}
+                    allowDecimals={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'hsl(var(--card))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                    formatter={(v) => [`${v}`, 'Reps']}
+                  />
+                  {bestForChart && (
+                    <ReferenceLine y={bestForChart} stroke="#60a5fa" strokeDasharray="4 3" strokeOpacity={0.5} />
+                  )}
+                  <Line
+                    type="monotone"
+                    dataKey="value"
+                    stroke="#60a5fa"
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: '#60a5fa', strokeWidth: 0 }}
+                    activeDot={{ r: 5 }}
+                    isAnimationActive
+                    animationDuration={900}
+                    animationEasing="ease-in-out"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
               <p className="mt-2 text-[11px] text-muted-foreground">Dashed line = personal best</p>
             </AnimateRise>
           )}
@@ -335,6 +326,9 @@ export default function AdminStrengthRepsOnlyDetail({
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="border-b border-border px-5 py-3.5">
+                <h2 className="text-sm font-bold">Efforts history</h2>
+              </div>
               <div className="divide-y divide-border">
                 {[...entries].reverse().map(e => {
                   const reps      = parseRepsOnlyFromLabel(e.label, isBand)

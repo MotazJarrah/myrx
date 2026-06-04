@@ -11,14 +11,22 @@
  *   - CLAUDE.md → "Isometric detail card — locked design spec"
  *   - mobile/app/(app)/effort/strength/[exercise].tsx → function IsometricDetail
  *
- * Sections, top to bottom (matching the athlete):
+ * Sections, top to bottom (matching the athlete — verified against the ACTUAL
+ * mobile IsometricDetail render, not the CLAUDE.md spec which describes an
+ * older design):
  *   1. Header        — movement name + "Personal best — N" (TickerNumber on the
- *                      mixed min/sec string) + BODYWEIGHT category pill + the
- *                      current PHASE pill (static status chip)
- *   2. Milestone card — single static phase pill (tappable info panel) above a
- *                      3-6-3 milestone grid (10s…120s, display-only) + the
- *                      "next target" hero with the mixed min/sec TickerNumber
- *                      format + cue line, OR the all-cleared trophy state
+ *                      mixed min/sec string, ALWAYS shown — "0 sec" when empty)
+ *                      + BODYWEIGHT category pill + the current PHASE pill, both
+ *                      static status chips stacked under the subtitle.
+ *   2. Milestone card — "Hold time milestones" heading, then the 3-6-3 milestone
+ *                      grid (10s…120s, display-only), then the greyed-out caption,
+ *                      then the "Your next training target" hero (titled, no
+ *                      min-height) with the mixed min/sec TickerNumber format +
+ *                      cue line, OR the all-cleared trophy state.
+ *                      NOTE: the athlete card has NO phase pill and NO info panel
+ *                      inside it — the phase chip lives ONLY in the header. Do not
+ *                      re-add an in-card pill/info panel (that was the stale-spec
+ *                      mistake this mirror was fixed to avoid).
  *   3. Chart         — Recharts hold-time-over-time line + personal-best ref line
  *   4. Efforts log   — chronological list, with per-effort DELETE kept (SwipeDelete)
  *
@@ -38,9 +46,9 @@
  * Web substitutions for athlete (RN) constructs:
  *   - Reanimated/Skia chart      → Recharts LineChart (same as weighted mirror).
  *   - <BackButton>               → inline back <button> (same as weighted mirror).
- *   - The phase pill is a STATIC status indicator on the athlete too (no swipe,
- *     no gesture), so it's a plain button that toggles the inline info panel —
- *     no gesture work needed.
+ *   - The phase pill is a STATIC, non-interactive status badge on the athlete
+ *     (it sits in the header, NOT in the milestone card) — reproduced here as a
+ *     plain stacked chip with no tap behaviour and no info panel.
  */
 
 import { useState, useEffect, useMemo } from 'react'
@@ -48,7 +56,7 @@ import { supabase } from '../../../lib/supabase'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
-import { ArrowLeft, Info, Trophy, Check } from 'lucide-react'
+import { ArrowLeft, Trophy, Check } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -146,9 +154,6 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
 
-  // Phase info panel toggle (mirrors the athlete's tappable phase pill).
-  const [phaseInfoOpen, setPhaseInfoOpen] = useState(false)
-
   // ── Load efforts ─────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
@@ -217,7 +222,7 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
     return (
       <div
         key={ms}
-        className={`flex flex-col items-center rounded-lg border px-1 py-1.5 ${
+        className={`flex flex-col items-center rounded-[9px] border px-0.5 py-1.5 ${
           achieved
             ? 'border-blue-500/40 bg-blue-500/[0.08]'
             : 'border-border/30 bg-card/20 opacity-35'
@@ -253,20 +258,20 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
     return (
       <>
         {mm === 0 ? (
-          <div className="flex items-baseline gap-1">
+          <div className="flex items-baseline gap-1.5">
             <TickerNumber value={nm} className="font-mono text-3xl font-bold text-blue-400" />
-            <span className="text-blue-400">seconds</span>
+            <span className="text-sm text-muted-foreground">seconds</span>
           </div>
         ) : (
           <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-            <div className="flex items-baseline gap-1">
+            <div className="flex items-baseline gap-1.5">
               <TickerNumber value={mm} className="font-mono text-3xl font-bold text-blue-400" />
-              <span className="text-blue-400">{mm === 1 ? 'minute' : 'minutes'}</span>
+              <span className="text-sm text-muted-foreground">{mm === 1 ? 'minute' : 'minutes'}</span>
             </div>
             {ss > 0 && (
-              <div className="flex items-baseline gap-1">
+              <div className="flex items-baseline gap-1.5">
                 <TickerNumber value={ss} className="font-mono text-3xl font-bold text-blue-400" />
-                <span className="text-blue-400">seconds</span>
+                <span className="text-sm text-muted-foreground">seconds</span>
               </div>
             )}
           </div>
@@ -296,27 +301,27 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
         <ArrowLeft className="h-4 w-4" /> Back to Client
       </button>
 
-      {/* ── 1. Header ── */}
+      {/* ── 1. Header ──
+          Mirrors the athlete exactly: the "Personal best —" subtitle and BOTH
+          status chips (BODYWEIGHT + phase) render unconditionally. When the
+          client has no efforts, fmtDurationLong(0) → "0 sec" and the phase
+          resolves to STABILITY — same as the athlete's empty state. */}
       <div>
         <h1 className="text-xl font-bold tracking-tight">{exercise}</h1>
-        {hasData ? (
-          <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
-            <span>Personal best —</span>
-            <TickerNumber value={fmtDurationLong(bestSecs)} className="font-mono font-semibold text-blue-400" />
-          </p>
-        ) : (
-          <p className="mt-0.5 text-sm text-muted-foreground">No efforts logged yet</p>
-        )}
-        {/* Stacked status pills: BODYWEIGHT category + current phase. */}
+        <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
+          <span>Personal best —</span>
+          <TickerNumber value={fmtDurationLong(bestSecs)} className="font-mono font-semibold text-blue-400" />
+        </p>
+        {/* Stacked status pills: BODYWEIGHT category + current phase. Both are
+            static, non-interactive badges (the athlete's phase chip lives here
+            in the header, NOT inside the milestone card). */}
         <div className="mt-1.5 flex flex-col items-start gap-1">
           <span className="inline-flex items-center rounded border border-blue-500/30 bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-400">
             BODYWEIGHT
           </span>
-          {hasData && (
-            <span className="inline-flex items-center rounded border border-blue-500/30 bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-400">
-              {phaseCfg.label}
-            </span>
-          )}
+          <span className="inline-flex items-center rounded border border-blue-500/30 bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-400">
+            {phaseCfg.label}
+          </span>
         </div>
       </div>
 
@@ -330,34 +335,15 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
         </AnimateRise>
       ) : (
         <>
-          {/* ── 2. Milestone card ── */}
+          {/* ── 2. Milestone card ──
+              The athlete card is exactly: heading → 3-6-3 grid → caption →
+              "Your next training target" hero. NO phase pill and NO info panel
+              inside the card (the phase chip is a header-only status badge). */}
           <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
             <h2 className="text-sm font-bold">Hold time milestones</h2>
 
-            {/* Single phase pill, centered above the grid. Pure status indicator
-                (no swipe / no nav — same as the athlete) but tappable to open
-                the inline "why this phase" info panel. */}
-            <div className="mt-3 flex justify-center">
-              <button
-                onClick={() => setPhaseInfoOpen(o => !o)}
-                className="inline-flex items-center gap-1 rounded-full border border-blue-500 bg-blue-500/15 px-4 py-2"
-              >
-                <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-blue-400">
-                  {phaseCfg.label}
-                </span>
-                <Info className="h-3 w-3 text-blue-400" />
-              </button>
-            </div>
-
-            {/* Inline "why this phase" info panel (Pattern 5). */}
-            {phaseInfoOpen && (
-              <div className="mt-2 rounded-md border border-blue-500/15 bg-card/60 px-2.5 py-2">
-                <p className="mb-1 text-xs font-bold text-foreground">{phaseCfg.label}</p>
-                <p className="text-[11px] leading-4 text-muted-foreground">{phaseCfg.whyText}</p>
-              </div>
-            )}
-
-            {/* 3-6-3 milestone grid, rows centered. Tiles are display-only. */}
+            {/* 3-6-3 milestone grid, rows centered. Tiles are display-only —
+                a status visualisation, not navigation. */}
             <div className="mt-3 flex flex-col gap-1">
               <div className="flex justify-center gap-1">
                 {ISO_PHASE_CONFIG.stability.tiles.map(renderTile)}
@@ -374,12 +360,14 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
               Greyed out tiles are milestones not yet reached
             </p>
 
-            {/* Next-target hero (or all-cleared trophy). Same blue chrome +
-                min-height feel as the weighted hero. */}
-            <div
-              className="mt-3 rounded-xl border border-blue-500/30 bg-blue-500/[0.08] p-4"
-              style={{ minHeight: 160 }}
-            >
+            {/* Next-target hero (or all-cleared trophy). Mirrors the athlete's
+                NextTargetCallout: blue chrome + uppercase title, NO min-height
+                (the iso callout deliberately uses the base style with no
+                weighted modifier, so it sizes to its content). */}
+            <div className="mt-3 flex flex-col gap-2 rounded-[9px] border border-blue-500/30 bg-blue-500/[0.08] p-4">
+              <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-blue-400">
+                Your next training target
+              </p>
               {allCleared ? (
                 <div className="flex flex-col items-center gap-2 py-2">
                   <Trophy className="h-7 w-7 text-blue-400" strokeWidth={2} />
@@ -468,11 +456,9 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
                         <div className="min-w-0 flex-1">
                           <p className="text-[11px] text-muted-foreground">{fmtDate(e.created_at)}</p>
                         </div>
-                        {secs !== null && (
-                          <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-blue-400">
-                            {fmtDurationLong(secs)}
-                          </span>
-                        )}
+                        <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-blue-400">
+                          {fmtDurationLong(secs)}
+                        </span>
                       </div>
                     </SwipeDelete>
                   )
