@@ -563,9 +563,9 @@ TASKS = [
      "web/src/pages/admin/detail/AdminStrength*.jsx + AdminCardio*.jsx; mirror mobile [exercise].tsx + [activity].tsx",
      "2026-06-04"),
 
-    ("T083", "Mobile dashboard pills don't refresh on effort delete", "Dashboard", "Mobile", "In progress",
+    ("T083", "Mobile dashboard pills don't refresh on effort delete", "Dashboard", "Mobile", "Done",
      "User 2026-06-04: on the mobile dashboard, deleting an effort does NOT update the stat pills in real time — the user must navigate away and back (which remounts + refetches) to see the corrected pill values. The pills derive from efforts data that isn't refetched/recomputed after an on-dashboard delete.",
-     "Agent: read mobile/app/(app)/dashboard.tsx, find the pill computation + the on-dashboard effort delete, and refresh the pill data immediately after a successful delete (update in-memory state or refetch via the existing pattern). tsc-clean.",
+     "FIXED 2026-06-04 (done directly — agent quota was rate-limited): handleDelete optimistically updated the recent-activity list but never re-ran fetchDashboard, which computes the pill aggregates (PRs/streak/HR/weight/hydration/sleep/food) from their own queries. Added fetchDashboard() right after the delete; it never sets loading=true so there's no skeleton flash. tsc clean.",
      "mobile/app/(app)/dashboard.tsx",
      "2026-06-04"),
 ]

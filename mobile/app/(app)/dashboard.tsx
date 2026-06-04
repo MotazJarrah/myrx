@@ -636,6 +636,14 @@ export default function Dashboard() {
     else setRecentEfforts(prev => prev.filter(e => e.id !== item.id))
 
     await supabase.from(table).delete().eq('id', item.id).eq('user_id', user!.id)
+
+    // Recompute the pill aggregates (PRs / streak / HR / weight / hydration /
+    // sleep / food) after the delete. They're computed inside fetchDashboard
+    // from their own queries — NOT from the recent-activity list — so the
+    // optimistic list updates above don't refresh them. Without this the pills
+    // stay stale until the tab re-gains focus (useFocusEffect). fetchDashboard
+    // never sets loading=true, so this refresh won't flash a skeleton.
+    fetchDashboard()
   }
 
   // Merge + sort + cap to 5 (matches web)
