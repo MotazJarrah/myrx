@@ -10,6 +10,9 @@ import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, Pow
 import AdminUserActivity  from './tabs/AdminUserActivity'
 import AdminUserBody      from './tabs/AdminUserBody'
 import AdminUserCalories  from './tabs/AdminUserCalories'
+import AdminUserHeart     from './tabs/AdminUserHeart'
+import AdminUserSleep     from './tabs/AdminUserSleep'
+import AdminUserHydration from './tabs/AdminUserHydration'
 import ClientSettingsDrawer from '../../components/ClientSettingsDrawer'
 import BillingView from '../../components/BillingView'
 import AthleteCoachingChip from '../../components/AthleteCoachingChip'
@@ -194,7 +197,10 @@ const TABS = [
   { id: 'dashboard', label: 'Dashboard'  },
   { id: 'activity',  label: 'Efforts'    },
   { id: 'body',      label: 'Bodyweight' },
+  { id: 'heart',     label: 'Heart'      },
   { id: 'calories',  label: 'Calories'   },
+  { id: 'sleep',     label: 'Sleep'      },
+  { id: 'hydration', label: 'Hydration'  },
   { id: 'billing',   label: 'Billing'    },
   { id: 'timeline',  label: 'Activity Feed' },
 ]
@@ -488,7 +494,7 @@ export default function AdminUserDetail() {
   const [activeTab,    setActiveTab]    = useState(() => {
     const params   = new URLSearchParams(window.location.search)
     const urlTab   = params.get('tab')
-    const validTabs = ['dashboard', 'activity', 'body', 'calories', 'billing', 'timeline']
+    const validTabs = ['dashboard', 'activity', 'body', 'heart', 'calories', 'sleep', 'hydration', 'billing', 'timeline']
     if (urlTab && validTabs.includes(urlTab)) return urlTab
     // Legacy: old 'profile' tab → new 'dashboard'
     const stored = localStorage.getItem(`admin-user-tab-${id}`)
@@ -1294,6 +1300,10 @@ export default function AdminUserDetail() {
         />
       )}
 
+      {activeTab === 'heart' && (
+        <AdminUserHeart userId={id} profile={profile} />
+      )}
+
       {activeTab === 'calories' && (
         <AdminUserCalories
           userId={id}
@@ -1303,6 +1313,14 @@ export default function AdminUserDetail() {
           onPlanSaved={updated => setExistingPlan(updated)}
           onSaved={() => setSnapshotKey(k => k + 1)}
         />
+      )}
+
+      {activeTab === 'sleep' && (
+        <AdminUserSleep userId={id} profile={profile} />
+      )}
+
+      {activeTab === 'hydration' && (
+        <AdminUserHydration userId={id} profile={profile} />
       )}
 
       {/* Billing tab — adaptive Current section (coach sub status /

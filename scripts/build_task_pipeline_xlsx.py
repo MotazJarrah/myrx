@@ -533,10 +533,16 @@ TASKS = [
      "mobile/app/(auth)/sign-in.tsx; web Auth.jsx",
      "2026-06-04"),
 
-    ("T078", "Finalize the Admin client-detail view", "Coach/Admin", "Web", "In progress",
+    ("T078", "Finalize the Admin client-detail view", "Coach/Admin", "Web", "Done",
      "User 2026-06-04 re-scoped the parity task: before mirroring admin->coach (T015), finalize the ADMIN client-detail view first so we have a full understanding of what exists + what needs mirroring. Admin client page = web/src/pages/admin/AdminUserDetail.jsx (shell) with 6 tabs: Dashboard, Efforts (AdminUserActivity), Bodyweight (AdminUserBody), Calories (AdminUserCalories - Food Log/Manual Logs/Macro Plan sub-tabs), Billing, Activity Feed (timeline).",
-     "Inventory done 2026-06-04. FIXES 2,3,4,5,7 DONE + deployed 2026-06-04 (bundle index-IUBSQ3c3): (2) added missing Loader2 import in AdminUserBody.jsx — weigh-in save no longer crashes; (3) deleted dead tabs/AdminUserProfile.jsx (530 lines) + its import; (4) added 'billing' to validTabs — Billing tab deep-linkable; (5) Efforts cardio 'Best' now direction-aware across all formats (added parseCardioBest mirror), not just /km; (7) fixed stale ClientSettingsDrawer docstring + unified the Calories manual-log save button to the Loader2 spinner pattern. REMAINING (decisions, one at a time): (1) Dashboard tab is an empty 'Snapshot coming soon' placeholder AND the default landing tab; (6) Calories Food Log has no add-on-behalf while every other tab does.",
+     "Inventory done 2026-06-04. FIXES 2,3,4,5,7 DONE + deployed 2026-06-04 (bundle index-IUBSQ3c3): (2) added missing Loader2 import in AdminUserBody.jsx — weigh-in save no longer crashes; (3) deleted dead tabs/AdminUserProfile.jsx (530 lines) + its import; (4) added 'billing' to validTabs — Billing tab deep-linkable; (5) Efforts cardio 'Best' now direction-aware across all formats (added parseCardioBest mirror), not just /km; (7) fixed stale ClientSettingsDrawer docstring + unified the Calories manual-log save button to the Loader2 spinner pattern. DECISIONS DISPOSED 2026-06-04: (1) Dashboard -> KEEP as placeholder for now (it's the holistic rollup of the other pages; build the underlying pages first) -> folded into T079; (6) Food-log add-on-behalf -> deferred to the coach-INPUT track (coach input is a different approach, TBD). Finalize-pass complete.",
      "web/src/pages/admin/AdminUserDetail.jsx; web/src/pages/admin/tabs/*.jsx; components/{BillingView,MacroPlanEditor,AccountSettings,ClientSettingsDrawer}.jsx",
+     "2026-06-04"),
+
+    ("T079", "Mirror athlete pages read-only in the admin client view", "Coach/Admin", "Web", "In progress",
+     "User 2026-06-04: build the client-view tabs so each athlete page is reflected READ-ONLY — a coach must first see exactly what the athlete sees (per-page coaching add-ons come later, one page at a time). Coach side has NO inputs (coach-input is a separate approach, TBD). Dashboard stays placeholder (holistic rollup of the others, built last). Athlete data pages: Strength, Cardio, Bodyweight, Calories, Sleep, Heart, Hydration. Admin already covers Strength/Cardio (Efforts), Bodyweight, Calories. GAPS added now: Sleep, Hydration, Heart.",
+     "Phase 1 (build pages): add read-only mirror tabs AdminUserSleep / AdminUserHydration / AdminUserHeart (styled like existing admin tabs: Recharts, design tokens), wired into AdminUserDetail. Built via parallel agents 2026-06-04. Phase 2 (per-page, one at a time): align every tab first-view to the athlete exactly + add coaching elements.",
+     "web/src/pages/admin/tabs/AdminUser{Sleep,Hydration,Heart}.jsx; web/src/pages/admin/AdminUserDetail.jsx; mirror mobile/app/(app)/{sleep,hydration,heart}.tsx",
      "2026-06-04"),
 ]
 
