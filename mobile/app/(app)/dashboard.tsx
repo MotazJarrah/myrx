@@ -40,6 +40,24 @@ import CoachChangeBanner from '../../src/components/CoachChangeBanner'
 import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
+// ── Tier model (mirrors RadialNav.tsx::resolveTier — single source of truth for
+// which pages/pills a subscription tier unlocks). free=0 < corerx=1 < fullrx=2.
+// Superuser / coach / coach-attached athletes all resolve to fullrx. ────────────
+type Tier = 'free' | 'corerx' | 'fullrx'
+const TIER_RANK: Record<Tier, number> = { free: 0, corerx: 1, fullrx: 2 }
+function resolveTier(p: {
+  b2c_subscription_tier?: 'free' | 'corerx' | 'fullrx' | null
+  coach_id?: string | null
+  is_superuser?: boolean
+  is_coach?: boolean
+} | null | undefined): Tier {
+  if (!p) return 'free'
+  if (p.is_superuser === true) return 'fullrx'
+  if (p.is_coach === true)     return 'fullrx'
+  if (p.coach_id)              return 'fullrx'
+  return (p.b2c_subscription_tier as Tier | null) ?? 'free'
+}
+
 // ── Helpers (1:1 with Dashboard.jsx) ─────────────────────────────────────────
 
 function getGreeting(): string {
@@ -412,6 +430,10 @@ function ActivityRow({ item, onDelete }: { item: AnyItem; onDelete: () => void }
 export default function Dashboard() {
   const { user, profile } = useAuth()
 
+  // Subscription tier → which stat pills show. free: Strength + Cardio only;
+  // corerx adds Weight + Heart + Food; fullrx adds Sleep + Hydration.
+  const tierRank = TIER_RANK[resolveTier(profile as any)]
+
   const cacheKey = user ? `dashboard:${user.id}` : null
   const cached   = cacheKey ? dataCache.get<any>(cacheKey) : null
 
@@ -774,8 +796,8 @@ export default function Dashboard() {
             time users with no data don't see empty/placeholder chips —
             only the metrics that have data show up. */}
         <View style={d.statsRow}>
-          {/* Strength PRs — last 30 days (count; shows 0 when none). */}
-          {strengthPRs != null && (
+          {/* Strength PRs — FREE. Last 30 days (count; shows 0 when none). */}
+          {tierRank >= TIER_RANK.free && strengthPRs != null && (
             <View style={[d.statChip, d.statChipBlue]}>
               <Dumbbell size={12} color={palette.blue[400]} style={d.statChipIcon} />
               <View style={d.statChipNum}>
@@ -787,8 +809,8 @@ export default function Dashboard() {
             </View>
           )}
 
-          {/* Cardio PRs — last 30 days (count; shows 0 when none). */}
-          {cardioPRs != null && (
+          {/* Cardio PRs — FREE. Last 30 days (count; shows 0 when none). */}
+          {tierRank >= TIER_RANK.free && cardioPRs != null && (
             <View style={[d.statChip, d.statChipAmber]}>
               <Activity size={12} color={palette.amber[400]} style={d.statChipIcon} />
               <View style={d.statChipNum}>
@@ -800,8 +822,55 @@ export default function Dashboard() {
             </View>
           )}
 
-          {/* Food — distinct days logged in the last 14 (count; shows 0). */}
-          {foodStreak != null && (
+          {/* Weight change — CORERX. Last 30 days (latest − earliest weigh-in). */}
+          {tierRank >= TIER_RANK.corerx && (
+            <View style={[d.statChip, d.statChipEmerald]}>
+              {weeklyWeightKg != null ? (() => {
+                const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
+                const inUnit = pUnit === 'kg' ? weeklyWeightKg : weeklyWeightKg / 0.453592
+                const rounded = Math.round(inUnit * 10) / 10
+                const sign = rounded > 0.05 ? '+' : rounded < -0.05 ? '−' : ''
+                const abs = Math.abs(rounded).toFixed(1)
+                return (
+                  <>
+                    <Weight size={12} color={palette.emerald[400]} style={d.statChipIcon} />
+                    <View style={d.statChipNum}>
+                      <TickerNumber value={`${sign}${abs}`} fontSize={11} color={palette.emerald[400]} fontWeight="700" />
+                    </View>
+                    <Text style={[d.statChipText, { color: palette.emerald[400] }]}>{` ${pUnit} · 30d`}</Text>
+                  </>
+                )
+              })() : (
+                <>
+                  <Weight size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                  <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent weight</Text>
+                </>
+              )}
+            </View>
+          )}
+
+          {/* Lowest ambient HR — CORERX. Last 7 days; "no recent" when empty. */}
+          {tierRank >= TIER_RANK.corerx && (
+            <View style={[d.statChip, d.statChipFuchsia]}>
+              {lowestHR7d != null ? (
+                <>
+                  <Heart size={12} color={palette.fuchsia[400]} style={d.statChipIcon} />
+                  <View style={d.statChipNum}>
+                    <TickerNumber value={lowestHR7d} fontSize={11} color={palette.fuchsia[400]} fontWeight="700" />
+                  </View>
+                  <Text style={[d.statChipText, { color: palette.fuchsia[400] }]}>{' '}low bpm · 7d</Text>
+                </>
+              ) : (
+                <>
+                  <Heart size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                  <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent HR</Text>
+                </>
+              )}
+            </View>
+          )}
+
+          {/* Food — CORERX. Distinct days logged in the last 14 (count; shows 0). */}
+          {tierRank >= TIER_RANK.corerx && foodStreak != null && (
             <View style={[d.statChip, d.statChipRed]}>
               <Flame size={12} color={palette.red[400]} style={d.statChipIcon} />
               <View style={d.statChipNum}>
@@ -813,84 +882,45 @@ export default function Dashboard() {
             </View>
           )}
 
-          {/* Lowest ambient HR — last 7 days. Always shown; "no recent" when empty. */}
-          <View style={[d.statChip, d.statChipFuchsia]}>
-            {lowestHR7d != null ? (
-              <>
-                <Heart size={12} color={palette.fuchsia[400]} style={d.statChipIcon} />
-                <View style={d.statChipNum}>
-                  <TickerNumber value={lowestHR7d} fontSize={11} color={palette.fuchsia[400]} fontWeight="700" />
-                </View>
-                <Text style={[d.statChipText, { color: palette.fuchsia[400] }]}>{' '}low bpm · 7d</Text>
-              </>
-            ) : (
-              <>
-                <Heart size={12} color={colors.mutedForeground} style={d.statChipIcon} />
-                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent HR</Text>
-              </>
-            )}
-          </View>
-
-          {/* Weight change over the last 30 days (latest − earliest weigh-in). */}
-          <View style={[d.statChip, d.statChipEmerald]}>
-            {weeklyWeightKg != null ? (() => {
-              const pUnit = profile?.weight_unit === 'kg' ? 'kg' : 'lb'
-              const inUnit = pUnit === 'kg' ? weeklyWeightKg : weeklyWeightKg / 0.453592
-              const rounded = Math.round(inUnit * 10) / 10
-              const sign = rounded > 0.05 ? '+' : rounded < -0.05 ? '−' : ''
-              const abs = Math.abs(rounded).toFixed(1)
-              return (
+          {/* Avg sleep — FULLRX. Last 7 nights; "no recent" when empty. */}
+          {tierRank >= TIER_RANK.fullrx && (
+            <View style={[d.statChip, d.statChipIndigo]}>
+              {avgSleepH != null ? (
                 <>
-                  <Weight size={12} color={palette.emerald[400]} style={d.statChipIcon} />
+                  <Moon size={12} color={palette.indigo[400]} style={d.statChipIcon} />
                   <View style={d.statChipNum}>
-                    <TickerNumber value={`${sign}${abs}`} fontSize={11} color={palette.emerald[400]} fontWeight="700" />
+                    <TickerNumber value={avgSleepH} fontSize={11} color={palette.indigo[400]} fontWeight="700" />
                   </View>
-                  <Text style={[d.statChipText, { color: palette.emerald[400] }]}>{` ${pUnit} · 30d`}</Text>
+                  <Text style={[d.statChipText, { color: palette.indigo[400] }]}>{`h sleep · 7d`}</Text>
                 </>
-              )
-            })() : (
-              <>
-                <Weight size={12} color={colors.mutedForeground} style={d.statChipIcon} />
-                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent weight</Text>
-              </>
-            )}
-          </View>
+              ) : (
+                <>
+                  <Moon size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                  <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent sleep</Text>
+                </>
+              )}
+            </View>
+          )}
 
-          {/* Avg sleep — last 7 nights. Always shown; "no recent" when empty. */}
-          <View style={[d.statChip, d.statChipIndigo]}>
-            {avgSleepH != null ? (
-              <>
-                <Moon size={12} color={palette.indigo[400]} style={d.statChipIcon} />
-                <View style={d.statChipNum}>
-                  <TickerNumber value={avgSleepH} fontSize={11} color={palette.indigo[400]} fontWeight="700" />
-                </View>
-                <Text style={[d.statChipText, { color: palette.indigo[400] }]}>{`h sleep · 7d`}</Text>
-              </>
-            ) : (
-              <>
-                <Moon size={12} color={colors.mutedForeground} style={d.statChipIcon} />
-                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent sleep</Text>
-              </>
-            )}
-          </View>
-
-          {/* Days the water goal was hit — last 7. Always shown; "no recent" when empty. */}
-          <View style={[d.statChip, d.statChipCyan]}>
-            {hydrationDays != null ? (
-              <>
-                <Droplet size={12} color={palette.cyan[400]} style={d.statChipIcon} />
-                <View style={d.statChipNum}>
-                  <TickerNumber value={hydrationDays} fontSize={11} color={palette.cyan[400]} fontWeight="700" />
-                </View>
-                <Text style={[d.statChipText, { color: palette.cyan[400] }]}>{` water day${hydrationDays !== 1 ? 's' : ''} · 7d`}</Text>
-              </>
-            ) : (
-              <>
-                <Droplet size={12} color={colors.mutedForeground} style={d.statChipIcon} />
-                <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent water</Text>
-              </>
-            )}
-          </View>
+          {/* Days the water goal was hit — FULLRX. Last 7; "no recent" when empty. */}
+          {tierRank >= TIER_RANK.fullrx && (
+            <View style={[d.statChip, d.statChipCyan]}>
+              {hydrationDays != null ? (
+                <>
+                  <Droplet size={12} color={palette.cyan[400]} style={d.statChipIcon} />
+                  <View style={d.statChipNum}>
+                    <TickerNumber value={hydrationDays} fontSize={11} color={palette.cyan[400]} fontWeight="700" />
+                  </View>
+                  <Text style={[d.statChipText, { color: palette.cyan[400] }]}>{` water day${hydrationDays !== 1 ? 's' : ''} · 7d`}</Text>
+                </>
+              ) : (
+                <>
+                  <Droplet size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                  <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent water</Text>
+                </>
+              )}
+            </View>
+          )}
         </View>
         </AnimateRise>
 

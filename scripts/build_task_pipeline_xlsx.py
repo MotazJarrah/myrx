@@ -496,6 +496,12 @@ TASKS = [
      "DONE 2026-06-03: weight pill now uses EMERALD (the Bodyweight page's accent green — reuses statChipEmerald); heart pill moved to FUCHSIA (new statChipFuchsia). Clearly distinguishable now. Mobile only; web admin+coach inherits both colours when the T069/T070 mirror lands.",
      "mobile dashboard.tsx",
      "2026-06-03"),
+
+    ("T072", "Dashboard pills — sort by tier + gate by user's tier", "Dashboard", "Cross", "In progress",
+     "User: re-sort the stat pills by app tier and only show the pills for the user's tier (and below). Free = 2 pills (Strength, Cardio); CoreRX adds Weight + Heart + Food; FullRX adds Sleep + Hydration. Tier->pill mapping mirrors RadialNav's NAV_BY_HREF: strength/cardio = free; bodyweight(weight)/heart/calories(food) = corerx; sleep/hydration = fullrx. Uneven count -> last pill centers (already handled by statsRow justify-center + 48% fixed width).",
+     "MOBILE DONE 2026-06-03: replicated RadialNav's resolveTier + TIER_RANK in dashboard.tsx; pills reordered to tier/nav order (Strength, Cardio = free; Weight, Heart, Food = corerx; Sleep, Hydration = fullrx) and each gated on `tierRank >= TIER_RANK[pillTier]`. Free user sees 2 pills, corerx 5, fullrx 7; uneven count centers the lone last pill (statsRow justify-center + 48% width). WEB (admin+coach) mirror still PENDING — bundle with T069/T070/T071.",
+     "mobile dashboard.tsx; (then) web AdminUserDetail.jsx, CoachClientDetail.jsx",
+     "2026-06-03"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
