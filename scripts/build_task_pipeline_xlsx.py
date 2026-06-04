@@ -473,15 +473,15 @@ TASKS = [
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
-    ("T070", "Dashboard pills: page icons + highlight weight pill", "Dashboard", "Cross", "In progress",
+    ("T070", "Dashboard pills: page icons + highlight weight pill", "Dashboard", "Cross", "Done",
      "User (after seeing the emoji-free pills): use each PAGE's lucide icon on its pill instead of no icon — Strength=Dumbbell, Cardio=Activity, Food=Flame, HR=Heart, Weight=Weight/Scale, Sleep=Moon, Hydration=Droplet (confirm exact icons + accents from the nav/RadialNav). Also the weight pill's slate tint blends into the card background — give it a more visible highlight (a distinct colored border/bg, not clashing with the other 6).",
-     "MOBILE DONE + reloaded 2026-06-03: each pill now leads with its page's lucide icon (Dumbbell / Activity / Flame / Heart / Weight / Moon / Droplet) in the page accent; weight chip switched from the near-invisible slate to a teal tint (border 0.34 / bg 0.12) so it stands out. WEB (admin + coach) mirror still PENDING the user's confirmation, to be bundled with the T069 changes.",
+     "MOBILE DONE + reloaded 2026-06-03: each pill now leads with its page's lucide icon (Dumbbell / Activity / Flame / Heart / Weight / Moon / Droplet) in the page accent; weight chip switched from the near-invisible slate to a teal tint (border 0.34 / bg 0.12) so it stands out. WEB (admin + coach) MIRRORED 2026-06-04 — page icons added, built + deployed.",
      "mobile dashboard.tsx; (then) web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
-    ("T069", "Dashboard pills: window-based compute + 'no recent data' (don't hide)", "Dashboard", "Cross", "In progress",
+    ("T069", "Dashboard pills: window-based compute + 'no recent data' (don't hide)", "Dashboard", "Cross", "Done",
      "User rejected T068's 'latest-N-logs' weight computation — wants every pill computed STRICTLY over its designated rolling window (PRs 30d, food 14d, HR/sleep/hydration 7d, weight = its own designated window). And instead of HIDING a pill when its window has no data, ALWAYS show the pill with a 'no recent data' placeholder (also keeps the fixed 3+3+1 / 7-pill layout stable). Weight window was not specified — assistant designating 30 days (shown as '· 30d'), easily changed.",
-     "MOBILE DONE + reloaded 2026-06-03: weight = change over rolling 30d (latest − earliest weigh-in in the 30d window; reverted the latest-5-logs hack), shown '±N lb · 30d' or 'no recent weight'; all pills always render — count pills (strength/cardio/food) show 0, measurement pills (HR/weight/sleep/water) show 'no recent <metric>' when empty. WEB (admin + coach) MIRROR PENDING the user's confirmation of the mobile look + the 30d weight window.",
+     "MOBILE DONE + reloaded 2026-06-03: weight = change over rolling 30d (latest − earliest weigh-in in the 30d window; reverted the latest-5-logs hack), shown '±N lb · 30d' or 'no recent weight'; all pills always render — count pills (strength/cardio/food) show 0, measurement pills (HR/weight/sleep/water) show 'no recent <metric>' when empty. WEB (admin + coach) MIRRORED 2026-06-04 — built + deployed.",
      "mobile dashboard.tsx; (then) web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
@@ -493,13 +493,13 @@ TASKS = [
 
     ("T071", "Dashboard weight pill color — distinct from heart", "Dashboard", "Mobile", "Done",
      "User: the weight pill (teal, from T070) and the heart pill (emerald) read as almost the same color. REVISED direction: give the weight pill the SAME green the Bodyweight page uses (so the pill matches its page), and recolor the HEART pill to something else (off green) so the two are clearly distinguishable.",
-     "DONE 2026-06-03: weight pill now uses EMERALD (the Bodyweight page's accent green — reuses statChipEmerald); heart pill moved to FUCHSIA (new statChipFuchsia). Clearly distinguishable now. Mobile only; web admin+coach inherits both colours when the T069/T070 mirror lands.",
+     "DONE 2026-06-03: weight pill now uses EMERALD (the Bodyweight page's accent green — reuses statChipEmerald); heart pill moved to FUCHSIA (new statChipFuchsia). Clearly distinguishable now. WEB (admin + coach) mirrored 2026-06-04 (weight = emerald, heart = fuchsia).",
      "mobile dashboard.tsx",
      "2026-06-03"),
 
-    ("T072", "Dashboard pills — sort by tier + gate by user's tier", "Dashboard", "Cross", "In progress",
+    ("T072", "Dashboard pills — sort by tier + gate by user's tier", "Dashboard", "Cross", "Done",
      "User: re-sort the stat pills by app tier and only show the pills for the user's tier (and below). Free = 2 pills (Strength, Cardio); CoreRX adds Weight + Heart + Food; FullRX adds Sleep + Hydration. Tier->pill mapping mirrors RadialNav's NAV_BY_HREF: strength/cardio = free; bodyweight(weight)/heart/calories(food) = corerx; sleep/hydration = fullrx. Uneven count -> last pill centers (already handled by statsRow justify-center + 48% fixed width).",
-     "MOBILE DONE 2026-06-03: replicated RadialNav's resolveTier + TIER_RANK in dashboard.tsx; pills reordered to tier/nav order (Strength, Cardio = free; Weight, Heart, Food = corerx; Sleep, Hydration = fullrx) and each gated on `tierRank >= TIER_RANK[pillTier]`. Free user sees 2 pills, corerx 5, fullrx 7; uneven count centers the lone last pill (statsRow justify-center + 48% width). WEB (admin+coach) mirror still PENDING — bundle with T069/T070/T071.",
+     "MOBILE DONE 2026-06-03: replicated RadialNav's resolveTier + TIER_RANK in dashboard.tsx; pills reordered to tier/nav order (Strength, Cardio = free; Weight, Heart, Food = corerx; Sleep, Hydration = fullrx) and each gated on `tierRank >= TIER_RANK[pillTier]`. Free user sees 2 pills, corerx 5, fullrx 7; uneven count centers the lone last pill (statsRow justify-center + 48% width). WEB (admin + coach) MIRRORED 2026-06-04 — replicated resolveTier on both files (client tier comes from the admin get_user_for_admin RPC + the coach profiles select('*'), both already return b2c_subscription_tier); reorder + tier-gate + icons + colors + no-recent states + 30d weight; built + deployed. So a coach-attached client (fullrx) shows all 7; a free B2C client shows 2.",
      "mobile dashboard.tsx; (then) web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 ]

@@ -26,7 +26,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'wouter'
 import {
   ArrowLeft, UserCog, Sparkles, AlertCircle, Info, Check, MessageCircle,
-  Activity, Scale, Apple, Dumbbell,
+  Activity, Scale, Apple, Dumbbell, Weight, Heart, Flame, Moon, Droplet,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
@@ -99,10 +99,26 @@ function convertWeightForViewer(w, clientUnit, viewerUnit) {
   return Math.round(w / 0.453592 * 10) / 10
 }
 
+// ── Tier model (mirrors mobile/app/(app)/dashboard.tsx::resolveTier +
+// TIER_RANK byte-for-byte — single source of truth for which stat pills a
+// subscription tier unlocks). free=0 < corerx=1 < fullrx=2. Superuser /
+// coach / coach-attached athletes all resolve to fullrx. Resolved against
+// the VIEWED CLIENT'S profile so the pills shown match what the client
+// would see on their own dashboard. ─────────────────────────────────────
+const TIER_RANK = { free: 0, corerx: 1, fullrx: 2 }
+function resolveTier(p) {
+  if (!p) return 'free'
+  if (p.is_superuser === true) return 'fullrx'
+  if (p.is_coach === true)     return 'fullrx'
+  if (p.coach_id)              return 'fullrx'
+  return p.b2c_subscription_tier ?? 'free'
+}
+
 function SnapshotBadge({ children, color }) {
   const cls = {
     blue:    'bg-blue-500/10 border-blue-500/20 text-blue-400',
     amber:   'bg-amber-500/10 border-amber-500/20 text-amber-400',
+    fuchsia: 'bg-fuchsia-500/10 border-fuchsia-500/20 text-fuchsia-400',
     red:     'bg-red-500/10 border-red-500/20 text-red-400',
     green:   'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
     zinc:    'bg-zinc-500/10 border-zinc-500/20 text-zinc-400',
@@ -189,7 +205,10 @@ export default function CoachClientDetail() {
         supabase.from('efforts').select('created_at, label, value, type').eq('user_id', id).limit(5000),
         supabase.from('food_logs').select('log_date').eq('user_id', id).gte('log_date', fourteenDate).order('log_date', { ascending: false }).limit(50),
         supabase.from('hr_samples').select('bpm').eq('user_id', id).is('workout_id', null).gte('measured_at', weekAgoISO).order('bpm', { ascending: true }).limit(1),
-        supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(50),
+        // Weight change — every weigh-in in the rolling 30-day window (latest −
+        // earliest). Mirrors mobile dashboard's 30d window; the chip reads "· 30d".
+        // The latest row also drives the hydration goal (35 mL/kg of latest weight).
+        supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', id).gte('created_at', thirtyAgoISO).order('created_at', { ascending: false }).limit(200),
         supabase.from('sleep_sessions').select('duration_s').eq('user_id', id).gte('start_at', weekAgoISO).limit(50),
         supabase.from('water_logs').select('amount_ml, drink_type, logged_at').eq('user_id', id).gte('logged_at', weekAgoISO).limit(500),
       ])
@@ -231,9 +250,11 @@ export default function CoachClientDetail() {
 
       const lowestBpm = hrRes.data?.[0]?.bpm ?? null
 
-      // Weight change since the previous weigh-in (latest minus the one before
-      // it); falls back to the current weight when there's only one log so the
-      // chip still appears right after a weigh-in.
+      // 30-day weight change: latest weigh-in minus the EARLIEST weigh-in in
+      // the rolling 30-day window (not just the previous one). null when there
+      // are fewer than 2 weigh-ins in 30 days — the pill then shows "no recent
+      // weight" (T069). latestWeight still tracks the single latest weigh-in
+      // for the hydration goal calc below.
       let weightDiff   = null
       let latestWeight = null
       const bw = [...(bw14Res.data || [])].sort(
@@ -244,8 +265,8 @@ export default function CoachClientDetail() {
         const latestKg = toKg(parseFloat(bw[0].weight), bw[0].unit || 'lb')
         latestWeight = coachUnit === 'kg' ? latestKg : latestKg / 0.453592
         if (bw.length >= 2) {
-          const prevKg = toKg(parseFloat(bw[1].weight), bw[1].unit || 'lb')
-          const diffKg = latestKg - prevKg
+          const earliestKg = toKg(parseFloat(bw[bw.length - 1].weight), bw[bw.length - 1].unit || 'lb')
+          const diffKg = latestKg - earliestKg
           weightDiff = coachUnit === 'kg' ? diffKg : diffKg / 0.453592
         }
       }
@@ -326,16 +347,10 @@ export default function CoachClientDetail() {
   )
   const isCoachManaged = client.macros_managed_by_coach === true
 
-  const hasSnapshot = snapshot && (
-    (snapshot.strengthPRsThisMonth > 0) ||
-    (snapshot.cardioPRsThisMonth > 0) ||
-    (snapshot.foodStreak > 0) ||
-    (snapshot.lowestBpm != null) ||
-    (snapshot.weightDiff != null) ||
-    (snapshot.latestWeight != null) ||
-    (snapshot.avgSleepH != null) ||
-    (snapshot.hydrationDays != null)
-  )
+  // Subscription tier of the VIEWED CLIENT → which stat pills render.
+  // free: Strength + Cardio. corerx adds Weight + Heart + Food. fullrx adds
+  // Sleep + Hydration. resolveTier guards null → 'free' (rank 0).
+  const tierRank = TIER_RANK[resolveTier(client)]
 
   return (
     <div className="space-y-4">
@@ -458,43 +473,104 @@ export default function CoachClientDetail() {
           ))}
         </div>
 
-        {/* Stat chips — mirrors mobile dashboard (same as admin) */}
-        {hasSnapshot && (
+        {/* Stat chips — mirrors the mobile Dashboard stat-pill block exactly
+            (locked May 24 2026, re-mirrored Jun 3 2026 with tier ordering,
+            leading icons, and "no recent" empty states).
+            Pill order follows subscription tier:
+              free   → Strength, Cardio
+              corerx → Weight, Heart, Food
+              fullrx → Sleep, Hydration
+            Each pill is gated on the client's tierRank. Count pills
+            (Strength / Cardio / Food) render their number even at 0 (gated
+            on `!= null`); measurement pills (Weight / Heart / Sleep /
+            Hydration) ALWAYS render within their tier, showing a muted
+            "no recent …" when the value is null. Rendered whenever the
+            snapshot has loaded so the tier-appropriate empty states appear
+            even with no signal. */}
+        {snapshot && (
           <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-            {snapshot.strengthPRsThisMonth > 0 && (
+            {/* Strength PRs — FREE. Last 30 days (count; shows 0 when none). */}
+            {tierRank >= TIER_RANK.free && snapshot.strengthPRsThisMonth != null && (
               <SnapshotBadge color="blue">
+                <Dumbbell className="h-3 w-3 shrink-0 text-blue-400" />
                 <TickerNumber value={snapshot.strengthPRsThisMonth} /> strength PR{snapshot.strengthPRsThisMonth !== 1 ? 's' : ''} · 30d
               </SnapshotBadge>
             )}
-            {snapshot.cardioPRsThisMonth > 0 && (
+
+            {/* Cardio PRs — FREE. Last 30 days (count; shows 0 when none). */}
+            {tierRank >= TIER_RANK.free && snapshot.cardioPRsThisMonth != null && (
               <SnapshotBadge color="amber">
+                <Activity className="h-3 w-3 shrink-0 text-amber-400" />
                 <TickerNumber value={snapshot.cardioPRsThisMonth} /> cardio PR{snapshot.cardioPRsThisMonth !== 1 ? 's' : ''} · 30d
               </SnapshotBadge>
             )}
-            {snapshot.foodStreak > 0 && (
+
+            {/* Weight change — CORERX. Last 30 days (latest − earliest weigh-in). */}
+            {tierRank >= TIER_RANK.corerx && (
+              snapshot.weightDiff != null ? (
+                <SnapshotBadge color="green">
+                  <Weight className="h-3 w-3 shrink-0 text-emerald-400" />
+                  {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {coachProfile?.weight_unit || 'lb'} · 30d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="zinc">
+                  <Weight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent weight
+                </SnapshotBadge>
+              )
+            )}
+
+            {/* Lowest ambient HR — CORERX. Last 7 days; "no recent HR" when empty. */}
+            {tierRank >= TIER_RANK.corerx && (
+              snapshot.lowestBpm != null ? (
+                <SnapshotBadge color="fuchsia">
+                  <Heart className="h-3 w-3 shrink-0 text-fuchsia-400" />
+                  <TickerNumber value={snapshot.lowestBpm} /> low bpm · 7d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="zinc">
+                  <Heart className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent HR
+                </SnapshotBadge>
+              )
+            )}
+
+            {/* Food — CORERX. Distinct days logged in last 14 (count; shows 0). */}
+            {tierRank >= TIER_RANK.corerx && snapshot.foodStreak != null && (
               <SnapshotBadge color="red">
+                <Flame className="h-3 w-3 shrink-0 text-red-400" />
                 <TickerNumber value={snapshot.foodStreak} /> food day{snapshot.foodStreak !== 1 ? 's' : ''} · 14d
               </SnapshotBadge>
             )}
-            {snapshot.lowestBpm != null && (
-              <SnapshotBadge color="green">
-                <TickerNumber value={snapshot.lowestBpm} /> low bpm · 7d
-              </SnapshotBadge>
+
+            {/* Avg sleep — FULLRX. Last 7 nights; "no recent sleep" when empty. */}
+            {tierRank >= TIER_RANK.fullrx && (
+              snapshot.avgSleepH != null ? (
+                <SnapshotBadge color="indigo">
+                  <Moon className="h-3 w-3 shrink-0 text-indigo-400" />
+                  <TickerNumber value={snapshot.avgSleepH} />h sleep · 7d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="zinc">
+                  <Moon className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent sleep
+                </SnapshotBadge>
+              )
             )}
-            {snapshot.weightDiff != null && (
-              <SnapshotBadge color="zinc">
-                {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {coachProfile?.weight_unit || 'lb'} change
-              </SnapshotBadge>
-            )}
-            {snapshot.avgSleepH != null && (
-              <SnapshotBadge color="indigo">
-                <TickerNumber value={snapshot.avgSleepH} />h sleep · 7d
-              </SnapshotBadge>
-            )}
-            {snapshot.hydrationDays != null && (
-              <SnapshotBadge color="cyan">
-                <TickerNumber value={snapshot.hydrationDays} /> water day{snapshot.hydrationDays !== 1 ? 's' : ''} · 7d
-              </SnapshotBadge>
+
+            {/* Days water goal hit — FULLRX. Last 7; "no recent water" when empty. */}
+            {tierRank >= TIER_RANK.fullrx && (
+              snapshot.hydrationDays != null ? (
+                <SnapshotBadge color="cyan">
+                  <Droplet className="h-3 w-3 shrink-0 text-cyan-400" />
+                  <TickerNumber value={snapshot.hydrationDays} /> water day{snapshot.hydrationDays !== 1 ? 's' : ''} · 7d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="zinc">
+                  <Droplet className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent water
+                </SnapshotBadge>
+              )
             )}
           </div>
         )}

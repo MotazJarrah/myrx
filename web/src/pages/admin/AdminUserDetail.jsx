@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
-import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign, Download, FileDown } from 'lucide-react'
+import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign, Download, FileDown, Weight, Heart, Flame, Moon, Droplet } from 'lucide-react'
 
 import AdminUserProfile   from './tabs/AdminUserProfile'
 import AdminUserActivity  from './tabs/AdminUserActivity'
@@ -145,6 +145,21 @@ function computeWeekStreak(dates) {
     else break
   }
   return streak
+}
+
+// ── Tier model (mirrors mobile/app/(app)/dashboard.tsx::resolveTier +
+// TIER_RANK byte-for-byte — single source of truth for which stat pills a
+// subscription tier unlocks). free=0 < corerx=1 < fullrx=2. Superuser /
+// coach / coach-attached athletes all resolve to fullrx. Resolved against
+// the VIEWED CLIENT'S profile so the pills shown match what the client
+// would see on their own dashboard. ─────────────────────────────────────
+const TIER_RANK = { free: 0, corerx: 1, fullrx: 2 }
+function resolveTier(p) {
+  if (!p) return 'free'
+  if (p.is_superuser === true) return 'fullrx'
+  if (p.is_coach === true)     return 'fullrx'
+  if (p.coach_id)              return 'fullrx'
+  return p.b2c_subscription_tier ?? 'free'
 }
 
 function SnapshotBadge({ children, color }) {
@@ -562,9 +577,11 @@ export default function AdminUserDetail() {
         supabase.from('food_logs').select('log_date').eq('user_id', id).gte('log_date', fourteenDate).order('log_date', { ascending: false }).limit(50),
         // Lowest ambient BPM in last 7 days (mirrors Heart page resting filter).
         supabase.from('hr_samples').select('bpm').eq('user_id', id).is('workout_id', null).gte('measured_at', weekAgoISO).order('bpm', { ascending: true }).limit(1),
-        // Weight change — the most-recent weigh-ins (unbounded by date) so the
-        // change shows from the latest two even if the prior one is >2 wks old (T068).
-        supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', id).order('created_at', { ascending: false }).limit(50),
+        // Weight change — every weigh-in in the rolling 30-day window (latest −
+        // earliest). Mirrors mobile dashboard's 30d window (T069/T068-correction);
+        // the chip label reads "· 30d". The latest row in this set also drives
+        // the hydration goal (35 mL/kg of latest weight).
+        supabase.from('bodyweight').select('weight, unit, created_at').eq('user_id', id).gte('created_at', thirtyAgoISO).order('created_at', { ascending: false }).limit(200),
         // Sleep — last 7 nights (duration_s) for the avg-sleep badge.
         supabase.from('sleep_sessions').select('duration_s').eq('user_id', id).gte('start_at', weekAgoISO).limit(50),
         // Hydration — last 7 days of water logs for the days-hit-goal badge.
@@ -622,10 +639,12 @@ export default function AdminUserDetail() {
       // ── Lowest BPM last 7 days ──────────────────────────────────────────
       const lowestBpm = hrRes.data?.[0]?.bpm ?? null
 
-      // ── Weekly weight diff (signed, in admin's display unit) ────────────
-      // Weight change since the previous weigh-in (latest minus the one before
-      // it); falls back to the current weight when there's only one log so the
-      // chip still appears right after a weigh-in.
+      // ── 30-day weight change (signed, in admin's display unit) ──────────
+      // Rolling 30-day window: latest weigh-in minus the EARLIEST weigh-in in
+      // the window (not just the previous one). null when there are fewer than
+      // 2 weigh-ins in 30 days — the pill then shows "no recent weight" (T069).
+      // latestWeight still tracks the single latest weigh-in for the hydration
+      // goal calc below.
       let weightDiff   = null
       let latestWeight = null
       const bw = [...(bw14Res.data || [])].sort(
@@ -636,8 +655,8 @@ export default function AdminUserDetail() {
         const latestKg = toKg(parseFloat(bw[0].weight), bw[0].unit || 'lb')
         latestWeight = adminUnit === 'kg' ? latestKg : latestKg / 0.453592
         if (bw.length >= 2) {
-          const prevKg = toKg(parseFloat(bw[1].weight), bw[1].unit || 'lb')
-          const diffKg = latestKg - prevKg
+          const earliestKg = toKg(parseFloat(bw[bw.length - 1].weight), bw[bw.length - 1].unit || 'lb')
+          const diffKg = latestKg - earliestKg
           weightDiff = adminUnit === 'kg' ? diffKg : diffKg / 0.453592
         }
       }
@@ -696,6 +715,11 @@ export default function AdminUserDetail() {
     ? `${convertWeightForAdmin(profile.current_weight, profile.weight_unit || 'lb', adminWeightUnit)} ${adminWeightUnit}`
     : '—'
   const displayHeight   = formatHeightForAdmin(profile.current_height, profile.height_unit || 'imperial', adminHeightUnit)
+
+  // Subscription tier of the VIEWED CLIENT → which stat pills render.
+  // free: Strength + Cardio. corerx adds Weight + Heart + Food. fullrx adds
+  // Sleep + Hydration. resolveTier guards null → 'free' (rank 0).
+  const tierRank = TIER_RANK[resolveTier(profile)]
 
   async function toggleChat() {
     if (togglingChat) return
@@ -800,17 +824,6 @@ export default function AdminUserDetail() {
       setDeleting(false)
     }
   }
-
-  const hasSnapshot = snapshot && (
-    (snapshot.strengthPRsThisMonth > 0) ||
-    (snapshot.cardioPRsThisMonth > 0) ||
-    (snapshot.foodStreak > 0) ||
-    (snapshot.lowestBpm != null) ||
-    (snapshot.weightDiff != null) ||
-    (snapshot.latestWeight != null) ||
-    (snapshot.avgSleepH != null) ||
-    (snapshot.hydrationDays != null)
-  )
 
   // Days remaining in the deletion grace window. Computed once per render
   // outside JSX so React 19's strict-purity rule doesn't flag the Date.now()
@@ -1108,45 +1121,104 @@ export default function AdminUserDetail() {
           ))}
         </div>
 
-        {/* Stat chips — mirrors the mobile Dashboard 5-chip set exactly
-            (locked May 24 2026, ported to admin May 26 2026). Each chip
-            only renders when the underlying signal exists. */}
-        {hasSnapshot && (
+        {/* Stat chips — mirrors the mobile Dashboard stat-pill block exactly
+            (locked May 24 2026, re-mirrored to admin Jun 3 2026 with tier
+            ordering, leading icons, and "no recent" empty states).
+            Pill order follows subscription tier:
+              free   → Strength, Cardio
+              corerx → Weight, Heart, Food
+              fullrx → Sleep, Hydration
+            Each pill is gated on the client's tierRank. Count pills
+            (Strength / Cardio / Food) render their number even at 0 (gated
+            on `!= null` so they don't flash during the initial null load);
+            measurement pills (Weight / Heart / Sleep / Hydration) ALWAYS
+            render within their tier, showing a muted "no recent …" when the
+            value is null. Rendered whenever the snapshot has loaded so the
+            tier-appropriate empty states appear even with no signal. */}
+        {snapshot && (
           <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-            {snapshot.strengthPRsThisMonth > 0 && (
+            {/* Strength PRs — FREE. Last 30 days (count; shows 0 when none). */}
+            {tierRank >= TIER_RANK.free && snapshot.strengthPRsThisMonth != null && (
               <SnapshotBadge color="blue">
+                <Dumbbell className="h-3 w-3 shrink-0 text-blue-400" />
                 <TickerNumber value={snapshot.strengthPRsThisMonth} /> strength PR{snapshot.strengthPRsThisMonth !== 1 ? 's' : ''} · 30d
               </SnapshotBadge>
             )}
-            {snapshot.cardioPRsThisMonth > 0 && (
+
+            {/* Cardio PRs — FREE. Last 30 days (count; shows 0 when none). */}
+            {tierRank >= TIER_RANK.free && snapshot.cardioPRsThisMonth != null && (
               <SnapshotBadge color="amber">
+                <Activity className="h-3 w-3 shrink-0 text-amber-400" />
                 <TickerNumber value={snapshot.cardioPRsThisMonth} /> cardio PR{snapshot.cardioPRsThisMonth !== 1 ? 's' : ''} · 30d
               </SnapshotBadge>
             )}
-            {snapshot.foodStreak > 0 && (
+
+            {/* Weight change — CORERX. Last 30 days (latest − earliest weigh-in). */}
+            {tierRank >= TIER_RANK.corerx && (
+              snapshot.weightDiff != null ? (
+                <SnapshotBadge color="green">
+                  <Weight className="h-3 w-3 shrink-0 text-emerald-400" />
+                  {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {adminProfile?.weight_unit || 'lb'} · 30d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="zinc">
+                  <Weight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent weight
+                </SnapshotBadge>
+              )
+            )}
+
+            {/* Lowest ambient HR — CORERX. Last 7 days; "no recent HR" when empty. */}
+            {tierRank >= TIER_RANK.corerx && (
+              snapshot.lowestBpm != null ? (
+                <SnapshotBadge color="fuchsia">
+                  <Heart className="h-3 w-3 shrink-0 text-fuchsia-400" />
+                  <TickerNumber value={snapshot.lowestBpm} /> low bpm · 7d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="zinc">
+                  <Heart className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent HR
+                </SnapshotBadge>
+              )
+            )}
+
+            {/* Food — CORERX. Distinct days logged in last 14 (count; shows 0). */}
+            {tierRank >= TIER_RANK.corerx && snapshot.foodStreak != null && (
               <SnapshotBadge color="red">
+                <Flame className="h-3 w-3 shrink-0 text-red-400" />
                 <TickerNumber value={snapshot.foodStreak} /> food day{snapshot.foodStreak !== 1 ? 's' : ''} · 14d
               </SnapshotBadge>
             )}
-            {snapshot.lowestBpm != null && (
-              <SnapshotBadge color="green">
-                <TickerNumber value={snapshot.lowestBpm} /> low bpm · 7d
-              </SnapshotBadge>
+
+            {/* Avg sleep — FULLRX. Last 7 nights; "no recent sleep" when empty. */}
+            {tierRank >= TIER_RANK.fullrx && (
+              snapshot.avgSleepH != null ? (
+                <SnapshotBadge color="indigo">
+                  <Moon className="h-3 w-3 shrink-0 text-indigo-400" />
+                  <TickerNumber value={snapshot.avgSleepH} />h sleep · 7d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="zinc">
+                  <Moon className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent sleep
+                </SnapshotBadge>
+              )
             )}
-            {snapshot.weightDiff != null && (
-              <SnapshotBadge color="zinc">
-                {snapshot.weightDiff >= 0 ? '+' : '−'}<TickerNumber value={Math.abs(Math.round(snapshot.weightDiff * 10) / 10)} /> {adminProfile?.weight_unit || 'lb'} change
-              </SnapshotBadge>
-            )}
-            {snapshot.avgSleepH != null && (
-              <SnapshotBadge color="indigo">
-                <TickerNumber value={snapshot.avgSleepH} />h sleep · 7d
-              </SnapshotBadge>
-            )}
-            {snapshot.hydrationDays != null && (
-              <SnapshotBadge color="cyan">
-                <TickerNumber value={snapshot.hydrationDays} /> water day{snapshot.hydrationDays !== 1 ? 's' : ''} · 7d
-              </SnapshotBadge>
+
+            {/* Days water goal hit — FULLRX. Last 7; "no recent water" when empty. */}
+            {tierRank >= TIER_RANK.fullrx && (
+              snapshot.hydrationDays != null ? (
+                <SnapshotBadge color="cyan">
+                  <Droplet className="h-3 w-3 shrink-0 text-cyan-400" />
+                  <TickerNumber value={snapshot.hydrationDays} /> water day{snapshot.hydrationDays !== 1 ? 's' : ''} · 7d
+                </SnapshotBadge>
+              ) : (
+                <SnapshotBadge color="zinc">
+                  <Droplet className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  no recent water
+                </SnapshotBadge>
+              )
             )}
           </div>
         )}
