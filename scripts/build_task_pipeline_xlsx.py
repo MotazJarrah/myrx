@@ -353,10 +353,10 @@ TASKS = [
      "mobile profile.tsx (ConnectTab), src/lib/healthConnect.ts, src/lib/lastSyncStorage.ts",
      "2026-06-04"),
 
-    ("T048", "Wire filters into food-library SYNC scripts", "Food Library", "Backend", "In progress",
-     "User 2026-06-04: this is supposed to be done — investigate and make sure all ~19 filter+dedup rules (Tier 1-4 rules 1-14 in filters.mjs + Tier 5 dedup rules 15-19) are wired into BOTH sync paths (orchestrator scripts/sync/run.mjs and legacy scripts/d1_migrate/sync_usda.mjs / sync_on.mjs). Bulk import already applies the full pipeline; verify sync matches.",
-     "Investigating: audit run.mjs + sync_usda.mjs + sync_on.mjs vs filters.mjs + dedup; wire in any missing rules.",
-     "scripts/sync/run.mjs, scripts/d1_migrate/sync_usda.mjs, sync_on.mjs, scripts/d1_migrate/lib/filters.mjs",
+    ("T048", "Wire filters into food-library SYNC scripts", "Food Library", "Backend", "Done",
+     "Audited 2026-06-04: ALREADY DONE. The production sync orchestrator (scripts/sync/run.mjs) reuses the bulk-import loaders (loadUsda/loadOn -> enrichFood + shouldKeepFood = Rules 1-14) and applyDedup (dedup_in_memory.mjs = Rules 15-19), so all 19 rules run on every sync and produce a byte-identical filtered/deduped result to a full rebuild. The 'Sync now' button dispatches sync-food-library.yml -> node scripts/sync/run.mjs (plus monthly cron 0 3 1 * *).",
+     "No code change needed. Legacy scripts/d1_migrate/sync_usda.mjs + sync_on.mjs are dead/superseded (no workflow/package.json refs) and have themselves been migrated to enrichFood + getFilterReason anyway. Also fixed the two stale CLAUDE.md bullets that wrongly claimed sync skips the filter pipeline.",
+     "scripts/sync/run.mjs, scripts/bulk_import/lib/{usda_loader,on_loader,dedup_in_memory}.mjs, scripts/d1_migrate/lib/filters.mjs",
      "2026-06-04"),
 
     ("T049", "Drop rom_records table (post-Mobility)", "Mobility", "Backend", "Done",
