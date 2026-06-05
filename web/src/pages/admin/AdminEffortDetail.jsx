@@ -15,6 +15,7 @@ import AdminStrengthAssistedDetail from './detail/AdminStrengthAssistedDetail'
 import AdminStrengthCarryDetail from './detail/AdminStrengthCarryDetail'
 import AdminStrengthIsometricDetail from './detail/AdminStrengthIsometricDetail'
 import AdminStrengthRepsOnlyDetail from './detail/AdminStrengthRepsOnlyDetail'
+import AdminStrengthOlympicDetail from './detail/AdminStrengthOlympicDetail'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -136,7 +137,7 @@ export default function AdminEffortDetail() {
     let alive = true
     setMovement(undefined)
     supabase.from('movements')
-      .select('equipment, strength_type, unit_lock, uses_pair, weight_ladder_override')
+      .select('equipment, strength_type, lift_type, unit_lock, uses_pair, weight_ladder_override')
       .eq('name', baseExercise)
       .maybeSingle()
       .then(({ data }) => { if (alive) setMovement(data ?? null) })
@@ -180,6 +181,9 @@ export default function AdminEffortDetail() {
         return <AdminStrengthRepsOnlyDetail userId={userId} exercise={exercise} assistType={suffix} onBack={goBack} />
       if (eq === 'bodyweight')
         return <AdminStrengthBodyweightDetail userId={userId} exercise={exercise} onBack={goBack} />
+      // Olympic lifts are barbell — this MUST come before the weighted branch.
+      if (movement.lift_type === 'olympic')
+        return <AdminStrengthOlympicDetail userId={userId} exercise={exercise} onBack={goBack} />
       if (WEIGHTED_STANDARD_EQUIP.includes(eq))
         return (
           <AdminStrengthWeightedDetail

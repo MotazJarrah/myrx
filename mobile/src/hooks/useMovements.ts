@@ -15,6 +15,11 @@ export interface Movement {
   category: 'strength' | 'cardio' | 'mobility' | string
   strength_type?: 'isometric' | 'compound' | 'isolation' | string | null
   equipment?: 'barbell' | 'dumbbell' | 'kettlebell' | 'bodyweight' | 'machine' | 'assisted' | 'carry' | string | null
+  /** Olympic-weightlifting / ballistic flag (T088 Fix 1.2). When 'olympic', the
+   *  detail page routes to the low-rep %-of-best OlympicLiftDetail (Layout 9)
+   *  instead of the rep-max grid — these lifts fail on technique/bar-speed, not
+   *  fatigue, so a 20-rep projection is meaningless and unsafe. */
+  lift_type?: 'olympic' | 'ballistic' | null
   band_assist?: boolean | null
   knee_assist?: boolean | null
   cardio_mode?: 'pace' | 'duration' | string | null

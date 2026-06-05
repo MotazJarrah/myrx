@@ -590,7 +590,7 @@ The bottom tab bar replacement. A single floating circular button at screen-bott
 
 ### Weighted Standard next-target card — locked design spec
 
-This is the spec for the "Your next training target" card that appears on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile) for **weighted standard** movements: barbell, dumbbell, kettlebell, machine, strongman. Bodyweight, isometric, assisted, carry, band/knee variants each have their own detail view and are NOT covered by this spec.
+This is the spec for the "Your next training target" card that appears on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile) for **weighted standard** movements: barbell, dumbbell, kettlebell, machine, strongman. Bodyweight, isometric, assisted, carry, band/knee variants each have their own detail view and are NOT covered by this spec. **Olympic & ballistic barbell lifts** (`movements.lift_type = 'olympic'` — snatch / clean / jerk family + pulls) are ALSO excluded — they route to the Olympic card (Layout 9, spec below), because a rep-max grid is meaningless and unsafe for explosive lifts (T088 Model 1 / Fix 1.2).
 
 **Big weight algorithm (the number at the top of the card):**
 
@@ -648,6 +648,29 @@ When `uses_pair = true`:
 - Footer copy switches from `Pick the X lb kettlebell` to `Pick a pair of X lb kettlebells`.
 - RHS label switches from `kettlebell` to `each hand`.
 - Big weight is the per-kettlebell weight (mirrors how dumbbell weights are displayed per hand).
+
+---
+
+### Olympic lift detail card (Layout 9) — locked design spec
+
+This is the spec for the detail page covering **Olympic weightlifting lifts** on `[exercise].tsx` (mobile, `OlympicLiftDetail`) + the web coach mirror `AdminStrengthOlympicDetail.jsx`. Selected by `movements.lift_type = 'olympic'` — a CHECK-constrained `text` column (allowed `'olympic' | 'ballistic'`, NULL otherwise) added in migration `add_lift_type_to_movements` (June 2026). The 22 tagged moves are the barbell snatch / clean / jerk family + their power / hang / block / muscle variants + the pulls (Snatch Pull, Clean Pull, High Pull). (T088 Model 1 / Fix 1.2.)
+
+**Why a separate card:** these lifts fail on TECHNIQUE and BAR SPEED, not muscular fatigue. A rep-max grid (1RM…20RM) is meaningless for them — nobody does a 20-rep snatch — and showing one nudges the user toward a dangerous, nonexistent practice. So they get NO rep-max grid, NO adp zones, and a %-of-best card instead. Evidence: NSCA Essentials (Haff & Triplett); Catalyst Athletics; velocity-based-training literature. Real Olympic programming is 1–3 reps at 70–100%, stopping the set when bar speed drops.
+
+**Layout 9** (built on the Layout-2 isometric skeleton — fixed tile row → hero → chart → log, no swipe pill):
+1. **Header** — back chevron + movement name + `Best — N unit` subtitle (TickerNumber; "No efforts logged yet" when empty) + a static **OLYMPIC** category pill.
+2. **"Train by percentage" card:**
+   - A fixed **3-tile row** (tap to select; no swipe pill, no zones to navigate): **TECHNIQUE** (70% · × 2-3) · **BUILD** (85% · × 1-2) · **PEAK** (100%+ · × 1). Each tile shows its loadable weight + % + rep count.
+   - **Hero card** (blue chrome) for the selected tile: big TickerNumber weight + `LABEL · % · reps` sub-line + a **bar-speed cue** instead of reps-in-reserve, e.g. *"Build to a heavy single — a new PR. Make-or-miss; speed is the signal, never grind it out."*
+   - Attribution: `NSCA (Haff & Triplett) · Catalyst Athletics · velocity-based training`.
+3. **Chart** — best lift (est. 1RM) over time + personal-best reference line.
+4. **Log** — efforts history (read-only + per-effort delete on the coach mirror).
+
+**Weight math (LOCKED):** `best1RM` = max `parseOneRM` across efforts (valid because Olympic lifts are logged low-rep — no high-rep extrapolation). Technique / Build weights = `nearestLoadableWeight(best1RM × pct)` (nearest barbell rung). Peak = `nextLoadableAbove(best1RM)` (the next PR single to chase). All Olympic lifts are barbell, so loadable rounding is always barbell.
+
+**Dispatch order (LOCKED):** the `lift_type === 'olympic'` check MUST come before the weighted-standard branch (Olympic lifts are `equipment = 'barbell'`, which is in the weighted set) — both in mobile `[exercise].tsx` and web `AdminEffortDetail.jsx`.
+
+**Deferred (Fix 1.2b):** ballistic **kettlebell** moves (Swing, Snatch, Clean, Clean & Jerk, etc.) are explosive but **rep-based** (no 1-rep-max swing), so the %-of-best card does NOT fit them. They keep `lift_type` unset for now and still route to the weighted card; their correct rep/load-based treatment is a separate follow-up.
 
 ---
 

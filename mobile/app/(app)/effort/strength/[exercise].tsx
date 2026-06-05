@@ -3818,6 +3818,165 @@ function RepsOnlyDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OlympicLiftDetail (Layout 9) — Olympic barbell lifts (snatch / clean / jerk
+// family + pulls). These fail on TECHNIQUE and BAR SPEED, not muscular fatigue,
+// so they get NO rep-max grid and NO hypertrophy/endurance zones — instead, three
+// %-of-best intensity tiles (Technique 70% / Build 85% / Peak = next PR) and a
+// "stop when the bar slows" cue. Built on the Layout-2 (isometric) skeleton:
+// fixed tile row → hero → chart → log, no swipe pill. (T088 Model 1 / Fix 1.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type OlympicKey = 'technique' | 'build' | 'peak'
+type OlympicTarget = { key: OlympicKey; label: string; pct: number; pctText: string; repsText: string; cue: string }
+const OLYMPIC_TARGETS: ReadonlyArray<OlympicTarget> = [
+  { key: 'technique', label: 'TECHNIQUE', pct: 0.70, pctText: '70%',   repsText: '× 2-3',
+    cue: 'Light and fast — drill the positions. Stop the set the moment bar speed drops.' },
+  { key: 'build',     label: 'BUILD',     pct: 0.85, pctText: '85%',   repsText: '× 1-2',
+    cue: 'Heavy but crisp singles and doubles. Stop the moment the bar slows down.' },
+  { key: 'peak',      label: 'PEAK',      pct: 1.00, pctText: '100%+', repsText: '× 1',
+    cue: 'Build to a heavy single — a new PR. Make-or-miss; speed is the signal, never grind it out.' },
+]
+
+function OlympicLiftDetail({
+  exercise, efforts, onDelete, hideHeader,
+}: {
+  exercise: string
+  efforts: Effort[]
+  onDelete: (id: string) => void
+  hideHeader?: boolean
+}) {
+  const { profile } = useAuth()
+
+  // Best single. Olympic lifts are logged low-rep (1-3), so parseOneRM (the same
+  // 1RM the log already stored) is a valid proxy — no high-rep extrapolation.
+  const best = useMemo(() => {
+    let b: { oneRM: number; unit: string } | null = null
+    for (const e of efforts) {
+      const p = parseOneRM(e.value)
+      if (p && p.oneRM > 0 && (!b || p.oneRM > b.oneRM)) b = p
+    }
+    return b
+  }, [efforts])
+  const unit    = (best?.unit as 'lb' | 'kg') || ((profile?.weight_unit as 'lb' | 'kg') || 'lb')
+  const best1RM = best?.oneRM ?? 0
+
+  const [selKey, setSelKey] = useState<OlympicKey>('build')
+  const selTarget: OlympicTarget = OLYMPIC_TARGETS.find(t => t.key === selKey) ?? OLYMPIC_TARGETS[1]
+
+  // Peak = the next loadable single above the best (the PR to chase); technique /
+  // build = the nearest loadable rung at the % of best. All Olympic lifts are
+  // barbell, so the loadable rounding is always barbell.
+  const weightFor = (t: OlympicTarget): number => {
+    if (best1RM <= 0) return 0
+    if (t.key === 'peak') return nextLoadableAbove(best1RM, 'barbell', unit) ?? best1RM
+    return nearestLoadableWeight(best1RM * t.pct, 'barbell', unit)
+  }
+  const selWeight = weightFor(selTarget)
+
+  const chartData = efforts
+    .map(e => { const p = parseOneRM(e.value); return p && p.oneRM > 0 ? { ts: e.created_at, y: p.oneRM } : null })
+    .filter((p): p is { ts: string; y: number } => p !== null)
+
+  const renderTile = (t: OlympicTarget) => {
+    const activeTile = t.key === selKey
+    const w = weightFor(t)
+    return (
+      <Pressable
+        key={t.key}
+        onPress={() => setSelKey(t.key)}
+        style={[
+          { flex: 1, paddingVertical: 10, paddingHorizontal: 4, borderRadius: 10, borderWidth: 1, alignItems: 'center', gap: 3 },
+          activeTile
+            ? { borderColor: withAlpha(palette.blue[500], 0.6), backgroundColor: withAlpha(palette.blue[500], 0.10) }
+            : { borderColor: alpha(colors.border, 0.4), backgroundColor: alpha(colors.card, 0.2) },
+        ]}
+      >
+        <Text style={{ fontSize: 10, fontWeight: '700', letterSpacing: 0.4, color: activeTile ? palette.blue[400] : colors.mutedForeground }}>{t.label}</Text>
+        <Text style={{ fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'], fontSize: 16, color: activeTile ? palette.blue[400] : colors.foreground }}>{w}</Text>
+        <Text style={{ fontFamily: fonts.mono[500], fontVariant: ['tabular-nums'], fontSize: 10, color: colors.mutedForeground }}>{t.pctText}</Text>
+        <Text style={{ fontSize: 10, color: colors.mutedForeground }}>{t.repsText}</Text>
+      </Pressable>
+    )
+  }
+
+  return (
+    <View style={s.page}>
+      {!hideHeader && (
+        <View>
+          <BackButton />
+          <Text style={s.h1}>{exercise}</Text>
+          <View style={s.subRow}>
+            <Text style={s.subText}>{best1RM > 0 ? 'Best — ' : 'No efforts logged yet'}</Text>
+            {best1RM > 0 && <TickerNumber value={best1RM} fontSize={14} color={palette.blue[400]} fontWeight="600" />}
+            {best1RM > 0 && <Text style={s.subText}> {unit}</Text>}
+          </View>
+          <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
+            <Text style={s.carryTierBadgeText}>OLYMPIC</Text>
+          </View>
+        </View>
+      )}
+
+      <AnimateRise delay={0} style={s.card}>
+        <Text style={s.h2}>Train by percentage</Text>
+        <Text style={s.tinyText}>Pick an intensity — these lifts build on bar speed, not reps.</Text>
+
+        {best1RM > 0 ? (
+          <>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+              {OLYMPIC_TARGETS.map(renderTile)}
+            </View>
+
+            <NextTargetCallout>
+              <View style={s.calloutValueRow}>
+                <TickerNumber value={selWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                <Text style={s.calloutSubText}> {unit}</Text>
+              </View>
+              <Text style={s.tinyText}>{selTarget.label} · {selTarget.pctText} · {selTarget.repsText}</Text>
+              <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
+                <Text style={s.calloutLabel}>{selTarget.cue}</Text>
+              </View>
+            </NextTargetCallout>
+
+            <Text style={s.tinyText}>{'NSCA (Haff & Triplett) · Catalyst Athletics · velocity-based training'}</Text>
+          </>
+        ) : (
+          <Text style={[s.tinyText, { marginTop: 8 }]}>Log a {exercise} effort and your percentage targets will appear here.</Text>
+        )}
+      </AnimateRise>
+
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
+          <Text style={s.h2}>Best lift over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={chartData.length > 1 ? best1RM : null}
+            yTickFormatter={(v) => `${Math.round(v)}`}
+            tooltipValueFormatter={(v) => `${Math.round(v)} ${unit}`}
+            tooltipLabel="Est. 1RM"
+            yDomain={{
+              min: (mn) => Math.max(0, Math.round(mn * 0.9)),
+              max: (mx) => Math.round(mx * 1.1),
+            }}
+            caption={<Text style={s.tinyText}>Dashed line = personal best</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      <EffortsHistorySection
+        efforts={efforts}
+        onDelete={onDelete}
+        delay={500}
+        renderLeft={e => (<Text style={s.listRowDate}>{fmtDate(e.created_at)}</Text>)}
+        renderRight={e => {
+          const p = parseOneRM(e.value)
+          return <Text style={s.valBlue}>{p ? `${p.oneRM} ${p.unit}` : '—'}</Text>
+        }}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main StrengthDetail (handles loading + dispatch + standard rep-based view)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -3947,6 +4106,7 @@ function StrengthDetail({
   const isIsometric       = movementRecord?.strength_type === 'isometric'
   const isAssistedMachine = movementRecord?.equipment === 'assisted'
   const isCarry           = movementRecord?.equipment === 'carry'
+  const isOlympic         = movementRecord?.lift_type === 'olympic'
   // Sled Work consolidated route — the URL is the base name "Sled Work"
   // (without [Push] / [Pull] suffix). The actual movements in the DB are
   // `Sled Work [Push]` and `Sled Work [Drag]` — when the user taps the
@@ -4305,6 +4465,7 @@ function StrengthDetail({
   // etc. checks all fall through here.
   if (isSledWorkConsolidated) return <SledWorkConsolidatedDetail efforts={efforts} onDelete={handleDeleteEffort} />
   if (isIsometric)        return <IsometricDetail        exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
+  if (isOlympic)          return <OlympicLiftDetail      exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isAssistedMachine)  return <AssistedMachineDetail  exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} outerScrollGesture={outerScrollGesture} />
   if (isCarry)            return <CarryDetail            exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} outerScrollGesture={outerScrollGesture} />
   // Bodyweight assisted variants fall through to the consolidated render
