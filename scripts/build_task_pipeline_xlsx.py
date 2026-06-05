@@ -574,6 +574,12 @@ TASKS = [
      "Mobile [activity].tsx: StairMill hero rows (4455/4461) + cues (4155/4158) + VO2 whyText (4090), Air Bike hero (3609) + cues (3327/3330) + threshold whyText (3259), Swimming cue (693) -> interval wording. Mirror to web AdminCardio{StairMill,AirBike,Swimming}Detail.jsx. tsc + build/deploy + reload. DONE 2026-06-04: hero descriptors 'per rep'->'per interval' + 'est. per rep'->'est. per interval'; cues 'Each rep'->'Each interval', 'between reps'->'between intervals'; whyText 'Sustained hard reps'->'intervals' + 'Longer reps than sprint'->'Longer intervals'. Pace/Duration already used interval wording. Internal field names (reps/repKm/repSecs) + code comments left as-is. tsc clean; web deployed; mobile Fast-Refresh.",
      "mobile/app/(app)/effort/cardio/[activity].tsx; web AdminCardio*Detail.jsx",
      "2026-06-04"),
+
+    ("T085", "Hydration: verify BHI weighting wired into cups + attribution states the science", "Hydration", "Mobile", "Done",
+     "User 2026-06-04: (1) we researched the Beverage-Hydration-Index weighting for how much hydration each drink gives (milk ~1.5x, water/coffee/tea/diet-soda ~1.0x). Is it ACTUALLY wired into the CUPS number displayed, or are cups computed from raw mL? (2) The attribution/science line on the hydration page doesn't state the science the way other pages do (strength 'Epley · Brzycki · Lombardi'; cardio 'Riegel · Daniels'...'). Verify both + fix.",
+     "Read mobile/app/(app)/hydration.tsx: confirm cups = round(effectiveBhiMl/250) of round(targetMl/250) using the BHI multiplier (not raw mL); check the attribution line content + styling. Fix the cups wiring if wrong + add/correct the BHI attribution line to match other pages. VERIFIED+FIXED 2026-06-04: (1) BHI IS wired correctly — DRINKS registry sets multipliers (milk 1.5, rest 1.0, Maughan 2016), todayEffectiveMl = sum(amount_ml × multiplierFor(drink_type)), cupsDone = round(todayEffectiveMl/250); milk even shows a ×1.5 badge. No cups fix needed. (2) Attribution credited ONLY the target formula (35 mL/kg, National Academies/Mayo/EFSA), not the BHI — added 'Maughan 2016 · ... hydration-weighted' to mobile hydration.tsx + mirrored to web AdminUserHydration.jsx. tsc clean, deployed.",
+     "mobile/app/(app)/hydration.tsx",
+     "2026-06-04"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────

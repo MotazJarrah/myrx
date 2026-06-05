@@ -233,8 +233,8 @@ export default function AdminUserHydration({ userId, profile }) {
 
   const hasWeight = bwKg != null || (profile?.current_weight ?? 0) > 0
   const targetAttribution = hasWeight
-    ? 'National Academies · Mayo Clinic · EFSA · 35 mL/kg bodyweight'
-    : 'National Academies · EFSA · sex-based estimate'
+    ? 'National Academies · Mayo Clinic · EFSA · Maughan 2016 · 35 mL/kg, hydration-weighted'
+    : 'National Academies · EFSA · Maughan 2016 · sex-based, hydration-weighted'
 
   if (loading) {
     return <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>

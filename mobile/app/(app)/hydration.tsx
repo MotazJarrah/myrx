@@ -456,8 +456,8 @@ export default function Hydration() {
   // mL is fine here even when the display unit is oz (it's the science basis,
   // not the user's reading).
   const targetAttribution = hasWeight
-    ? `National Academies · Mayo Clinic · EFSA · 35 mL/kg bodyweight`
-    : `National Academies · EFSA · sex-based estimate`
+    ? `National Academies · Mayo Clinic · EFSA · Maughan 2016 · 35 mL/kg, hydration-weighted`
+    : `National Academies · EFSA · Maughan 2016 · sex-based, hydration-weighted`
 
   return (
     <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
