@@ -358,7 +358,7 @@ export default function AdminCardioAirBikeDetail({
           </p>
         ) : (
           <p className="mt-0.5 text-sm text-muted-foreground">
-            No efforts logged yet · using {baselineCalsPerMin} cal/min as a starting estimate
+            No efforts logged yet
           </p>
         )}
         <span className="mt-1.5 inline-flex items-center rounded border border-amber-500/30 bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-400">
@@ -373,9 +373,6 @@ export default function AdminCardioAirBikeDetail({
           {/* ── 2. Progression plan card ── */}
           <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
             <h2 className="text-sm font-bold">Your progression plan</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Three zones to train, each anchored on your cal/min rate. Swipe the pill to switch zones.
-            </p>
 
             {/* Zone pill row — single active pill flanked by chevrons. Web stays
                 simple click-to-navigate (no swipe choreography). Amber theme. */}
@@ -464,10 +461,6 @@ export default function AdminCardioAirBikeDetail({
                 <p className="text-sm text-foreground">{selectedCue}</p>
               </div>
             </div>
-
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Cal/min anchored zones · watts derived (cal/min × 17.4) · gender-calibrated baseline
-            </p>
           </AnimateRise>
 
           {/* ── 3. Cal/min over time chart (higher = better; NOT reversed) ── */}

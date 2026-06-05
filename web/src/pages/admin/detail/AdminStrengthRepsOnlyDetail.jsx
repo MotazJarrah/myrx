@@ -139,14 +139,6 @@ export default function AdminStrengthRepsOnlyDetail({
     : assistType === 'knee'    ? 'Knee assisted'
                                : 'Band assisted'
 
-  // Static progression hint (mirror of the athlete's `hintText`).
-  const hintText =
-    assistType === 'band+knee'
-      ? 'Progress by using lighter bands and removing knee assist one step at a time'
-      : assistType === 'knee'
-        ? 'Build strength in the knee-assisted position to progress to full reps'
-        : 'Work towards unassisted reps by progressively using lighter bands'
-
   // ── Load efforts (suffixed movement only) + profile ──────────────────────────
   useEffect(() => {
     let cancelled = false
@@ -240,9 +232,7 @@ export default function AdminStrengthRepsOnlyDetail({
         <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
       ) : bestReps <= 0 ? (
         <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
-          <p className="text-sm text-muted-foreground">
-            This client hasn't logged any efforts for this movement yet.
-          </p>
+          <p className="text-sm text-muted-foreground">No efforts logged yet</p>
         </AnimateRise>
       ) : (
         <>
@@ -261,7 +251,6 @@ export default function AdminStrengthRepsOnlyDetail({
                 <TickerNumber value={bestReps} className="font-mono text-3xl font-bold text-blue-400" />
                 <span className="text-blue-400">reps</span>
               </div>
-              <p className="mt-2 text-[11px] leading-4 text-muted-foreground">{hintText}</p>
             </div>
           </AnimateRise>
 

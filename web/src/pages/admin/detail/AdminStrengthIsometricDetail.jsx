@@ -356,10 +356,6 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
               </div>
             </div>
 
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Greyed out tiles are milestones not yet reached
-            </p>
-
             {/* Next-target hero (or all-cleared trophy). Mirrors the athlete's
                 NextTargetCallout: blue chrome + uppercase title, NO min-height
                 (the iso callout deliberately uses the base style with no
@@ -371,8 +367,7 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
               {allCleared ? (
                 <div className="flex flex-col items-center gap-2 py-2">
                   <Trophy className="h-7 w-7 text-blue-400" strokeWidth={2} />
-                  <p className="text-sm font-medium text-foreground">You've hit the practical ceiling</p>
-                  <p className="text-[11px] text-muted-foreground">Anything beyond 2 min is bonus</p>
+                  <p className="text-sm font-medium text-foreground">All milestones cleared</p>
                 </div>
               ) : (
                 renderNextTarget()

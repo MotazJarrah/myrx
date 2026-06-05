@@ -732,9 +732,6 @@ export default function AdminCardioPaceDetail({ userId, activity, onBack }) {
           {isGroupA && hasBestPace && selectedStep && selZoneCfg && (
             <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
               <h2 className="text-sm font-bold">Your progression plan</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                This is your personalized adaptation plan — follow it to see your results improve.
-              </p>
 
               {/* Tile row with chevrons between each pair, indicating forward
                   direction. The tile row IS both the navigation and the
@@ -858,25 +855,16 @@ export default function AdminCardioPaceDetail({ userId, activity, onBack }) {
                   )}
                 </div>
               </div>
-
-              {/* Science attribution. */}
-              <p className="mt-3 text-[11px] text-muted-foreground">
-                Riegel · Daniels' · Seiler · pace zones &amp; polarized 80/20
-              </p>
             </AnimateRise>
           )}
 
-          {/* Empty-state hint for Group A users with no efforts yet. */}
+          {/* Empty-state for Group A users with no efforts yet. */}
           {isGroupA && !hasBestPace && (
             <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
               <h2 className="text-sm font-bold">Progression plan</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Log a first {activity} effort and the personalized plan will appear here.
-                Every step adapts to the client's latest pace.
+                No {activity} logged yet.
               </p>
-              {/* Copy reframed for the coach surface ("the client's latest pace"
-                  vs the athlete's "your latest pace"). Otherwise verbatim from
-                  mobile PaceDetail's empty state. */}
             </AnimateRise>
           )}
 

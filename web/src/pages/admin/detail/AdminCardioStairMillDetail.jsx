@@ -453,9 +453,6 @@ export default function AdminCardioStairMillDetail({
           {selectedStep && selectedRx && selectedCfg && (
             <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
               <h2 className="text-sm font-bold">Your progression plan</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                This is the client's personalized adaptation plan — follow it to see their results improve.
-              </p>
 
               {/* Tile row with chevrons between each pair, indicating forward
                   direction. The tile row IS both the navigation and the
@@ -559,11 +556,6 @@ export default function AdminCardioStairMillDetail({
                   <p className="text-sm text-foreground">{selectedStep.cue}</p>
                 </div>
               </div>
-
-              {/* Science attribution (verbatim mirror of the athlete). */}
-              <p className="mt-3 text-[11px] text-muted-foreground">
-                Seiler polarized 80/20 · session shapes from Allison / Honda / Boreham · ACSM
-              </p>
             </AnimateRise>
           )}
 

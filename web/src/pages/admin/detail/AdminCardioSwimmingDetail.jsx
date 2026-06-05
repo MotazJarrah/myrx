@@ -444,9 +444,6 @@ function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) 
       {hasCSS && selectedStep ? (
         <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
           <h2 className="text-sm font-bold">Your progression plan</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            This is the client's personalized adaptation plan — follow it to see their results improve.
-          </p>
 
           {/* COMING UP queue — 8 upcoming steps, horizontal scroll with chevrons.
               Click a tile to preview it in the hero card. */}
@@ -543,17 +540,12 @@ function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) 
               <p className="text-sm text-foreground">{selectedStep.cue}</p>
             </div>
           </div>
-
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Riegel · Maglischo · Counsilman · Costill — CSS-anchored zones
-          </p>
         </AnimateRise>
       ) : (
         <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
           <h2 className="text-sm font-bold">Progression plan</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            No {emptyStateLabel} efforts logged yet. Once this client logs a {emptyStateLabel} swim,
-            their personalized plan appears here.
+            No {emptyStateLabel} efforts logged yet.
           </p>
         </AnimateRise>
       )}
@@ -611,7 +603,7 @@ function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) 
             </ResponsiveContainer>
           ) : (
             <p className="py-6 text-center text-xs text-muted-foreground">
-              Log a second effort to see the trend.
+              Only one effort logged.
             </p>
           )}
           <p className="mt-2 text-[11px] text-muted-foreground">Dashed = personal best</p>

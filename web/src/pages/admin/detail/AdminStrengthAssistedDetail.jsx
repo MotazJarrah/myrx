@@ -434,9 +434,6 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
           {showProjectionAndHero && (
             <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
               <h2 className="text-sm font-bold">Rep-max projections</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Pick an adaptation zone, then tap a rep target.
-              </p>
 
               {/* adp-zone pill row — single active pill flanked by chevrons.
                   Web stays simple click-to-navigate (no swipe choreography). */}
@@ -507,10 +504,6 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                   )
                 })}
               </div>
-
-              <p className="mt-2 text-[11px] text-muted-foreground">
-                Epley · Brzycki · Lombardi averaged · % of bodyweight
-              </p>
 
               {/* ── 5. Next-target hero card ── */}
               {selProj && (

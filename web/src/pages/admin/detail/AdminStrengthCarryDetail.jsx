@@ -274,7 +274,7 @@ function MiniChart({ data, label, best, unit, stroke }) {
         </ResponsiveContainer>
       ) : (
         <p className="py-5 text-center text-xs text-muted-foreground">
-          Log a second effort to see the trend.
+          Not enough data to show a trend yet.
         </p>
       )}
       <p className="mt-1 text-[11px] text-muted-foreground">Dashed line = personal best {label.toLowerCase()}</p>
@@ -379,7 +379,6 @@ function CarrySurface({
     return e.weight
   }
   const distInDisplayUnit = (e) => distUnit === 'ft' ? e.distM / M_PER_FT : e.distM
-  const distMToDisplay    = (m) => distUnit === 'ft' ? m / M_PER_FT : m
 
   const wUnit = displayUnit
   const dUnit = distUnit
@@ -446,7 +445,7 @@ function CarrySurface({
 
       let cueLine
       if (!hasTargets) {
-        cueLine = `Log your first ${verb.toLowerCase()} to see a target.`
+        cueLine = ''
       } else if (zoneId === 'max_load') {
         cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — focus on grip and posture`
       } else if (zoneId === 'distance_build') {
@@ -464,12 +463,6 @@ function CarrySurface({
   const showZoneAndHero = isRatio ? (bwLoaded && bwForMath != null) : true
   const showBwGate      = isRatio && bwLoaded && !bwForMath
   const cascadeReady    = isRatio ? bwLoaded : true   // gates chart + log (cascade order)
-
-  // Tier-criteria subtitle for the zone card.
-  const beginnerMinDistDisplay = Math.round(distMToDisplay(cfg.tiers.beginner[1]))
-  const tierLadderSubtitle = isRatio
-    ? `Tiers based on weight × bodyweight at ≥ ${beginnerMinDistDisplay} ${dUnit} walked`
-    : `Tiers based on absolute load at ≥ ${beginnerMinDistDisplay} ${dUnit} walked`
 
   // ── Zone navigation ─────────────────────────────────────────────────────────
   const zoneIdx   = CARRY_ZONE_ORDER.indexOf(selZone)
@@ -544,10 +537,6 @@ function CarrySurface({
       {showZoneAndHero && (
         <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
           <h2 className="text-sm font-bold">Adaptation zone</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Pick a training focus, then aim at the next target.
-          </p>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{tierLadderSubtitle}.</p>
 
           {/* Zone pill row — single active pill flanked by chevrons (click nav). */}
           <div className="mt-3 mb-1 flex items-center justify-center gap-3">
@@ -635,10 +624,12 @@ function CarrySurface({
                 <p className="mt-2 text-sm text-muted-foreground">No qualifying efforts in this zone yet.</p>
               )}
 
-              {/* Thin separator + cue line. */}
-              <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-                <p className="text-sm text-foreground">{activeZone.cueLine}</p>
-              </div>
+              {/* Thin separator + cue line (the prescription). */}
+              {activeZone.cueLine && (
+                <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
+                  <p className="text-sm text-foreground">{activeZone.cueLine}</p>
+                </div>
+              )}
             </div>
           )}
         </AnimateRise>

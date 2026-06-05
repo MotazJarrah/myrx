@@ -67,7 +67,7 @@ import { supabase } from '../../../lib/supabase'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
-import { ArrowLeft, Info, Check, PartyPopper } from 'lucide-react'
+import { ArrowLeft, Info, Check } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -662,11 +662,10 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
             <span className="text-sm text-muted-foreground">max attempts</span>
           </div>
           <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-            <p className="flex items-center gap-1.5 text-sm">
-              <PartyPopper className="h-3.5 w-3.5 text-blue-400" />
-              <span className="text-foreground">You're ready for <span className="font-bold">{bwTierLabel(nextT)}</span></span>
+            <p className="text-sm">
+              <span className="text-muted-foreground">Ready for </span>
+              <span className="font-bold text-foreground">{bwTierLabel(nextT)}</span>
             </p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">Log a {bwTierLabel(nextT)} effort to promote</p>
           </div>
         </>
       )
@@ -717,7 +716,6 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
               <TickerNumber value={selectedBWTile?.reps ?? selectedRM} className="font-mono text-4xl font-bold text-blue-400" />
               <span className="text-sm text-muted-foreground">{(selectedBWTile?.reps ?? selectedRM) > 1 ? 'reps' : 'rep'}</span>
             </div>
-            <p className="mt-1 text-[11px] text-muted-foreground">Locked — keep building reps</p>
           </>
         )
       }
@@ -859,7 +857,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
       ) : bwLoggedTiers.length === 0 ? (
         <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
           <p className="text-sm text-muted-foreground">
-            Log your first effort to start tracking your progression.
+            No efforts logged yet.
           </p>
         </AnimateRise>
       ) : (
@@ -898,11 +896,6 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
                   ? (weightedProgression ? 'Max attempt projections' : 'Max attempts')
                   : 'Max attempts'}
               </h2>
-              <p className="text-xs text-muted-foreground">
-                {isFullRxT && weightedProgression
-                  ? 'Add the proposed load to train each rep target at the same intensity as your current max'
-                  : 'Each tile is a rep-count milestone — checkmarks fill in as you hit them'}
-              </p>
             </div>
 
             {/* Tile row — horizontal scroll w/ fading edges. */}
@@ -913,9 +906,6 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
               <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-card to-transparent" />
               <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-card to-transparent" />
             </div>
-            <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Greyed out tiles are rep counts not yet achieved
-            </p>
 
             {/* ── Hero card ── */}
             <div className="mt-3 rounded-xl border border-blue-500/30 bg-blue-500/[0.08] p-4">
@@ -994,7 +984,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
                 </ResponsiveContainer>
               ) : (
                 <p className="py-6 text-center text-xs text-muted-foreground">
-                  Log a second effort to see the trend.
+                  Not enough efforts logged yet.
                 </p>
               )}
               <p className="mt-2 text-[11px] text-muted-foreground">

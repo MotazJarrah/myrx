@@ -308,7 +308,7 @@ export default function AdminCardioRuckingDetail({
         : ''
       let cueLine
       if (!hasTargets) {
-        cueLine = 'Log your first ruck to see a target.'
+        cueLine = 'No rucks logged yet'
       } else {
         switch (zone) {
           case 'max_load':
@@ -416,9 +416,6 @@ export default function AdminCardioRuckingDetail({
           {/* ── 2. Adaptation zone card — pill + info panel + dual-target hero ── */}
           <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
             <h2 className="text-sm font-bold">Adaptation zone</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Pick a training focus, then aim at the next target.
-            </p>
 
             {/* Zone pill row — single active pill flanked by chevrons.
                 Web stays simple click-to-navigate (no swipe choreography). */}
@@ -505,10 +502,6 @@ export default function AdminCardioRuckingDetail({
                 <p className="text-sm text-foreground">{selectedZone.cueLine}</p>
               </div>
             </div>
-
-            <p className="mt-2.5 text-[11px] text-muted-foreground">
-              Load + distance progression · GoRuck tier ladder
-            </p>
           </AnimateRise>
 
           {/* ── 3. Progress charts — two stacked single-axis lines ── */}
@@ -565,7 +558,7 @@ export default function AdminCardioRuckingDetail({
                 </ResponsiveContainer>
               ) : (
                 <p className="py-6 text-center text-xs text-muted-foreground">
-                  Log a second ruck to see the weight trend.
+                  Not enough data for the weight trend yet.
                 </p>
               )}
 
@@ -616,7 +609,7 @@ export default function AdminCardioRuckingDetail({
                 </ResponsiveContainer>
               ) : (
                 <p className="py-6 text-center text-xs text-muted-foreground">
-                  Log a second ruck to see the distance trend.
+                  Not enough data for the distance trend yet.
                 </p>
               )}
             </AnimateRise>
