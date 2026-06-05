@@ -478,12 +478,6 @@ function HistoryValueChip({ value, color }) {
 
 function RestingAssessment({ bpm, bands }) {
   const band = classifyResting(bpm, bands)
-  const tip =
-    band.key === 'athlete' || band.key === 'excellent'
-      ? 'Excellent cardio fitness. Maintained with consistent Z2 work.'
-      : band.key === 'good' || band.key === 'aboveAvg'
-        ? 'Healthy territory. Lower it further with Z2 cardio 3–5×/week.'
-        : 'Lower resting HR comes from consistent Z2 cardio, good sleep, and hydration.'
 
   // Where the marker sits within the user's band (mirrors mobile's SpectrumGauge).
   const userIx = bands.findIndex(b => b.key === band.key)
@@ -549,8 +543,6 @@ function RestingAssessment({ bpm, bands }) {
           </span>
         ))}
       </div>
-
-      <p className="mt-3 text-xs text-muted-foreground leading-relaxed">{tip}</p>
     </div>
   )
 }
@@ -569,8 +561,7 @@ function HrRangeChart({ data }) {
 
   return (
     <div className="rounded-xl border border-border bg-card p-4">
-      <p className="text-sm font-semibold text-foreground mb-0.5">Heart rate — last 7 days</p>
-      <p className="text-xs text-muted-foreground mb-3">Daily resting low, average, and peak (bpm).</p>
+      <p className="text-sm font-semibold text-foreground mb-3">Heart rate — last 7 days</p>
       <ResponsiveContainer width="100%" height={160}>
         <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
           <XAxis

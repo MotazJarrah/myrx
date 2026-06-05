@@ -225,16 +225,9 @@ export default function AdminUserHydration({ userId, profile }) {
   }, [logs])
 
   // Hero figures — friendly "cups" readout (a cup ≈ 250 mL effective).
-  const remainingMl = Math.max(0, targetMl - todayEffectiveMl)
-  const overTarget  = todayEffectiveMl >= targetMl
   const cupsTarget  = Math.max(1, Math.round(targetMl / ML_PER_CUP))
   const cupsDone    = Math.round(todayEffectiveMl / ML_PER_CUP)
   const pct = targetMl > 0 ? Math.min(100, Math.round((todayEffectiveMl / targetMl) * 100)) : 0
-
-  const hasWeight = bwKg != null || (profile?.current_weight ?? 0) > 0
-  const targetAttribution = hasWeight
-    ? 'National Academies · Mayo Clinic · EFSA · Maughan 2016 · 35 mL/kg, hydration-weighted'
-    : 'National Academies · EFSA · Maughan 2016 · sex-based, hydration-weighted'
 
   if (loading) {
     return <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
@@ -288,20 +281,7 @@ export default function AdminUserHydration({ userId, profile }) {
           </div>
         </div>
 
-        {/* Helper line — mirrors the athlete's coaching copy */}
-        <p className="text-[13px] text-foreground/90 text-center leading-snug">
-          {overTarget
-            ? 'Target hit. Extra fluid is fine when activity or heat ramps up.'
-            : remainingMl > 0
-              ? `${fmtVolume(remainingMl, fluidUnit)} ${fluidUnit} to go today. Steady sips beat chugging it all at once.`
-              : 'No sips logged yet today.'}
-        </p>
-
-        {/* Eligibility note + science attribution (mirrored) */}
-        <p className="text-[11px] text-muted-foreground text-center leading-tight">
-          Only no- and low-calorie, non-alcoholic drinks count toward hydration — milk included.
-        </p>
-        <p className="text-[11px] text-muted-foreground leading-tight">{targetAttribution}</p>
+        {/* Coach view: athlete helper / eligibility / attribution copy removed (T086) */}
       </div>
 
       {/* ── 7-day chart ── */}

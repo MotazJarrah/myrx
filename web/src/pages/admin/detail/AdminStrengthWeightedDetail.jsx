@@ -504,9 +504,6 @@ export default function AdminStrengthWeightedDetail({
           {/* ── 2. Rep-max projections card ── */}
           <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
             <h2 className="text-sm font-bold">Rep-max projections</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Pick an adaptation zone, then tap a rep target.
-            </p>
 
             {/* adp-zone pill row — single active pill flanked by chevrons.
                 Web stays simple click-to-navigate (no swipe choreography). */}
@@ -583,21 +580,13 @@ export default function AdminStrengthWeightedDetail({
               <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-card to-transparent" />
             </div>
 
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Epley · Brzycki · Lombardi averaged · % of 1RM
-            </p>
-
             {/* ── 3. Next-target hero card ── */}
             {selectedProjection && (
               <div
                 className="mt-3 rounded-xl border border-blue-500/30 bg-blue-500/[0.08] p-4"
                 style={{ minHeight: 220 }}
               >
-                {/* Card title — the athlete's NextTargetCallout renders this
-                    "Your next training target" header at the top of the hero
-                    card. (The CLAUDE.md spec claims the title was removed, but
-                    the actual mobile component still renders it via
-                    NextTargetCallout's `title` prop — code is source of truth.) */}
+                {/* Card title — labels the prescription block for the coach. */}
                 <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-blue-400">
                   Your next training target
                 </p>

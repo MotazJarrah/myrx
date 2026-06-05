@@ -25,7 +25,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
-import { Moon, Clock, BedDouble, Activity, Brain, Info, Watch } from 'lucide-react'
+import { Moon, Clock, BedDouble, Activity, Brain, Watch } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
 // ── Time-based classifiers (copied from mobile/app/(app)/sleep.tsx) ───────────
@@ -209,7 +209,7 @@ function DurationChart({ nights, targetHours }) {
           />
         </LineChart>
       </ResponsiveContainer>
-      <p className="mt-2 text-[11px] text-muted-foreground">Dashed line = your age-based target ({fmtHoursOnly(targetHours)}).</p>
+      <p className="mt-2 text-[11px] text-muted-foreground">Dashed line = age-based target ({fmtHoursOnly(targetHours)}).</p>
     </div>
   )
 }
@@ -239,11 +239,6 @@ function DimensionRow({ icon: Icon, label, dim, isFirst, hideAction }) {
       {!hideAction && dim.action && (
         <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{dim.action}</p>
       )}
-
-      {/* Science / "why this matters" — read-only equivalent of the mobile
-          info-pill expansion. Rendered inline (no toggle) so the coach sees
-          the full context without interaction. */}
-      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/80">{dim.whyText}</p>
     </div>
   )
 }
@@ -293,9 +288,8 @@ export default function AdminUserSleep({ userId, profile }) {
 
   // ── Dimension: Sleep duration ──────────────────────────────────────────────
   const durationDim = useMemo(() => {
-    const whyText = "How long they sleep each night. It's the foundation under cognition, mood, immunity, and hormones — when this slips, everything else slips with it."
     if (!sleepAvg) {
-      return { status: 'unknown', headline: `Target ${fmtHoursOnly(targetHours)}`, action: 'No nights logged yet.', whyText }
+      return { status: 'unknown', headline: `Target ${fmtHoursOnly(targetHours)}`, action: 'No nights logged yet.' }
     }
     const status = classifyTotal(sleepAvg.avgDurS, targetSecs)
     const headline = `avg ${fmtHoursMinutes(sleepAvg.avgDurS)} → target ${fmtHoursOnly(targetHours)}`
@@ -307,14 +301,13 @@ export default function AdminUserSleep({ userId, profile }) {
         ? `About ${offMin} min over target.`
         : `About ${offMin} min short of target.`
     }
-    return { status, headline, action, whyText }
+    return { status, headline, action }
   }, [sleepAvg, targetSecs, targetHours])
 
   // ── Dimension: Bedtime (bedtime offset + consistency, worst-of-two) ─────────
   const bedtimeDim = useMemo(() => {
-    const whyText = "When they fall asleep, and how steady it stays night to night. The body anchors its internal rhythm to wake time — drift the wake time and hormones, temperature, and digestion drift with it."
     if (!sleepAvg) {
-      return { status: 'unknown', headline: 'No data yet', action: 'No nights logged yet.', whyText }
+      return { status: 'unknown', headline: 'No data yet', action: 'No nights logged yet.' }
     }
     const bedStatus = classifyTotal(sleepAvg.avgBedMin * 60, sleepAvg.targetBedMin * 60)
     let consistencyStatus = 'unknown'
@@ -331,29 +324,27 @@ export default function AdminUserSleep({ userId, profile }) {
     } else {
       action = `Bedtime varies night to night (±${Math.round(sleepAvg.bedSdMin)} min).`
     }
-    return { status, headline, action, whyText }
+    return { status, headline, action }
   }, [sleepAvg, last7.length])
 
   // ── Dimension: Deep sleep (watch only) ─────────────────────────────────────
   const deepDim = useMemo(() => {
-    const whyText = "The non-dreaming stage where the body does its physical repairs — growth hormone release, immune maintenance, brain waste clearance."
     const withStages = last7.filter(s => s.deep_s != null)
     if (withStages.length === 0) {
-      return { status: 'unknown', headline: 'Optimal 90 min', action: 'No watch stage data — needs a worn watch overnight.', whyText }
+      return { status: 'unknown', headline: 'Optimal 90 min', action: 'No watch stage data yet.' }
     }
     const avg = withStages.reduce((a, s) => a + (s.deep_s ?? 0), 0) / withStages.length
-    return { status: classifyStage(avg, DEEP_TARGET_S), headline: `avg ${fmtHoursMinutes(avg)} → optimal 90 min`, action: '', whyText }
+    return { status: classifyStage(avg, DEEP_TARGET_S), headline: `avg ${fmtHoursMinutes(avg)} → optimal 90 min`, action: '' }
   }, [last7])
 
   // ── Dimension: REM sleep (watch only) ──────────────────────────────────────
   const remDim = useMemo(() => {
-    const whyText = "The dream stage where the brain consolidates learning, regulates emotion, and processes memory. It clusters in the back half of the night."
     const withStages = last7.filter(s => s.rem_s != null)
     if (withStages.length === 0) {
-      return { status: 'unknown', headline: 'Optimal 90 min', action: 'No watch stage data — needs a worn watch overnight.', whyText }
+      return { status: 'unknown', headline: 'Optimal 90 min', action: 'No watch stage data yet.' }
     }
     const avg = withStages.reduce((a, s) => a + (s.rem_s ?? 0), 0) / withStages.length
-    return { status: classifyStage(avg, REM_TARGET_S), headline: `avg ${fmtHoursMinutes(avg)} → optimal 90 min`, action: '', whyText }
+    return { status: classifyStage(avg, REM_TARGET_S), headline: `avg ${fmtHoursMinutes(avg)} → optimal 90 min`, action: '' }
   }, [last7])
 
   const hasStageData = deepDim.status !== 'unknown' || remDim.status !== 'unknown'
@@ -369,12 +360,7 @@ export default function AdminUserSleep({ userId, profile }) {
     return (
       <div className="rounded-xl border border-border bg-card py-12 text-center">
         <Moon className="mx-auto mb-3 h-8 w-8 text-indigo-400" />
-        <h2 className="text-base font-semibold">No sleep tracked yet</h2>
-        <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-          This client hasn't synced any sleep yet. Sleep data flows in when they keep their phone near
-          the bed overnight (total sleep + bedtime) or wear a watch overnight (full picture including
-          deep and REM stages).
-        </p>
+        <h2 className="text-base font-semibold">No sleep data yet</h2>
       </div>
     )
   }
@@ -419,28 +405,21 @@ export default function AdminUserSleep({ userId, profile }) {
       {/* Sleep Targets — duration + bedtime */}
       <div className="rounded-xl border border-border bg-card p-4">
         <p className="text-sm font-semibold text-foreground">Sleep Targets</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">Each night should land on these targets.</p>
         <div className="mt-3">
           <DimensionRow icon={Clock} label="Sleep Duration" dim={durationDim} isFirst />
           <DimensionRow icon={BedDouble} label="Bedtime" dim={bedtimeDim} />
         </div>
-        <p className="mt-4 border-t border-border/40 pt-3 text-center text-[11px] leading-relaxed text-muted-foreground">
-          AASM · NSF · Li 2022 · Windred · Wittmann · Czeisler — sleep-need targets by age, and a bedtime anchored to wake time.
-        </p>
       </div>
 
       {/* Deep & REM Recovery */}
       <div className="rounded-xl border border-border bg-card p-4">
         <p className="text-sm font-semibold text-foreground">Deep &amp; REM Recovery</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Deep and REM aren't targets to chase — they improve on their own as duration and schedule do.
-        </p>
 
         {!hasStageData && (
           <div className="mt-3 flex items-center gap-2.5 rounded-lg border border-indigo-500/25 bg-indigo-500/10 px-3 py-2.5">
             <Watch className="h-4 w-4 shrink-0 text-indigo-400" />
             <p className="text-xs leading-snug text-foreground">
-              No watch stage data in the last 7 nights. Deep, REM, and the sleep cycle need a worn watch overnight.
+              No watch stage data in the last 7 nights.
             </p>
           </div>
         )}
