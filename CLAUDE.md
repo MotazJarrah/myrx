@@ -614,19 +614,21 @@ This is the spec for the "Your next training target" card that appears on `Stren
 - Big weight number on the left + equipment-specific RHS on the right.
 - Equipment-specific footer line (e.g., `45 lb bar + 130 lb per side`, `Pick the 35 lb kettlebell`, `Set the pin to 60 lb`, `Use the X lb stone, sandbag, or D-ball (or closest available)`, `Pick a pair of X lb kettlebells` when `uses_pair = true`).
 - Thin separator (blue/15).
-- **Single coaching cue** below the separator (no "this or that"):
-  - Non-1RM tile: `Push {K+1} reps at {cue_weight} lb · {sets range} sets · rest {range}`
-  - 1RM tile (benchmark): `Hit one clean rep at {big_weight} lb · benchmark attempt`
+- **Coaching cue** below the separator — prescribes a submaximal WORKING weight, NOT the rep-max (T088 Model 1 / Fix 1.1, locked 2026-06-05). The big number + equipment footer stay the PR target (`big_weight`); the cue describes the day-to-day work and the path to that PR:
+  - Non-1RM tile (4 short lines): `Do {sets} of {K} reps at {working_weight} {unit}` · `A weight you could do {K + reserve} — but only do {K}` · `Add {jump} {unit} when all sets are clean · test {K} × {big_weight} {unit} when it's in reach` · `Rest {rest} between sets`.
+    - `working_weight = nearestLoadableWeight(projection at (K + zone reserve) reps)` — snaps to the NEAREST loadable rung (128→130, 126→125), not round-up. `jump` = the equipment's loadable increment.
+    - Science: working sets must be submaximal with reps in reserve (Prilepin's loading table, RIR/RPE autoregulation, ACSM); you reach the PR via double progression, and the rep-max is a periodic *test*. `nearestLoadableWeight` + the `reserve` field live in `mobile/src/lib/formulas.ts`; the web coach mirror (`AdminStrengthWeightedDetail.jsx`) has byte-equivalent local copies.
+  - 1RM tile (benchmark): `Hit one clean rep at {big_weight} {unit}` · `Benchmark attempt`.
 
 **Per-zone defaults (uneditable, globally locked):**
 
 | adp zone | rep range | sets | RIR | rest |
 |----------|-----------|------|-----|------|
-| strength | 1-5 reps | 4-5 sets | 1 rep short of failure | 3-5 min between sets |
-| hypertrophy | 6-12 reps | 3-4 sets | 2 reps short of failure | 2-3 min between sets |
-| endurance | 13+ reps | 2-3 sets | 3 reps short of failure | 45-60 sec between sets |
+| strength | 1-5 reps | 4-5 sets | leave ~2 in reserve | 3-5 min between sets |
+| hypertrophy | 6-12 reps | 3-4 sets | leave ~2 in reserve | 2-3 min between sets |
+| endurance | 13+ reps | 2-3 sets | leave ~1 in reserve | 45-60 sec between sets |
 
-RIR is a coaching cue that lives in the adp-zone info panel (not in the prescription line). The cue line itself only mentions sets and rest.
+The reps-in-reserve column = the `reserve` field, and it now drives BOTH the working weight AND the cue line ("a weight you could do {K + reserve} — but only do {K}"). The 2 / 2 / 1 values **correct a previously-inverted set** (was strength 1 / hypertrophy 2 / endurance 3, which had it backwards): the evidence (Refalo 2023; Schoenfeld) says strength is robust to proximity-to-failure so it can leave MORE in reserve, while endurance trains CLOSEST to failure. `whyText` (the adaptation science) still lives in the info panel.
 
 **Tile grid UX (replaces the previous 5-column grid):**
 
