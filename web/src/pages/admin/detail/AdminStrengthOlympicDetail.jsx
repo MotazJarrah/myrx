@@ -256,24 +256,20 @@ export default function AdminStrengthOlympicDetail({ userId, exercise, onBack })
 
                 {/* Next-target hero — mirrors the athlete NextTargetCallout chrome. */}
                 <div className="mt-3 flex flex-col gap-2 rounded-[9px] border border-blue-500/30 bg-blue-500/[0.08] p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-baseline gap-1.5">
-                      <TickerNumber value={selWeight} className="font-mono text-3xl font-bold text-blue-400" />
-                      <span className="text-sm text-muted-foreground">{unit}</span>
-                    </div>
-                    {selPlates.length > 0 && (
-                      <div className="flex flex-col items-end">
-                        <span className="mb-1 text-[11px] text-muted-foreground">per side</span>
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {selPlates.map((p, i) => (
-                            <span key={i} className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-blue-400">
-                              {p}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                  <div className="flex items-baseline gap-1.5">
+                    <TickerNumber value={selWeight} className="font-mono text-3xl font-bold text-blue-400" />
+                    <span className="text-sm text-muted-foreground">{unit}</span>
                   </div>
+                  {selPlates.length > 0 && (
+                    <div className="flex flex-nowrap items-center gap-1.5">
+                      <span className="text-[11px] text-muted-foreground">per side</span>
+                      {selPlates.map((p, i) => (
+                        <span key={i} className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-blue-400">
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <p className="text-[11px] text-muted-foreground">{selTarget.label} · {selTarget.pctText} · {selTarget.repsText}</p>
                   <p className="text-[11px] text-muted-foreground">{unit === 'kg' ? 20 : 45} {unit} bar + {selPlates.join(' + ') || '—'} {unit} per side</p>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">

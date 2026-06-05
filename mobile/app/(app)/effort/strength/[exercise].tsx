@@ -1387,27 +1387,23 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                           </>
                         ) : (
                           <>
-                            <View style={s.targetRow}>
-                              <View>
-                                <Text style={s.calloutLabel}>attempt {selectedRM} {repWord(selectedRM)}</Text>
-                                <View style={[s.calloutValueRow, { marginTop: 2 }]}>
-                                  <TickerNumber value={`+${selectedBWTile.addedWeight}`} fontSize={36} color={palette.blue[400]} fontWeight="700" />
-                                  <Text style={s.calloutSubText}>{profileUnit} added</Text>
-                                </View>
+                            <View>
+                              <Text style={s.calloutLabel}>attempt {selectedRM} {repWord(selectedRM)}</Text>
+                              <View style={[s.calloutValueRow, { marginTop: 2 }]}>
+                                <TickerNumber value={`+${selectedBWTile.addedWeight}`} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                                <Text style={s.calloutSubText}>{profileUnit} added</Text>
                               </View>
-                              {selectedBWTile.plates.length > 0 && (
-                                <View style={{ alignItems: 'flex-end', flex: 1, minWidth: 0 }}>
-                                  <Text style={[s.tinyText, { marginBottom: 4 }]}>belt / vest</Text>
-                                  <View style={s.plateChipRow}>
-                                    {selectedBWTile.plates.map((p, i) => (
-                                      <View key={i} style={s.plateChip}>
-                                        <Text style={s.plateChipText}>{p}</Text>
-                                      </View>
-                                    ))}
-                                  </View>
-                                </View>
-                              )}
                             </View>
+                            {selectedBWTile.plates.length > 0 && (
+                              <View style={s.plateLine}>
+                                <Text style={s.plateLineLabel}>belt / vest</Text>
+                                {selectedBWTile.plates.map((p, i) => (
+                                  <View key={i} style={s.plateChip}>
+                                    <Text style={s.plateChipText}>{p}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
                             <CueText style={s.tinyText}>{`Add ${selectedBWTile.addedWeight} ${profileUnit} of load, aim for ${selectedRM} clean rep${selectedRM > 1 ? 's' : ''}`}</CueText>
                           </>
                         )
@@ -4320,22 +4316,18 @@ function OlympicLiftDetail({
             </View>
 
             <NextTargetCallout>
-              <View style={s.targetRow}>
-                <View style={s.calloutValueRow}>
-                  <TickerNumber value={selWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
-                  <Text style={s.calloutSubText}> {unit}</Text>
-                </View>
-                {selPlates.length > 0 && (
-                  <View style={{ alignItems: 'flex-end', flex: 1, minWidth: 0 }}>
-                    <Text style={[s.tinyText, { marginBottom: 4 }]}>per side</Text>
-                    <View style={s.plateChipRow}>
-                      {selPlates.map((p, i) => (
-                        <View key={i} style={s.plateChip}><Text style={s.plateChipText}>{p}</Text></View>
-                      ))}
-                    </View>
-                  </View>
-                )}
+              <View style={s.calloutValueRow}>
+                <TickerNumber value={selWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                <Text style={s.calloutSubText}> {unit}</Text>
               </View>
+              {selPlates.length > 0 && (
+                <View style={s.plateLine}>
+                  <Text style={s.plateLineLabel}>per side</Text>
+                  {selPlates.map((p, i) => (
+                    <View key={i} style={s.plateChip}><Text style={s.plateChipText}>{p}</Text></View>
+                  ))}
+                </View>
+              )}
               <Text style={s.tinyText}>{selTarget.label} · {selTarget.pctText} · {selTarget.repsText}</Text>
               <Text style={s.tinyText}>{unit === 'kg' ? 20 : 45} {unit} bar + {selPlates.join(' + ') || '—'} {unit} per side</Text>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
@@ -5688,22 +5680,20 @@ function StrengthDetail({
               <View>
               {equipmentType === 'barbell' && (
                 <>
-                  <View style={s.targetRow}>
-                    <View style={[s.calloutValueRow, { marginTop: 2 }]}>
-                      <TickerNumber value={targetWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
-                      <Text style={s.calloutSubText}>{unit}</Text>
-                    </View>
-                    <View style={{ alignItems: 'flex-end', flex: 1, minWidth: 0 }}>
-                      <Text style={[s.tinyText, { marginBottom: 4 }]}>per side</Text>
-                      <View style={s.plateChipRow}>
-                        {targetPlatesBarbell.map((p, i) => (
-                          <View key={i} style={s.plateChip}>
-                            <Text style={s.plateChipText}>{p}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
+                  <View style={[s.calloutValueRow, { marginTop: 2 }]}>
+                    <TickerNumber value={targetWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                    <Text style={s.calloutSubText}>{unit}</Text>
                   </View>
+                  {targetPlatesBarbell.length > 0 && (
+                    <View style={s.plateLine}>
+                      <Text style={s.plateLineLabel}>per side</Text>
+                      {targetPlatesBarbell.map((p, i) => (
+                        <View key={i} style={s.plateChip}>
+                          <Text style={s.plateChipText}>{p}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                   <Text style={s.tinyText}>
                     {unit === 'kg' ? 20 : 45} {unit} bar + {targetPlatesBarbell.join(' + ') || '—'} {unit} per side
                   </Text>
@@ -6085,6 +6075,10 @@ const s = StyleSheet.create({
   plateChipRow: {
     flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end',
   },
+  // Plates on their own single line below the hero number, joined with the label
+  // (per side / belt / vest). Never wraps — one line. (T088 round-2 plate fix.)
+  plateLine: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
+  plateLineLabel: { color: colors.mutedForeground, fontSize: 11, marginRight: 2 },
   plateChip: {
     borderColor: BLUE_BORDER, borderWidth: 1,
     backgroundColor: colors.card,

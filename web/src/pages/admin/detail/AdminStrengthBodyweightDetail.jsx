@@ -752,25 +752,21 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
       // weighted
       return (
         <>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground">attempt {selectedRM} {repWord(selectedRM)}</p>
-              <div className="mt-0.5 flex items-baseline gap-1">
-                <TickerNumber value={`+${selectedBWTile.addedWeight}`} className="font-mono text-4xl font-bold text-blue-400" />
-                <span className="text-sm text-muted-foreground">{profileUnit} added</span>
-              </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">attempt {selectedRM} {repWord(selectedRM)}</p>
+            <div className="mt-0.5 flex items-baseline gap-1">
+              <TickerNumber value={`+${selectedBWTile.addedWeight}`} className="font-mono text-4xl font-bold text-blue-400" />
+              <span className="text-sm text-muted-foreground">{profileUnit} added</span>
             </div>
-            {selectedBWTile.plates.length > 0 && (
-              <div className="flex flex-col items-end">
-                <span className="mb-1 text-[11px] text-muted-foreground">belt / vest</span>
-                <div className="flex flex-wrap justify-end gap-1">
-                  {selectedBWTile.plates.map((p, i) => (
-                    <span key={i} className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-blue-400">{p}</span>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
+          {selectedBWTile.plates.length > 0 && (
+            <div className="mt-2 flex flex-nowrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">belt / vest</span>
+              {selectedBWTile.plates.map((p, i) => (
+                <span key={i} className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-blue-400">{p}</span>
+              ))}
+            </div>
+          )}
           <CueText className="mt-1 text-[11px] text-muted-foreground">{`Add ${selectedBWTile.addedWeight} ${profileUnit} of load, aim for ${selectedRM} clean rep${selectedRM > 1 ? 's' : ''}`}</CueText>
         </>
       )

@@ -656,22 +656,20 @@ export default function AdminStrengthWeightedDetail({
                 <div className="mt-1">
                   {equipForMath === 'barbell' && (
                     <>
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-baseline gap-1">
-                          <TickerNumber value={targetWeight} className="font-mono text-3xl font-bold text-blue-400" />
-                          <span className="text-blue-400">{unit}</span>
-                        </div>
-                        <div className="flex flex-col items-end">
-                          <span className="mb-1 text-[11px] text-muted-foreground">per side</span>
-                          <div className="flex flex-wrap justify-end gap-1">
-                            {targetPlatesBarbell.map((p, i) => (
-                              <span key={i} className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-blue-400">
-                                {p}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
+                      <div className="flex items-baseline gap-1">
+                        <TickerNumber value={targetWeight} className="font-mono text-3xl font-bold text-blue-400" />
+                        <span className="text-blue-400">{unit}</span>
                       </div>
+                      {targetPlatesBarbell.length > 0 && (
+                        <div className="mt-2 flex flex-nowrap items-center gap-1.5">
+                          <span className="text-[11px] text-muted-foreground">per side</span>
+                          {targetPlatesBarbell.map((p, i) => (
+                            <span key={i} className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-blue-400">
+                              {p}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <p className="mt-1 text-[11px] text-muted-foreground">
                         {unit === 'kg' ? 20 : 45} {unit} bar + {targetPlatesBarbell.join(' + ') || '—'} {unit} per side
                       </p>
