@@ -5632,21 +5632,12 @@ function StrengthDetail({
                   </>
                 ) : (
                   <>
-                    {/* Bullet STEPS, each on a single line (T088 round-2 #1). Work
-                        line keeps the tickers; the rest are short plain steps. */}
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                      <Text style={s.calloutLabel}>• </Text>
-                      <Text style={{ color: colors.foreground, fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}>{selZoneCfg.setsText}</Text>
-                      <Text style={s.calloutLabel}> of </Text>
-                      <TickerNumber value={selRepRange} fontSize={14} color={colors.foreground} fontWeight="700" />
-                      <Text style={s.calloutLabel}> at </Text>
-                      <TickerNumber value={workingWeight} fontSize={14} color={palette.blue[400]} fontWeight="700" />
-                      <Text style={{ color: palette.blue[400], fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> {unit}</Text>
-                    </View>
-                    <Text style={s.tinyText} numberOfLines={1}>• A weight you could do {couldDoReps}, but only do {selRepRange}</Text>
-                    <Text style={s.tinyText} numberOfLines={1}>• Add {workingJump} {unit} when all sets are clean</Text>
-                    <Text style={s.tinyText} numberOfLines={1}>• Work up to {selRepRange} × {targetWeight} {unit}</Text>
-                    <Text style={s.tinyText} numberOfLines={1}>• Rest {selZoneCfg.restText}</Text>
+                    {/* LOCKED coaching-cue format (T088 round-2): prose, one flowing
+                        sentence, numbers emphasized as bold mono spans (RN can't
+                        reflow a TickerNumber View inside wrapping text). */}
+                    <Text style={s.calloutLabel}>
+                      Do <Text style={s.cueNum}>{selZoneCfg.setsText}</Text> of <Text style={s.cueNum}>{selRepRange} reps</Text> at <Text style={s.cueNumBlue}>{workingWeight} {unit}</Text> — a weight you can do at least <Text style={s.cueNum}>{couldDoReps}</Text> of; rest <Text style={s.cueNum}>{selZoneCfg.restText}</Text> between sets. Add <Text style={s.cueNum}>{workingJump} {unit}</Text> after every clean session, work your way up to <Text style={s.cueNumBlue}>{selRepRange} × {targetWeight} {unit}</Text>.
+                    </Text>
                   </>
                 )}
               </View>
@@ -5920,6 +5911,9 @@ const s = StyleSheet.create({
   },
   calloutSubText: { color: colors.mutedForeground, fontSize: 14 },
   calloutLabel:   { color: colors.mutedForeground, fontSize: 14 },
+  // Emphasized numbers inside a prose coaching cue (LOCKED cue format, T088 round-2).
+  cueNum:         { color: colors.foreground, fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'] },
+  cueNumBlue:     { color: palette.blue[400], fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'] },
 
   targetRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
