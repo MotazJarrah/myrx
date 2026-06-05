@@ -2617,48 +2617,17 @@ function AssistedMachineDetail({
               >
                 {showAttemptUnassisted ? (
                   selRepRange === 1 ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                      <Text style={s.calloutLabel}>Attempt an unassisted </Text>
-                      <Text style={{ color: palette.blue[400], fontWeight: '700', fontSize: 14 }}>{bareName}</Text>
-                      <Text style={s.calloutLabel}> — you&apos;re ready.</Text>
-                    </View>
+                    <CueText>{`Attempt an unassisted ${bareName}, you're ready.`}</CueText>
                   ) : (
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                      <Text style={s.calloutLabel}>Attempt </Text>
-                      <TickerNumber value={selRepRange} fontSize={14} color={colors.foreground} fontWeight="700" />
-                      <Text style={s.calloutLabel}> unassisted </Text>
-                      <Text style={{ color: palette.blue[400], fontWeight: '700', fontSize: 14 }}>{bareName}s</Text>
-                      <Text style={s.calloutLabel}> — you&apos;re ready.</Text>
-                    </View>
+                    <CueText>{`Attempt ${selRepRange} unassisted ${bareName}s, you're ready.`}</CueText>
                   )
                 ) : selRepRange === 1 ? (
                   <>
-                    <Text style={s.calloutLabel}>Hit one clean rep</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                      <Text style={s.calloutLabel}>with </Text>
-                      <TickerNumber value={targetAssistance} fontSize={14} color={palette.blue[400]} fontWeight="700" />
-                      <Text style={{ color: palette.blue[400], fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> {labelUnit}</Text>
-                      <Text style={s.calloutLabel}> assistance</Text>
-                    </View>
+                    <CueText>{`Hit one clean rep with ${targetAssistance} ${labelUnit} assistance.`}</CueText>
                     <Text style={s.tinyText}>Benchmark attempt</Text>
                   </>
                 ) : (
-                  <>
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                      <Text style={s.calloutLabel}>Do </Text>
-                      <Text style={{ color: colors.foreground, fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}>{selZoneCfg.setsText}</Text>
-                      <Text style={s.calloutLabel}> of </Text>
-                      <TickerNumber value={selRepRange} fontSize={14} color={colors.foreground} fontWeight="700" />
-                      <Text style={{ color: colors.foreground, fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> reps</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                      <Text style={s.calloutLabel}>with </Text>
-                      <TickerNumber value={targetAssistance} fontSize={14} color={palette.blue[400]} fontWeight="700" />
-                      <Text style={{ color: palette.blue[400], fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> {labelUnit}</Text>
-                      <Text style={s.calloutLabel}> assistance</Text>
-                    </View>
-                    <Text style={s.tinyText}>Rest {selZoneCfg.restText} between sets</Text>
-                  </>
+                  <CueText>{`Do ${selZoneCfg.setsText} of ${selRepRange} reps with ${targetAssistance} ${labelUnit} assistance; rest ${selZoneCfg.restText} between sets.`}</CueText>
                 )}
               </View>
             </NextTargetCallout>
@@ -4113,7 +4082,7 @@ function RepsOnlyDetail({
             <TickerNumber value={bestReps} fontSize={36} color={palette.blue[400]} fontWeight="700" />
             <Text style={s.calloutSubText}>reps</Text>
           </View>
-          <Text style={s.tinyText}>{hintText}</Text>
+          <CueText style={s.tinyText}>{hintText}</CueText>
         </NextTargetCallout>
       </AnimateRise>
 
