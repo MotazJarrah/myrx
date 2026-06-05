@@ -4924,29 +4924,56 @@ function StrengthDetail({
     [wsZoneIdx, wsCanGoPrev, wsCanGoNext, tileViewportW, outerScrollGesture]
   )
 
-  // ── Weighted HERO swipe (swipe rule: the per-zone hero accepts the zone-swipe,
-  // not just the pill). Plain Pan → scrollToZone (no pill slide; mirrors a direct
-  // body swipe). Weighted standard is never nested, so plain thresholds. ─────────
+  // ── Weighted HERO swipe (swipe rule: a swipeable element must run the SAME
+  // slide animation as the pill — not a raw snap). Mirrors wsPillSwipeGesture's
+  // commit choreography: chevrons fade, pill slides off, zone changes, pill slides
+  // back in. ─────────────────────────────────────────────────────────────────────
   const wsHeroSwipeGesture = useMemo(
     () => Gesture.Pan()
       .activeOffsetX([-15, 15])
       .failOffsetY([-25, 25])
+      .onStart(() => {
+        'worklet'
+        wsChevronOpacityOver.value = withTiming(0, { duration: 120 })
+      })
       .onEnd((event) => {
         'worklet'
         const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
         const allowed = direction === -1 ? wsCanGoPrev : wsCanGoNext
-        if (Math.abs(event.translationX) <= WS_SWIPE_THRESHOLD_PX || !allowed) return
+        const past    = Math.abs(event.translationX) > WS_SWIPE_THRESHOLD_PX
+        if (!past || !allowed) {
+          wsChevronOpacityOver.value = withTiming(1, { duration: 200 })
+          return
+        }
+        const slideOff = direction === 1 ? -WS_SLIDE_OFFSCREEN_PX : WS_SLIDE_OFFSCREEN_PX
         const targetIdx = wsZoneIdx + direction
-        runOnJS(scrollToZone)(WS_FIRST_REP_OF_ZONE[WS_ZONE_ORDER[targetIdx]])
+        const targetFirstRep = WS_FIRST_REP_OF_ZONE[WS_ZONE_ORDER[targetIdx]]
+        wsPillTranslateX.value = withTiming(slideOff, { duration: WS_SLIDE_DURATION_MS }, (finished) => {
+          'worklet'
+          if (!finished) return
+          runOnJS(scrollToZone)(targetFirstRep)
+          wsPillTranslateX.value = -slideOff
+          wsPillTranslateX.value = withTiming(0, { duration: WS_SLIDE_DURATION_MS }, (settled) => {
+            'worklet'
+            if (settled) wsChevronOpacityOver.value = withTiming(1, { duration: 200 })
+          })
+        })
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [wsZoneIdx, wsCanGoPrev, wsCanGoNext]
   )
 
-  // ── Bodyweight CHART swipe (swipe rule: the per-tier chart navigates tiers).
-  // Reads live tier state via a ref so this gesture can live up here in the hook
-  // zone while bwActiveTier / bwLoggedTiers are computed further down; the block's
-  // scroll-sync effect moves the hero pager to match. ───────────────────────────
+  // ── Bodyweight CHART swipe (swipe rule: the per-tier chart navigates tiers AND
+  // plays a slide animation like every other swipeable element). The chart slides
+  // off in the swipe direction, the tier changes (the hero pager follows via the
+  // block's scroll-sync effect), then the chart slides back in. Reads live tier
+  // state + bounds via a ref / shared values so the gesture can live in the hook
+  // zone while bwActiveTier / bwLoggedTiers are computed further down. ───────────
+  const swipeWinWidth = useWindowDimensions().width
+  const bwChartTranslateX = useSharedValue(0)
+  const bwChartCanLeft  = useSharedValue(false)
+  const bwChartCanRight = useSharedValue(false)
+  const bwChartAnimStyle = useAnimatedStyle(() => ({ transform: [{ translateX: bwChartTranslateX.value }] }))
   const bwNavRef = useRef<{ loggedTiers: BwTier[]; activeTier: BwTier; bestByTier: Record<BwTier, number> } | null>(null)
   const navigateBwTierFromChart = (direction: -1 | 1) => {
     const nav = bwNavRef.current
@@ -4967,11 +4994,19 @@ function StrengthDetail({
       .onEnd((event) => {
         'worklet'
         const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
-        if (Math.abs(event.translationX) <= 20) return
-        runOnJS(navigateBwTierFromChart)(direction)
+        const allowed = direction === -1 ? bwChartCanLeft.value : bwChartCanRight.value
+        if (Math.abs(event.translationX) <= 20 || !allowed) return
+        const slideOff = direction === 1 ? -swipeWinWidth : swipeWinWidth
+        bwChartTranslateX.value = withTiming(slideOff, { duration: 220 }, (finished) => {
+          'worklet'
+          if (!finished) return
+          runOnJS(navigateBwTierFromChart)(direction)
+          bwChartTranslateX.value = -slideOff
+          bwChartTranslateX.value = withTiming(0, { duration: 220 })
+        })
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [swipeWinWidth]
   )
 
   const wsPillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: wsPillTranslateX.value }] }))
@@ -5217,8 +5252,14 @@ function StrengthDetail({
   }
 
   const bwActiveTier: BwTier = bwSelectedTier ?? bwHighestTier
-  // Feed live tier state to the chart-swipe gesture declared up in the hook zone.
+  // Feed live tier state + swipe bounds to the chart-swipe gesture (declared up in
+  // the hook zone). Shared-value writes in render are fine for these derived flags.
   bwNavRef.current = { loggedTiers: bwLoggedTiers, activeTier: bwActiveTier, bestByTier: bwBestByTier }
+  {
+    const __bwIdx = bwLoggedTiers.indexOf(bwActiveTier)
+    bwChartCanLeft.value  = __bwIdx > 0
+    bwChartCanRight.value = __bwIdx >= 0 && __bwIdx < bwLoggedTiers.length - 1
+  }
 
   const bwLatestBandLevel: string | null = (() => {
     if (bwActiveTier !== 'band' || bwEffortsByTier.band.length === 0) return null
@@ -5738,7 +5779,7 @@ function StrengthDetail({
         // Swipe rule: the bodyweight chart is per-tier (round-2 #4) so it accepts
         // the tier-swipe; the weighted chart is shared across zones, so it doesn't.
         return isBodyweightExercise
-          ? <GestureDetector gesture={bwChartSwipeGesture}><View collapsable={false}>{chartCard}</View></GestureDetector>
+          ? <GestureDetector gesture={bwChartSwipeGesture}><Animated.View collapsable={false} style={bwChartAnimStyle}>{chartCard}</Animated.View></GestureDetector>
           : chartCard
       })()}
 
