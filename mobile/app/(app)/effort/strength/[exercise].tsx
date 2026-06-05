@@ -4968,7 +4968,7 @@ function StrengthDetail({
                       <Text style={{ color: palette.blue[400], fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> {unit}</Text>
                     </View>
                     <Text style={s.tinyText}>A weight you could do {couldDoReps} — but only do {selRepRange}</Text>
-                    <Text style={s.tinyText}>Add {workingJump} {unit} when all sets are clean · test {selRepRange} × {targetWeight} {unit} when it's in reach</Text>
+                    <Text style={s.tinyText}>Add {workingJump} {unit} each time all sets are clean — work up to {selRepRange} × {targetWeight} {unit}</Text>
                     <Text style={s.tinyText}>Rest {selZoneCfg.restText} between sets</Text>
                   </>
                 )}

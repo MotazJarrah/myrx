@@ -759,7 +759,7 @@ export default function AdminStrengthWeightedDetail({
                         <span className="font-mono font-bold text-blue-400">&nbsp;{unit}</span>
                       </p>
                       <p className="text-[11px] text-muted-foreground">A weight you could do {couldDoReps} — but only do {selRepRange}</p>
-                      <p className="text-[11px] text-muted-foreground">Add {workingJump} {unit} when all sets are clean · test {selRepRange} × {targetWeight} {unit} when it's in reach</p>
+                      <p className="text-[11px] text-muted-foreground">Add {workingJump} {unit} each time all sets are clean — work up to {selRepRange} × {targetWeight} {unit}</p>
                       <p className="text-[11px] text-muted-foreground">Rest {selZoneCfg.restText} between sets</p>
                     </>
                   )}
