@@ -1341,7 +1341,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                                 <Text style={s.calloutSubText}>{(selectedBWTile?.reps ?? selectedRM) > 1 ? 'reps' : 'rep'}</Text>
                               </View>
                               <Text style={s.tinyText}>
-                                Locked — keep building reps
+                                Locked, keep building reps
                               </Text>
                             </>
                           )
@@ -1352,9 +1352,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                               <TickerNumber value={selectedRM} fontSize={36} color={palette.blue[400]} fontWeight="700" />
                               <Text style={s.calloutSubText}>max attempts</Text>
                             </View>
-                            <Text style={s.tinyText}>
-                              Build up to {selectedRM} clean reps at bodyweight first · current best: {tierBest}
-                            </Text>
+                            <CueText style={s.tinyText}>{`Build up to ${selectedRM} clean reps at bodyweight first, current best ${tierBest}`}</CueText>
                           </>
                         ) : selectedBWTile.mode === 'push' ? (
                           <>
@@ -1362,9 +1360,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                               <TickerNumber value={selectedBWTile.nextRep ?? 0} fontSize={36} color={palette.blue[400]} fontWeight="700" />
                               <Text style={s.calloutSubText}>reps next at bodyweight</Text>
                             </View>
-                            <Text style={s.tinyText}>
-                              Push for one more clean rep — current best: {tierBest}
-                            </Text>
+                            <CueText style={s.tinyText}>{`Push for one more clean rep, current best ${tierBest}`}</CueText>
                           </>
                         ) : (
                           <>
@@ -1389,9 +1385,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                                 </View>
                               )}
                             </View>
-                            <Text style={s.tinyText}>
-                              Add {selectedBWTile.addedWeight} {profileUnit} of load — aim for {selectedRM} clean rep{selectedRM > 1 ? 's' : ''}
-                            </Text>
+                            <CueText style={s.tinyText}>{`Add ${selectedBWTile.addedWeight} ${profileUnit} of load, aim for ${selectedRM} clean rep${selectedRM > 1 ? 's' : ''}`}</CueText>
                           </>
                         )
                       ) : (
@@ -1422,18 +1416,12 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                             <Text style={s.tinyText}>Knee assisted</Text>
                           )}
                           <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
-                            <Text style={s.calloutLabel}>
-                              Keep practicing until you hit{' '}
-                              <Text style={{ color: colors.foreground, fontWeight: '700' }}>{displayBest + 1}</Text>
-                              {' '}unbroken {repWord(displayBest + 1)}
-                              {t === 'band+knee' && bandSubState
-                                ? <> with {aOrAn(bandSubState.currentBand)} <Text style={{ color: colors.foreground, fontWeight: '700' }}>{bandSubState.currentBand}</Text> band on your knees</>
-                                : t === 'knee'
-                                ? <> on your knees</>
-                                : t === 'band' && bandSubState
-                                ? <> with {aOrAn(bandSubState.currentBand)} <Text style={{ color: colors.foreground, fontWeight: '700' }}>{bandSubState.currentBand}</Text> band</>
-                                : null}
-                            </Text>
+                            <CueText>{`Keep practicing until you hit ${displayBest + 1} unbroken ${repWord(displayBest + 1)}${
+                              t === 'band+knee' && bandSubState ? ` with ${aOrAn(bandSubState.currentBand)} ${bandSubState.currentBand} band on your knees`
+                              : t === 'knee' ? ' on your knees'
+                              : t === 'band' && bandSubState ? ` with ${aOrAn(bandSubState.currentBand)} ${bandSubState.currentBand} band`
+                              : ''
+                            }`}</CueText>
                           </View>
                         </>
                       )}
@@ -1489,6 +1477,29 @@ function EffortsHistorySection({
       </View>
     </AnimateRise>
   )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CueText — the ONE coaching-cue renderer (T088 round-2). Pass a plain cue
+// sentence; it renders muted prose with number+unit tokens auto-emphasized
+// (weights blue, other numbers foreground, bold mono). EVERY coaching cue in the
+// app routes through this so the format is identical by construction. Rules:
+// one flowing sentence, commas not em-dashes, NEVER any attribution in a cue.
+const CUE_TOKEN_RE = /\d[\d.,/–-]*(?:\s?[×x]\s?\d[\d.,/–-]*)?(?:\s?(?:lb|kg|km|mi|min|sec|reps?|sets?|m|s|%))?/g
+function CueText({ children, style }: { children: string; style?: any }) {
+  const text = children ?? ''
+  const out: React.ReactNode[] = []
+  let last = 0, key = 0, cursor = 0
+  for (const tok of text.match(CUE_TOKEN_RE) ?? []) {
+    const at = text.indexOf(tok, cursor)
+    if (at < 0) continue
+    if (at > last) out.push(text.slice(last, at))
+    out.push(<Text key={key++} style={/\b(?:lb|kg)\b/.test(tok) ? s.cueNumBlue : s.cueNum}>{tok}</Text>)
+    last = at + tok.length
+    cursor = last
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return <Text style={style ?? s.calloutLabel}>{out}</Text>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1642,13 +1653,7 @@ function IsometricDetail({
                   </View>
                 )}
                 <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
-                  <Text style={s.calloutLabel}>
-                    Hold for{' '}
-                    <Text style={{ color: colors.foreground, fontWeight: '700' }}>
-                      {nm < 60 ? `${nm} seconds` : fmtDurationLong(nm)}
-                    </Text>
-                    {' '}without breaking form
-                  </Text>
+                  <CueText>{`Hold for ${nm < 60 ? `${nm} seconds` : fmtDurationLong(nm)} without breaking form`}</CueText>
                 </View>
               </>
             )
@@ -3006,14 +3011,14 @@ function CarryDetail({
       } else {
         switch (zoneId) {
           case 'max_load':
-            cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — focus on grip and posture`
+            cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit}, focus on grip and posture`
             break
           case 'distance_build':
-            cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — maintain posture across the full distance`
+            cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit}, maintain posture across the full distance`
             break
           case 'conditioning':
           default:
-            cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — control your breathing through the burn`
+            cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit}, control your breathing through the burn`
             break
         }
       }
@@ -3544,7 +3549,7 @@ function CarryDetail({
 
                         {/* Thin separator + cue line. */}
                         <View style={s.carryHeroCueRow}>
-                          <Text style={s.carryHeroCueText}>{zm.cueLine}</Text>
+                          <CueText style={s.carryHeroCueText}>{zm.cueLine}</CueText>
                         </View>
                       </NextTargetCallout>
                     </View>
