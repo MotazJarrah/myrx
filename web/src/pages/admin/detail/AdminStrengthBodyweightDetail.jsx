@@ -78,7 +78,7 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 const BW_TIERS = ['band+knee', 'knee', 'band', 'rx']
 const BW_TIER_RANK = { 'band+knee': 1, 'knee': 2, 'band': 3, 'rx': 4 }
-const BW_GRADUATION_REPS = 10
+const BW_GRADUATION_REPS = 8 // T088 Fix 2.1: was 10 — graduate in the strength range (~5-8 reps), not endurance
 
 function bwTierFromVariantName(name) {
   if (name.endsWith(' [Band + Knee]')) return 'band+knee'
@@ -178,7 +178,7 @@ function parseBandLevelFromBwLabel(label) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Band-level sub-progression (Band & Band+Knee tiers) — verbatim mirror of
 // mobile computeBandSubState. Extra Heavy → Heavy → Medium → Light, with
-// auto-advance once 10 reps are hit at the lightest used band.
+// auto-advance once BW_GRADUATION_REPS (8) reps are hit at the lightest used band.
 // ═══════════════════════════════════════════════════════════════════════════
 const BAND_LEVELS_PROGRESSION = ['Extra Heavy', 'Heavy', 'Medium', 'Light']
 

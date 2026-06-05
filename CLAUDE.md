@@ -712,8 +712,8 @@ Always written as "**Full RX**", never just "RX".
 
 **Tier graduation rule (universal, single number):**
 
-- **10 unbroken clean reps in a single set** → promotes to the next tier.
-- For Band and Band+Knee tiers, this is gated by **band level** (see "Band-level sub-progression" below): the user must hit 10 unbroken reps at the LIGHT band level before graduating to the next tier. Within those tiers, hitting 10 reps at a heavier band level auto-advances them to the next thinner band, not all the way to the next tier.
+- **8 unbroken clean reps in a single set** (`BW_GRADUATION_REPS` — dropped from 10 to 8 in T088 Fix 2.1 so graduation stays in the strength range ~5-8 reps instead of drifting into endurance; Schoenfeld repetition continuum, Steven Low) → promotes to the next tier.
+- For Band and Band+Knee tiers, this is gated by **band level** (see "Band-level sub-progression" below): the user must hit 8 unbroken reps at the LIGHT band level before graduating to the next tier. Within those tiers, hitting 8 reps at a heavier band level auto-advances them to the next thinner band, not all the way to the next tier.
 - "Clean" = full range of motion, no kip / cheat, controlled descent.
 - The "10 reps" target is the same across all four tiers and all movements. It is NOT adp-zone aware (because bodyweight has no adp zones).
 - The user can also self-promote at any time by logging a harder tier directly — the system respects revealed preference. Re-logging an easier tier after graduation is silent (no demotion, no UI badge).
@@ -808,13 +808,13 @@ Always written as "**Full RX**", never just "RX".
   - Band+Knee at *(band)*: `Keep practicing until you hit (displayBest + 1) unbroken reps with (band) band on your knees`
   - Knee: `Keep practicing until you hit (tierBest + 1) unbroken reps on your knees`
   - Band at *(band)*: `Keep practicing until you hit (displayBest + 1) unbroken reps with (band) band`
-- No "rest" line and no separate graduation-hint line. ONE unbroken set at the target rep count is the new benchmark — there is no longer a "3 sets" prescription. The graduation moment is implicit: hit 10 at the current band and the algorithm auto-advances; hit 10 at the LIGHT band and the Ready state fires.
+- No "rest" line and no separate graduation-hint line. ONE unbroken set at the target rep count is the new benchmark — there is no longer a "3 sets" prescription. The graduation moment is implicit: hit 8 at the current band and the algorithm auto-advances; hit 8 at the LIGHT band and the Ready state fires (`BW_GRADUATION_REPS` = 8 since T088 Fix 2.1, was 10).
 
 **Hero card (item 4) — assisted tier, ready to graduate:**
 
 - Fires when:
-  - **Band / Band+Knee**: best at the LIGHT band level ≥ 10 (`allLevelsCleared` from `computeBandSubState`).
-  - **Knee**: overall tier best ≥ 10.
+  - **Band / Band+Knee**: best at the LIGHT band level ≥ 8 (`allLevelsCleared` from `computeBandSubState`).
+  - **Knee**: overall tier best ≥ 8.
 - Tier label pill stays at top.
 - Big number = `displayBest` (the user's peak at the variant that triggered Ready).
 - Cue/rest/graduation-hint lines are replaced by a single promotion block:
@@ -851,8 +851,8 @@ The user's band level is parsed from the effort label (`Pull Up [Band] · Heavy 
 
 1. Find `lightestUsed` = the lightest band level the user has logged any effort at (their progression frontier).
 2. If `lightestUsed` is null (no efforts yet in this tier) → current band = **Extra Heavy** (most-assistance starting point), best at current = 0.
-3. Else if best at `lightestUsed` < 10 → current band = `lightestUsed`, best at current = `bestPerLevel[lightestUsed]`.
-4. Else (best at `lightestUsed` ≥ 10) → auto-advance to the next thinner band:
+3. Else if best at `lightestUsed` < 8 → current band = `lightestUsed`, best at current = `bestPerLevel[lightestUsed]`.
+4. Else (best at `lightestUsed` ≥ 8) → auto-advance to the next thinner band:
    - If `lightestUsed` is Light → `allLevelsCleared = true`, the Ready state fires (user can graduate to the next tier).
    - Otherwise → current band = the next thinner level (e.g., Heavy → Medium), best at current = `bestPerLevel[nextBand]` (typically 0 if the user hasn't logged at this lighter band yet).
 
@@ -863,7 +863,7 @@ The user's band level is parsed from the effort label (`Pull Up [Band] · Heavy 
 - The user can skip band levels at will (e.g., go straight to Light without doing Extra Heavy / Heavy / Medium) — the algorithm respects that choice and uses their lightest used band as the frontier.
 - Regressing to a heavier band level (e.g., logging Extra Heavy after already practicing Heavy) does NOT pull the current band backward — the lightest used band stays the frontier.
 
-**Knee tier has no sub-progression** — only one variant, just track overall tier best. Ready state fires at tier best ≥ 10.
+**Knee tier has no sub-progression** — only one variant, just track overall tier best. Ready state fires at tier best ≥ 8.
 
 **Full RX** keeps its 4-mode body (locked / push / graduation / weighted) — see the Full RX section below.
 

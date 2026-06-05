@@ -179,7 +179,7 @@ type BwTier = 'band+knee' | 'knee' | 'band' | 'rx'
 
 const BW_TIERS: BwTier[] = ['band+knee', 'knee', 'band', 'rx']
 const BW_TIER_RANK: Record<BwTier, number> = { 'band+knee': 1, 'knee': 2, 'band': 3, 'rx': 4 }
-const BW_GRADUATION_REPS = 10
+const BW_GRADUATION_REPS = 8 // T088 Fix 2.1: was 10 — graduate a tier / advance a band in the strength range (~5-8 reps), not endurance (Schoenfeld repetition continuum; Steven Low, Overcoming Gravity)
 const BW_REST_TEXT = '2 min'
 
 function bwTierFromVariantName(name: string): BwTier {
@@ -262,7 +262,7 @@ function repWord(count: number): string {
 //   - If best at current band ≥ 10, the algorithm auto-advances to the next
 //     thinner level. The pill / tiles / cue all reflect the new band, and
 //     the tile grid resets (best at the new band starts at 0).
-//   - If the lightest used band is Light and best ≥ 10, "allLevelsCleared"
+//   - If the lightest used band is Light and best ≥ BW_GRADUATION_REPS, "allLevelsCleared"
 //     is true — the user is ready to graduate to the next tier.
 //   - If no efforts are logged in this tier yet, "current band" defaults to
 //     Extra Heavy (the most-assistance starting point).
