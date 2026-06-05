@@ -79,13 +79,36 @@ function nextBarbellAbove(raw, unit) {
 
 // Verbatim mirror of the mobile OLYMPIC_TARGETS.
 const OLYMPIC_TARGETS = [
-  { key: 'technique', label: 'TECHNIQUE', pct: 0.70, pctText: '70%',   repsText: '× 2-3',
-    cue: 'Light and fast — drill the positions. Stop the set the moment bar speed drops.' },
-  { key: 'build',     label: 'BUILD',     pct: 0.85, pctText: '85%',   repsText: '× 1-2',
-    cue: 'Heavy but crisp singles and doubles. Stop the moment the bar slows down.' },
-  { key: 'peak',      label: 'PEAK',      pct: 1.00, pctText: '100%+', repsText: '× 1',
-    cue: 'Build to a heavy single — a new PR. Make-or-miss; speed is the signal, never grind it out.' },
+  { key: 'technique', label: 'TECHNIQUE', pct: 0.70, pctText: '70%',   repsText: '× 2-3', reps: '2-3' },
+  { key: 'build',     label: 'BUILD',     pct: 0.85, pctText: '85%',   repsText: '× 1-2', reps: '1-2' },
+  { key: 'peak',      label: 'PEAK',      pct: 1.00, pctText: '100%+', repsText: '× 1',   reps: '1'   },
 ]
+
+// Warm-up ramp baked into the Olympic cue as prose (T088 round-2 #2) — mirror of
+// the mobile olympicRamp / buildOlympicCue. Two loadable jumps at ~60% & ~80% of
+// the working weight, between the empty bar and the work set (0-2 rungs).
+function olympicRamp(working, unit) {
+  const bar = BAR[unit] ?? 45
+  const out = []
+  for (const frac of [0.6, 0.8]) {
+    const w = nearestBarbell(working * frac, unit)
+    if (w > bar && w < working && !out.includes(w)) out.push(w)
+  }
+  return out
+}
+function buildOlympicCue(t, working, unit) {
+  const ramp = olympicRamp(working, unit)
+  const rampStr = ramp.length === 2 ? `${ramp[0]} and ${ramp[1]}` : ramp.length === 1 ? `${ramp[0]}` : ''
+  const warm = rampStr
+    ? `Warm up from the empty bar through ${rampStr} before `
+    : 'Warm up from the empty bar, then '
+  if (t.key === 'peak')
+    return `${warm}a heavy single at ${working} ${unit}, a new PR. Make or miss, never grind it out, speed is the signal.`
+  const coaching = t.key === 'technique'
+    ? 'Keep it light and fast on the positions, ending each set the instant bar speed drops.'
+    : 'Crisp singles and doubles, stopping the moment the bar slows.'
+  return `${warm}${t.reps} reps at ${working} ${unit}, around ${t.pctText} of your best. ${coaching}`
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component — props: userId (required), exercise (required), onBack (optional).
@@ -226,7 +249,7 @@ export default function AdminStrengthOlympicDetail({ userId, exercise, onBack })
                   </div>
                   <p className="text-[11px] text-muted-foreground">{selTarget.label} · {selTarget.pctText} · {selTarget.repsText}</p>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-                    <CueText className="text-sm text-muted-foreground">{selTarget.cue}</CueText>
+                    <CueText className="text-sm text-muted-foreground">{buildOlympicCue(selTarget, selWeight, unit)}</CueText>
                   </div>
                 </div>
 
