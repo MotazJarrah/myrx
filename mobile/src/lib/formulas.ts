@@ -426,7 +426,7 @@ export const ADP_ZONE_CONFIG: Readonly<Record<AdpZone, AdpZoneConfigEntry>> = Ob
     restText:     '2-3 min',
     reserve:      2,
     whyText:
-      'Moderate loads taken close to failure put muscle fibers under sustained mechanical tension and metabolic stress. Both signals trigger growth of the fibers themselves.',
+      'Moderate loads taken close to failure put muscle fibers under sustained mechanical tension and metabolic stress. Both signals trigger growth of the fibers themselves. Growth is not locked to this range — it happens anywhere from about 5 to 30+ reps when you train close to failure; 6-12 is just the efficient middle ground.',
   },
   endurance: {
     label:        'Boost Endurance',

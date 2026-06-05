@@ -231,7 +231,7 @@ const ADP_ZONE_CONFIG = Object.freeze({
     restText:     '2-3 min',
     reserve:      2,
     whyText:
-      'Moderate loads taken close to failure put muscle fibers under sustained mechanical tension and metabolic stress. Both signals trigger growth of the fibers themselves.',
+      'Moderate loads taken close to failure put muscle fibers under sustained mechanical tension and metabolic stress. Both signals trigger growth of the fibers themselves. Growth is not locked to this range — it happens anywhere from about 5 to 30+ reps when you train close to failure; 6-12 is just the efficient middle ground.',
   },
   endurance: {
     label:        'Boost Endurance',
@@ -581,9 +581,13 @@ export default function AdminStrengthWeightedDetail({
                 className="flex gap-2 overflow-x-auto py-1 px-0.5 scrollbar-hide"
                 style={{ scrollbarWidth: 'none' }}
               >
-                {projections.map(({ reps: r, weight: w }) => {
+                {/* Cap at 15RM (T088 Fix 1.3) — rep-max math is only accurate to
+                    ~10 reps, so 16-20RM were noise. 13-15 stay (Endurance needs
+                    13+) but are flagged "≈". */}
+                {projections.filter(({ reps }) => reps <= 15).map(({ reps: r, weight: w }) => {
                   const isSelected = selectedRM === r
                   const pct = bestOneRM > 0 ? Math.round((w / bestOneRM) * 100) : 0
+                  const isEstimate = r >= 13
                   return (
                     <button
                       key={r}
@@ -600,7 +604,7 @@ export default function AdminStrengthWeightedDetail({
                         {r}RM
                       </span>
                       <span className={`mt-0.5 font-mono text-base font-bold tabular-nums ${isSelected ? 'text-blue-400' : 'text-foreground'}`}>
-                        {w}
+                        {isEstimate ? `≈${w}` : w}
                       </span>
                       <span className={`mt-0.5 font-mono text-[9px] tabular-nums leading-none ${isSelected ? 'text-blue-400/70' : 'text-muted-foreground/50'}`}>
                         {pct}%
@@ -613,6 +617,7 @@ export default function AdminStrengthWeightedDetail({
               <div className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-card to-transparent" />
               <div className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-card to-transparent" />
             </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">≈ 13RM+ are rough estimates — rep-max math is most accurate up to ~10 reps</p>
 
             {/* ── 3. Next-target hero card ── */}
             {selectedProjection && (

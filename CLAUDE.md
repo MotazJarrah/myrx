@@ -595,7 +595,7 @@ This is the spec for the "Your next training target" card that appears on `Stren
 **Big weight algorithm (the number at the top of the card):**
 
 1. `current_1RM` = the user's highest 1RM estimate ever computed from any logged effort. Uses `bestOneRM` (max across all logged efforts). Never goes down — a bad day doesn't downgrade projections.
-2. For each tile K (1RM through 20RM):
+2. For each tile K (1RM through 15RM — the rendered grid is capped at 15 per T088 Fix 1.3; the projection math still computes internally up to 20 for the working-weight lookup):
    - `projection_K` = eff curve weight at K reps from `current_1RM`.
    - `cue_weight_K` = `round_up(projection_K, smallest_jump)` — the user's current capability at K reps, rounded to the nearest loadable weight.
    - `big_weight_K` = `round_up(projection_K + smallest_jump, smallest_jump)` — the next progression milestone (one loadable step above current capability).
@@ -628,13 +628,13 @@ This is the spec for the "Your next training target" card that appears on `Stren
 | hypertrophy | 6-12 reps | 3-4 sets | leave ~2 in reserve | 2-3 min between sets |
 | endurance | 13+ reps | 2-3 sets | leave ~1 in reserve | 45-60 sec between sets |
 
-The reps-in-reserve column = the `reserve` field, and it now drives BOTH the working weight AND the cue line ("a weight you could do {K + reserve} — but only do {K}"). The 2 / 2 / 1 values **correct a previously-inverted set** (was strength 1 / hypertrophy 2 / endurance 3, which had it backwards): the evidence (Refalo 2023; Schoenfeld) says strength is robust to proximity-to-failure so it can leave MORE in reserve, while endurance trains CLOSEST to failure. `whyText` (the adaptation science) still lives in the info panel.
+The reps-in-reserve column = the `reserve` field, and it now drives BOTH the working weight AND the cue line ("a weight you could do {K + reserve} — but only do {K}"). The 2 / 2 / 1 values **correct a previously-inverted set** (was strength 1 / hypertrophy 2 / endurance 3, which had it backwards): the evidence (Refalo 2023; Schoenfeld) says strength is robust to proximity-to-failure so it can leave MORE in reserve, while endurance trains CLOSEST to failure. `whyText` (the adaptation science) still lives in the info panel. (T088 Fix 1.4: the hypertrophy `whyText` now also notes growth isn't locked to 6-12 — it spans ~5 to 30+ reps trained close to failure; the zone stays as an intent label, not an exclusive growth window.)
 
 **Tile grid UX (replaces the previous 5-column grid):**
 
 - **Single active adp-zone pill at the top**, flanked by pulsing chevron arrows — same locked choreography as the bodyweight pill row (see the "Pill row swipe gesture" subsection below). Pill label sits on ONE line (`BUILD STRENGTH` / `INCREASE HYPERTROPHY` / `BOOST ENDURANCE`), never wrapped. The previous 3-pill grid is gone.
 - Pill order in the swipe carousel (left → right): `strength → hypertrophy → endurance`. Chevrons appear only on the side where another zone exists (no `<<` on strength, no `>>` on endurance).
-- Below the pill: single horizontal scrollable row of tiles (1RM through 20RM), with fading edges signaling more content off-screen.
+- Below the pill: single horizontal scrollable row of tiles (1RM through **15RM** — capped at 15 per T088 Fix 1.3; 16-20RM removed as noise, and 13-15RM flagged with a leading "≈" as rough estimates since rep-max math is only accurate to ~10 reps), with fading edges signaling more content off-screen.
 - Tapping a chevron OR swiping the pill row navigates one zone in that direction. On commit, the **first tile of the new zone scrolls to the CENTRE of the tile row** (via `scrollIntoView({ inline: 'center' })` on web / measured-viewport scrollTo on mobile) and becomes the selected tile that drives the card below.
 - On mobile, the pill physically slides with the user's finger during pan and runs the same slide-off / slide-in choreography as the bodyweight pill (chevrons fade out at pan start, fade back in once the new pill lands). Web stays simple touch-swipe (no physical slide animation).
 

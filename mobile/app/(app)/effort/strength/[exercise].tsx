@@ -4909,9 +4909,13 @@ function StrengthDetail({
             scrollEventThrottle={16}
             onScroll={(e) => { tileScrollPosRef.current = e.nativeEvent.contentOffset.x }}
           >
-            {projections.map(({ reps: r, weight: w }) => {
+            {/* Cap the strip at 15RM (T088 Fix 1.3): rep-max projection is only
+                accurate to ~10 reps, so 16-20RM tiles were noise. 13-15RM stay
+                (the Endurance zone needs 13+) but are flagged with "≈". */}
+            {projections.filter(({ reps }) => reps <= 15).map(({ reps: r, weight: w }) => {
               const isSelected = selectedRM === r
               const pct = effectiveOneRM > 0 ? Math.round((w / effectiveOneRM) * 100) : 0
+              const isEstimate = r >= 13
               return (
                 <Pressable
                   key={r}
@@ -4947,7 +4951,7 @@ function StrengthDetail({
                       fontSize: 16, fontWeight: '700',
                       color: isSelected ? palette.blue[400] : colors.foreground,
                     }}>
-                      {w}
+                      {isEstimate ? `≈${w}` : w}
                     </Text>
                   </View>
                   <Text style={{
@@ -4965,6 +4969,7 @@ function StrengthDetail({
           </GestureDetector>
 
           <Text style={s.tinyText}>Epley · Brzycki · Lombardi averaged · % of 1RM</Text>
+          <Text style={s.tinyText}>≈ 13RM+ are rough estimates — rep-max math is most accurate up to ~10 reps</Text>
 
           {selectedProjection && (
             /* `calloutWeighted` sets `minHeight: 220` so every weighted
