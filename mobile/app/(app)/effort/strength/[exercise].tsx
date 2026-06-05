@@ -1882,9 +1882,32 @@ function LeverageHoldDetail({
 // progression. hold_type = 'load'. (T088 Model 3 — load family.)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const LOAD_HOLD_MILESTONES = [15, 30, 45, 60]
-const LOAD_HOLD_GATE = 60        // hold this many bodyweight seconds, then add load
-const LOAD_HOLD_TARGET_SECS = 30 // the loaded-hold duration target
+const LOAD_HOLD_BUILD_MILESTONES = [15, 30, 45, 60]   // bodyweight build-phase tiles
+const LOAD_HOLD_DURATIONS = [10, 20, 30, 45, 60, 90]  // TUT tiles in the loaded phase
+const LOAD_HOLD_GATE = 60        // build a clean bodyweight hold to here first
+const LOAD_HOLD_TARGET_SECS = 30 // canonical loaded-hold duration (default tile)
+
+// Rohmert's isometric-endurance curve: the fraction of a brief-max isometric force
+// that's holdable for a given duration (heavier for short holds, lighter for long).
+// This is the isometric analog of the rep-max eff curve — it scales a logged loaded
+// hold to a target at any other duration. Points from Rohmert (1960); interpolate
+// linearly between, clamp at the ends. (T088 round-2 #6.)
+const ROHMERT_POINTS: ReadonlyArray<readonly [number, number]> = [
+  [6, 1.00], [10, 0.90], [20, 0.72], [30, 0.62], [45, 0.53], [60, 0.46], [90, 0.38], [120, 0.32],
+]
+function rohmertFactor(secs: number): number {
+  const pts = ROHMERT_POINTS
+  if (secs <= pts[0][0]) return pts[0][1]
+  if (secs >= pts[pts.length - 1][0]) return pts[pts.length - 1][1]
+  for (let i = 1; i < pts.length; i++) {
+    if (secs <= pts[i][0]) {
+      const [t0, f0] = pts[i - 1]
+      const [t1, f1] = pts[i]
+      return f0 + (f1 - f0) * ((secs - t0) / (t1 - t0))
+    }
+  }
+  return pts[pts.length - 1][1]
+}
 
 // Added weight from a load-hold label: "Wall Sit · 25 lb × 45 sec" -> 25;
 // bodyweight holds ("Wall Sit · 45 sec") -> 0.
@@ -1908,12 +1931,29 @@ function LoadHoldDetail({
   const bestBwHold  = bwHolds.length ? Math.max(...bwHolds) : 0
   const weighted    = parsed.filter(p => p.load > 0)
   const hasWeighted = weighted.length > 0
-  const bestLoad    = hasWeighted ? Math.max(...weighted.map(p => p.load)) : 0
+  // Anchor on the heaviest loaded hold + the duration it was held for.
+  const bestWeightedEffort = hasWeighted
+    ? weighted.reduce((b, p) => (p.load > b.load ? p : b), weighted[0])
+    : null
+  const bestLoad    = bestWeightedEffort?.load ?? 0
+  const bestLoadDur = (bestWeightedEffort && bestWeightedEffort.dur > 0) ? bestWeightedEffort.dur : LOAD_HOLD_TARGET_SECS
 
   const LOAD_INC      = unit === 'kg' ? 2.5 : 5
-  const gateReached   = bestBwHold >= LOAD_HOLD_GATE || hasWeighted
-  const nextMilestone = LOAD_HOLD_MILESTONES.find(m => m > bestBwHold) ?? null
-  const targetLoad    = hasWeighted ? bestLoad + LOAD_INC : LOAD_INC
+  const nextMilestone = LOAD_HOLD_BUILD_MILESTONES.find(m => m > bestBwHold) ?? null
+
+  // Project the added weight to aim for at a given hold duration: scale the user's
+  // best loaded hold by the Rohmert ratio between the two durations, snap to a
+  // loadable increment, floor at 0 (= bodyweight). Mirrors the Pull-Up Full RX grid,
+  // but the axis is hold duration. (T088 round-2 #6.)
+  const projectedAddedFor = (secs: number): number => {
+    if (!hasWeighted) return 0
+    const raw = bestLoad * (rohmertFactor(secs) / rohmertFactor(bestLoadDur))
+    return Math.max(0, Math.round(raw / LOAD_INC) * LOAD_INC)
+  }
+
+  // Selected TUT tile (drives the hero in the loaded phase). Defaults to 30 s.
+  const [selLoadDur, setSelLoadDur] = useState<number>(LOAD_HOLD_TARGET_SECS)
+  const selAdded = projectedAddedFor(selLoadDur)
 
   // Once loaded, the meaningful progression is LOAD; before that, hold time.
   const chartData = (hasWeighted
@@ -1922,19 +1962,36 @@ function LoadHoldDetail({
   ).filter((p): p is { ts: string; y: number } => p !== null)
 
   const renderTile = (sec: number) => {
-    const achieved = sec <= bestBwHold
-    return (
-      <View key={sec} style={[
-        { width: 64, paddingVertical: 6, borderRadius: 9, borderWidth: 1, alignItems: 'center' },
-        achieved
-          ? { borderColor: withAlpha(palette.blue[500], 0.4), backgroundColor: withAlpha(palette.blue[500], 0.08) }
-          : { borderColor: alpha(colors.border, 0.3), backgroundColor: alpha(colors.card, 0.2), opacity: 0.35 },
-      ]}>
-        <Text style={{ fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 12, color: achieved ? palette.blue[400] : alpha(colors.mutedForeground, 0.4) }}>{sec}s</Text>
-        <View style={{ marginTop: 2, height: 12, alignItems: 'center', justifyContent: 'center' }}>
-          {achieved ? <Check size={11} color={palette.blue[400]} strokeWidth={3} /> : <Text style={{ fontFamily: fonts.mono[400], fontSize: 10, color: alpha(colors.mutedForeground, 0.4) }}>—</Text>}
+    if (!hasWeighted) {
+      // Build phase: bodyweight duration achievement (✓ held that long, — not yet).
+      const achieved = sec <= bestBwHold
+      return (
+        <View key={sec} style={[
+          { width: 56, paddingVertical: 6, borderRadius: 9, borderWidth: 1, alignItems: 'center' },
+          achieved
+            ? { borderColor: withAlpha(palette.blue[500], 0.4), backgroundColor: withAlpha(palette.blue[500], 0.08) }
+            : { borderColor: alpha(colors.border, 0.3), backgroundColor: alpha(colors.card, 0.2), opacity: 0.35 },
+        ]}>
+          <Text style={{ fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 12, color: achieved ? palette.blue[400] : alpha(colors.mutedForeground, 0.4) }}>{sec}s</Text>
+          <View style={{ marginTop: 2, height: 12, alignItems: 'center', justifyContent: 'center' }}>
+            {achieved ? <Check size={11} color={palette.blue[400]} strokeWidth={3} /> : <Text style={{ fontFamily: fonts.mono[400], fontSize: 10, color: alpha(colors.mutedForeground, 0.4) }}>—</Text>}
+          </View>
         </View>
-      </View>
+      )
+    }
+    // Loaded phase: projected added weight per duration; tappable, drives the hero.
+    const added  = projectedAddedFor(sec)
+    const active = sec === selLoadDur
+    return (
+      <Pressable key={sec} onPress={() => setSelLoadDur(sec)} style={[
+        { width: 56, paddingVertical: 6, borderRadius: 9, borderWidth: 1, alignItems: 'center', gap: 1 },
+        active
+          ? { borderColor: withAlpha(palette.blue[500], 0.6), backgroundColor: withAlpha(palette.blue[500], 0.12) }
+          : { borderColor: alpha(colors.border, 0.4), backgroundColor: alpha(colors.card, 0.2) },
+      ]}>
+        <Text numberOfLines={1} style={{ fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 11, color: active ? palette.blue[400] : colors.mutedForeground }}>{fmtDuration(sec)}</Text>
+        <Text style={{ fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'], fontSize: 13, color: active ? palette.blue[400] : colors.foreground }}>{added > 0 ? `+${added}` : 'BW'}</Text>
+      </Pressable>
     )
   }
 
@@ -1960,30 +2017,29 @@ function LoadHoldDetail({
       )}
 
       <AnimateRise delay={0} style={s.card}>
-        <Text style={s.h2}>{gateReached ? 'Add load' : 'Build the hold'}</Text>
+        <Text style={s.h2}>{hasWeighted ? 'Load targets by hold time' : 'Build the hold'}</Text>
         <Text style={s.tinyText}>
-          {gateReached
-            ? 'You own the bodyweight hold — now progress by adding weight, not seconds.'
-            : 'Build a clean 60s hold first; past that, longer just trains endurance — you add load instead.'}
+          {hasWeighted
+            ? 'Hold heavier for short sets, lighter for long ones. Tap a duration to see its target.'
+            : 'Build a clean 60s bodyweight hold first; past that, longer just trains endurance — you add load instead.'}
         </Text>
 
-        {!gateReached && (
-          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 4 }}>
-            {LOAD_HOLD_MILESTONES.map(renderTile)}
-          </View>
-        )}
+        <View style={{ flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+          {(hasWeighted ? LOAD_HOLD_DURATIONS : LOAD_HOLD_BUILD_MILESTONES).map(renderTile)}
+        </View>
 
         <NextTargetCallout>
-          {gateReached ? (
+          {hasWeighted ? (
             <>
               <View style={s.calloutValueRow}>
-                <TickerNumber value={targetLoad} fontSize={36} color={palette.blue[400]} fontWeight="700" />
-                <Text style={s.calloutSubText}>{unit}</Text>
+                {selAdded > 0
+                  ? <><TickerNumber value={selAdded} fontSize={36} color={palette.blue[400]} fontWeight="700" /><Text style={s.calloutSubText}>{unit} added</Text></>
+                  : <Text style={{ fontSize: 26, fontFamily: fonts.sans[700], color: palette.blue[400] }}>Bodyweight</Text>}
               </View>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
-                <CueText>{hasWeighted
-                  ? `Hold ${targetLoad} ${unit} for ~${LOAD_HOLD_TARGET_SECS}s, then add ${LOAD_INC} ${unit} once you hold it clean.`
-                  : `You can hold ${LOAD_HOLD_GATE}s+ bodyweight, so add ${LOAD_INC} ${unit} and hold ~${LOAD_HOLD_TARGET_SECS}s.`}</CueText>
+                <CueText>{selAdded > 0
+                  ? `Hold ${selLoadDur < 60 ? `${selLoadDur} sec` : fmtDurationLong(selLoadDur)} with ${selAdded} ${unit} added, then add ${LOAD_INC} ${unit} once you hold it clean.`
+                  : `Hold ${selLoadDur < 60 ? `${selLoadDur} sec` : fmtDurationLong(selLoadDur)} at bodyweight — at that duration bodyweight alone is the work.`}</CueText>
               </View>
             </>
           ) : (
@@ -1993,13 +2049,13 @@ function LoadHoldDetail({
                 <Text style={s.calloutSubText}>seconds</Text>
               </View>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
-                <CueText>{`Hold a clean ${nextMilestone ?? LOAD_HOLD_GATE}s, building to ${LOAD_HOLD_GATE}s, then add load.`}</CueText>
+                <CueText>{`Hold a clean ${nextMilestone ?? LOAD_HOLD_GATE}s, build to ${LOAD_HOLD_GATE}s, then start adding load.`}</CueText>
               </View>
             </>
           )}
         </NextTargetCallout>
 
-        <Text style={s.tinyText}>{'Isometric strength is position-specific · add load past ~60s (ACSM; Oranchuk 2019)'}</Text>
+        <Text style={s.tinyText}>{'Rohmert isometric-endurance curve · Oranchuk 2019 · ACSM'}</Text>
       </AnimateRise>
 
       {chartData.length >= 1 && (
