@@ -145,7 +145,7 @@ const AIR_BIKE_ZONE_CONFIG = Object.freeze({
   threshold: {
     label:       'THRESHOLD',
     whyText:
-      'Sustained hard intervals at the edge of what you can hold. Trains lactate clearance and the ability to maintain high output past the burn. Longer reps than sprint, less rest. The most productive zone for improving the cal/min rate that anchors every other prescription.',
+      'Sustained hard intervals at the edge of what you can hold. Trains lactate clearance and the ability to maintain high output past the burn. Longer intervals than sprint, less rest. The most productive zone for improving the cal/min rate that anchors every other prescription.',
     durationMin: 1.0,   // ~1 min per rep
     intensity:   0.85,  // 85 % of peak rate
     reps:        5,
@@ -187,10 +187,10 @@ function getAirBikeZoneCue(zone, rx) {
     return `Pedal ${rx.calsPerRep} cals at or above ${rx.wattsFloor} W — steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
   }
   if (zone === 'sprint') {
-    return `Sprint ${rx.calsPerRep} cals as fast as you can — hold at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+    return `Sprint ${rx.calsPerRep} cals as fast as you can — hold at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   // threshold
-  return `Hold ${rx.calsPerRep} cals at a sustained hard pace — keep watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+  return `Hold ${rx.calsPerRep} cals at a sustained hard pace — keep watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
 }
 
 // ── Misc date helpers ─────────────────────────────────────────────────────────
@@ -454,7 +454,7 @@ export default function AdminCardioAirBikeDetail({
                 <div className="flex items-baseline justify-between gap-2">
                   <TickerNumber value={fmtSecs(selectedRx.estimatedSecsPerRep)} className="font-mono text-3xl font-bold text-amber-400" />
                   <span className="shrink-0 text-[11px] text-muted-foreground">
-                    {selectedRx.reps > 1 ? 'est. per rep' : 'est. total'}
+                    {selectedRx.reps > 1 ? 'est. per interval' : 'est. total'}
                   </span>
                 </div>
               </div>

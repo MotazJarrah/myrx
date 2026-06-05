@@ -690,7 +690,7 @@ function buildSwimPlanStep(
     threshold: 'comfortably hard',
     vo2:       'race pace',
   }
-  const cue = `Swim ${shortWork} at ${shortPace} pace (${feelByZone[zone]}). Leave every ${shortLeaving} — about ${Math.round(restPerRep)}s rest between reps.`
+  const cue = `Swim ${shortWork} at ${shortPace} pace (${feelByZone[zone]}). Leave every ${shortLeaving} — about ${Math.round(restPerRep)}s rest between intervals.`
 
   return {
     zone,
@@ -1140,7 +1140,7 @@ function adjustPaceForTimeCap(
   // Intervals — reduce rep count until total time ≤ 45 min.
   //
   // Rest values come from Jack Daniels' Running Formula (3rd ed.):
-  //   • Threshold (T-pace) "Cruise Intervals" → 60 sec jog recovery between reps
+  //   • Threshold (T-pace) "Cruise Intervals" → 60 sec jog recovery between intervals
   //   • VO2 (I-pace) "Intervals"               → equal-time jog recovery (1:1 work:rest)
   const rawReps    = rawSession.intervalReps ?? 4
   const repKm      = rawSession.distanceKm / rawReps
@@ -1260,10 +1260,10 @@ function getZonePaceCue(
   const repTime = fmtSecs(Math.round(rx.repKm * paceSecPerKm))
 
   if (zone === 'threshold') {
-    // Daniels' Cruise Intervals: 60 sec jog recovery between reps at T-pace.
+    // Daniels' Cruise Intervals: 60 sec jog recovery between intervals at T-pace.
     return `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each — jog 60 sec between cruise intervals. After your session, log your best ${repDist}.`
   }
-  // VO2: equal-time jog recovery between reps at I-pace.
+  // VO2: equal-time jog recovery between intervals at I-pace.
   return `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each — equal-time jog recovery, max sustainable effort. After your session, log your best ${repDist}.`
 }
 
@@ -3239,7 +3239,7 @@ interface AirBikeZoneCfg {
   intensity:   number
   /** Number of reps (1 for continuous zones). */
   reps:        number
-  /** Rest between reps in seconds (0 for continuous). */
+  /** Rest between intervals in seconds (0 for continuous). */
   restSecs:    number
 }
 
@@ -3256,7 +3256,7 @@ const AIR_BIKE_ZONE_CONFIG: Record<AirBikeZone, AirBikeZoneCfg> = Object.freeze(
   threshold: {
     label:       'THRESHOLD',
     shortLabel:  'THRESHOLD',
-    whyText:     'Sustained hard intervals at the edge of what you can hold. Trains lactate clearance and the ability to maintain high output past the burn. Longer reps than sprint, less rest. The most productive zone for improving the cal/min rate that anchors every other prescription.',
+    whyText:     'Sustained hard intervals at the edge of what you can hold. Trains lactate clearance and the ability to maintain high output past the burn. Longer intervals than sprint, less rest. The most productive zone for improving the cal/min rate that anchors every other prescription.',
     durationMin: 1.0,    // ~1 min per rep
     intensity:   0.85,   // 85% of peak rate
     reps:        5,
@@ -3285,7 +3285,7 @@ interface AirBikeZoneRx {
   estimatedSecsPerRep: number
   /** Number of reps (1 for continuous). */
   reps:              number
-  /** Rest between reps in seconds (0 for continuous). */
+  /** Rest between intervals in seconds (0 for continuous). */
   restSecs:          number
   /** Short label for tile / pill display. */
   shortWork:         string  // "8 × 9 cal"
@@ -3324,10 +3324,10 @@ function getAirBikeZoneCue(zone: AirBikeZone, rx: AirBikeZoneRx): string {
     return `Pedal ${rx.calsPerRep} cals at or above ${rx.wattsFloor} W — steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
   }
   if (zone === 'sprint') {
-    return `Sprint ${rx.calsPerRep} cals as fast as you can — hold at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+    return `Sprint ${rx.calsPerRep} cals as fast as you can — hold at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   // threshold
-  return `Hold ${rx.calsPerRep} cals at a sustained hard pace — keep watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each rep should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+  return `Hold ${rx.calsPerRep} cals at a sustained hard pace — keep watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
 }
 
 function AirBikeDetail({
@@ -3606,7 +3606,7 @@ function AirBikeDetail({
                     fontWeight="700"
                   />
                   <Text style={s.heroValueDescriptor} numberOfLines={1}>
-                    {selectedRx.reps > 1 ? 'est. per rep' : 'est. total'}
+                    {selectedRx.reps > 1 ? 'est. per interval' : 'est. total'}
                   </Text>
                 </View>
               </View>
@@ -4080,14 +4080,14 @@ interface StairMillZoneCfg {
   intensity:   number
   /** Number of reps (1 for continuous AEROBIC zone). */
   reps:        number
-  /** Rest between reps in seconds (0 for continuous). */
+  /** Rest between intervals in seconds (0 for continuous). */
   restSecs:    number
 }
 
 const STAIRMILL_ZONE_CONFIG: Record<StairMillZone, StairMillZoneCfg> = Object.freeze({
   vo2: {
     label:       'VO2 MAX',
-    whyText:     "Short max-effort sprints at the ceiling of your aerobic capacity. The Allison protocol (2017 Med Sci Sports Exerc) showed 3 × 20-sec all-out stair climbs three times per week produced a 12 % VO2peak improvement in 6 weeks — among the most efficient cardio interventions ever published. Use sparingly: 1 session per week, full recovery between reps.",
+    whyText:     "Short max-effort sprints at the ceiling of your aerobic capacity. The Allison protocol (2017 Med Sci Sports Exerc) showed 3 × 20-sec all-out stair climbs three times per week produced a 12 % VO2peak improvement in 6 weeks — among the most efficient cardio interventions ever published. Use sparingly: 1 session per week, full recovery between intervals.",
     durationMin: 1.0,    // ~60 sec per rep (Allison protocol used 20s, extended here for Step Mill console pacing)
     intensity:   1.10,   // 110 % of peak FPM — short reps tolerate above-peak
     reps:        3,
@@ -4095,7 +4095,7 @@ const STAIRMILL_ZONE_CONFIG: Record<StairMillZone, StairMillZoneCfg> = Object.fr
   },
   threshold: {
     label:       'THRESHOLD',
-    whyText:     'Sustained hard reps at the edge of what you can hold. Trains lactate clearance and the ability to maintain high climbing output past the initial burn. Honda et al. (2014) used 3-min stair-climbing intervals to drive metabolic adaptation; comparable to Pete Pfitzinger\'s cruise interval programming. 1–2 sessions per week max.',
+    whyText:     'Sustained hard intervals at the edge of what you can hold. Trains lactate clearance and the ability to maintain high climbing output past the initial burn. Honda et al. (2014) used 3-min stair-climbing intervals to drive metabolic adaptation; comparable to Pete Pfitzinger\'s cruise interval programming. 1–2 sessions per week max.',
     durationMin: 3.0,    // 3 min per rep — Honda protocol
     intensity:   0.85,   // 85 % of peak FPM — "comfortably hard sustained"
     reps:        4,
@@ -4120,7 +4120,7 @@ interface StairMillZoneRx {
   estimatedSecsPerRep: number
   /** Number of reps (1 for continuous). */
   reps:               number
-  /** Rest between reps in seconds (0 for continuous). */
+  /** Rest between intervals in seconds (0 for continuous). */
   restSecs:           number
   /** Short label for hero row 1 (e.g. "4 × 30 floors" or "160 floors"). */
   shortWork:          string
@@ -4152,10 +4152,10 @@ function getStairMillZoneCue(zone: StairMillZone, rx: StairMillZoneRx): string {
     return `Climb ${rx.floorsPerRep} floors continuously at a steady ${fpm} floors/min — should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   if (zone === 'threshold') {
-    return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at a hard sustained ${fpm} floors/min (~${fmtSecs(rx.estimatedSecsPerRep)} each). Rest ${rx.restSecs} sec between reps.`
+    return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at a hard sustained ${fpm} floors/min (~${fmtSecs(rx.estimatedSecsPerRep)} each). Rest ${rx.restSecs} sec between intervals.`
   }
   // vo2
-  return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at max effort (~${fmtSecs(rx.estimatedSecsPerRep)} each). Full recovery ${Math.round(rx.restSecs / 60)} min between reps.`
+  return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at max effort (~${fmtSecs(rx.estimatedSecsPerRep)} each). Full recovery ${Math.round(rx.restSecs / 60)} min between intervals.`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4452,13 +4452,13 @@ function StairMillDetail({
               <View style={s.heroValueRow}>
                 <TickerNumber value={selectedRx.shortWork} fontSize={30} color={palette.amber[400]} fontWeight="700" />
                 <Text style={s.heroValueDescriptor} numberOfLines={1}>
-                  {selectedRx.reps === 1 ? 'total climb' : 'per rep'}
+                  {selectedRx.reps === 1 ? 'total climb' : 'per interval'}
                 </Text>
               </View>
               <View style={s.heroValueRow}>
                 <TickerNumber value={fmtSecs(selectedRx.estimatedSecsPerRep)} fontSize={30} color={palette.amber[400]} fontWeight="700" />
                 <Text style={s.heroValueDescriptor} numberOfLines={1}>
-                  {selectedRx.reps === 1 ? 'to complete' : 'per rep'}
+                  {selectedRx.reps === 1 ? 'to complete' : 'per interval'}
                 </Text>
               </View>
               <View style={s.heroValueRow}>

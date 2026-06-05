@@ -124,7 +124,7 @@ const STAIRMILL_ZONE_CONFIG = Object.freeze({
   vo2: {
     label:       'VO2 MAX',
     whyText:
-      'Short max-effort sprints at the ceiling of your aerobic capacity. The Allison protocol (2017 Med Sci Sports Exerc) showed 3 × 20-sec all-out stair climbs three times per week produced a 12 % VO2peak improvement in 6 weeks — among the most efficient cardio interventions ever published. Use sparingly: 1 session per week, full recovery between reps.',
+      'Short max-effort sprints at the ceiling of your aerobic capacity. The Allison protocol (2017 Med Sci Sports Exerc) showed 3 × 20-sec all-out stair climbs three times per week produced a 12 % VO2peak improvement in 6 weeks — among the most efficient cardio interventions ever published. Use sparingly: 1 session per week, full recovery between intervals.',
     durationMin: 1.0,    // ~60 sec per rep
     intensity:   1.10,   // 110 % of peak FPM — short reps tolerate above-peak
     reps:        3,
@@ -133,7 +133,7 @@ const STAIRMILL_ZONE_CONFIG = Object.freeze({
   threshold: {
     label:       'THRESHOLD',
     whyText:
-      'Sustained hard reps at the edge of what you can hold. Trains lactate clearance and the ability to maintain high climbing output past the initial burn. Honda et al. (2014) used 3-min stair-climbing intervals to drive metabolic adaptation; comparable to Pete Pfitzinger\'s cruise interval programming. 1–2 sessions per week max.',
+      'Sustained hard intervals at the edge of what you can hold. Trains lactate clearance and the ability to maintain high climbing output past the initial burn. Honda et al. (2014) used 3-min stair-climbing intervals to drive metabolic adaptation; comparable to Pete Pfitzinger\'s cruise interval programming. 1–2 sessions per week max.',
     durationMin: 3.0,    // 3 min per rep — Honda protocol
     intensity:   0.85,   // 85 % of peak FPM — "comfortably hard sustained"
     reps:        4,
@@ -180,10 +180,10 @@ function getStairMillZoneCue(zone, rx) {
     return `Climb ${rx.floorsPerRep} floors continuously at a steady ${fpm} floors/min — should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   if (zone === 'threshold') {
-    return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at a hard sustained ${fpm} floors/min (~${fmtSecs(rx.estimatedSecsPerRep)} each). Rest ${rx.restSecs} sec between reps.`
+    return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at a hard sustained ${fpm} floors/min (~${fmtSecs(rx.estimatedSecsPerRep)} each). Rest ${rx.restSecs} sec between intervals.`
   }
   // vo2
-  return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at max effort (~${fmtSecs(rx.estimatedSecsPerRep)} each). Full recovery ${Math.round(rx.restSecs / 60)} min between reps.`
+  return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at max effort (~${fmtSecs(rx.estimatedSecsPerRep)} each). Full recovery ${Math.round(rx.restSecs / 60)} min between intervals.`
 }
 
 // ── Plan queue — Seiler polarized sequencing (verbatim mirror of mobile) ───────
@@ -537,14 +537,14 @@ export default function AdminCardioStairMillDetail({
                   <div className="flex items-end justify-between gap-3">
                     <TickerNumber value={selectedRx.shortWork} className="font-mono text-3xl font-bold text-amber-400" />
                     <span className="shrink pb-1 text-right text-xs text-muted-foreground">
-                      {selectedRx.reps === 1 ? 'total climb' : 'per rep'}
+                      {selectedRx.reps === 1 ? 'total climb' : 'per interval'}
                     </span>
                   </div>
                   {/* Row 2 — estimated time. */}
                   <div className="flex items-end justify-between gap-3">
                     <TickerNumber value={fmtSecs(selectedRx.estimatedSecsPerRep)} className="font-mono text-3xl font-bold text-amber-400" />
                     <span className="shrink pb-1 text-right text-xs text-muted-foreground">
-                      {selectedRx.reps === 1 ? 'to complete' : 'per rep'}
+                      {selectedRx.reps === 1 ? 'to complete' : 'per interval'}
                     </span>
                   </div>
                   {/* Row 3 — target FPM (climb rate). */}

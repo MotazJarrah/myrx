@@ -568,6 +568,12 @@ TASKS = [
      "FIXED 2026-06-04 (done directly — agent quota was rate-limited): handleDelete optimistically updated the recent-activity list but never re-ran fetchDashboard, which computes the pill aggregates (PRs/streak/HR/weight/hydration/sleep/food) from their own queries. Added fetchDashboard() right after the delete; it never sets loading=true so there's no skeleton flash. tsc clean.",
      "mobile/app/(app)/dashboard.tsx",
      "2026-06-04"),
+
+    ("T084", "Cardio copy: 'per rep' -> 'per interval' (StairMill + sweep)", "Cardio", "Mobile+Web", "Done",
+     "User 2026-06-04: StairMill (and other cardio) display copy says 'per rep' / 'between reps' / 'Each rep' — cardio prescriptions are INTERVALS, not reps. Fix the user-facing copy to interval terminology where it makes sense (hero row descriptors + cue lines + zone whyText). Internal code identifiers (reps, repKm, repSecs fields) stay. Pace already uses 'per interval' for its descriptors.",
+     "Mobile [activity].tsx: StairMill hero rows (4455/4461) + cues (4155/4158) + VO2 whyText (4090), Air Bike hero (3609) + cues (3327/3330) + threshold whyText (3259), Swimming cue (693) -> interval wording. Mirror to web AdminCardio{StairMill,AirBike,Swimming}Detail.jsx. tsc + build/deploy + reload. DONE 2026-06-04: hero descriptors 'per rep'->'per interval' + 'est. per rep'->'est. per interval'; cues 'Each rep'->'Each interval', 'between reps'->'between intervals'; whyText 'Sustained hard reps'->'intervals' + 'Longer reps than sprint'->'Longer intervals'. Pace/Duration already used interval wording. Internal field names (reps/repKm/repSecs) + code comments left as-is. tsc clean; web deployed; mobile Fast-Refresh.",
+     "mobile/app/(app)/effort/cardio/[activity].tsx; web AdminCardio*Detail.jsx",
+     "2026-06-04"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────

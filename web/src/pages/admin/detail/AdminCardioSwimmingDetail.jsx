@@ -282,7 +282,7 @@ function buildSwimPlanStep(zone, cssSecsPer100m, swimUnit, session) {
     threshold: 'comfortably hard',
     vo2:       'race pace',
   }
-  const cue = `Swim ${shortWork} at ${shortPace} pace (${feelByZone[zone]}). Leave every ${shortLeaving} — about ${Math.round(restPerRep)}s rest between reps.`
+  const cue = `Swim ${shortWork} at ${shortPace} pace (${feelByZone[zone]}). Leave every ${shortLeaving} — about ${Math.round(restPerRep)}s rest between intervals.`
 
   return {
     zone,
