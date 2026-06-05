@@ -76,6 +76,19 @@ function nextBarbellAbove(raw, unit) {
   const next = (above % inc === 0) ? above + inc : Math.ceil(above / inc) * inc
   return bar + next
 }
+// Per-side plate breakdown for a barbell weight — mirror of the weighted card's
+// platesForBarbellWeight, so Olympic shows the same plate chips. (T088 round-2 #2)
+const PLATE_SIZES = { lb: [45, 35, 25, 10, 5, 2.5], kg: [25, 20, 15, 10, 5, 2.5, 1.25] }
+function platesForBarbellWeight(weight, unit = 'lb') {
+  const bar = BAR[unit] ?? 45
+  const plates = PLATE_SIZES[unit] ?? PLATE_SIZES.lb
+  let rem = Math.max(0, weight - bar) / 2
+  const used = []
+  for (const p of plates) {
+    while (rem >= p - 0.001) { used.push(p); rem = Math.round((rem - p) * 1000) / 1000 }
+  }
+  return used
+}
 
 // Verbatim mirror of the mobile OLYMPIC_TARGETS.
 const OLYMPIC_TARGETS = [
@@ -97,17 +110,16 @@ function olympicRamp(working, unit) {
   return out
 }
 function buildOlympicCue(t, working, unit) {
+  // Explicit step sequence (user: "start with an empty bar, then so and so, then
+  // 2-3 reps") — each warm-up jump is its own "then N unit" step.
   const ramp = olympicRamp(working, unit)
-  const rampStr = ramp.length === 2 ? `${ramp[0]} and ${ramp[1]}` : ramp.length === 1 ? `${ramp[0]}` : ''
-  const warm = rampStr
-    ? `Warm up from the empty bar through ${rampStr} before `
-    : 'Warm up from the empty bar, then '
+  const rampClause = ramp.map(w => `then ${w} ${unit}, `).join('')
   if (t.key === 'peak')
-    return `${warm}a heavy single at ${working} ${unit}, a new PR. Make or miss, never grind it out, speed is the signal.`
+    return `Start with the empty bar, ${rampClause}then build to a heavy single at ${working} ${unit}, a new PR. Make or miss, never grind it out, speed is the signal.`
   const coaching = t.key === 'technique'
-    ? 'Keep it light and fast on the positions, ending each set the instant bar speed drops.'
-    : 'Crisp singles and doubles, stopping the moment the bar slows.'
-  return `${warm}${t.reps} reps at ${working} ${unit}, around ${t.pctText} of your best. ${coaching}`
+    ? 'Keep it light and fast on the positions, and stop each set the instant the bar slows.'
+    : 'Keep every rep crisp and stop the moment the bar slows.'
+  return `Start with the empty bar, ${rampClause}then do ${t.reps} reps at ${working} ${unit}, around ${t.pctText} of your best. ${coaching}`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,6 +170,7 @@ export default function AdminStrengthOlympicDetail({ userId, exercise, onBack })
     return t.key === 'peak' ? nextBarbellAbove(best1RM, unit) : nearestBarbell(best1RM * t.pct, unit)
   }
   const selWeight = weightFor(selTarget)
+  const selPlates = best1RM > 0 ? platesForBarbellWeight(selWeight, unit) : []
 
   const chartData = useMemo(() => entries
     .map(e => { const p = parseOneRM(e.value); return p ? { ts: e.created_at, date: fmtShort(e.created_at), value: p.oneRM } : null })
@@ -243,11 +256,26 @@ export default function AdminStrengthOlympicDetail({ userId, exercise, onBack })
 
                 {/* Next-target hero — mirrors the athlete NextTargetCallout chrome. */}
                 <div className="mt-3 flex flex-col gap-2 rounded-[9px] border border-blue-500/30 bg-blue-500/[0.08] p-4">
-                  <div className="flex items-baseline gap-1.5">
-                    <TickerNumber value={selWeight} className="font-mono text-3xl font-bold text-blue-400" />
-                    <span className="text-sm text-muted-foreground">{unit}</span>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-baseline gap-1.5">
+                      <TickerNumber value={selWeight} className="font-mono text-3xl font-bold text-blue-400" />
+                      <span className="text-sm text-muted-foreground">{unit}</span>
+                    </div>
+                    {selPlates.length > 0 && (
+                      <div className="flex flex-col items-end">
+                        <span className="mb-1 text-[11px] text-muted-foreground">per side</span>
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {selPlates.map((p, i) => (
+                            <span key={i} className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-blue-400">
+                              {p}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <p className="text-[11px] text-muted-foreground">{selTarget.label} · {selTarget.pctText} · {selTarget.repsText}</p>
+                  <p className="text-[11px] text-muted-foreground">{unit === 'kg' ? 20 : 45} {unit} bar + {selPlates.join(' + ') || '—'} {unit} per side</p>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
                     <CueText className="text-sm text-muted-foreground">{buildOlympicCue(selTarget, selWeight, unit)}</CueText>
                   </div>

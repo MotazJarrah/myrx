@@ -4138,17 +4138,16 @@ function olympicRamp(working: number, unit: 'lb' | 'kg'): number[] {
   return out
 }
 function buildOlympicCue(t: OlympicTarget, working: number, unit: 'lb' | 'kg'): string {
+  // Read as an explicit step sequence (user: "start with an empty bar, then so
+  // and so, then 2-3 reps"). Each warm-up jump is its own "then N unit" step.
   const ramp = olympicRamp(working, unit)
-  const rampStr = ramp.length === 2 ? `${ramp[0]} and ${ramp[1]}` : ramp.length === 1 ? `${ramp[0]}` : ''
-  const warm = rampStr
-    ? `Warm up from the empty bar through ${rampStr} before `
-    : 'Warm up from the empty bar, then '
+  const rampClause = ramp.map(w => `then ${w} ${unit}, `).join('')
   if (t.key === 'peak')
-    return `${warm}a heavy single at ${working} ${unit}, a new PR. Make or miss, never grind it out, speed is the signal.`
+    return `Start with the empty bar, ${rampClause}then build to a heavy single at ${working} ${unit}, a new PR. Make or miss, never grind it out, speed is the signal.`
   const coaching = t.key === 'technique'
-    ? 'Keep it light and fast on the positions, ending each set the instant bar speed drops.'
-    : 'Crisp singles and doubles, stopping the moment the bar slows.'
-  return `${warm}${t.reps} reps at ${working} ${unit}, around ${t.pctText} of your best. ${coaching}`
+    ? 'Keep it light and fast on the positions, and stop each set the instant the bar slows.'
+    : 'Keep every rep crisp and stop the moment the bar slows.'
+  return `Start with the empty bar, ${rampClause}then do ${t.reps} reps at ${working} ${unit}, around ${t.pctText} of your best. ${coaching}`
 }
 
 function OlympicLiftDetail({
@@ -4186,6 +4185,8 @@ function OlympicLiftDetail({
     return nearestLoadableWeight(best1RM * t.pct, 'barbell', unit)
   }
   const selWeight = weightFor(selTarget)
+  // Per-side plate breakdown for the work set — same chips the weighted card shows.
+  const selPlates = best1RM > 0 ? platesForBarbellWeight(selWeight, unit) : []
 
   const chartData = efforts
     .map(e => { const p = parseOneRM(e.value); return p && p.oneRM > 0 ? { ts: e.created_at, y: p.oneRM } : null })
@@ -4241,11 +4242,24 @@ function OlympicLiftDetail({
             </View>
 
             <NextTargetCallout>
-              <View style={s.calloutValueRow}>
-                <TickerNumber value={selWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
-                <Text style={s.calloutSubText}> {unit}</Text>
+              <View style={s.targetRow}>
+                <View style={s.calloutValueRow}>
+                  <TickerNumber value={selWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                  <Text style={s.calloutSubText}> {unit}</Text>
+                </View>
+                {selPlates.length > 0 && (
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={[s.tinyText, { marginBottom: 4 }]}>per side</Text>
+                    <View style={s.plateChipRow}>
+                      {selPlates.map((p, i) => (
+                        <View key={i} style={s.plateChip}><Text style={s.plateChipText}>{p}</Text></View>
+                      ))}
+                    </View>
+                  </View>
+                )}
               </View>
               <Text style={s.tinyText}>{selTarget.label} · {selTarget.pctText} · {selTarget.repsText}</Text>
+              <Text style={s.tinyText}>{unit === 'kg' ? 20 : 45} {unit} bar + {selPlates.join(' + ') || '—'} {unit} per side</Text>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
                 <CueText>{buildOlympicCue(selTarget, selWeight, unit)}</CueText>
               </View>
