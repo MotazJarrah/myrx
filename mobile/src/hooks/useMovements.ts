@@ -20,6 +20,11 @@ export interface Movement {
    *  instead of the rep-max grid — these lifts fail on technique/bar-speed, not
    *  fatigue, so a 20-rep projection is meaningless and unsafe. */
   lift_type?: 'olympic' | 'ballistic' | null
+  /** Isometric hold sub-type (T088 Model 3). 'leverage' -> LeverageHoldDetail
+   *  (Layout 11, skill ladder — planche/levers/flag/handstand); 'load' -> an
+   *  add-load progression (planned); 'time'/null -> the default time-milestone
+   *  IsometricDetail. */
+  hold_type?: 'time' | 'load' | 'leverage' | null
   band_assist?: boolean | null
   knee_assist?: boolean | null
   cardio_mode?: 'pace' | 'duration' | string | null

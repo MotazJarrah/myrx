@@ -17,6 +17,7 @@ import AdminStrengthIsometricDetail from './detail/AdminStrengthIsometricDetail'
 import AdminStrengthRepsOnlyDetail from './detail/AdminStrengthRepsOnlyDetail'
 import AdminStrengthOlympicDetail from './detail/AdminStrengthOlympicDetail'
 import AdminStrengthBallisticDetail from './detail/AdminStrengthBallisticDetail'
+import AdminStrengthLeverageDetail from './detail/AdminStrengthLeverageDetail'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -138,7 +139,7 @@ export default function AdminEffortDetail() {
     let alive = true
     setMovement(undefined)
     supabase.from('movements')
-      .select('equipment, strength_type, lift_type, unit_lock, uses_pair, weight_ladder_override')
+      .select('equipment, strength_type, lift_type, hold_type, unit_lock, uses_pair, weight_ladder_override')
       .eq('name', baseExercise)
       .maybeSingle()
       .then(({ data }) => { if (alive) setMovement(data ?? null) })
@@ -172,6 +173,10 @@ export default function AdminEffortDetail() {
         : / \[Band\]$/.test(exercise) ? 'band'
         : / \[Knee\]$/.test(exercise) ? 'knee'
         : null
+      // Leverage/skill holds (planche, levers, flag…) — before the isometric
+      // branch (they ARE strength_type='isometric', just a different progression).
+      if (movement.hold_type === 'leverage')
+        return <AdminStrengthLeverageDetail userId={userId} exercise={exercise} onBack={goBack} />
       if (movement.strength_type === 'isometric')
         return <AdminStrengthIsometricDetail userId={userId} exercise={exercise} onBack={goBack} />
       if (eq === 'assisted')

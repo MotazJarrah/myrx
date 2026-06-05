@@ -1693,6 +1693,188 @@ function IsometricDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LeverageHoldDetail (Layout 11) — skill / leverage isometric holds (planche,
+// front/back lever, human flag, L-sit, handstand, crow, support holds). These
+// fail on LEVERAGE, not endurance — a full planche maxes at ~10-20s, so the
+// 10-120s time grid + 2-min cap is meaningless. Instead: short milestones
+// (5-30s) and a SKILL LADDER — hold the current variant clean for 30s, then
+// progress to the next harder variant (tuck -> straddle -> full). Standalone
+// holds (no harder variant in the app) just chase the 30s "mastered" mark.
+// (T088 Model 3 — leverage family. hold_type = 'leverage'.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LEVERAGE_MILESTONES = [5, 10, 15, 20, 30]
+const LEVERAGE_GATE = 30 // hold this many clean seconds at a variant, then progress
+
+// Variant ladders — only the families whose harder variants exist as separate
+// movements in the DB. Order = easiest -> hardest.
+const LEVERAGE_LADDERS: ReadonlyArray<readonly string[]> = [
+  ['Planche Hold (Tuck)', 'Planche Hold (Straddle)', 'Planche Hold'],
+  ['Front Lever Hold (Tuck)', 'Front Lever Hold'],
+  ['Back Lever Hold (Tuck)', 'Back Lever Hold'],
+  ['Handstand Hold (Wall)', 'Handstand Hold (Freestanding)'],
+]
+function leverageLadderFor(name: string): readonly string[] | null {
+  for (const l of LEVERAGE_LADDERS) if (l.includes(name)) return l
+  return null
+}
+// Short label for the ladder strip: the parenthetical ("Tuck"/"Straddle"/"Wall")
+// or "Full" for the no-parenthetical top variant.
+function leverageVariantLabel(name: string): string {
+  const m = name.match(/\(([^)]+)\)/)
+  return m ? m[1] : 'Full'
+}
+
+function LeverageHoldDetail({
+  exercise, efforts, onDelete, hideHeader,
+}: {
+  exercise: string
+  efforts: Effort[]
+  onDelete: (id: string) => void
+  hideHeader?: boolean
+}) {
+  const durations = efforts.map(e => parseDurationSecs(e.value)).filter((x): x is number => x !== null)
+  const bestSecs  = durations.length > 0 ? Math.max(...durations) : 0
+
+  const ladder      = leverageLadderFor(exercise)
+  const ladderIdx   = ladder ? ladder.indexOf(exercise) : -1
+  const nextVariant = ladder && ladderIdx >= 0 && ladderIdx < ladder.length - 1 ? ladder[ladderIdx + 1] : null
+
+  const gateReached   = bestSecs >= LEVERAGE_GATE
+  const nextMilestone = LEVERAGE_MILESTONES.find(m => m > bestSecs) ?? null
+
+  const chartData = efforts
+    .map(e => { const x = parseDurationSecs(e.value); return x !== null ? { ts: e.created_at, y: x } : null })
+    .filter((p): p is { ts: string; y: number } => p !== null)
+
+  const renderTile = (sec: number) => {
+    const achieved = sec <= bestSecs
+    return (
+      <View key={sec} style={[
+        { width: 52, paddingVertical: 6, borderRadius: 9, borderWidth: 1, alignItems: 'center' },
+        achieved
+          ? { borderColor: withAlpha(palette.blue[500], 0.4), backgroundColor: withAlpha(palette.blue[500], 0.08) }
+          : { borderColor: alpha(colors.border, 0.3), backgroundColor: alpha(colors.card, 0.2), opacity: 0.35 },
+      ]}>
+        <Text style={{ fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 11, color: achieved ? palette.blue[400] : alpha(colors.mutedForeground, 0.4) }}>{sec}s</Text>
+        <View style={{ marginTop: 2, height: 12, alignItems: 'center', justifyContent: 'center' }}>
+          {achieved
+            ? <Check size={11} color={palette.blue[400]} strokeWidth={3} />
+            : <Text style={{ fontFamily: fonts.mono[400], fontSize: 10, color: alpha(colors.mutedForeground, 0.4) }}>—</Text>}
+        </View>
+      </View>
+    )
+  }
+
+  return (
+    <View style={s.page}>
+      {!hideHeader && (
+        <View>
+          <BackButton />
+          <Text style={s.h1}>{exercise}</Text>
+          <View style={s.subRow}>
+            <Text style={s.subText}>{bestSecs > 0 ? 'Best — ' : 'No efforts logged yet'}</Text>
+            {bestSecs > 0 && <TickerNumber value={fmtDurationLong(bestSecs)} fontSize={14} color={palette.blue[400]} fontWeight="600" />}
+          </View>
+          <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
+            <Text style={s.carryTierBadgeText}>SKILL</Text>
+          </View>
+        </View>
+      )}
+
+      <AnimateRise delay={0} style={s.card}>
+        <Text style={s.h2}>Hold the position</Text>
+        <Text style={s.tinyText}>A skill, not an endurance test — short clean holds, then a harder variant.</Text>
+
+        {ladder && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+            {ladder.map((v, i) => {
+              const isCurrent = v === exercise
+              return (
+                <View key={v} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={[
+                    { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
+                    isCurrent
+                      ? { borderColor: palette.blue[500], backgroundColor: withAlpha(palette.blue[500], 0.15) }
+                      : { borderColor: alpha(colors.border, 0.4), backgroundColor: alpha(colors.card, 0.2) },
+                  ]}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: isCurrent ? palette.blue[400] : colors.mutedForeground }}>{leverageVariantLabel(v)}</Text>
+                  </View>
+                  {i < ladder.length - 1 && <Text style={{ color: alpha(colors.mutedForeground, 0.5), fontSize: 12 }}>→</Text>}
+                </View>
+              )
+            })}
+          </View>
+        )}
+
+        <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 4 }}>
+          {LEVERAGE_MILESTONES.map(renderTile)}
+        </View>
+
+        <NextTargetCallout>
+          {gateReached ? (
+            <View style={{ alignItems: 'center', paddingVertical: 8, gap: 6 }}>
+              <Trophy size={26} color={palette.blue[400]} strokeWidth={2} />
+              <Text style={{ fontSize: 14, fontWeight: '600', color: colors.foreground }}>
+                {nextVariant ? `Ready for ${leverageVariantLabel(nextVariant)}` : 'Skill mastered'}
+              </Text>
+              <Text style={s.tinyText}>
+                {nextVariant
+                  ? `You can hold a clean ${LEVERAGE_GATE}s — log a ${nextVariant} effort to progress`
+                  : `Holding ${LEVERAGE_GATE}s+ clean — keep it sharp or chase a harder skill`}
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={s.calloutValueRow}>
+                <TickerNumber value={nextMilestone ?? LEVERAGE_GATE} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                <Text style={s.calloutSubText}>seconds</Text>
+              </View>
+              <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
+                <Text style={s.calloutLabel}>
+                  Hold a clean <Text style={{ color: colors.foreground, fontWeight: '700' }}>{nextMilestone ?? LEVERAGE_GATE}s</Text>
+                  {nextVariant
+                    ? <> — at {LEVERAGE_GATE}s clean, progress to {leverageVariantLabel(nextVariant)}</>
+                    : <> — build to a solid {LEVERAGE_GATE}s</>}
+                </Text>
+              </View>
+            </>
+          )}
+        </NextTargetCallout>
+
+        <Text style={s.tinyText}>{'Gymnastics leverage progression · GMB · Steven Low (Overcoming Gravity)'}</Text>
+      </AnimateRise>
+
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
+          <Text style={s.h2}>Hold time over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={chartData.length > 1 ? bestSecs : null}
+            yTickFormatter={(v) => `${Math.round(v)}s`}
+            tooltipValueFormatter={(v) => fmtDurationLong(Math.round(v))}
+            tooltipLabel="Hold time"
+            yDomain={{ min: (mn) => Math.max(0, Math.round(mn * 0.85)), max: (mx) => Math.round(mx * 1.15) }}
+            caption={<Text style={s.tinyText}>Dashed line = personal best</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      <EffortsHistorySection
+        efforts={efforts}
+        onDelete={onDelete}
+        delay={500}
+        renderLeft={e => (<Text style={s.listRowDate}>{fmtDate(e.created_at)}</Text>)}
+        renderRight={e => {
+          const secs = parseDurationSecs(e.value)
+          return <Text style={s.valBlue}>{fmtDurationLong(secs)}</Text>
+        }}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AssistedMachineDetail
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4241,6 +4423,7 @@ function StrengthDetail({
     .replace(/ \[Knee\]$/, '')
   const movementRecord    = dbMovements.find(m => m.name === baseExercise) ?? null
   const isIsometric       = movementRecord?.strength_type === 'isometric'
+  const isLeverageHold    = isIsometric && movementRecord?.hold_type === 'leverage'
   const isAssistedMachine = movementRecord?.equipment === 'assisted'
   const isCarry           = movementRecord?.equipment === 'carry'
   const isOlympic         = movementRecord?.lift_type === 'olympic'
@@ -4602,6 +4785,7 @@ function StrengthDetail({
   // [Push] and [Pull] variants are), so the other isCarry / isAssisted /
   // etc. checks all fall through here.
   if (isSledWorkConsolidated) return <SledWorkConsolidatedDetail efforts={efforts} onDelete={handleDeleteEffort} />
+  if (isLeverageHold)     return <LeverageHoldDetail     exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isIsometric)        return <IsometricDetail        exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isOlympic)          return <OlympicLiftDetail      exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isBallistic)        return <BallisticLiftDetail    exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />

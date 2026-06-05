@@ -889,9 +889,9 @@ The user's band level is parsed from the effort label (`Pull Up [Band] · Heavy 
 
 ### Isometric detail card — locked design spec
 
-This is the spec for the detail page that covers **isometric movements** on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile) — Plank Hold, Wall Sit, Side Plank, L-sit, Hollow Hold, Glute Bridge Hold, Superman Hold, Handstand Hold, and any other movement where `movements.strength_type = 'isometric'`. Progression is measured in **seconds of unbroken hold time**, not reps or weight.
+This is the spec for the detail page that covers **isometric movements** on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile) — Plank Hold, Wall Sit, Side Plank, L-sit, Hollow Hold, Glute Bridge Hold, Superman Hold, and any other movement where `movements.strength_type = 'isometric'` and `hold_type` is not `'leverage'`. Progression is measured in **seconds of unbroken hold time**, not reps or weight. **Skill/leverage holds (`hold_type = 'leverage'` — planche, front/back lever, human flag, L-sit, handstand, crow, support holds) are EXCLUDED from this card** — they route to the Leverage hold card (Layout 11, spec below), because a 2-min time grid is meaningless for a skill that maxes at ~10-20 s (T088 Model 3). Loadable holds (`hold_type = 'load'`) are a planned separate add-load treatment; until built they stay on this time card.
 
-**Universal milestone set (locked):** every isometric movement uses the same 12 milestones:
+**Universal milestone set (locked) — TIME/LOAD holds only:** every time/load isometric movement uses the same 12 milestones (leverage/skill holds use Layout 11's short 5-30 s set + a variant ladder instead):
 
 ```
 10s · 20s · 30s · 40s · 50s · 60s · 70s · 80s · 90s · 100s · 110s · 120s
@@ -947,6 +947,28 @@ No more `TEN_MIN_ISO` split. Per the science (McGill Torso Endurance Tests, Behm
 - `selectedMilestone` state and tap-to-review behaviour — tiles are status indicators only now; the hero card always shows the NEXT target, not a tile the user tapped.
 - The "first target" / "achieved" / "all done" three-mode hero card body — replaced by a single "next target + cue" block with a special-cased all-cleared state.
 - "Tap an achieved milestone to review it" subtitle — no longer applicable.
+
+---
+
+### Leverage / skill hold detail card (Layout 11) — locked design spec
+
+Spec for the detail page covering **skill / leverage isometric holds** on `[exercise].tsx` (mobile, `LeverageHoldDetail`) + the web coach mirror `AdminStrengthLeverageDetail.jsx`. Selected by `movements.hold_type = 'leverage'` — a CHECK-constrained `text` column (`'time' | 'load' | 'leverage'`) added in migration `add_hold_type_tag_leverage_holds` (June 2026). The 18 tagged moves: Planche (Tuck/Straddle/Full), Front Lever (Tuck/Full), Back Lever (Tuck/Full), Handstand (Wall/Freestanding), Human Flag, L-Sit, V-Sit, Hanging L-Sit, Headstand, Crow, Dip/Ring Support, Pike Compression. (T088 Model 3.)
+
+**Why a separate card:** these fail on LEVERAGE, not endurance — a full planche maxes at ~10-20 s even for elites, so the 10-120 s time grid + 2-min cap is meaningless and a "mastery = 2 min" frame is wrong. Progression is a LEVERAGE LADDER (tuck → straddle → full), not longer time. Evidence: gymnastics-strength leverage progression (GMB; Steven Low, *Overcoming Gravity*); isometric strength is joint-angle/position-specific (Oranchuk 2019; Kitai & Sale).
+
+**Layout 11** (Layout-2 skeleton — strip → tiles → hero → chart → log, no swipe pill):
+1. **Header** — name + `Best — N s` + a static **SKILL** pill.
+2. **"Hold the position" card:**
+   - A **skill-ladder strip** (only when harder variants exist in the DB): the variant sequence (Tuck → Straddle → Full) with the current variant highlighted. Standalone holds omit it.
+   - **Short milestone tiles**: `5 / 10 / 15 / 20 / 30 s` (achieved ≤ best). NOT the 10-120 s grid.
+   - **Hero**: while best < 30 s → the next milestone as target + cue *"Hold a clean N s — at 30 s clean, progress to [next variant]"* (or *"build to a solid 30 s"* if standalone). At best ≥ 30 s (the **gate**) → a Trophy state: *"Ready for [next variant] — log a [next] effort to progress"*, or *"Skill mastered"* for the top/standalone rung.
+   - Attribution: `Gymnastics leverage progression · GMB · Steven Low (Overcoming Gravity)`.
+3. **Chart** — hold time over time + PB reference line.
+4. **Log** — hold time per effort (read-only + per-effort delete on the coach mirror).
+
+**Locked constants:** `LEVERAGE_MILESTONES = [5,10,15,20,30]`, `LEVERAGE_GATE = 30` (clean seconds at a variant → progress). `LEVERAGE_LADDERS` (code lookup) holds the variant families: Planche Tuck→Straddle→Full, Front/Back Lever Tuck→Full, Handstand Wall→Freestanding. L-Sit / V-Sit are intentionally **standalone** (user chose, not linked). Each variant is its own page (per-variant; full family consolidation is future polish).
+
+**Dispatch order (LOCKED):** `hold_type === 'leverage'` MUST come before the `strength_type === 'isometric'` branch (leverage holds ARE isometric) — both mobile + web.
 
 ---
 
