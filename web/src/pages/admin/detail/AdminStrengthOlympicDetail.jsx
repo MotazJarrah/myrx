@@ -115,11 +115,11 @@ function buildOlympicCue(t, working, unit) {
   const ramp = olympicRamp(working, unit)
   const rampClause = ramp.map(w => `then ${w} ${unit}, `).join('')
   if (t.key === 'peak')
-    return `Start with the empty bar, ${rampClause}then build to a heavy single at ${working} ${unit}, a new PR. Make or miss, never grind it out, speed is the signal.`
+    return `Start with an empty bar, ${rampClause}then build to a heavy single at ${working} ${unit}, a new PR. Make or miss, never grind it out, speed is the signal.`
   const coaching = t.key === 'technique'
     ? 'Keep it light and fast on the positions, and stop each set the instant the bar slows.'
     : 'Keep every rep crisp and stop the moment the bar slows.'
-  return `Start with the empty bar, ${rampClause}then do ${t.reps} reps at ${working} ${unit}, around ${t.pctText} of your best. ${coaching}`
+  return `Start with an empty bar, ${rampClause}then do ${t.reps} reps at ${working} ${unit}, around ${t.pctText} of your best. ${coaching}`
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
