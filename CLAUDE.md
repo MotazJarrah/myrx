@@ -1018,9 +1018,13 @@ Spec for **loadable isometric holds** on `[exercise].tsx` (mobile, `LoadHoldDeta
 
 **Why:** these positions take external load, so endless seconds is the wrong progression — past ~60 s a bodyweight hold trains endurance, not strength. Build the hold to 60 s, THEN add weight. Evidence: isometric strength is position/joint-angle-specific (Oranchuk 2019; ACSM).
 
-**Two phases:**
-- **Phase 1 (build the hold)** — best bodyweight hold < 60 s AND no weighted efforts: time-milestone tiles `15 / 30 / 45 / 60 s`; hero targets the next milestone; cue *"Hold a clean N s — build to 60 s, then add load."*
-- **Phase 2 (add load)** — best bodyweight hold ≥ 60 s OR any weighted effort logged: tiles hidden; hero shows the next load target. First load = the smallest increment (5 lb / 2.5 kg); thereafter `best load + increment`. Cue *"Hold X for ~30 s — add 5 lb once you hold it clean."* `LOAD_HOLD_GATE = 60`, `LOAD_HOLD_TARGET_SECS = 30`.
+**Layout (round-2 #6 redesign — looks like the Pull-Up Full RX grid):** a persistent TUT (time-under-tension) tile grid + a hero, in two phases:
+- **Build phase** (no weighted efforts yet): tiles = bodyweight duration milestones `15 / 30 / 45 / 60 s`, each ✓ (held that long) or — (not yet); hero targets the next milestone; cue *"Hold a clean N s, build to 60 s, then start adding load."* You can't project an added-weight target until a loaded hold is logged — first earn the bodyweight hold.
+- **Loaded phase** (any weighted effort logged): tiles = `10 / 20 / 30 / 45 / 60 / 90 s`, each PROJECTING the added weight to aim for at that duration (heavier for short holds, lighter for long), via Rohmert's curve anchored on the user's best loaded hold; tap a tile → hero shows that prescription (`Hold 30 sec with +25 lb added, then add 5 lb once you hold it clean`); default tile 30 s. A tile whose projection rounds to 0 shows `BW`.
+
+**Projection (Rohmert's isometric-endurance curve):** `rohmertFactor(secs)` = fraction of a brief-max isometric force holdable for a duration (points from Rohmert 1960: 6 s→1.0, 30 s→0.62, 60 s→0.46, 90 s→0.38, …, interpolated + clamped). `projectedAddedFor(D) = round_to_increment(bestLoad × rohmertFactor(D) / rohmertFactor(bestLoadDur))`, floored at 0 — the isometric analog of the rep-max eff curve. `LOAD_HOLD_GATE = 60`, `LOAD_HOLD_TARGET_SECS = 30` (default tile), increment 5 lb / 2.5 kg.
+
+**Title + attribution (round-2 #6 fixes):** the card title is neutral (`Build the hold` / `Load targets by hold time`) — "Add load" is NO LONGER a title (the add-load guidance lives in the cue). Attribution reformatted to the standard sources-only line: `Rohmert isometric-endurance curve · Oranchuk 2019 · ACSM`.
 
 **Log form (mobile `strength.tsx`):** for `hold_type='load'` the isometric form gains an **Added-weight wheel** (step 5 lb / 2.5 kg, min 0 = bodyweight) beside the duration wheel. Label: `Name · {w} {unit} × {dur} sec` when loaded, `Name · {dur} sec` when bodyweight; `value` stays `{dur} sec` so `parseDurationSecs` is unchanged. Weight is parsed back from the label via `parseLoadHoldWeight`.
 

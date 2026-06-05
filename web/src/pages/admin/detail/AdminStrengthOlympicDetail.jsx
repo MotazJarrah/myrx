@@ -200,7 +200,7 @@ export default function AdminStrengthOlympicDetail({ userId, exercise, onBack })
         }`}
       >
         <span className={`text-[10px] font-bold uppercase tracking-wide ${active ? 'text-blue-400' : 'text-muted-foreground'}`}>{t.label}</span>
-        <span className={`font-mono text-base font-bold tabular-nums ${active ? 'text-blue-400' : 'text-foreground'}`}>{w}</span>
+        <span className={`whitespace-nowrap font-mono text-base font-bold tabular-nums ${active ? 'text-blue-400' : 'text-foreground'}`}>{w}</span>
         <span className="font-mono text-[10px] tabular-nums text-muted-foreground">{t.pctText}</span>
         <span className="text-[10px] text-muted-foreground">{t.repsText}</span>
       </button>

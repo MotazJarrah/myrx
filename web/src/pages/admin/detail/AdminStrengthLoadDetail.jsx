@@ -60,9 +60,28 @@ function parseLoadHold(label) {
   return m ? { weight: parseFloat(m[1]), unit: m[2].toLowerCase() } : { weight: 0, unit: null }
 }
 
-const LOAD_HOLD_MILESTONES = [15, 30, 45, 60]
+const LOAD_HOLD_BUILD_MILESTONES = [15, 30, 45, 60]   // bodyweight build-phase tiles
+const LOAD_HOLD_DURATIONS = [10, 20, 30, 45, 60, 90]  // TUT tiles in the loaded phase
 const LOAD_HOLD_GATE = 60
 const LOAD_HOLD_TARGET_SECS = 30
+
+// Rohmert isometric-endurance curve (verbatim mirror of mobile): fraction of a
+// brief-max isometric force holdable for a given duration; scales a logged loaded
+// hold to a target at any other duration. (T088 round-2 #6.)
+const ROHMERT_POINTS = [[6, 1.00], [10, 0.90], [20, 0.72], [30, 0.62], [45, 0.53], [60, 0.46], [90, 0.38], [120, 0.32]]
+function rohmertFactor(secs) {
+  const pts = ROHMERT_POINTS
+  if (secs <= pts[0][0]) return pts[0][1]
+  if (secs >= pts[pts.length - 1][0]) return pts[pts.length - 1][1]
+  for (let i = 1; i < pts.length; i++) {
+    if (secs <= pts[i][0]) {
+      const [t0, f0] = pts[i - 1]
+      const [t1, f1] = pts[i]
+      return f0 + (f1 - f0) * ((secs - t0) / (t1 - t0))
+    }
+  }
+  return pts[pts.length - 1][1]
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
@@ -101,13 +120,27 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
   const bestBwHold  = useMemo(() => { const bw = parsed.filter(p => p.weight === 0).map(p => p.dur); return bw.length ? Math.max(...bw) : 0 }, [parsed])
   const weighted    = useMemo(() => parsed.filter(p => p.weight > 0), [parsed])
   const hasWeighted = weighted.length > 0
-  const bestLoad    = hasWeighted ? Math.max(...weighted.map(p => p.weight)) : 0
+  // Anchor on the heaviest loaded hold + the duration it was held for.
+  const bestWeightedEffort = useMemo(
+    () => (hasWeighted ? weighted.reduce((b, p) => (p.weight > b.weight ? p : b), weighted[0]) : null),
+    [weighted, hasWeighted]
+  )
+  const bestLoad    = bestWeightedEffort?.weight ?? 0
+  const bestLoadDur = (bestWeightedEffort && bestWeightedEffort.dur > 0) ? bestWeightedEffort.dur : LOAD_HOLD_TARGET_SECS
   const unit        = (parsed.find(p => p.unit)?.unit) || 'lb'
 
   const LOAD_INC      = unit === 'kg' ? 2.5 : 5
-  const gateReached   = bestBwHold >= LOAD_HOLD_GATE || hasWeighted
-  const nextMilestone = LOAD_HOLD_MILESTONES.find(m => m > bestBwHold) ?? null
-  const targetLoad    = hasWeighted ? bestLoad + LOAD_INC : LOAD_INC
+  const nextMilestone = LOAD_HOLD_BUILD_MILESTONES.find(m => m > bestBwHold) ?? null
+
+  // Project the added weight to aim for at a given hold duration (Rohmert ratio),
+  // snapped to a loadable increment, floored at 0 (= bodyweight).
+  const projectedAddedFor = (secs) => {
+    if (!hasWeighted) return 0
+    const raw = bestLoad * (rohmertFactor(secs) / rohmertFactor(bestLoadDur))
+    return Math.max(0, Math.round(raw / LOAD_INC) * LOAD_INC)
+  }
+  const [selLoadDur, setSelLoadDur] = useState(LOAD_HOLD_TARGET_SECS)
+  const selAdded = projectedAddedFor(selLoadDur)
 
   const chartData = useMemo(() => (hasWeighted
     ? entries.map(e => { const w = parseLoadHold(e.label).weight; return w > 0 ? { ts: e.created_at, date: fmtShort(e.created_at), value: w } : null })
@@ -127,22 +160,41 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
   }
 
   function renderTile(sec) {
-    const achieved = sec <= bestBwHold
-    return (
-      <div
-        key={sec}
-        className={`flex flex-col items-center rounded-[9px] border py-1.5 ${
-          achieved ? 'border-blue-500/40 bg-blue-500/[0.08]' : 'border-border/30 bg-card/20 opacity-35'
-        }`}
-        style={{ width: 64 }}
-      >
-        <span className={`font-mono text-xs font-semibold tabular-nums ${achieved ? 'text-blue-400' : 'text-muted-foreground/40'}`}>{sec}s</span>
-        <div className="mt-0.5 flex h-3 items-center justify-center">
-          {achieved
-            ? <Check className="h-2.5 w-2.5 text-blue-400" strokeWidth={3} />
-            : <span className="font-mono text-[10px] text-muted-foreground/40">—</span>}
+    if (!hasWeighted) {
+      // Build phase: bodyweight duration achievement.
+      const achieved = sec <= bestBwHold
+      return (
+        <div
+          key={sec}
+          className={`flex flex-col items-center rounded-[9px] border py-1.5 ${
+            achieved ? 'border-blue-500/40 bg-blue-500/[0.08]' : 'border-border/30 bg-card/20 opacity-35'
+          }`}
+          style={{ width: 56 }}
+        >
+          <span className={`font-mono text-xs font-semibold tabular-nums ${achieved ? 'text-blue-400' : 'text-muted-foreground/40'}`}>{sec}s</span>
+          <div className="mt-0.5 flex h-3 items-center justify-center">
+            {achieved
+              ? <Check className="h-2.5 w-2.5 text-blue-400" strokeWidth={3} />
+              : <span className="font-mono text-[10px] text-muted-foreground/40">—</span>}
+          </div>
         </div>
-      </div>
+      )
+    }
+    // Loaded phase: projected added weight per duration; click drives the hero.
+    const added  = projectedAddedFor(sec)
+    const active = sec === selLoadDur
+    return (
+      <button
+        key={sec}
+        onClick={() => setSelLoadDur(sec)}
+        className={`flex flex-col items-center gap-0.5 rounded-[9px] border py-1.5 transition-colors ${
+          active ? 'border-blue-500/60 bg-blue-500/[0.12]' : 'border-border/40 bg-card/20 hover:bg-card/40'
+        }`}
+        style={{ width: 56 }}
+      >
+        <span className={`whitespace-nowrap font-mono text-[11px] tabular-nums ${active ? 'text-blue-400' : 'text-muted-foreground'}`}>{fmtDuration(sec)}</span>
+        <span className={`whitespace-nowrap font-mono text-[13px] font-bold tabular-nums ${active ? 'text-blue-400' : 'text-foreground'}`}>{added > 0 ? `+${added}` : 'BW'}</span>
+      </button>
     )
   }
 
@@ -180,31 +232,32 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
         <>
           {/* ── 2. Hold card ── */}
           <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
-            <h2 className="text-sm font-bold">{gateReached ? 'Add load' : 'Build the hold'}</h2>
+            <h2 className="text-sm font-bold">{hasWeighted ? 'Load targets by hold time' : 'Build the hold'}</h2>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              {gateReached
-                ? 'Owns the bodyweight hold — progress by adding weight, not seconds.'
-                : 'Build a clean 60 s hold first; past that, longer just trains endurance — add load instead.'}
+              {hasWeighted
+                ? 'Hold heavier for short sets, lighter for long ones. Tap a duration to see its target.'
+                : 'Build a clean 60 s bodyweight hold first; past that, longer just trains endurance — add load instead.'}
             </p>
 
-            {!gateReached && (
-              <div className="mt-3 flex justify-center gap-2">
-                {LOAD_HOLD_MILESTONES.map(renderTile)}
-              </div>
-            )}
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
+              {(hasWeighted ? LOAD_HOLD_DURATIONS : LOAD_HOLD_BUILD_MILESTONES).map(renderTile)}
+            </div>
 
             {/* Hero */}
             <div className="mt-3 flex flex-col gap-2 rounded-[9px] border border-blue-500/30 bg-blue-500/[0.08] p-4">
-              {gateReached ? (
+              {hasWeighted ? (
                 <>
                   <div className="flex items-baseline gap-1.5">
-                    <TickerNumber value={targetLoad} className="font-mono text-3xl font-bold text-blue-400" />
-                    <span className="text-sm text-muted-foreground">{unit}</span>
+                    {selAdded > 0 ? (
+                      <><TickerNumber value={selAdded} className="font-mono text-3xl font-bold text-blue-400" /><span className="text-sm text-muted-foreground">{unit} added</span></>
+                    ) : (
+                      <span className="text-2xl font-bold text-blue-400">Bodyweight</span>
+                    )}
                   </div>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-                    <CueText>{hasWeighted
-                      ? `Hold ${targetLoad} ${unit} for ~${LOAD_HOLD_TARGET_SECS}s, then add ${LOAD_INC} ${unit} once held clean.`
-                      : `Can hold ${LOAD_HOLD_GATE}s+ bodyweight, so add ${LOAD_INC} ${unit} and hold ~${LOAD_HOLD_TARGET_SECS}s.`}</CueText>
+                    <CueText>{selAdded > 0
+                      ? `Hold ${selLoadDur < 60 ? `${selLoadDur} sec` : fmtDurationLong(selLoadDur)} with ${selAdded} ${unit} added, then add ${LOAD_INC} ${unit} once you hold it clean.`
+                      : `Hold ${selLoadDur < 60 ? `${selLoadDur} sec` : fmtDurationLong(selLoadDur)} at bodyweight — at that duration bodyweight alone is the work.`}</CueText>
                   </div>
                 </>
               ) : (
@@ -214,13 +267,13 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
                     <span className="text-sm text-muted-foreground">seconds</span>
                   </div>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-                    <CueText>{`Hold a clean ${nextMilestone ?? LOAD_HOLD_GATE}s, building to ${LOAD_HOLD_GATE}s, then add load.`}</CueText>
+                    <CueText>{`Hold a clean ${nextMilestone ?? LOAD_HOLD_GATE}s, build to ${LOAD_HOLD_GATE}s, then start adding load.`}</CueText>
                   </div>
                 </>
               )}
             </div>
 
-            <p className="mt-2 text-[11px] text-muted-foreground">{'Isometric strength is position-specific · add load past ~60s (ACSM; Oranchuk 2019)'}</p>
+            <p className="mt-2 text-[11px] text-muted-foreground">{'Rohmert isometric-endurance curve · Oranchuk 2019 · ACSM'}</p>
           </AnimateRise>
 
           {/* ── 3. Chart ── */}

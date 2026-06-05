@@ -607,7 +607,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
               <Check className="h-3.5 w-3.5 text-blue-400" strokeWidth={3} />
             </span>
           ) : (
-            <span className={`mt-1 font-mono text-xs font-bold tabular-nums ${isSelected ? 'text-blue-400' : isCurrent ? 'text-blue-400' : achievable ? 'text-blue-400/70' : 'text-muted-foreground/50'}`}>
+            <span className={`mt-1 whitespace-nowrap font-mono text-xs font-bold tabular-nums ${isSelected ? 'text-blue-400' : isCurrent ? 'text-blue-400' : achievable ? 'text-blue-400/70' : 'text-muted-foreground/50'}`}>
               {mode === 'locked' ? '—'
                 : mode === 'push' ? `→ ${nextRep}`
                 : aw === 0 ? 'BW' : `+${aw}`}

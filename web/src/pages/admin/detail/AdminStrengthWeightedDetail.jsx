@@ -604,7 +604,7 @@ export default function AdminStrengthWeightedDetail({
                       <span className={`text-[10px] font-bold uppercase tracking-wider ${isSelected ? 'text-blue-400' : 'text-muted-foreground'}`}>
                         {r}RM
                       </span>
-                      <span className={`mt-0.5 font-mono text-base font-bold tabular-nums ${isSelected ? 'text-blue-400' : 'text-foreground'}`}>
+                      <span className={`mt-0.5 whitespace-nowrap font-mono text-base font-bold tabular-nums ${isSelected ? 'text-blue-400' : 'text-foreground'}`}>
                         {isEstimate ? `≈${w}` : w}
                       </span>
                       <span className={`mt-0.5 font-mono text-[9px] tabular-nums leading-none ${isSelected ? 'text-blue-400/70' : 'text-muted-foreground/50'}`}>
