@@ -63,6 +63,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../../lib/supabase'
+import CueText from '../../../components/CueText'
 import { projectPaces } from '../../../lib/formulas'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
@@ -444,7 +445,7 @@ function buildPlanStep(zone, activity, bestPaceSecPerKm, distUnit, session) {
 
   const pacingCheckpoint = computePacingCheckpoint(rx, distUnit, zonePace)
   const pacingSentence   = pacingCheckpoint
-    ? ` — aim for ${pacingCheckpoint.value} ${pacingCheckpoint.descriptor}`
+    ? `, aim for ${pacingCheckpoint.value} ${pacingCheckpoint.descriptor}`
     : ''
 
   const restDays   = zone === 'endurance' ? 0 : (zone === 'threshold' ? 1 : 2)
@@ -849,7 +850,7 @@ export default function AdminCardioPaceDetail({ userId, activity, onBack }) {
 
                 {/* Thin separator + full coaching cue + rest line. */}
                 <div className="mt-2.5 border-t border-amber-500/15 pt-2.5">
-                  <p className="text-sm text-foreground">{selectedStep.cue}</p>
+                  <CueText className="text-sm text-foreground">{selectedStep.cue}</CueText>
                   {selectedStep.restLine && (
                     <p className="mt-1 text-[11px] text-muted-foreground">{selectedStep.restLine}</p>
                   )}

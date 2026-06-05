@@ -51,6 +51,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import CueText from '../../../components/CueText'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
@@ -627,7 +628,7 @@ function CarrySurface({
               {/* Thin separator + cue line (the prescription). */}
               {activeZone.cueLine && (
                 <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-                  <p className="text-sm text-foreground">{activeZone.cueLine}</p>
+                  <CueText className="text-sm text-foreground">{activeZone.cueLine}</CueText>
                 </div>
               )}
             </div>

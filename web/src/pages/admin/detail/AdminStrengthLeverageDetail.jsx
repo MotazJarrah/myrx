@@ -223,8 +223,8 @@ export default function AdminStrengthLeverageDetail({ userId, exercise, onBack }
                   </p>
                   <p className="text-[11px] text-muted-foreground">
                     {nextVariant
-                      ? `Can hold a clean ${LEVERAGE_GATE}s — log a ${nextVariant} effort to progress`
-                      : `Holding ${LEVERAGE_GATE}s+ clean — keep it sharp or chase a harder skill`}
+                      ? `Can hold a clean ${LEVERAGE_GATE}s, log a ${nextVariant} effort to progress`
+                      : `Holding ${LEVERAGE_GATE}s+ clean, keep it sharp or chase a harder skill`}
                   </p>
                 </div>
               ) : (

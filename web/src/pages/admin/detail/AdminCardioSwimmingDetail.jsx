@@ -44,6 +44,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import CueText from '../../../components/CueText'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
@@ -282,7 +283,7 @@ function buildSwimPlanStep(zone, cssSecsPer100m, swimUnit, session) {
     threshold: 'comfortably hard',
     vo2:       'race pace',
   }
-  const cue = `Swim ${shortWork} at ${shortPace} pace (${feelByZone[zone]}). Leave every ${shortLeaving} — about ${Math.round(restPerRep)}s rest between intervals.`
+  const cue = `Swim ${shortWork} at ${shortPace} pace (${feelByZone[zone]}). Leave every ${shortLeaving}, about ${Math.round(restPerRep)}s rest between intervals.`
 
   return {
     zone,
@@ -537,7 +538,7 @@ function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) 
 
             {/* Thin separator + full coaching cue. */}
             <div className="mt-2.5 border-t border-amber-500/15 pt-2.5">
-              <p className="text-sm text-foreground">{selectedStep.cue}</p>
+              <CueText className="text-sm text-foreground">{selectedStep.cue}</CueText>
             </div>
           </div>
         </AnimateRise>

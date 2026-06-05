@@ -58,6 +58,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../../lib/supabase'
+import CueText from '../../../components/CueText'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
@@ -177,7 +178,7 @@ function buildStairMillZoneRx(zone, peakFpm) {
 function getStairMillZoneCue(zone, rx) {
   const fpm = rx.targetFpm.toFixed(1)
   if (zone === 'aerobic') {
-    return `Climb ${rx.floorsPerRep} floors continuously at a steady ${fpm} floors/min — should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+    return `Climb ${rx.floorsPerRep} floors continuously at a steady ${fpm} floors/min, should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   if (zone === 'threshold') {
     return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at a hard sustained ${fpm} floors/min (~${fmtSecs(rx.estimatedSecsPerRep)} each). Rest ${rx.restSecs} sec between intervals.`
@@ -553,7 +554,7 @@ export default function AdminCardioStairMillDetail({
 
                 {/* Thin separator + full coaching cue. */}
                 <div className="mt-2.5 border-t border-amber-500/15 pt-2.5">
-                  <p className="text-sm text-foreground">{selectedStep.cue}</p>
+                  <CueText className="text-sm text-foreground">{selectedStep.cue}</CueText>
                 </div>
               </div>
             </AnimateRise>

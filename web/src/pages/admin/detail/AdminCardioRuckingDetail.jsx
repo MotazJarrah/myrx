@@ -46,6 +46,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import CueText from '../../../components/CueText'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
@@ -312,14 +313,14 @@ export default function AdminCardioRuckingDetail({
       } else {
         switch (zone) {
           case 'max_load':
-            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit} — focus on posture and step under load`
+            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit}, focus on posture and step under load`
             break
           case 'distance_build':
-            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit} — steady cadence, manage your feet`
+            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit}, steady cadence, manage your feet`
             break
           case 'conditioning':
           default:
-            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit} — keep moving, build aerobic base`
+            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit}, keep moving, build aerobic base`
             break
         }
       }
@@ -499,7 +500,7 @@ export default function AdminCardioRuckingDetail({
 
               {/* Thin separator + cue line. */}
               <div className="mt-2.5 border-t border-amber-500/15 pt-2.5">
-                <p className="text-sm text-foreground">{selectedZone.cueLine}</p>
+                <CueText className="text-sm text-foreground">{selectedZone.cueLine}</CueText>
               </div>
             </div>
           </AnimateRise>

@@ -32,6 +32,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import CueText from '../../../components/CueText'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
@@ -225,7 +226,7 @@ export default function AdminStrengthOlympicDetail({ userId, exercise, onBack })
                   </div>
                   <p className="text-[11px] text-muted-foreground">{selTarget.label} · {selTarget.pctText} · {selTarget.repsText}</p>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-                    <p className="text-sm text-muted-foreground">{selTarget.cue}</p>
+                    <CueText className="text-sm text-muted-foreground">{selTarget.cue}</CueText>
                   </div>
                 </div>
 

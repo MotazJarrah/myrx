@@ -50,6 +50,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import CueText from '../../../components/CueText'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
@@ -184,13 +185,13 @@ function buildAirBikeZoneRx(zone, peakCalsPerMin) {
 function getAirBikeZoneCue(zone, rx) {
   const cfg = AIR_BIKE_ZONE_CONFIG[zone]
   if (cfg.reps === 1) {
-    return `Pedal ${rx.calsPerRep} cals at or above ${rx.wattsFloor} W — steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
+    return `Pedal ${rx.calsPerRep} cals at or above ${rx.wattsFloor} W, steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
   }
   if (zone === 'sprint') {
-    return `Sprint ${rx.calsPerRep} cals as fast as you can — hold at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+    return `Sprint ${rx.calsPerRep} cals as fast as you can, holding at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   // threshold
-  return `Hold ${rx.calsPerRep} cals at a sustained hard pace — keep watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+  return `Hold ${rx.calsPerRep} cals at a sustained hard pace, keeping watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
 }
 
 // ── Misc date helpers ─────────────────────────────────────────────────────────
@@ -458,7 +459,7 @@ export default function AdminCardioAirBikeDetail({
 
               {/* Thin separator + full coaching cue (rest + watts floor inline). */}
               <div className="mt-2.5 border-t border-amber-500/15 pt-2.5">
-                <p className="text-sm text-foreground">{selectedCue}</p>
+                <CueText className="text-sm text-foreground">{selectedCue}</CueText>
               </div>
             </div>
           </AnimateRise>
