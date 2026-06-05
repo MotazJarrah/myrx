@@ -206,7 +206,7 @@ export default function AdminStrengthBallisticDetail({ userId, exercise, onBack 
                         <span className="text-sm text-muted-foreground">{unit} — top bell</span>
                       </div>
                       <div className="mt-2.5 flex flex-col gap-1 border-t border-blue-500/15 pt-2.5">
-                        <p className="text-sm text-muted-foreground">On the heaviest bell — keep the sets explosive (5-10 powerful reps), resting at least as long as each set takes.</p>
+                        <p className="text-sm text-muted-foreground">On the heaviest bell, so keep the sets explosive (<span className="font-mono font-semibold text-foreground">5–10</span> powerful reps), resting at least as long as each set takes.</p>
                         {benchmarkApplies && <p className="text-[11px] text-muted-foreground">{benchmark}</p>}
                       </div>
                     </>
@@ -217,7 +217,7 @@ export default function AdminStrengthBallisticDetail({ userId, exercise, onBack 
                         <span className="text-sm text-muted-foreground">{unit} — next bell</span>
                       </div>
                       <div className="mt-2.5 flex flex-col gap-1 border-t border-blue-500/15 pt-2.5">
-                        <p className="text-sm text-muted-foreground">Train the {bestBell} {unit} bell in explosive sets of 5-10, resting at least as long as each set takes (power needs full recovery). Own ~100 clean reps, then move up to {targetBell} {unit}.</p>
+                        <p className="text-sm text-muted-foreground">Train the <span className="font-mono font-semibold text-blue-400">{bestBell} {unit}</span> bell in explosive sets of <span className="font-mono font-semibold text-foreground">5–10</span>, resting at least as long as each set takes. Own ~<span className="font-mono font-semibold text-foreground">100</span> clean reps, then move up to <span className="font-mono font-semibold text-blue-400">{targetBell} {unit}</span>.</p>
                         {benchmarkApplies && <p className="text-[11px] text-muted-foreground">{benchmark}</p>}
                       </div>
                     </>

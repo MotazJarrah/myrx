@@ -203,8 +203,8 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
                     <p className="text-sm text-muted-foreground">
                       {hasWeighted
-                        ? <>Hold <span className="font-semibold text-foreground">{targetLoad} {unit}</span> for ~{LOAD_HOLD_TARGET_SECS}s — add {LOAD_INC} {unit} once held clean</>
-                        : <>Can hold {LOAD_HOLD_GATE}s+ bodyweight — add <span className="font-semibold text-foreground">{LOAD_INC} {unit}</span> and hold ~{LOAD_HOLD_TARGET_SECS}s</>}
+                        ? <>Hold <span className="font-mono font-semibold text-blue-400">{targetLoad} {unit}</span> for ~<span className="font-mono font-semibold text-foreground">{LOAD_HOLD_TARGET_SECS}s</span>, then add <span className="font-mono font-semibold text-foreground">{LOAD_INC} {unit}</span> once held clean.</>
+                        : <>Can hold <span className="font-mono font-semibold text-foreground">{LOAD_HOLD_GATE}s</span>+ bodyweight, so add <span className="font-mono font-semibold text-blue-400">{LOAD_INC} {unit}</span> and hold ~<span className="font-mono font-semibold text-foreground">{LOAD_HOLD_TARGET_SECS}s</span>.</>}
                     </p>
                   </div>
                 </>
@@ -216,7 +216,7 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
                   </div>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
                     <p className="text-sm text-muted-foreground">
-                      Hold a clean <span className="font-semibold text-foreground">{nextMilestone ?? LOAD_HOLD_GATE}s</span> — build to {LOAD_HOLD_GATE}s, then add load
+                      Hold a clean <span className="font-mono font-semibold text-foreground">{nextMilestone ?? LOAD_HOLD_GATE}s</span>, building to <span className="font-mono font-semibold text-foreground">{LOAD_HOLD_GATE}s</span>, then add load.
                     </p>
                   </div>
                 </>

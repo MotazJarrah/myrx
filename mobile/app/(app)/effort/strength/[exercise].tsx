@@ -1832,10 +1832,10 @@ function LeverageHoldDetail({
               </View>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
                 <Text style={s.calloutLabel}>
-                  Hold a clean <Text style={{ color: colors.foreground, fontWeight: '700' }}>{nextMilestone ?? LEVERAGE_GATE}s</Text>
+                  Hold a clean <Text style={s.cueNum}>{nextMilestone ?? LEVERAGE_GATE}s</Text>
                   {nextVariant
-                    ? <> — at {LEVERAGE_GATE}s clean, progress to {leverageVariantLabel(nextVariant)}</>
-                    : <> — build to a solid {LEVERAGE_GATE}s</>}
+                    ? <>, then at <Text style={s.cueNum}>{LEVERAGE_GATE}s</Text> clean progress to {leverageVariantLabel(nextVariant)}.</>
+                    : <>, building to a solid <Text style={s.cueNum}>{LEVERAGE_GATE}s</Text>.</>}
                 </Text>
               </View>
             </>
@@ -1983,8 +1983,8 @@ function LoadHoldDetail({
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
                 <Text style={s.calloutLabel}>
                   {hasWeighted
-                    ? <>Hold <Text style={{ color: colors.foreground, fontWeight: '700' }}>{targetLoad} {unit}</Text> for ~{LOAD_HOLD_TARGET_SECS}s — add {LOAD_INC} {unit} once you hold it clean</>
-                    : <>You can hold {LOAD_HOLD_GATE}s+ bodyweight — add <Text style={{ color: colors.foreground, fontWeight: '700' }}>{LOAD_INC} {unit}</Text> and hold ~{LOAD_HOLD_TARGET_SECS}s</>}
+                    ? <>Hold <Text style={s.cueNumBlue}>{targetLoad} {unit}</Text> for ~<Text style={s.cueNum}>{LOAD_HOLD_TARGET_SECS}s</Text>, then add <Text style={s.cueNum}>{LOAD_INC} {unit}</Text> once you hold it clean.</>
+                    : <>You can hold <Text style={s.cueNum}>{LOAD_HOLD_GATE}s</Text>+ bodyweight, so add <Text style={s.cueNumBlue}>{LOAD_INC} {unit}</Text> and hold ~<Text style={s.cueNum}>{LOAD_HOLD_TARGET_SECS}s</Text>.</>}
                 </Text>
               </View>
             </>
@@ -1996,7 +1996,7 @@ function LoadHoldDetail({
               </View>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
                 <Text style={s.calloutLabel}>
-                  Hold a clean <Text style={{ color: colors.foreground, fontWeight: '700' }}>{nextMilestone ?? LOAD_HOLD_GATE}s</Text> — build to {LOAD_HOLD_GATE}s, then add load
+                  Hold a clean <Text style={s.cueNum}>{nextMilestone ?? LOAD_HOLD_GATE}s</Text>, building to <Text style={s.cueNum}>{LOAD_HOLD_GATE}s</Text>, then add load.
                 </Text>
               </View>
             </>
@@ -4424,7 +4424,7 @@ function BallisticLiftDetail({
                     <Text style={s.calloutSubText}> {unit} — top bell</Text>
                   </View>
                   <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
-                    <Text style={s.calloutLabel}>You're on the heaviest bell — keep the sets explosive (5-10 powerful reps), resting at least as long as each set takes.</Text>
+                    <Text style={s.calloutLabel}>You're on the heaviest bell, so keep the sets explosive (<Text style={s.cueNum}>5–10</Text> powerful reps), resting at least as long as each set takes.</Text>
                     {benchmarkApplies && <Text style={s.tinyText}>{benchmark}</Text>}
                   </View>
                 </>
@@ -4435,7 +4435,7 @@ function BallisticLiftDetail({
                     <Text style={s.calloutSubText}> {unit} — next bell</Text>
                   </View>
                   <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
-                    <Text style={s.calloutLabel}>Train the {bestBell} {unit} bell in explosive sets of 5-10, resting at least as long as each set takes (power needs full recovery). Own ~100 clean reps, then move up to {targetBell} {unit}.</Text>
+                    <Text style={s.calloutLabel}>Train the <Text style={s.cueNumBlue}>{bestBell} {unit}</Text> bell in explosive sets of <Text style={s.cueNum}>5–10</Text>, resting at least as long as each set takes. Own ~<Text style={s.cueNum}>100</Text> clean reps, then move up to <Text style={s.cueNumBlue}>{targetBell} {unit}</Text>.</Text>
                     {benchmarkApplies && <Text style={s.tinyText}>{benchmark}</Text>}
                   </View>
                 </>
@@ -5636,7 +5636,7 @@ function StrengthDetail({
                         sentence, numbers emphasized as bold mono spans (RN can't
                         reflow a TickerNumber View inside wrapping text). */}
                     <Text style={s.calloutLabel}>
-                      Do <Text style={s.cueNum}>{selZoneCfg.setsText}</Text> of <Text style={s.cueNum}>{selRepRange} reps</Text> at <Text style={s.cueNumBlue}>{workingWeight} {unit}</Text> — a weight you can do at least <Text style={s.cueNum}>{couldDoReps}</Text> of; rest <Text style={s.cueNum}>{selZoneCfg.restText}</Text> between sets. Add <Text style={s.cueNum}>{workingJump} {unit}</Text> after every clean session, work your way up to <Text style={s.cueNumBlue}>{selRepRange} × {targetWeight} {unit}</Text>.
+                      Do <Text style={s.cueNum}>{selZoneCfg.setsText}</Text> of <Text style={s.cueNum}>{selRepRange} reps</Text> at <Text style={s.cueNumBlue}>{workingWeight} {unit}</Text>, a weight you can do at least <Text style={s.cueNum}>{couldDoReps}</Text> of; rest <Text style={s.cueNum}>{selZoneCfg.restText}</Text> between sets. Add <Text style={s.cueNum}>{workingJump} {unit}</Text> after every clean session, work your way up to <Text style={s.cueNumBlue}>{selRepRange} × {targetWeight} {unit}</Text>.
                     </Text>
                   </>
                 )}

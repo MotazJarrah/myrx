@@ -235,10 +235,10 @@ export default function AdminStrengthLeverageDetail({ userId, exercise, onBack }
                   </div>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
                     <p className="text-sm text-muted-foreground">
-                      Hold a clean <span className="font-semibold text-foreground">{nextMilestone ?? LEVERAGE_GATE}s</span>
+                      Hold a clean <span className="font-mono font-semibold text-foreground">{nextMilestone ?? LEVERAGE_GATE}s</span>
                       {nextVariant
-                        ? ` — at ${LEVERAGE_GATE}s clean, progress to ${leverageVariantLabel(nextVariant)}`
-                        : ` — build to a solid ${LEVERAGE_GATE}s`}
+                        ? <>, then at <span className="font-mono font-semibold text-foreground">{LEVERAGE_GATE}s</span> clean progress to {leverageVariantLabel(nextVariant)}.</>
+                        : <>, building to a solid <span className="font-mono font-semibold text-foreground">{LEVERAGE_GATE}s</span>.</>}
                     </p>
                   </div>
                 </>
