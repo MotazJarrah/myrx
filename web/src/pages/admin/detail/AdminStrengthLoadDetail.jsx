@@ -16,6 +16,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
 import TickerNumber from '../../../components/TickerNumber'
+import CueText from '../../../components/CueText'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
 import { ArrowLeft, Check } from 'lucide-react'
@@ -201,11 +202,9 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
                     <span className="text-sm text-muted-foreground">{unit}</span>
                   </div>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-                    <p className="text-sm text-muted-foreground">
-                      {hasWeighted
-                        ? <>Hold <span className="font-mono font-semibold text-blue-400">{targetLoad} {unit}</span> for ~<span className="font-mono font-semibold text-foreground">{LOAD_HOLD_TARGET_SECS}s</span>, then add <span className="font-mono font-semibold text-foreground">{LOAD_INC} {unit}</span> once held clean.</>
-                        : <>Can hold <span className="font-mono font-semibold text-foreground">{LOAD_HOLD_GATE}s</span>+ bodyweight, so add <span className="font-mono font-semibold text-blue-400">{LOAD_INC} {unit}</span> and hold ~<span className="font-mono font-semibold text-foreground">{LOAD_HOLD_TARGET_SECS}s</span>.</>}
-                    </p>
+                    <CueText>{hasWeighted
+                      ? `Hold ${targetLoad} ${unit} for ~${LOAD_HOLD_TARGET_SECS}s, then add ${LOAD_INC} ${unit} once held clean.`
+                      : `Can hold ${LOAD_HOLD_GATE}s+ bodyweight, so add ${LOAD_INC} ${unit} and hold ~${LOAD_HOLD_TARGET_SECS}s.`}</CueText>
                   </div>
                 </>
               ) : (
@@ -215,9 +214,7 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
                     <span className="text-sm text-muted-foreground">seconds</span>
                   </div>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-                    <p className="text-sm text-muted-foreground">
-                      Hold a clean <span className="font-mono font-semibold text-foreground">{nextMilestone ?? LOAD_HOLD_GATE}s</span>, building to <span className="font-mono font-semibold text-foreground">{LOAD_HOLD_GATE}s</span>, then add load.
-                    </p>
+                    <CueText>{`Hold a clean ${nextMilestone ?? LOAD_HOLD_GATE}s, building to ${LOAD_HOLD_GATE}s, then add load.`}</CueText>
                   </div>
                 </>
               )}

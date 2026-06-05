@@ -1815,12 +1815,9 @@ function LeverageHoldDetail({
                 <Text style={s.calloutSubText}>seconds</Text>
               </View>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
-                <Text style={s.calloutLabel}>
-                  Hold a clean <Text style={s.cueNum}>{nextMilestone ?? LEVERAGE_GATE}s</Text>
-                  {nextVariant
-                    ? <>, then at <Text style={s.cueNum}>{LEVERAGE_GATE}s</Text> clean progress to {leverageVariantLabel(nextVariant)}.</>
-                    : <>, building to a solid <Text style={s.cueNum}>{LEVERAGE_GATE}s</Text>.</>}
-                </Text>
+                <CueText>{`Hold a clean ${nextMilestone ?? LEVERAGE_GATE}s${nextVariant
+                  ? `, then at ${LEVERAGE_GATE}s clean progress to ${leverageVariantLabel(nextVariant)}.`
+                  : `, building to a solid ${LEVERAGE_GATE}s.`}`}</CueText>
               </View>
             </>
           )}
@@ -1965,11 +1962,9 @@ function LoadHoldDetail({
                 <Text style={s.calloutSubText}>{unit}</Text>
               </View>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
-                <Text style={s.calloutLabel}>
-                  {hasWeighted
-                    ? <>Hold <Text style={s.cueNumBlue}>{targetLoad} {unit}</Text> for ~<Text style={s.cueNum}>{LOAD_HOLD_TARGET_SECS}s</Text>, then add <Text style={s.cueNum}>{LOAD_INC} {unit}</Text> once you hold it clean.</>
-                    : <>You can hold <Text style={s.cueNum}>{LOAD_HOLD_GATE}s</Text>+ bodyweight, so add <Text style={s.cueNumBlue}>{LOAD_INC} {unit}</Text> and hold ~<Text style={s.cueNum}>{LOAD_HOLD_TARGET_SECS}s</Text>.</>}
-                </Text>
+                <CueText>{hasWeighted
+                  ? `Hold ${targetLoad} ${unit} for ~${LOAD_HOLD_TARGET_SECS}s, then add ${LOAD_INC} ${unit} once you hold it clean.`
+                  : `You can hold ${LOAD_HOLD_GATE}s+ bodyweight, so add ${LOAD_INC} ${unit} and hold ~${LOAD_HOLD_TARGET_SECS}s.`}</CueText>
               </View>
             </>
           ) : (
@@ -1979,9 +1974,7 @@ function LoadHoldDetail({
                 <Text style={s.calloutSubText}>seconds</Text>
               </View>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
-                <Text style={s.calloutLabel}>
-                  Hold a clean <Text style={s.cueNum}>{nextMilestone ?? LOAD_HOLD_GATE}s</Text>, building to <Text style={s.cueNum}>{LOAD_HOLD_GATE}s</Text>, then add load.
-                </Text>
+                <CueText>{`Hold a clean ${nextMilestone ?? LOAD_HOLD_GATE}s, building to ${LOAD_HOLD_GATE}s, then add load.`}</CueText>
               </View>
             </>
           )}
@@ -4377,7 +4370,7 @@ function BallisticLiftDetail({
                     <Text style={s.calloutSubText}> {unit} — top bell</Text>
                   </View>
                   <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
-                    <Text style={s.calloutLabel}>You're on the heaviest bell, so keep the sets explosive (<Text style={s.cueNum}>5–10</Text> powerful reps), resting at least as long as each set takes.</Text>
+                    <CueText>{`You're on the heaviest bell, so keep the sets explosive (5–10 powerful reps), resting at least as long as each set takes.`}</CueText>
                     {benchmarkApplies && <Text style={s.tinyText}>{benchmark}</Text>}
                   </View>
                 </>
@@ -4388,7 +4381,7 @@ function BallisticLiftDetail({
                     <Text style={s.calloutSubText}> {unit} — next bell</Text>
                   </View>
                   <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
-                    <Text style={s.calloutLabel}>Train the <Text style={s.cueNumBlue}>{bestBell} {unit}</Text> bell in explosive sets of <Text style={s.cueNum}>5–10</Text>, resting at least as long as each set takes. Own ~<Text style={s.cueNum}>100</Text> clean reps, then move up to <Text style={s.cueNumBlue}>{targetBell} {unit}</Text>.</Text>
+                    <CueText>{`Train the ${bestBell} ${unit} bell in explosive sets of 5–10, resting at least as long as each set takes. Own ~100 clean reps, then move up to ${targetBell} ${unit}.`}</CueText>
                     {benchmarkApplies && <Text style={s.tinyText}>{benchmark}</Text>}
                   </View>
                 </>
@@ -5585,12 +5578,9 @@ function StrengthDetail({
                   </>
                 ) : (
                   <>
-                    {/* LOCKED coaching-cue format (T088 round-2): prose, one flowing
-                        sentence, numbers emphasized as bold mono spans (RN can't
-                        reflow a TickerNumber View inside wrapping text). */}
-                    <Text style={s.calloutLabel}>
-                      Do <Text style={s.cueNum}>{selZoneCfg.setsText}</Text> of <Text style={s.cueNum}>{selRepRange} reps</Text> at <Text style={s.cueNumBlue}>{workingWeight} {unit}</Text>, a weight you can do at least <Text style={s.cueNum}>{couldDoReps}</Text> of; rest <Text style={s.cueNum}>{selZoneCfg.restText}</Text> between sets. Add <Text style={s.cueNum}>{workingJump} {unit}</Text> after every clean session, work your way up to <Text style={s.cueNumBlue}>{selRepRange} × {targetWeight} {unit}</Text>.
-                    </Text>
+                    {/* LOCKED coaching-cue format (T088 round-2): one flowing prose
+                        sentence rendered through the shared CueText component. */}
+                    <CueText>{`Do ${selZoneCfg.setsText} of ${selRepRange} reps at ${workingWeight} ${unit}, a weight you can do at least ${couldDoReps} of; rest ${selZoneCfg.restText} between sets. Add ${workingJump} ${unit} after every clean session, work your way up to ${selRepRange} × ${targetWeight} ${unit}.`}</CueText>
                   </>
                 )}
               </View>
@@ -5864,9 +5854,6 @@ const s = StyleSheet.create({
   },
   calloutSubText: { color: colors.mutedForeground, fontSize: 14 },
   calloutLabel:   { color: colors.mutedForeground, fontSize: 14 },
-  // Emphasized numbers inside a prose coaching cue (LOCKED cue format, T088 round-2).
-  cueNum:         { color: colors.foreground, fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'] },
-  cueNumBlue:     { color: palette.blue[400], fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'] },
 
   targetRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',

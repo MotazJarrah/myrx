@@ -17,6 +17,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
 import TickerNumber from '../../../components/TickerNumber'
+import CueText from '../../../components/CueText'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
 import { ArrowLeft, Trophy, Check } from 'lucide-react'
@@ -234,12 +235,9 @@ export default function AdminStrengthLeverageDetail({ userId, exercise, onBack }
                     <span className="text-sm text-muted-foreground">seconds</span>
                   </div>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-                    <p className="text-sm text-muted-foreground">
-                      Hold a clean <span className="font-mono font-semibold text-foreground">{nextMilestone ?? LEVERAGE_GATE}s</span>
-                      {nextVariant
-                        ? <>, then at <span className="font-mono font-semibold text-foreground">{LEVERAGE_GATE}s</span> clean progress to {leverageVariantLabel(nextVariant)}.</>
-                        : <>, building to a solid <span className="font-mono font-semibold text-foreground">{LEVERAGE_GATE}s</span>.</>}
-                    </p>
+                    <CueText>{`Hold a clean ${nextMilestone ?? LEVERAGE_GATE}s${nextVariant
+                      ? `, then at ${LEVERAGE_GATE}s clean progress to ${leverageVariantLabel(nextVariant)}.`
+                      : `, building to a solid ${LEVERAGE_GATE}s.`}`}</CueText>
                   </div>
                 </>
               )}

@@ -42,6 +42,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
 import TickerNumber from '../../../components/TickerNumber'
+import CueText from '../../../components/CueText'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
 import { ArrowLeft, ChevronLeft, ChevronRight, Info } from 'lucide-react'
@@ -753,11 +754,9 @@ export default function AdminStrengthWeightedDetail({
                     </>
                   ) : (
                     <>
-                      {/* LOCKED coaching-cue format (T088 round-2): prose, one flowing
-                          sentence, numbers emphasized as bold mono spans. */}
-                      <p className="text-sm text-muted-foreground">
-                        Do <span className="font-mono font-semibold text-foreground">{selZoneCfg.setsText}</span> of <span className="font-mono font-semibold text-foreground">{selRepRange} reps</span> at <span className="font-mono font-semibold text-blue-400">{workingWeight} {unit}</span>, a weight you can do at least <span className="font-mono font-semibold text-foreground">{couldDoReps}</span> of; rest <span className="font-mono font-semibold text-foreground">{selZoneCfg.restText}</span> between sets. Add <span className="font-mono font-semibold text-foreground">{workingJump} {unit}</span> after every clean session, work your way up to <span className="font-mono font-semibold text-blue-400">{selRepRange} × {targetWeight} {unit}</span>.
-                      </p>
+                      {/* LOCKED coaching-cue format (T088 round-2): one flowing prose
+                          sentence rendered through the shared CueText component. */}
+                      <CueText>{`Do ${selZoneCfg.setsText} of ${selRepRange} reps at ${workingWeight} ${unit}, a weight you can do at least ${couldDoReps} of; rest ${selZoneCfg.restText} between sets. Add ${workingJump} ${unit} after every clean session, work your way up to ${selRepRange} × ${targetWeight} ${unit}.`}</CueText>
                     </>
                   )}
                 </div>
