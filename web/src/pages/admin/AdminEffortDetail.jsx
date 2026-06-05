@@ -18,6 +18,7 @@ import AdminStrengthRepsOnlyDetail from './detail/AdminStrengthRepsOnlyDetail'
 import AdminStrengthOlympicDetail from './detail/AdminStrengthOlympicDetail'
 import AdminStrengthBallisticDetail from './detail/AdminStrengthBallisticDetail'
 import AdminStrengthLeverageDetail from './detail/AdminStrengthLeverageDetail'
+import AdminStrengthLoadDetail from './detail/AdminStrengthLoadDetail'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -177,6 +178,8 @@ export default function AdminEffortDetail() {
       // branch (they ARE strength_type='isometric', just a different progression).
       if (movement.hold_type === 'leverage')
         return <AdminStrengthLeverageDetail userId={userId} exercise={exercise} onBack={goBack} />
+      if (movement.hold_type === 'load')
+        return <AdminStrengthLoadDetail userId={userId} exercise={exercise} onBack={goBack} />
       if (movement.strength_type === 'isometric')
         return <AdminStrengthIsometricDetail userId={userId} exercise={exercise} onBack={goBack} />
       if (eq === 'assisted')

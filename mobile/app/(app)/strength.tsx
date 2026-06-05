@@ -311,6 +311,9 @@ export default function Strength() {
   //    default values match the new exercise's shape) ───────────────────────
   const movementRecord    = exercise ? (strengthRecords.find(m => m.name === exercise) ?? null) : null
   const isIsometric       = movementRecord?.strength_type === 'isometric'
+  // Loadable holds (wall sit, calf-raise hold, glute-bridge hold, dead hang…)
+  // log an OPTIONAL added weight alongside the duration — T088 Model 3 load family.
+  const isLoadHold        = isIsometric && (movementRecord as any)?.hold_type === 'load'
   const isAssistedMachine = movementRecord?.equipment === 'assisted'
   const isCarry           = movementRecord?.equipment === 'carry'
   const isBodyweightExercise = movementRecord?.equipment === 'bodyweight'
@@ -456,9 +459,12 @@ export default function Strength() {
 
     if (isIsometric) {
       if (!canSaveIso) return
+      const loadW = isLoadHold ? (Number(weight) || 0) : 0
       await supabase.from('efforts').insert({
         user_id: user.id, type: 'strength',
-        label: `${exercise} · ${durSecs} sec`,
+        label: loadW > 0
+          ? `${exercise} · ${loadW} ${unit} × ${durSecs} sec`
+          : `${exercise} · ${durSecs} sec`,
         value: `${durSecs} sec`,
       })
       setSaved(true); setTimeout(resetForm, 1500); return
@@ -758,7 +764,46 @@ export default function Strength() {
             This exercise isn't in our list yet. Send it as a suggestion and your coach will add it.
           </Text>
 
-        ) : !exercise ? null : isIsometric ? (
+        ) : !exercise ? null : isLoadHold ? (
+          <>
+            <View style={s.tripleGrid}>
+              <View style={[s.field, s.gridLarge]}>
+                <Text style={s.label}>Added weight</Text>
+                <WheelInput>
+                  <PhantomWheel
+                    value={Number(weight) || 0}
+                    onChange={(n) => setWeight(String(n))}
+                    step={unit === 'kg' ? 2.5 : 5}
+                    min={0}
+                    max={unit === 'kg' ? 100 : 200}
+                    unit={unit}
+                  />
+                </WheelInput>
+              </View>
+              <View style={[s.field, s.gridLarge]}>
+                <Text style={s.label}>Duration</Text>
+                <WheelInput>
+                  <PhantomWheel
+                    value={parseTimeStr(timeStr) || 0}
+                    onChange={(secs) => setTimeStr(formatMmSs(secs))}
+                    time="mm:ss"
+                    maxMinutes={60}
+                  />
+                </WheelInput>
+              </View>
+            </View>
+            {durSecs >= 1 && (
+              <ChipBlue>
+                <Timer size={14} color={palette.blue[400]} />
+                <Text style={s.chipLabel}>Hold</Text>
+                <Text style={[s.chipValue, { color: palette.blue[400], marginLeft: 'auto' }]}>
+                  {(Number(weight) || 0) > 0 ? `${Number(weight)} ${unit} × ${fmtDuration(durSecs)}` : `Bodyweight · ${fmtDuration(durSecs)}`}
+                </Text>
+              </ChipBlue>
+            )}
+          </>
+
+        ) : isIsometric ? (
           <>
             <View style={s.field}>
               <Text style={s.label}>Duration</Text>

@@ -1875,6 +1875,168 @@ function LeverageHoldDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LoadHoldDetail (Layout 12) — loadable isometric holds (wall sit, calf-raise
+// hold, glute-bridge holds, dead hang, split-squat hold, squat hold). Build the
+// bodyweight hold to ~60s, THEN add external load — grinding to 2 minutes trains
+// endurance, not strength. Two phases: time milestones (15-60s) -> add-load
+// progression. hold_type = 'load'. (T088 Model 3 — load family.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LOAD_HOLD_MILESTONES = [15, 30, 45, 60]
+const LOAD_HOLD_GATE = 60        // hold this many bodyweight seconds, then add load
+const LOAD_HOLD_TARGET_SECS = 30 // the loaded-hold duration target
+
+// Added weight from a load-hold label: "Wall Sit · 25 lb × 45 sec" -> 25;
+// bodyweight holds ("Wall Sit · 45 sec") -> 0.
+function parseLoadHoldWeight(label: string | null | undefined): number {
+  const m = label?.match(/·\s*([\d.]+)\s*(?:lb|kg)\s*×/i)
+  return m ? parseFloat(m[1]) : 0
+}
+
+function LoadHoldDetail({
+  exercise, efforts, onDelete, hideHeader,
+}: {
+  exercise: string
+  efforts: Effort[]
+  onDelete: (id: string) => void
+  hideHeader?: boolean
+}) {
+  const { profile } = useAuth()
+  const unit: 'lb' | 'kg' = ((profile?.weight_unit as 'lb' | 'kg') || 'lb')
+  const parsed = efforts.map(e => ({ dur: parseDurationSecs(e.value) ?? 0, load: parseLoadHoldWeight(e.label) }))
+  const bwHolds     = parsed.filter(p => p.load === 0).map(p => p.dur)
+  const bestBwHold  = bwHolds.length ? Math.max(...bwHolds) : 0
+  const weighted    = parsed.filter(p => p.load > 0)
+  const hasWeighted = weighted.length > 0
+  const bestLoad    = hasWeighted ? Math.max(...weighted.map(p => p.load)) : 0
+
+  const LOAD_INC      = unit === 'kg' ? 2.5 : 5
+  const gateReached   = bestBwHold >= LOAD_HOLD_GATE || hasWeighted
+  const nextMilestone = LOAD_HOLD_MILESTONES.find(m => m > bestBwHold) ?? null
+  const targetLoad    = hasWeighted ? bestLoad + LOAD_INC : LOAD_INC
+
+  // Once loaded, the meaningful progression is LOAD; before that, hold time.
+  const chartData = (hasWeighted
+    ? efforts.map(e => { const w = parseLoadHoldWeight(e.label); return w > 0 ? { ts: e.created_at, y: w } : null })
+    : efforts.map(e => { const d = parseDurationSecs(e.value); return d !== null ? { ts: e.created_at, y: d } : null })
+  ).filter((p): p is { ts: string; y: number } => p !== null)
+
+  const renderTile = (sec: number) => {
+    const achieved = sec <= bestBwHold
+    return (
+      <View key={sec} style={[
+        { width: 64, paddingVertical: 6, borderRadius: 9, borderWidth: 1, alignItems: 'center' },
+        achieved
+          ? { borderColor: withAlpha(palette.blue[500], 0.4), backgroundColor: withAlpha(palette.blue[500], 0.08) }
+          : { borderColor: alpha(colors.border, 0.3), backgroundColor: alpha(colors.card, 0.2), opacity: 0.35 },
+      ]}>
+        <Text style={{ fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 12, color: achieved ? palette.blue[400] : alpha(colors.mutedForeground, 0.4) }}>{sec}s</Text>
+        <View style={{ marginTop: 2, height: 12, alignItems: 'center', justifyContent: 'center' }}>
+          {achieved ? <Check size={11} color={palette.blue[400]} strokeWidth={3} /> : <Text style={{ fontFamily: fonts.mono[400], fontSize: 10, color: alpha(colors.mutedForeground, 0.4) }}>—</Text>}
+        </View>
+      </View>
+    )
+  }
+
+  return (
+    <View style={s.page}>
+      {!hideHeader && (
+        <View>
+          <BackButton />
+          <Text style={s.h1}>{exercise}</Text>
+          <View style={s.subRow}>
+            {hasWeighted ? (
+              <><Text style={s.subText}>Best — </Text><TickerNumber value={bestLoad} fontSize={14} color={palette.blue[400]} fontWeight="600" /><Text style={s.subText}> {unit}</Text></>
+            ) : bestBwHold > 0 ? (
+              <><Text style={s.subText}>Best — </Text><TickerNumber value={fmtDurationLong(bestBwHold)} fontSize={14} color={palette.blue[400]} fontWeight="600" /></>
+            ) : (
+              <Text style={s.subText}>No efforts logged yet</Text>
+            )}
+          </View>
+          <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
+            <Text style={s.carryTierBadgeText}>LOADABLE HOLD</Text>
+          </View>
+        </View>
+      )}
+
+      <AnimateRise delay={0} style={s.card}>
+        <Text style={s.h2}>{gateReached ? 'Add load' : 'Build the hold'}</Text>
+        <Text style={s.tinyText}>
+          {gateReached
+            ? 'You own the bodyweight hold — now progress by adding weight, not seconds.'
+            : 'Build a clean 60s hold first; past that, longer just trains endurance — you add load instead.'}
+        </Text>
+
+        {!gateReached && (
+          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 4 }}>
+            {LOAD_HOLD_MILESTONES.map(renderTile)}
+          </View>
+        )}
+
+        <NextTargetCallout>
+          {gateReached ? (
+            <>
+              <View style={s.calloutValueRow}>
+                <TickerNumber value={targetLoad} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                <Text style={s.calloutSubText}>{unit}</Text>
+              </View>
+              <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
+                <Text style={s.calloutLabel}>
+                  {hasWeighted
+                    ? <>Hold <Text style={{ color: colors.foreground, fontWeight: '700' }}>{targetLoad} {unit}</Text> for ~{LOAD_HOLD_TARGET_SECS}s — add {LOAD_INC} {unit} once you hold it clean</>
+                    : <>You can hold {LOAD_HOLD_GATE}s+ bodyweight — add <Text style={{ color: colors.foreground, fontWeight: '700' }}>{LOAD_INC} {unit}</Text> and hold ~{LOAD_HOLD_TARGET_SECS}s</>}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={s.calloutValueRow}>
+                <TickerNumber value={nextMilestone ?? LOAD_HOLD_GATE} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                <Text style={s.calloutSubText}>seconds</Text>
+              </View>
+              <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
+                <Text style={s.calloutLabel}>
+                  Hold a clean <Text style={{ color: colors.foreground, fontWeight: '700' }}>{nextMilestone ?? LOAD_HOLD_GATE}s</Text> — build to {LOAD_HOLD_GATE}s, then add load
+                </Text>
+              </View>
+            </>
+          )}
+        </NextTargetCallout>
+
+        <Text style={s.tinyText}>{'Isometric strength is position-specific · add load past ~60s (ACSM; Oranchuk 2019)'}</Text>
+      </AnimateRise>
+
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
+          <Text style={s.h2}>{hasWeighted ? 'Load over time' : 'Hold time over time'}</Text>
+          <LineChart
+            data={chartData}
+            referenceY={chartData.length > 1 ? (hasWeighted ? bestLoad : bestBwHold) : null}
+            yTickFormatter={(v) => hasWeighted ? `${Math.round(v)}` : `${Math.round(v)}s`}
+            tooltipValueFormatter={(v) => hasWeighted ? `${Math.round(v)} ${unit}` : fmtDurationLong(Math.round(v))}
+            tooltipLabel={hasWeighted ? 'Load' : 'Hold time'}
+            yDomain={{ min: (mn) => Math.max(0, Math.round(mn * 0.85)), max: (mx) => Math.round(mx * 1.15) }}
+            caption={<Text style={s.tinyText}>{hasWeighted ? 'Dashed line = heaviest hold' : 'Dashed line = personal best'}</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      <EffortsHistorySection
+        efforts={efforts}
+        onDelete={onDelete}
+        delay={500}
+        renderLeft={e => (<Text style={s.listRowDate}>{fmtDate(e.created_at)}</Text>)}
+        renderRight={e => {
+          const secs = parseDurationSecs(e.value)
+          const w = parseLoadHoldWeight(e.label)
+          return <Text style={s.valBlue}>{w > 0 ? `${w} ${unit} × ${fmtDuration(secs ?? 0)}` : fmtDurationLong(secs)}</Text>
+        }}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AssistedMachineDetail
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4424,6 +4586,7 @@ function StrengthDetail({
   const movementRecord    = dbMovements.find(m => m.name === baseExercise) ?? null
   const isIsometric       = movementRecord?.strength_type === 'isometric'
   const isLeverageHold    = isIsometric && movementRecord?.hold_type === 'leverage'
+  const isLoadHold        = isIsometric && movementRecord?.hold_type === 'load'
   const isAssistedMachine = movementRecord?.equipment === 'assisted'
   const isCarry           = movementRecord?.equipment === 'carry'
   const isOlympic         = movementRecord?.lift_type === 'olympic'
@@ -4786,6 +4949,7 @@ function StrengthDetail({
   // etc. checks all fall through here.
   if (isSledWorkConsolidated) return <SledWorkConsolidatedDetail efforts={efforts} onDelete={handleDeleteEffort} />
   if (isLeverageHold)     return <LeverageHoldDetail     exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
+  if (isLoadHold)         return <LoadHoldDetail         exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isIsometric)        return <IsometricDetail        exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isOlympic)          return <OlympicLiftDetail      exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isBallistic)        return <BallisticLiftDetail    exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />

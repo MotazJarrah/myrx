@@ -889,7 +889,7 @@ The user's band level is parsed from the effort label (`Pull Up [Band] · Heavy 
 
 ### Isometric detail card — locked design spec
 
-This is the spec for the detail page that covers **isometric movements** on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile) — Plank Hold, Wall Sit, Side Plank, L-sit, Hollow Hold, Glute Bridge Hold, Superman Hold, and any other movement where `movements.strength_type = 'isometric'` and `hold_type` is not `'leverage'`. Progression is measured in **seconds of unbroken hold time**, not reps or weight. **Skill/leverage holds (`hold_type = 'leverage'` — planche, front/back lever, human flag, L-sit, handstand, crow, support holds) are EXCLUDED from this card** — they route to the Leverage hold card (Layout 11, spec below), because a 2-min time grid is meaningless for a skill that maxes at ~10-20 s (T088 Model 3). Loadable holds (`hold_type = 'load'`) are a planned separate add-load treatment; until built they stay on this time card.
+This is the spec for the detail page that covers **isometric movements** on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile) — Plank Hold, Wall Sit, Side Plank, L-sit, Hollow Hold, Glute Bridge Hold, Superman Hold, and any other movement where `movements.strength_type = 'isometric'` and `hold_type` is neither `'leverage'` nor `'load'`. Progression is measured in **seconds of unbroken hold time**, not reps or weight. **Skill/leverage holds (`hold_type = 'leverage'` — planche, front/back lever, human flag, L-sit, handstand, crow, support holds) are EXCLUDED from this card** — they route to the Leverage hold card (Layout 11, spec below), because a 2-min time grid is meaningless for a skill that maxes at ~10-20 s (T088 Model 3). **Loadable holds (`hold_type = 'load'` — wall sit, calf-raise hold, glute-bridge holds, dead hang, split-squat hold, squat hold) are ALSO excluded** — they route to the Load hold card (Layout 12, spec below): build the bodyweight hold to ~60 s, then add external load (T088 Model 3).
 
 **Universal milestone set (locked) — TIME/LOAD holds only:** every time/load isometric movement uses the same 12 milestones (leverage/skill holds use Layout 11's short 5-30 s set + a variant ladder instead):
 
@@ -969,6 +969,24 @@ Spec for the detail page covering **skill / leverage isometric holds** on `[exer
 **Locked constants:** `LEVERAGE_MILESTONES = [5,10,15,20,30]`, `LEVERAGE_GATE = 30` (clean seconds at a variant → progress). `LEVERAGE_LADDERS` (code lookup) holds the variant families: Planche Tuck→Straddle→Full, Front/Back Lever Tuck→Full, Handstand Wall→Freestanding. L-Sit / V-Sit are intentionally **standalone** (user chose, not linked). Each variant is its own page (per-variant; full family consolidation is future polish).
 
 **Dispatch order (LOCKED):** `hold_type === 'leverage'` MUST come before the `strength_type === 'isometric'` branch (leverage holds ARE isometric) — both mobile + web.
+
+---
+
+### Loadable hold detail card (Layout 12) — locked design spec
+
+Spec for **loadable isometric holds** on `[exercise].tsx` (mobile, `LoadHoldDetail`) + the web coach mirror `AdminStrengthLoadDetail.jsx`. Selected by `movements.hold_type = 'load'` (migration `tag_load_holds`, June 2026). The 7 tagged moves: Wall Sit, Calf Raise Hold, Glute Bridge Hold, Single Leg Glute Bridge Hold, Dead Hang, Split Squat Hold, Freestanding Squat Hold. (T088 Model 3.)
+
+**Why:** these positions take external load, so endless seconds is the wrong progression — past ~60 s a bodyweight hold trains endurance, not strength. Build the hold to 60 s, THEN add weight. Evidence: isometric strength is position/joint-angle-specific (Oranchuk 2019; ACSM).
+
+**Two phases:**
+- **Phase 1 (build the hold)** — best bodyweight hold < 60 s AND no weighted efforts: time-milestone tiles `15 / 30 / 45 / 60 s`; hero targets the next milestone; cue *"Hold a clean N s — build to 60 s, then add load."*
+- **Phase 2 (add load)** — best bodyweight hold ≥ 60 s OR any weighted effort logged: tiles hidden; hero shows the next load target. First load = the smallest increment (5 lb / 2.5 kg); thereafter `best load + increment`. Cue *"Hold X for ~30 s — add 5 lb once you hold it clean."* `LOAD_HOLD_GATE = 60`, `LOAD_HOLD_TARGET_SECS = 30`.
+
+**Log form (mobile `strength.tsx`):** for `hold_type='load'` the isometric form gains an **Added-weight wheel** (step 5 lb / 2.5 kg, min 0 = bodyweight) beside the duration wheel. Label: `Name · {w} {unit} × {dur} sec` when loaded, `Name · {dur} sec` when bodyweight; `value` stays `{dur} sec` so `parseDurationSecs` is unchanged. Weight is parsed back from the label via `parseLoadHoldWeight`.
+
+**Chart:** adaptive — plots **load over time** once any weighted effort exists, else **hold time over time**.
+
+**Dispatch order (LOCKED):** `hold_type === 'load'` before the `strength_type === 'isometric'` branch (mobile + web). Web log form is frozen — the coach mirror displays the progression read-only (the Added-weight wheel is athlete-app only).
 
 ---
 
