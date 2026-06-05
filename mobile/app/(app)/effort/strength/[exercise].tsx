@@ -1804,8 +1804,8 @@ function LeverageHoldDetail({
               </Text>
               <Text style={s.tinyText}>
                 {nextVariant
-                  ? `You can hold a clean ${LEVERAGE_GATE}s — log a ${nextVariant} effort to progress`
-                  : `Holding ${LEVERAGE_GATE}s+ clean — keep it sharp or chase a harder skill`}
+                  ? `You can hold a clean ${LEVERAGE_GATE}s, log a ${nextVariant} effort to progress`
+                  : `Holding ${LEVERAGE_GATE}s+ clean, keep it sharp or chase a harder skill`}
               </Text>
             </View>
           ) : (
@@ -2990,13 +2990,13 @@ function CarryDetail({
     const minDistDisplay = Math.round(distMToDisplay(minDistM))
     if (cfg.mode === 'ratio') {
       const xLabel = `${threshold.toFixed(threshold % 1 === 0 ? 1 : 2)}× bodyweight`
-      return `${CARRY_TIER_LABELS[tier]} — ${xLabel} per hand for at least ${minDistDisplay} ${dUnit}`
+      return `${CARRY_TIER_LABELS[tier]}, ${xLabel} per hand for at least ${minDistDisplay} ${dUnit}`
     }
     // Abs: convert threshold (kg) to display unit
     const thresholdDisplay = displayUnit === 'lb'
       ? Math.round(threshold / 0.453592)
       : threshold
-    return `${CARRY_TIER_LABELS[tier]} — ${thresholdDisplay} ${wUnit} for at least ${minDistDisplay} ${dUnit}`
+    return `${CARRY_TIER_LABELS[tier]}, ${thresholdDisplay} ${wUnit} for at least ${minDistDisplay} ${dUnit}`
   }
 
   // Subtitle for the tier ladder card — describes the qualification rule.

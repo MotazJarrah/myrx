@@ -448,11 +448,11 @@ function CarrySurface({
       if (!hasTargets) {
         cueLine = ''
       } else if (zoneId === 'max_load') {
-        cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — focus on grip and posture`
+        cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit}, focus on grip and posture`
       } else if (zoneId === 'distance_build') {
-        cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — maintain posture across the full distance`
+        cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit}, maintain posture across the full distance`
       } else {
-        cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit} — control your breathing through the burn`
+        cueLine = `${verb} ${W_target} ${wUnit} for ${D_target} ${dUnit}, control your breathing through the burn`
       }
 
       acc[zoneId] = { cfgZone, W_target, D_target, weightDeltaText, distDeltaText, hasTargets, cueLine }
