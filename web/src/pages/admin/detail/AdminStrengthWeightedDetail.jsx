@@ -142,6 +142,24 @@ function loadableWeight(raw, equipment, unit = 'lb', override = null) {
   return raw
 }
 
+/** NEAREST loadable weight to `raw` (rounds to the closest rung, not up) — for the submaximal working-weight cue. */
+function nearestLoadableWeight(raw, equipment, unit = 'lb', override = null) {
+  const ladder = getLadder(equipment, unit, override)
+  if (ladder) {
+    let best = ladder[0], bestDiff = Math.abs(ladder[0] - raw)
+    for (const w of ladder) { const d = Math.abs(w - raw); if (d < bestDiff) { best = w; bestDiff = d } }
+    return best
+  }
+  if (equipment === 'barbell') {
+    const bar = BAR_WEIGHT[unit]; const inc = MIN_INCREMENT[unit]
+    const above = Math.max(0, raw - bar)
+    return bar + Math.round(above / inc) * inc
+  }
+  if (equipment === 'dumbbell') { const inc = unit === 'kg' ? 2 : 5; return Math.max(inc, Math.round(raw / inc) * inc) }
+  if (equipment === 'machine')  { const inc = unit === 'kg' ? 2.5 : 5; return Math.max(inc, Math.round(raw / inc) * inc) }
+  return raw
+}
+
 /** Smallest loadable weight STRICTLY ABOVE `current` for a given equipment. */
 function nextLoadableAbove(current, equipment, unit = 'lb', override = null) {
   const ladder = getLadder(equipment, unit, override)
@@ -199,8 +217,9 @@ const ADP_ZONE_CONFIG = Object.freeze({
     label:        'Build Strength',
     repRangeText: 'reps 1-5',
     setsText:     '4-5 sets',
-    rirText:      'stop 1 rep short of failure',
+    rirText:      'leave ~2 reps in reserve',
     restText:     '3-5 min',
+    reserve:      2,
     whyText:
       'Heavy loads at low reps recruit your biggest motor units and train them to fire harder and faster. The adaptation is neural — you get stronger without adding muscle size.',
   },
@@ -208,8 +227,9 @@ const ADP_ZONE_CONFIG = Object.freeze({
     label:        'Increase Hypertrophy',
     repRangeText: 'reps 6-12',
     setsText:     '3-4 sets',
-    rirText:      'stop 2 reps short of failure',
+    rirText:      'leave ~2 reps in reserve',
     restText:     '2-3 min',
+    reserve:      2,
     whyText:
       'Moderate loads taken close to failure put muscle fibers under sustained mechanical tension and metabolic stress. Both signals trigger growth of the fibers themselves.',
   },
@@ -217,8 +237,9 @@ const ADP_ZONE_CONFIG = Object.freeze({
     label:        'Boost Endurance',
     repRangeText: 'reps 13+',
     setsText:     '2-3 sets',
-    rirText:      'stop 3 reps short of failure',
+    rirText:      'leave ~1 rep in reserve',
     restText:     '45-60 sec',
+    reserve:      1,
     whyText:
       'Lighter loads at high reps drive capillary and mitochondrial growth inside the muscle. The adaptation is in stamina and waste clearance, not raw force — your muscles work longer before fatigue.',
   },
@@ -408,6 +429,19 @@ export default function AdminStrengthWeightedDetail({
   const targetWeight    = selBigWeight
 
   const selZoneCfg = ADP_ZONE_CONFIG[selZone]
+
+  // ── Submaximal WORKING weight for the cue (Fix 1.1 / T088) — mirror of mobile ──
+  // Working sets use a weight you could do `reserve` MORE reps than the tile's
+  // rep target (reps-in-reserve), NOT the rep-max. Double-progress up to
+  // selBigWeight (the PR test/target shown big up top).
+  const selReserve     = selZoneCfg.reserve
+  const couldDoReps    = Math.min(20, selRepRange + selReserve)
+  const workingProjRaw = projections.find(p => p.reps === couldDoReps)?.weight ?? selProj
+  const workingWeight  = nearestLoadableWeight(workingProjRaw, equipForMath, unit, ladderOverride)
+  const workingNextAbove = nextLoadableAbove(workingWeight, equipForMath, unit, ladderOverride)
+  const workingJump    = workingNextAbove != null
+    ? Math.round((workingNextAbove - workingWeight) * 100) / 100
+    : (unit === 'kg' ? 2.5 : 5)
 
   const targetPlatesBarbell = equipForMath === 'barbell'
     ? platesForBarbellWeight(targetWeight, unit)
@@ -721,9 +755,11 @@ export default function AdminStrengthWeightedDetail({
                         <TickerNumber value={selRepRange} className="font-mono font-bold text-foreground" />
                         <span className="font-mono font-bold text-foreground">&nbsp;reps</span>
                         <span className="text-foreground">&nbsp;at&nbsp;</span>
-                        <TickerNumber value={targetWeight} className="font-mono font-bold text-blue-400" />
+                        <TickerNumber value={workingWeight} className="font-mono font-bold text-blue-400" />
                         <span className="font-mono font-bold text-blue-400">&nbsp;{unit}</span>
                       </p>
+                      <p className="text-[11px] text-muted-foreground">A weight you could do {couldDoReps} — but only do {selRepRange}</p>
+                      <p className="text-[11px] text-muted-foreground">Add {workingJump} {unit} when all sets are clean · test {selRepRange} × {targetWeight} {unit} when it's in reach</p>
                       <p className="text-[11px] text-muted-foreground">Rest {selZoneCfg.restText} between sets</p>
                     </>
                   )}

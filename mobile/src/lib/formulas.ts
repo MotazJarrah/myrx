@@ -176,6 +176,44 @@ export function loadableWeight(raw: number, equipment: LadderEquipment, unit: La
 }
 
 /**
+ * Returns the NEAREST loadable weight to `raw` for a given equipment type
+ * (rounds to the closest real plate/dumbbell/pin/ladder rung, not up).
+ * Used for the submaximal "working weight" coaching cue: e.g. a 128 lb
+ * projection on a barbell snaps to 130, a 126 projection snaps to 125.
+ */
+export function nearestLoadableWeight(raw: number, equipment: LadderEquipment, unit: LadderUnit = 'lb'): number {
+  const ladder = getLadder(equipment, unit)
+  if (ladder) {
+    let best = ladder[0]
+    let bestDiff = Math.abs(ladder[0] - raw)
+    for (const w of ladder) {
+      const d = Math.abs(w - raw)
+      if (d < bestDiff) { best = w; bestDiff = d }
+    }
+    return best
+  }
+  if (equipment === 'barbell') {
+    const bar = BAR_WEIGHT[unit]
+    const inc = MIN_INCREMENT[unit]
+    const above = Math.max(0, raw - bar)
+    return bar + Math.round(above / inc) * inc
+  }
+  if (equipment === 'dumbbell') {
+    const inc = unit === 'kg' ? 2 : 5
+    return Math.max(inc, Math.round(raw / inc) * inc)
+  }
+  if (equipment === 'machine') {
+    const inc = unit === 'kg' ? 2.5 : 5
+    return Math.max(inc, Math.round(raw / inc) * inc)
+  }
+  if (equipment === 'bodyweight') {
+    const inc = 2.5
+    return Math.max(0, Math.round(raw / inc) * inc)
+  }
+  return raw
+}
+
+/**
  * Returns the plates per side needed to load a SPECIFIC barbell weight.
  * Mirror of web platesForBarbellWeight.
  */
@@ -365,6 +403,8 @@ export interface AdpZoneConfigEntry {
   rirText:      string
   restText:     string
   whyText:      string
+  /** Reps left "in the tank" on a working set for this zone (working weight = projection at repRange + reserve). */
+  reserve:      number
 }
 
 export const ADP_ZONE_CONFIG: Readonly<Record<AdpZone, AdpZoneConfigEntry>> = Object.freeze({
@@ -372,8 +412,9 @@ export const ADP_ZONE_CONFIG: Readonly<Record<AdpZone, AdpZoneConfigEntry>> = Ob
     label:        'Build Strength',
     repRangeText: 'reps 1-5',
     setsText:     '4-5 sets',
-    rirText:      'stop 1 rep short of failure',
+    rirText:      'leave ~2 reps in reserve',
     restText:     '3-5 min',
+    reserve:      2,
     whyText:
       'Heavy loads at low reps recruit your biggest motor units and train them to fire harder and faster. The adaptation is neural — you get stronger without adding muscle size.',
   },
@@ -381,8 +422,9 @@ export const ADP_ZONE_CONFIG: Readonly<Record<AdpZone, AdpZoneConfigEntry>> = Ob
     label:        'Increase Hypertrophy',
     repRangeText: 'reps 6-12',
     setsText:     '3-4 sets',
-    rirText:      'stop 2 reps short of failure',
+    rirText:      'leave ~2 reps in reserve',
     restText:     '2-3 min',
+    reserve:      2,
     whyText:
       'Moderate loads taken close to failure put muscle fibers under sustained mechanical tension and metabolic stress. Both signals trigger growth of the fibers themselves.',
   },
@@ -390,8 +432,9 @@ export const ADP_ZONE_CONFIG: Readonly<Record<AdpZone, AdpZoneConfigEntry>> = Ob
     label:        'Boost Endurance',
     repRangeText: 'reps 13+',
     setsText:     '2-3 sets',
-    rirText:      'stop 3 reps short of failure',
+    rirText:      'leave ~1 rep in reserve',
     restText:     '45-60 sec',
+    reserve:      1,
     whyText:
       'Lighter loads at high reps drive capillary and mitochondrial growth inside the muscle. The adaptation is in stamina and waste clearance, not raw force — your muscles work longer before fatigue.',
   },

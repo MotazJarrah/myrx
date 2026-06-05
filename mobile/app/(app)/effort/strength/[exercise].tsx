@@ -140,6 +140,7 @@ import {
   platesForBarbellWeight,
   platesForAddedWeight,
   loadableWeight,
+  nearestLoadableWeight,
   nextLoadableAbove,
   getLadder,
   adpZoneFor,
@@ -4524,6 +4525,20 @@ function StrengthDetail({
   // the component, so rules-of-hooks ordering stays stable.
 
   const targetWeight: number = selBigWeight
+
+  // ── Submaximal WORKING weight for the cue (Fix 1.1 / T088) ───────────────
+  // Working sets use a weight you could do `reserve` MORE reps than the tile's
+  // rep target (reps-in-reserve) — NOT the rep-max. You double-progress up to
+  // selBigWeight (140), which stays the PR test/target shown big up top.
+  const selReserve: number     = selZoneCfg.reserve
+  const couldDoReps: number    = Math.min(20, selRepRange + selReserve)
+  const workingProjRaw: number = projections.find(p => p.reps === couldDoReps)?.weight ?? selProj
+  const workingWeight: number  = nearestLoadableWeight(workingProjRaw, equipmentType as LadderEquipment, unit as 'lb' | 'kg')
+  const workingNextAbove: number | null = nextLoadableAbove(workingWeight, equipmentType as LadderEquipment, unit as 'lb' | 'kg')
+  const workingJump: number    = workingNextAbove != null
+    ? Math.round((workingNextAbove - workingWeight) * 100) / 100
+    : (unit === 'kg' ? 2.5 : 5)
+
   const targetPlatesBarbell: number[] = (equipmentType === 'barbell')
     ? platesForBarbellWeight(targetWeight, unit as 'lb' | 'kg')
     : []
@@ -4941,6 +4956,7 @@ function StrengthDetail({
                   </>
                 ) : (
                   <>
+                    {/* Work line — submaximal WORKING weight (Fix 1.1 / T088), not the rep-max target */}
                     <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
                       <Text style={s.calloutLabel}>Do </Text>
                       <Text style={{ color: colors.foreground, fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}>{selZoneCfg.setsText}</Text>
@@ -4948,9 +4964,11 @@ function StrengthDetail({
                       <TickerNumber value={selRepRange} fontSize={14} color={colors.foreground} fontWeight="700" />
                       <Text style={{ color: colors.foreground, fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> reps</Text>
                       <Text style={s.calloutLabel}> at </Text>
-                      <TickerNumber value={targetWeight} fontSize={14} color={palette.blue[400]} fontWeight="700" />
+                      <TickerNumber value={workingWeight} fontSize={14} color={palette.blue[400]} fontWeight="700" />
                       <Text style={{ color: palette.blue[400], fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> {unit}</Text>
                     </View>
+                    <Text style={s.tinyText}>A weight you could do {couldDoReps} — but only do {selRepRange}</Text>
+                    <Text style={s.tinyText}>Add {workingJump} {unit} when all sets are clean · test {selRepRange} × {targetWeight} {unit} when it's in reach</Text>
                     <Text style={s.tinyText}>Rest {selZoneCfg.restText} between sets</Text>
                   </>
                 )}
