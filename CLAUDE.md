@@ -588,6 +588,18 @@ The bottom tab bar replacement. A single floating circular button at screen-bott
 >
 > **EXCEPTION — coach mirrors intentionally OMIT athlete-only prose (T086, June 2026).** The web admin coach-mirror detail/tab surfaces (`AdminUser{Sleep,Hydration,Heart}.jsx`, `AdminStrength*Detail.jsx`, `AdminCardio*Detail.jsx`) deliberately STRIP the athlete-facing explanatory copy that the mobile pages show: attribution/citation footers (Epley·Brzycki·Lombardi, Riegel·Daniels'·Seiler, National Academies·…·Maughan, etc.), feature help-text subtitles ("Pick an adaptation zone, then tap a rep target"), tier-criteria methodology subtitles, motivational lines ("Steady sips…", "Anything beyond 2 min is bonus"), eligibility/how-to-log notes, and Sleep's always-visible "why this matters" science. The coach view = client DATA + the prescription cue + the opt-in "why this zone" info pills, nothing else. So a "match the mobile render" cross-check will see these as "missing" — that is CORRECT, do NOT re-add them. (Mobile athlete pages keep all of it.)
 
+### Coaching-cue format (LOCKED — T088 round-2, June 2026)
+
+EVERY coaching cue across the entire app — strength AND cardio, mobile AND the web coach mirrors — uses ONE format, rendered by a single shared component. There are no per-page exceptions.
+
+- **Component:** `mobile/src/components/CueText.tsx` + `web/src/components/CueText.jsx`. Pass the cue as a plain **string**; it auto-emphasizes number+unit tokens (weights `lb`/`kg` → blue, all other numbers → foreground, bold mono). Do NOT hand-wrap numbers in spans.
+- **Voice:** one flowing prose sentence (or two). Canonical shape (weighted): `Do 4-5 sets of 5 reps at 285 lb, a weight you can do at least 7 of; rest 3-5 min between sets. Add 5 lb after every clean session, work your way up to 5 × 300 lb.`
+- **Hard rules:** commas / semicolons, **NEVER em-dashes (—)**. **NEVER bullets.** **NEVER attribution inside a cue** (source credit lives on its own separate line below). **No `TickerNumber` inside a cue** — RN can't reflow an animated View in wrapping prose, so CueText uses bold text spans; the big hero number above keeps its ticker.
+- **When adding/editing ANY cue anywhere:** build the sentence as a plain string and render `<CueText>{string}</CueText>` (web: `<CueText className="…">{string}</CueText>`). Commas, not em-dashes.
+- **Swept June 2026:** all mobile strength cues (carry, bodyweight, isometric, assisted, reps-only + bench/ballistic/leverage/load) and all mobile cardio cues (pace, swim, air-bike, ruck, stair-mill, beat-your-best) route through CueText. Web mirrors swept alongside. Olympic/Power-Clean cue is authored in this format when its #2 ramp lands.
+
+---
+
 ### Weighted Standard next-target card — locked design spec
 
 This is the spec for the "Your next training target" card that appears on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile) for **weighted standard** movements: barbell, dumbbell, kettlebell, machine, strongman. Bodyweight, isometric, assisted, carry, band/knee variants each have their own detail view and are NOT covered by this spec. **Olympic & ballistic barbell lifts** (`movements.lift_type = 'olympic'` — snatch / clean / jerk family + pulls) are ALSO excluded — they route to the Olympic card (Layout 9, spec below), because a rep-max grid is meaningless and unsafe for explosive lifts (T088 Model 1 / Fix 1.2).

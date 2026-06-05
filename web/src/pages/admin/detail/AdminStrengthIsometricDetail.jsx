@@ -56,6 +56,7 @@ import { supabase } from '../../../lib/supabase'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
+import CueText from '../../../components/CueText'
 import { ArrowLeft, Trophy, Check } from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
@@ -277,13 +278,7 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
           </div>
         )}
         <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-          <p className="text-sm text-muted-foreground">
-            Hold for{' '}
-            <span className="font-semibold text-foreground">
-              {nm < 60 ? `${nm} seconds` : fmtDurationLong(nm)}
-            </span>
-            {' '}without breaking form
-          </p>
+          <CueText>{`Hold for ${nm < 60 ? `${nm} seconds` : fmtDurationLong(nm)} without breaking form`}</CueText>
         </div>
       </>
     )
