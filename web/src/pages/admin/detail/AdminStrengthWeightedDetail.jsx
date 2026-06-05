@@ -670,9 +670,6 @@ export default function AdminStrengthWeightedDetail({
                           ))}
                         </div>
                       )}
-                      <p className="mt-1 text-[11px] text-muted-foreground">
-                        {unit === 'kg' ? 20 : 45} {unit} bar + {targetPlatesBarbell.join(' + ') || '—'} {unit} per side
-                      </p>
                     </>
                   )}
 

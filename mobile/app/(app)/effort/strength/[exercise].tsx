@@ -4329,7 +4329,6 @@ function OlympicLiftDetail({
                 </View>
               )}
               <Text style={s.tinyText}>{selTarget.label} · {selTarget.pctText} · {selTarget.repsText}</Text>
-              <Text style={s.tinyText}>{unit === 'kg' ? 20 : 45} {unit} bar + {selPlates.join(' + ') || '—'} {unit} per side</Text>
               <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15) }}>
                 <CueText>{buildOlympicCue(selTarget, selWeight, unit)}</CueText>
               </View>
@@ -5694,9 +5693,6 @@ function StrengthDetail({
                       ))}
                     </View>
                   )}
-                  <Text style={s.tinyText}>
-                    {unit === 'kg' ? 20 : 45} {unit} bar + {targetPlatesBarbell.join(' + ') || '—'} {unit} per side
-                  </Text>
                 </>
               )}
 

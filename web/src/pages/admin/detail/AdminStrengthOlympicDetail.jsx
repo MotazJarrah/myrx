@@ -271,7 +271,6 @@ export default function AdminStrengthOlympicDetail({ userId, exercise, onBack })
                     </div>
                   )}
                   <p className="text-[11px] text-muted-foreground">{selTarget.label} · {selTarget.pctText} · {selTarget.repsText}</p>
-                  <p className="text-[11px] text-muted-foreground">{unit === 'kg' ? 20 : 45} {unit} bar + {selPlates.join(' + ') || '—'} {unit} per side</p>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
                     <CueText className="text-sm text-muted-foreground">{buildOlympicCue(selTarget, selWeight, unit)}</CueText>
                   </div>
