@@ -600,6 +600,33 @@ EVERY coaching cue across the entire app — strength AND cardio, mobile AND the
 
 ---
 
+### Swipe-acceptance rule (LOCKED — June 2026)
+
+On any **variant page** (a detail page with a variant pill/carousel — assist tiers, adp zones, strokes, push/pull, etc.), an element accepts the variant-swipe gesture **if and only if its content is per-variant** (it changes when you swipe to another variant). A **shared / consolidated** element (same content across all variants) does **NOT** swipe — it scrolls / taps / reads normally. One discriminator: *"is this element's content shared across variants?"* → shared = no swipe, not-shared = swipe. Applies element by element, the **log included**: a per-variant (filtered) log swipes; a consolidated log doesn't.
+
+**The canonical per-element source of truth is `docs/Layout Design.xlsx`, column "Swipe rule (per element)".** Mirror of it:
+
+| Layout | Variant | Swipes | Does NOT swipe |
+|---|---|---|---|
+| 1 Bodyweight | assist tier | pill, hero, tiles, **chart** (all per-tier) | **log** (consolidated across tiers) |
+| 3 Weighted | adp zone | pill, **hero** (per-zone) | tiles (shared 1-15RM grid → they scroll), chart, log (shared across zones) |
+| 4 Carry | adp zone | pill, hero (per-zone) | chart, log (shared across zones) |
+| 5 Sled (consolidated) | push/pull | pill, hero, chart, log (all per-variant, filtered) | — |
+| 6 Swimming (consolidated) | stroke | pill, hero, plan tiles, chart, log (all per-stroke, filtered) | — |
+| Air Bike / Rucking | adp zone | pill, hero (per-zone) | chart, log (shared) |
+| Pace / StairMill | (no variant pill — tile-tap model) | — (no variant swipe at all) | n/a |
+
+**Implementation notes (mobile, `[exercise].tsx` / `[activity].tsx`):**
+- **BW chart** is per-tier (after the round-2 #4 split), so it accepts the tier-swipe: a `Gesture.Pan` on the chart calls `navigateBwTierFromChart` (reads live tier state via `bwNavRef` so the gesture can sit in the hook zone), and `BodyweightConsolidatedBlock` has a `lastSyncedTierRef`-guarded scroll-sync `useEffect` so the hero pager follows when the tier changes from OUTSIDE (chart swipe / effort delete). The BW **log stays ungestured** (consolidated across tiers).
+- **Weighted hero** got its own `wsHeroSwipeGesture` (`Gesture.Pan` → `scrollToZone`, mirrors the pill) — previously only the pill swiped.
+- **Sled / Swimming**: chart + log live inside the per-variant paged ScrollView, so they already swipe (each filtered to the active variant). **Air Bike / Rucking / Carry**: chart + log are shared across zones → deliberately ungestured.
+- Shared charts/logs are left ungestured on purpose (they scroll vertically / pin tooltips / delete rows).
+- The variant-nav `Gesture.Pan` uses `activeOffsetX([-15, 15])` + `failOffsetY([-25, 25])` so taps (tooltip pin, info pill, tile select) and vertical scroll still work.
+
+When you add or change a variant page, set each element's swipe per this rule and update `docs/Layout Design.xlsx`. (Web coach mirrors are a separate, lighter implementation; this rule is the canonical intent.)
+
+---
+
 ### Weighted Standard next-target card — locked design spec
 
 This is the spec for the "Your next training target" card that appears on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile) for **weighted standard** movements: barbell, dumbbell, kettlebell, machine, strongman. Bodyweight, isometric, assisted, carry, band/knee variants each have their own detail view and are NOT covered by this spec. **Olympic & ballistic barbell lifts** (`movements.lift_type = 'olympic'` — snatch / clean / jerk family + pulls) are ALSO excluded — they route to the Olympic card (Layout 9, spec below), because a rep-max grid is meaningless and unsafe for explosive lifts (T088 Model 1 / Fix 1.2).

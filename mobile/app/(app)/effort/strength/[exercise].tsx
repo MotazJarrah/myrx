@@ -873,6 +873,10 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
 
   // ── Pill navigation (component-level so the Pan gesture worklet can call
   // it via runOnJS) ────────────────────────────────────────────────────────
+  // Remembers the tier the pager was last scrolled to, so the scroll-sync effect
+  // below only fires for tier changes from OUTSIDE this block (chart swipe / effort
+  // delete) — the pill & body swipe paths set it themselves.
+  const lastSyncedTierRef = useRef<BwTier | null>(null)
   const currentTierIdx = bwLoggedTiers.indexOf(bwActiveTier)
   const canGoLeft  = currentTierIdx > 0
   const canGoRight = currentTierIdx >= 0 && currentTierIdx < bwLoggedTiers.length - 1
@@ -887,6 +891,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
     if (slotWidth > 0 && bwTierScrollRef.current) {
       bwTierScrollRef.current.scrollTo({ x: targetIdx * slotWidth, animated: true })
     }
+    lastSyncedTierRef.current = targetTier
   }
 
   // ── Pan gesture + slide animation for the pill row ─────────────────────
@@ -965,6 +970,19 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
   const chevronAnimatedStyle = useAnimatedStyle(() => ({
     opacity: chevronOpacityOverride.value,
   }))
+
+  // Scroll-sync: when the active tier changes from OUTSIDE this block (a swipe on
+  // the per-tier chart, or an effort delete that drops the active tier), scroll the
+  // pager so the hero slot never desyncs from the pill. The pill & body swipe paths
+  // set lastSyncedTierRef themselves, so this only acts on external changes.
+  useEffect(() => {
+    if (slotWidth <= 0 || !bwTierScrollRef.current) return
+    if (lastSyncedTierRef.current === bwActiveTier) return
+    const idx = bwLoggedTiers.indexOf(bwActiveTier)
+    if (idx < 0) return
+    bwTierScrollRef.current.scrollTo({ x: idx * slotWidth, animated: true })
+    lastSyncedTierRef.current = bwActiveTier
+  }, [bwActiveTier, slotWidth, bwLoggedTiers])
 
   return (
     <View style={{ gap: 12 }}>
@@ -1051,6 +1069,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
             const idx = Math.round(x / slotWidth)
             const t = bwLoggedTiers[idx]
             if (t && t !== bwActiveTier) {
+              lastSyncedTierRef.current = t
               setBwSelectedTier(t)
               setBwTierInfoOpen(false)
               const tierBest = bwBestByTier[t] || 1
@@ -4905,6 +4924,56 @@ function StrengthDetail({
     [wsZoneIdx, wsCanGoPrev, wsCanGoNext, tileViewportW, outerScrollGesture]
   )
 
+  // ── Weighted HERO swipe (swipe rule: the per-zone hero accepts the zone-swipe,
+  // not just the pill). Plain Pan → scrollToZone (no pill slide; mirrors a direct
+  // body swipe). Weighted standard is never nested, so plain thresholds. ─────────
+  const wsHeroSwipeGesture = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-25, 25])
+      .onEnd((event) => {
+        'worklet'
+        const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
+        const allowed = direction === -1 ? wsCanGoPrev : wsCanGoNext
+        if (Math.abs(event.translationX) <= WS_SWIPE_THRESHOLD_PX || !allowed) return
+        const targetIdx = wsZoneIdx + direction
+        runOnJS(scrollToZone)(WS_FIRST_REP_OF_ZONE[WS_ZONE_ORDER[targetIdx]])
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [wsZoneIdx, wsCanGoPrev, wsCanGoNext]
+  )
+
+  // ── Bodyweight CHART swipe (swipe rule: the per-tier chart navigates tiers).
+  // Reads live tier state via a ref so this gesture can live up here in the hook
+  // zone while bwActiveTier / bwLoggedTiers are computed further down; the block's
+  // scroll-sync effect moves the hero pager to match. ───────────────────────────
+  const bwNavRef = useRef<{ loggedTiers: BwTier[]; activeTier: BwTier; bestByTier: Record<BwTier, number> } | null>(null)
+  const navigateBwTierFromChart = (direction: -1 | 1) => {
+    const nav = bwNavRef.current
+    if (!nav) return
+    const idx = nav.loggedTiers.indexOf(nav.activeTier)
+    const target = idx + direction
+    if (target < 0 || target >= nav.loggedTiers.length) return
+    const t = nav.loggedTiers[target]
+    setBwSelectedTier(t)
+    setBwTierInfoOpen(false)
+    const tierBest = nav.bestByTier[t] || 1
+    setSelectedRM(Math.min(Math.max(tierBest, 1), 10))
+  }
+  const bwChartSwipeGesture = useMemo(
+    () => Gesture.Pan()
+      .activeOffsetX([-15, 15])
+      .failOffsetY([-25, 25])
+      .onEnd((event) => {
+        'worklet'
+        const direction: -1 | 1 = event.translationX > 0 ? -1 : 1
+        if (Math.abs(event.translationX) <= 20) return
+        runOnJS(navigateBwTierFromChart)(direction)
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  )
+
   const wsPillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: wsPillTranslateX.value }] }))
   const wsChevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: wsChevronOpacityOver.value }))
 
@@ -5148,6 +5217,8 @@ function StrengthDetail({
   }
 
   const bwActiveTier: BwTier = bwSelectedTier ?? bwHighestTier
+  // Feed live tier state to the chart-swipe gesture declared up in the hook zone.
+  bwNavRef.current = { loggedTiers: bwLoggedTiers, activeTier: bwActiveTier, bestByTier: bwBestByTier }
 
   const bwLatestBandLevel: string | null = (() => {
     if (bwActiveTier !== 'band' || bwEffortsByTier.band.length === 0) return null
@@ -5472,6 +5543,8 @@ function StrengthDetail({
             /* `calloutWeighted` sets `minHeight: 220` so every weighted
                equipment variant (barbell / dumbbell / kettlebell / machine /
                strongman) renders at the same height. */
+            <GestureDetector gesture={wsHeroSwipeGesture}>
+            <View collapsable={false}>
             <NextTargetCallout style={s.calloutWeighted}>
               {/* Title text removed (NextTargetCallout already provides it).
                   Adp-zone pill is the only header element here. */}
@@ -5626,39 +5699,48 @@ function StrengthDetail({
                 )}
               </View>
             </NextTargetCallout>
+            </View>
+            </GestureDetector>
           )}
         </AnimateRise>
       )}
 
       {/* Progress chart */}
-      {chartData.length >= 1 && (
-        <AnimateRise delay={250} style={s.card}>
-          <Text style={s.h2}>
-            {isBodyweightExercise ? 'Max attempts over time' : 'Est. 1RM over time'}
-          </Text>
-          <LineChart
-            data={chartData}
-            referenceY={chartData.length > 1
-              ? (isBodyweightExercise ? bwBestByTier[bwActiveTier] : bestOneRM)
-              : null}
-            yTickFormatter={(v) => `${Math.round(v)}`}
-            tooltipValueFormatter={(v) =>
-              isBodyweightExercise ? `${Math.round(v)} reps` : `${Math.round(v)} ${unit}`
-            }
-            tooltipLabel={isBodyweightExercise ? 'Max attempts' : 'Est. 1RM'}
-            yDomain={{
-              min: (mn) => Math.max(0, Math.round(mn * 0.9)),
-              max: (mx) => Math.round(mx * 1.1),
-            }}
-            caption={
-              <Text style={s.tinyText}>
-                Dashed line = personal best
-                {isBodyweightExercise && ' on ' + bwTierLabel(bwActiveTier)}
-              </Text>
-            }
-          />
-        </AnimateRise>
-      )}
+      {chartData.length >= 1 && (() => {
+        const chartCard = (
+          <AnimateRise delay={250} style={s.card}>
+            <Text style={s.h2}>
+              {isBodyweightExercise ? 'Max attempts over time' : 'Est. 1RM over time'}
+            </Text>
+            <LineChart
+              data={chartData}
+              referenceY={chartData.length > 1
+                ? (isBodyweightExercise ? bwBestByTier[bwActiveTier] : bestOneRM)
+                : null}
+              yTickFormatter={(v) => `${Math.round(v)}`}
+              tooltipValueFormatter={(v) =>
+                isBodyweightExercise ? `${Math.round(v)} reps` : `${Math.round(v)} ${unit}`
+              }
+              tooltipLabel={isBodyweightExercise ? 'Max attempts' : 'Est. 1RM'}
+              yDomain={{
+                min: (mn) => Math.max(0, Math.round(mn * 0.9)),
+                max: (mx) => Math.round(mx * 1.1),
+              }}
+              caption={
+                <Text style={s.tinyText}>
+                  Dashed line = personal best
+                  {isBodyweightExercise && ' on ' + bwTierLabel(bwActiveTier)}
+                </Text>
+              }
+            />
+          </AnimateRise>
+        )
+        // Swipe rule: the bodyweight chart is per-tier (round-2 #4) so it accepts
+        // the tier-swipe; the weighted chart is shared across zones, so it doesn't.
+        return isBodyweightExercise
+          ? <GestureDetector gesture={bwChartSwipeGesture}><View collapsable={false}>{chartCard}</View></GestureDetector>
+          : chartCard
+      })()}
 
       {/* Efforts history */}
       <EffortsHistorySection
