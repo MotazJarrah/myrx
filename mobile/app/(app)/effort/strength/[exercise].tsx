@@ -5203,10 +5203,13 @@ function StrengthDetail({
 
   const usesPair: boolean = !!(movementRecord as any)?.uses_pair
 
-  // Weighted: est. 1RM over time. Bodyweight: max-attempt reps over time
-  // across all tiers (one line; tier carried in the tooltip via fmt).
+  // Weighted: est. 1RM over time. Bodyweight: max-attempt reps over time for the
+  // ACTIVE tier only (round-2 #4) — blending band-assisted reps with full-RX reps
+  // on one curve is misleading, so each pill/tier gets its own line (uses the same
+  // bwActiveTier the hero/tiles track, so the chart follows the pill swipe).
   const chartData = isBodyweightExercise
     ? efforts
+        .filter(e => bwTierFromVariantName(e.label.split(' · ')[0]) === bwActiveTier)
         .map(e => {
           const r = parseRepsFromBwLabel(e.label)
           if (r === null) return null
@@ -5636,7 +5639,7 @@ function StrengthDetail({
           <LineChart
             data={chartData}
             referenceY={chartData.length > 1
-              ? (isBodyweightExercise ? bwBestByTier[bwHighestTier] : bestOneRM)
+              ? (isBodyweightExercise ? bwBestByTier[bwActiveTier] : bestOneRM)
               : null}
             yTickFormatter={(v) => `${Math.round(v)}`}
             tooltipValueFormatter={(v) =>
@@ -5650,7 +5653,7 @@ function StrengthDetail({
             caption={
               <Text style={s.tinyText}>
                 Dashed line = personal best
-                {isBodyweightExercise && ' on ' + bwTierLabel(bwHighestTier)}
+                {isBodyweightExercise && ' on ' + bwTierLabel(bwActiveTier)}
               </Text>
             }
           />

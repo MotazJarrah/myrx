@@ -743,7 +743,7 @@ Always written as "**Full RX**", never just "RX".
 2. **Tier pills** — horizontally-scrollable pill row.
 3. **Tile row** — 10 max-attempt tiles. Swipes/scroll-snaps in sync with the hero card.
 4. **Hero card** — big number + cue line + rest line + graduation hint.
-5. **Chart** — shared across all tiers and all time. Never slides.
+5. **Chart** — shows the ACTIVE tier only (round-2 #4): one curve per pill/tier, so band-assisted reps aren't blended with full-RX reps. Re-filters when you swipe the pill; never physically slides.
 6. **Log list** — shared chronological list of every effort across all tiers. Never slides.
 
 **Tier pill row (item 2) — single pill + marching chevrons:**
@@ -885,10 +885,10 @@ The user's band level is parsed from the effort label (`Pull Up [Band] · Heavy 
 - Info-panel open/close uses the same `LinearTransition` + `FadeInUp / FadeOutUp` pattern that the weighted card uses, with sibling layout animation so the big number slides smoothly when the panel opens.
 - Tier-pill row, tile row, and hero card form a synchronised horizontal pager — swiping the hero card scrolls the pill row and the tile row to match, and tapping a pill scrolls all three to that tier.
 
-**Chart (item 5) — shared:**
+**Chart (item 5) — per active tier (round-2 #4):**
 
-- One est-progress chart for the whole movement, spanning all tiers and all time.
-- Each data point carries the tier in its tooltip (`May 4, Push Up [Knee] · 10 reps`).
+- The chart plots ONLY the active tier's efforts (`chartData` filters on `bwTierFromVariantName(label) === bwActiveTier` on mobile / `=== tier` on web). Blending ~13 light-band reps with ~5 full-RX reps on one curve was misleading, so each pill/tier gets its own line; the PB reference line + caption (`on {tier}`) follow the active tier too. The chart re-filters when the user swipes the pill (it reads `bwActiveTier` / `tier`), but never physically slides.
+- Each data point still carries the tier in its tooltip (`May 4, Push Up [Knee] · 10 reps`).
 - Graduation moments render as vertical milestone markers on the chart (`graduated to KNEE on May 4`).
 
 **Log list (item 6) — shared:**

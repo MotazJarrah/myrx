@@ -554,18 +554,21 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
     if (achievable) setSelectedRM(r)
   }
 
-  // ── Chart data — max attempts over time, across ALL tiers ────────────────────
+  // ── Chart data — max attempts over time for the ACTIVE tier only (round-2 #4):
+  // blending band-assisted reps with full-RX reps on one curve is misleading, so
+  // each pill/tier gets its own line (follows the active `tier`). ───────────────
   const chartData = useMemo(() => entries
+    .filter(e => bwTierFromVariantName(e.label.split(' · ')[0]) === tier)
     .map(e => {
       const r = parseRepsFromBwLabel(e.label)
       return r !== null ? { ts: e.created_at, date: fmtShort(e.created_at), value: r } : null
     })
-    .filter(Boolean), [entries])
+    .filter(Boolean), [entries, tier])
 
   const values = chartData.map(d => d.value)
   const minV   = values.length ? Math.min(...values) : 0
   const maxV   = values.length ? Math.max(...values) : 10
-  const bestForChart = chartData.length > 1 ? bwBestByTier[bwHighestTier] : null
+  const bestForChart = chartData.length > 1 ? bwBestByTier[tier] : null
 
   function backFn() {
     if (onBack) return onBack()
@@ -977,7 +980,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
                 </p>
               )}
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Dashed line = personal best{canHaveTiers ? ` on ${bwTierLabel(bwHighestTier)}` : ''}
+                Dashed line = personal best{canHaveTiers ? ` on ${bwTierLabel(tier)}` : ''}
               </p>
             </AnimateRise>
           )}
