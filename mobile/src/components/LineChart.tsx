@@ -25,7 +25,7 @@
  * file follows.
  */
 
-import { useCallback, useState, useMemo, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, useMemo, type ReactNode } from 'react'
 import { View, Text, Pressable, StyleSheet, type LayoutChangeEvent, type GestureResponderEvent } from 'react-native'
 import { Canvas, Path, Circle, Skia, Group, DashPathEffect, type SkPath } from '@shopify/react-native-skia'
 import { colors, palette, fonts } from '../theme'
@@ -174,6 +174,11 @@ export default function LineChart({
   const LINE_COLOR = lineColor
   const [width,    setWidth]     = useState(0)
   const [activeIx, setActiveIx]  = useState<number | null>(null)
+  // Clear a pinned tooltip whenever the dataset size changes (e.g. the bodyweight
+  // chart re-filtering to a different tier on pill swipe) — a stale index would
+  // otherwise point past the end of the new `points` array and crash the
+  // destructure below.
+  useEffect(() => { setActiveIx(null) }, [data.length])
 
   // Register with the global chart-tooltip scope so a tap anywhere on the
   // surrounding page (other cards, header, scroll) dismisses this chart's
@@ -265,7 +270,7 @@ export default function LineChart({
   }
 
   // ── Tooltip placement (clamped inside chart) ────────────────────────────
-  const tooltip = activeIx != null ? (() => {
+  const tooltip = (activeIx != null && activeIx >= 0 && activeIx < points.length) ? (() => {
     const [px, py] = points[activeIx]
     const tipW = 120
     const tipH = 44
