@@ -110,6 +110,7 @@ import {
   RUCK_WEIGHT_LADDER_LB,
 } from '../../../../src/lib/movements'
 import { colors, palette, alpha, withAlpha, fonts } from '../../../../src/theme'
+import CueText from '../../../../src/components/CueText'
 
 // ── Effort row ───────────────────────────────────────────────────────────────
 interface Effort {
@@ -690,7 +691,7 @@ function buildSwimPlanStep(
     threshold: 'comfortably hard',
     vo2:       'race pace',
   }
-  const cue = `Swim ${shortWork} at ${shortPace} pace (${feelByZone[zone]}). Leave every ${shortLeaving} — about ${Math.round(restPerRep)}s rest between intervals.`
+  const cue = `Swim ${shortWork} at ${shortPace} pace (${feelByZone[zone]}). Leave every ${shortLeaving}, about ${Math.round(restPerRep)}s rest between intervals.`
 
   return {
     zone,
@@ -985,7 +986,7 @@ function buildPlanStep(
   // (constant speed → no mid-interval drift to verify against).
   const pacingCheckpoint = speedMachine ? null : computePacingCheckpoint(rx, distUnit, zonePace)
   const pacingSentence   = pacingCheckpoint
-    ? ` — aim for ${pacingCheckpoint.value} ${pacingCheckpoint.descriptor}`
+    ? `, aim for ${pacingCheckpoint.value} ${pacingCheckpoint.descriptor}`
     : ''
 
   // Rest between this step and the next. Endurance steps have no rest
@@ -1025,7 +1026,7 @@ function buildPlanStep(
     // Row Erg cue references the per-500m split — the canonical rowing
     // pace metric — instead of generic "conversation pace" language.
     const cue = speedMachine
-      ? `${verb.imperative} ${totalDist} at ${shortSpeed} — should take ${totalTime}.`
+      ? `${verb.imperative} ${totalDist} at ${shortSpeed}, should take ${totalTime}.`
       : isRowErg
         ? `${verb.imperative} ${totalDist} in ${totalTime} at a steady ${splitDisplay} split${pacingSentence}.`
         : `${verb.imperative} ${totalDist} in ${totalTime} at steady conversation pace${pacingSentence}.`
@@ -1058,7 +1059,7 @@ function buildPlanStep(
         : 'Equal-time paddle recovery between intervals')
     : restNote
   const cue = speedMachine
-    ? `${verb.imperative} ${rx.numReps} × ${repDist} at ${shortSpeed} — should take ${repTime} each.`
+    ? `${verb.imperative} ${rx.numReps} × ${repDist} at ${shortSpeed}, should take ${repTime} each.`
     : isRowErg
       ? `${verb.imperative} ${rx.numReps} × ${repDist} at ${splitDisplay} split (${repTime} each).`
       : `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each${pacingSentence}.`
@@ -1252,7 +1253,7 @@ function getZonePaceCue(
   if (zone === 'endurance') {
     const totalDist = fmtDist(rx.totalKm, distUnit)
     const totalTime = fmtSecs(rx.totalSecs)
-    return `${verb.imperative} ${totalDist} in ${totalTime} — steady conversation pace, resist pushing`
+    return `${verb.imperative} ${totalDist} in ${totalTime}, steady conversation pace, resist pushing`
   }
 
   // Intervals (threshold + vo2)
@@ -1261,10 +1262,10 @@ function getZonePaceCue(
 
   if (zone === 'threshold') {
     // Daniels' Cruise Intervals: 60 sec jog recovery between intervals at T-pace.
-    return `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each — jog 60 sec between cruise intervals. After your session, log your best ${repDist}.`
+    return `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each, jog 60 sec between cruise intervals. After your session, log your best ${repDist}.`
   }
   // VO2: equal-time jog recovery between intervals at I-pace.
-  return `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each — equal-time jog recovery, max sustainable effort. After your session, log your best ${repDist}.`
+  return `${verb.imperative} ${rx.numReps} × ${repDist} in ${repTime} each, equal-time jog recovery, max sustainable effort. After your session, log your best ${repDist}.`
 }
 
 // Hero-card cue line per zone for DURATION-MODE movements. Same idea —
@@ -1272,14 +1273,14 @@ function getZonePaceCue(
 function getZoneDurationCue(zone: CardioZone, rx: AdjustedDurationRx): string {
   if (zone === 'endurance') {
     const totalTime = fmtSecs(rx.totalSecs)
-    return `${totalTime} — conversational intensity, steady rhythm throughout`
+    return `${totalTime}, conversational intensity, steady rhythm throughout`
   }
 
   const repTime = fmtSecs(rx.repSecs)
   if (zone === 'threshold') {
-    return `${rx.numReps} × ${repTime} hard — 60 sec rest between cruise intervals`
+    return `${rx.numReps} × ${repTime} hard, 60 sec rest between cruise intervals`
   }
-  return `${rx.numReps} × ${repTime} max effort — equal-time rest between intervals`
+  return `${rx.numReps} × ${repTime} max effort, equal-time rest between intervals`
 }
 
 // Pulsing chevron used to flank the zone pill — amber-toned version of the
@@ -1940,9 +1941,9 @@ function PaceDetail({
                 rest line). Splitting them makes the rest cue much more
                 visible than when it was buried mid-sentence. */}
             <View style={s.heroSep}>
-              <Text style={s.heroCue}>{selectedStep.cue}</Text>
+              <CueText style={s.heroCue}>{selectedStep.cue}</CueText>
               {selectedStep.restLine ? (
-                <Text style={s.heroRestLine}>{selectedStep.restLine}</Text>
+                <CueText style={s.heroRestLine}>{selectedStep.restLine}</CueText>
               ) : null}
             </View>
           </View>
@@ -2701,7 +2702,7 @@ function SwimmingDetail({
 
             {/* Full coaching cue */}
             <View style={s.heroSep}>
-              <Text style={s.heroCue}>{selectedStep.cue}</Text>
+              <CueText style={s.heroCue}>{selectedStep.cue}</CueText>
             </View>
           </View>
 
@@ -3321,13 +3322,13 @@ function getAirBikeZoneCue(zone: AirBikeZone, rx: AirBikeZoneRx): string {
   const cfg = AIR_BIKE_ZONE_CONFIG[zone]
   if (cfg.reps === 1) {
     // Continuous zone — no rest, one effort.
-    return `Pedal ${rx.calsPerRep} cals at or above ${rx.wattsFloor} W — steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
+    return `Pedal ${rx.calsPerRep} cals at or above ${rx.wattsFloor} W, steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
   }
   if (zone === 'sprint') {
-    return `Sprint ${rx.calsPerRep} cals as fast as you can — hold at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+    return `Sprint ${rx.calsPerRep} cals as fast as you can, holding at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   // threshold
-  return `Hold ${rx.calsPerRep} cals at a sustained hard pace — keep watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+  return `Hold ${rx.calsPerRep} cals at a sustained hard pace, keeping watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
 }
 
 function AirBikeDetail({
@@ -3612,7 +3613,7 @@ function AirBikeDetail({
               </View>
 
               <View style={s.heroSep}>
-                <Text style={s.heroCue}>{selectedCue}</Text>
+                <CueText style={s.heroCue}>{selectedCue}</CueText>
               </View>
             </View>
           </View>
@@ -3772,14 +3773,14 @@ function RuckingDetail({
       } else {
         switch (zone) {
           case 'max_load':
-            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit} — focus on posture and step under load`
+            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit}, focus on posture and step under load`
             break
           case 'distance_build':
-            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit} — steady cadence, manage your feet`
+            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit}, steady cadence, manage your feet`
             break
           case 'conditioning':
           default:
-            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit} — keep moving, build aerobic base`
+            cueLine = `Ruck ${W_target} ${wUnit} for ${D_target} ${dUnit}, keep moving, build aerobic base`
             break
         }
       }
@@ -3963,7 +3964,7 @@ function RuckingDetail({
               </View>
 
               <View style={s.heroSep}>
-                <Text style={s.heroCue}>{selectedZone.cueLine}</Text>
+                <CueText style={s.heroCue}>{selectedZone.cueLine}</CueText>
               </View>
             </View>
           </View>
@@ -4149,7 +4150,7 @@ function buildStairMillZoneRx(zone: StairMillZone, peakFpm: number): StairMillZo
 function getStairMillZoneCue(zone: StairMillZone, rx: StairMillZoneRx): string {
   const fpm = rx.targetFpm.toFixed(1)
   if (zone === 'aerobic') {
-    return `Climb ${rx.floorsPerRep} floors continuously at a steady ${fpm} floors/min — should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+    return `Climb ${rx.floorsPerRep} floors continuously at a steady ${fpm} floors/min, should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   if (zone === 'threshold') {
     return `Climb ${rx.reps} × ${rx.floorsPerRep} floors at a hard sustained ${fpm} floors/min (~${fmtSecs(rx.estimatedSecsPerRep)} each). Rest ${rx.restSecs} sec between intervals.`
@@ -4468,7 +4469,7 @@ function StairMillDetail({
             </View>
 
             <View style={s.heroSep}>
-              <Text style={s.heroCue}>{selectedCue}</Text>
+              <CueText style={s.heroCue}>{selectedCue}</CueText>
             </View>
           </View>
 
