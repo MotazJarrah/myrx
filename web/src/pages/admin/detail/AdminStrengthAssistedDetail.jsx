@@ -53,6 +53,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import CueText from '../../../components/CueText'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
@@ -555,45 +556,17 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
                     {showAttemptUnassisted ? (
                       selRepRange === 1 ? (
-                        <p className="flex flex-wrap items-baseline text-sm">
-                          <span className="text-foreground">Attempt an unassisted&nbsp;</span>
-                          <span className="font-bold text-blue-400">{bareName}</span>
-                          <span className="text-foreground">&nbsp;— they&apos;re ready.</span>
-                        </p>
+                        <CueText className="text-sm text-foreground">{`Attempt an unassisted ${bareName}, they're ready.`}</CueText>
                       ) : (
-                        <p className="flex flex-wrap items-baseline text-sm">
-                          <span className="text-foreground">Attempt&nbsp;</span>
-                          <TickerNumber value={selRepRange} className="font-mono font-bold text-foreground" />
-                          <span className="text-foreground">&nbsp;unassisted&nbsp;</span>
-                          <span className="whitespace-nowrap font-bold text-blue-400">{bareName}s</span>
-                          <span className="text-foreground">&nbsp;— they&apos;re ready.</span>
-                        </p>
+                        <CueText className="text-sm text-foreground">{`Attempt ${selRepRange} unassisted ${bareName}s, they're ready.`}</CueText>
                       )
                     ) : selRepRange === 1 ? (
                       <>
-                        <p className="flex flex-wrap items-baseline text-sm">
-                          <span className="text-foreground">Hit one clean rep with&nbsp;</span>
-                          <TickerNumber value={targetAssistance} className="font-mono font-bold text-blue-400" />
-                          <span className="font-mono font-bold text-blue-400">&nbsp;{labelUnit}</span>
-                          <span className="text-foreground">&nbsp;assistance</span>
-                        </p>
+                        <CueText className="text-sm text-foreground">{`Hit one clean rep with ${targetAssistance} ${labelUnit} assistance.`}</CueText>
                         <p className="text-[11px] text-muted-foreground">Benchmark attempt</p>
                       </>
                     ) : (
-                      <>
-                        <p className="flex flex-wrap items-baseline text-sm">
-                          <span className="text-foreground">Do&nbsp;</span>
-                          <span className="font-mono font-bold text-foreground">{selZoneCfg.setsText}</span>
-                          <span className="text-foreground">&nbsp;of&nbsp;</span>
-                          <TickerNumber value={selRepRange} className="font-mono font-bold text-foreground" />
-                          <span className="font-mono font-bold text-foreground">&nbsp;reps</span>
-                          <span className="text-foreground">&nbsp;with&nbsp;</span>
-                          <TickerNumber value={targetAssistance} className="font-mono font-bold text-blue-400" />
-                          <span className="font-mono font-bold text-blue-400">&nbsp;{labelUnit}</span>
-                          <span className="text-foreground">&nbsp;assistance</span>
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">Rest {selZoneCfg.restText} between sets</p>
-                      </>
+                      <CueText className="text-sm text-foreground">{`Do ${selZoneCfg.setsText} of ${selRepRange} reps with ${targetAssistance} ${labelUnit} assistance; rest ${selZoneCfg.restText} between sets.`}</CueText>
                     )}
                   </div>
                 </div>

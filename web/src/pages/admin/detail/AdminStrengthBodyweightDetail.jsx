@@ -64,6 +64,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import CueText from '../../../components/CueText'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
@@ -730,9 +731,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
               <TickerNumber value={selectedRM} className="font-mono text-4xl font-bold text-blue-400" />
               <span className="text-sm text-muted-foreground">max attempts</span>
             </div>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Build up to {selectedRM} clean reps at bodyweight first · current best: {tierBest}
-            </p>
+            <CueText className="mt-1 text-[11px] text-muted-foreground">{`Build up to ${selectedRM} clean reps at bodyweight first, current best ${tierBest}`}</CueText>
           </>
         )
       }
@@ -743,9 +742,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
               <TickerNumber value={selectedBWTile.nextRep ?? 0} className="font-mono text-4xl font-bold text-blue-400" />
               <span className="text-sm text-muted-foreground">reps next at bodyweight</span>
             </div>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Push for one more clean rep — current best: {tierBest}
-            </p>
+            <CueText className="mt-1 text-[11px] text-muted-foreground">{`Push for one more clean rep, current best ${tierBest}`}</CueText>
           </>
         )
       }
@@ -771,9 +768,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
               </div>
             )}
           </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            Add {selectedBWTile.addedWeight} {profileUnit} of load — aim for {selectedRM} clean rep{selectedRM > 1 ? 's' : ''}
-          </p>
+          <CueText className="mt-1 text-[11px] text-muted-foreground">{`Add ${selectedBWTile.addedWeight} ${profileUnit} of load, aim for ${selectedRM} clean rep${selectedRM > 1 ? 's' : ''}`}</CueText>
         </>
       )
     }
@@ -793,18 +788,12 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
         )}
         {tier === 'knee' && <p className="mt-0.5 text-[11px] text-muted-foreground">Knee assisted</p>}
         <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
-          <p className="text-sm text-muted-foreground">
-            Keep practicing until you hit{' '}
-            <span className="font-bold text-foreground">{displayBest + 1}</span>{' '}
-            unbroken {repWord(displayBest + 1)}
-            {tier === 'band+knee' && bandSubState
-              ? <> with {aOrAn(bandSubState.currentBand)} <span className="font-bold text-foreground">{bandSubState.currentBand}</span> band on your knees</>
-              : tier === 'knee'
-              ? <> on your knees</>
-              : tier === 'band' && bandSubState
-              ? <> with {aOrAn(bandSubState.currentBand)} <span className="font-bold text-foreground">{bandSubState.currentBand}</span> band</>
-              : null}
-          </p>
+          <CueText className="text-sm text-muted-foreground">{`Keep practicing until you hit ${displayBest + 1} unbroken ${repWord(displayBest + 1)}${
+            tier === 'band+knee' && bandSubState ? ` with ${aOrAn(bandSubState.currentBand)} ${bandSubState.currentBand} band on your knees`
+            : tier === 'knee' ? ' on your knees'
+            : tier === 'band' && bandSubState ? ` with ${aOrAn(bandSubState.currentBand)} ${bandSubState.currentBand} band`
+            : ''
+          }`}</CueText>
         </div>
       </>
     )
