@@ -3977,6 +3977,143 @@ function OlympicLiftDetail({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BallisticLiftDetail (Layout 10) — ballistic KETTLEBELL lifts (swing / snatch /
+// clean / jerk / push-press / high-pull + double & single-arm variants). These
+// are trained for high-power reps at a given bell, NOT a 1-rep max — so they get
+// NO rep-max grid. Progression is a BELL LADDER: own a bell at a clean rep volume,
+// then size up. Benchmarks: Simple & Sinister (100 swings/5min), the snatch test
+// (100 snatches/5min). Built on the Layout-2 skeleton: ladder strip → hero →
+// chart → log, no swipe pill. (T088 Model 1 / Fix 1.2b)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function BallisticLiftDetail({
+  exercise, efforts, onDelete, hideHeader,
+}: {
+  exercise: string
+  efforts: Effort[]
+  onDelete: (id: string) => void
+  hideHeader?: boolean
+}) {
+  const { profile } = useAuth()
+
+  const parsed = useMemo(() => efforts.map(e => ({
+    ts: e.created_at,
+    weight: parseWeightFromLabel(e.label),
+    reps: parseRepsFromLabel(e.label),
+    unit: parseOneRM(e.value)?.unit ?? null,
+  })).filter(p => p.weight > 0), [efforts])
+
+  const unit = ((parsed.length ? parsed[parsed.length - 1].unit : null) as 'lb' | 'kg' | null)
+    || ((profile?.weight_unit as 'lb' | 'kg') || 'lb')
+  const bestBell   = parsed.length ? Math.max(...parsed.map(p => p.weight)) : 0
+  const ladder     = (getLadder('kettlebell', unit) ?? []) as readonly number[]
+  const targetBell = nextLoadableAbove(bestBell, 'kettlebell', unit) ?? bestBell
+
+  const benchmark = /swing/i.test(exercise)  ? 'Benchmark: 100 swings in 5 min (Simple & Sinister).'
+    : /snatch/i.test(exercise) ? 'Benchmark: 100 snatches in 5 min (the snatch test).'
+    : null
+
+  const chartData = parsed.map(p => ({ ts: p.ts, y: p.weight }))
+
+  const renderBell = (kg: number) => {
+    const achieved = kg <= bestBell
+    const isTarget = kg === targetBell && kg > bestBell
+    return (
+      <View key={kg} style={[
+        { minWidth: 56, paddingHorizontal: 8, paddingVertical: 8, borderRadius: 9, borderWidth: 1, alignItems: 'center', gap: 3 },
+        isTarget ? { borderColor: palette.blue[500], backgroundColor: withAlpha(palette.blue[500], 0.15) }
+          : achieved ? { borderColor: withAlpha(palette.blue[500], 0.4), backgroundColor: withAlpha(palette.blue[500], 0.08) }
+            : { borderColor: alpha(colors.border, 0.3), backgroundColor: alpha(colors.card, 0.2), opacity: 0.4 },
+      ]}>
+        <Text style={{ fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'], fontSize: 13, color: (achieved || isTarget) ? palette.blue[400] : colors.mutedForeground }}>{kg}</Text>
+        <View style={{ height: 12, alignItems: 'center', justifyContent: 'center' }}>
+          {achieved
+            ? <Check size={11} color={palette.blue[400]} strokeWidth={3} />
+            : isTarget
+              ? <Text style={{ fontSize: 9, fontWeight: '700', color: palette.blue[400] }}>NEXT</Text>
+              : <Text style={{ fontFamily: fonts.mono[400], fontSize: 10, color: alpha(colors.mutedForeground, 0.4) }}>—</Text>}
+        </View>
+      </View>
+    )
+  }
+
+  return (
+    <View style={s.page}>
+      {!hideHeader && (
+        <View>
+          <BackButton />
+          <Text style={s.h1}>{exercise}</Text>
+          <View style={s.subRow}>
+            <Text style={s.subText}>{bestBell > 0 ? 'Best — ' : 'No efforts logged yet'}</Text>
+            {bestBell > 0 && <TickerNumber value={bestBell} fontSize={14} color={palette.blue[400]} fontWeight="600" />}
+            {bestBell > 0 && <Text style={s.subText}> {unit}</Text>}
+          </View>
+          <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
+            <Text style={s.carryTierBadgeText}>BALLISTIC</Text>
+          </View>
+        </View>
+      )}
+
+      <AnimateRise delay={0} style={s.card}>
+        <Text style={s.h2}>Move up the bells</Text>
+        <Text style={s.tinyText}>Trained on power, not a 1-rep max — own a bell, then size up.</Text>
+
+        {bestBell > 0 ? (
+          <>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 4 }}>
+              {ladder.map(renderBell)}
+            </ScrollView>
+
+            <NextTargetCallout>
+              <View style={s.calloutValueRow}>
+                <TickerNumber value={targetBell} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                <Text style={s.calloutSubText}> {unit} — next bell</Text>
+              </View>
+              <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
+                <Text style={s.calloutLabel}>Train the {bestBell} {unit} bell in high-power sets of 5-10 with full rest. Own ~100 clean reps, then move up to {targetBell} {unit}.</Text>
+                {benchmark && <Text style={s.tinyText}>{benchmark}</Text>}
+              </View>
+            </NextTargetCallout>
+
+            <Text style={s.tinyText}>{'StrongFirst · Simple & Sinister (Pavel) · RKC/SFG snatch test'}</Text>
+          </>
+        ) : (
+          <Text style={[s.tinyText, { marginTop: 8 }]}>Log a {exercise} effort and your bell ladder will appear here.</Text>
+        )}
+      </AnimateRise>
+
+      {chartData.length >= 1 && (
+        <AnimateRise delay={250} style={s.card}>
+          <Text style={s.h2}>Bell weight over time</Text>
+          <LineChart
+            data={chartData}
+            referenceY={chartData.length > 1 ? bestBell : null}
+            yTickFormatter={(v) => `${Math.round(v)}`}
+            tooltipValueFormatter={(v) => `${Math.round(v)} ${unit}`}
+            tooltipLabel="Bell"
+            yDomain={{ min: (mn) => Math.max(0, Math.round(mn * 0.9)), max: (mx) => Math.round(mx * 1.1) }}
+            caption={<Text style={s.tinyText}>Dashed line = heaviest bell</Text>}
+          />
+        </AnimateRise>
+      )}
+
+      <EffortsHistorySection
+        efforts={efforts}
+        onDelete={onDelete}
+        delay={500}
+        renderLeft={e => (<Text style={s.listRowDate}>{fmtDate(e.created_at)}</Text>)}
+        renderRight={e => {
+          const w = parseWeightFromLabel(e.label)
+          const reps = parseRepsFromLabel(e.label)
+          const u = parseOneRM(e.value)?.unit ?? unit
+          return <Text style={s.valBlue}>{w > 0 ? `${w} ${u} × ${reps}` : '—'}</Text>
+        }}
+      />
+    </View>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main StrengthDetail (handles loading + dispatch + standard rep-based view)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -4107,6 +4244,7 @@ function StrengthDetail({
   const isAssistedMachine = movementRecord?.equipment === 'assisted'
   const isCarry           = movementRecord?.equipment === 'carry'
   const isOlympic         = movementRecord?.lift_type === 'olympic'
+  const isBallistic       = movementRecord?.lift_type === 'ballistic'
   // Sled Work consolidated route — the URL is the base name "Sled Work"
   // (without [Push] / [Pull] suffix). The actual movements in the DB are
   // `Sled Work [Push]` and `Sled Work [Drag]` — when the user taps the
@@ -4466,6 +4604,7 @@ function StrengthDetail({
   if (isSledWorkConsolidated) return <SledWorkConsolidatedDetail efforts={efforts} onDelete={handleDeleteEffort} />
   if (isIsometric)        return <IsometricDetail        exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isOlympic)          return <OlympicLiftDetail      exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
+  if (isBallistic)        return <BallisticLiftDetail    exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isAssistedMachine)  return <AssistedMachineDetail  exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} outerScrollGesture={outerScrollGesture} />
   if (isCarry)            return <CarryDetail            exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} outerScrollGesture={outerScrollGesture} />
   // Bodyweight assisted variants fall through to the consolidated render

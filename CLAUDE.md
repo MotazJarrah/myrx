@@ -674,6 +674,27 @@ This is the spec for the detail page covering **Olympic weightlifting lifts** on
 
 ---
 
+### Ballistic kettlebell detail card (Layout 10) — locked design spec
+
+Spec for the detail page covering **ballistic kettlebell lifts** on `[exercise].tsx` (mobile, `BallisticLiftDetail`) + the web coach mirror `AdminStrengthBallisticDetail.jsx`. Selected by `movements.lift_type = 'ballistic'` (same column as Olympic; tagged in migration `tag_ballistic_kettlebell_moves`, June 2026). The 13 tagged moves: Kettlebell Swing / Snatch / Clean / Clean and Jerk / Jerk / Push Press / High Pull + Double KB Swing / Snatch / Clean / Push Press + Single Arm KB Swing / Clean and Jerk. (T088 Model 1 / Fix 1.2b.)
+
+**Why a separate card:** these are explosive, momentum-driven lifts trained for high-power REPS at a given bell — there is no 1-rep-max kettlebell swing, so a rep-max grid is meaningless. Progression is a BELL LADDER (own a bell at a clean rep volume, then size up), not %-of-1RM. Evidence: StrongFirst / Pavel's *Simple & Sinister* (100 one-arm swings + 10 get-ups → graduate the bell); the RKC/SFG snatch test (100 snatches in 5 min). Ballistic power favours moderate load + semi-short sets (5-10 reps) with full rest.
+
+**Layout 10** (Layout-2 skeleton — ladder strip → hero → chart → log, no swipe pill):
+1. **Header** — back chevron + name + `Best — N unit` (heaviest bell logged) + a static **BALLISTIC** pill.
+2. **"Move up the bells" card:**
+   - A horizontal **bell-ladder strip** (kettlebell sizes from `EQUIPMENT_LADDERS.kettlebell`): bells ≤ best show blue + check, the next rung shows **NEXT** (target), heavier ones greyed. Display-only.
+   - **Hero card** — the next bell big + a prescription/graduation cue: *"Train the [best] bell in high-power sets of 5-10 with full rest. Own ~100 clean reps, then move up to [next]."* Swing → references Simple & Sinister; Snatch → the snatch test.
+   - Attribution: `StrongFirst · Simple & Sinister (Pavel) · RKC/SFG snatch test`.
+3. **Chart** — bell weight over time + heaviest-bell reference line.
+4. **Log** — each effort shows bell × reps (read-only + per-effort delete on the coach mirror).
+
+**Data (LOCKED):** bell weight + reps parsed from the effort LABEL (`Name · W unit × R`); `bestBell` = heaviest logged; `targetBell` = next ladder rung above best (`nextLoadableAbove(..., 'kettlebell', ...)`).
+
+**Dispatch order (LOCKED):** `lift_type === 'ballistic'` MUST come before the weighted-standard branch (these are `equipment = 'kettlebell'`, which is in the weighted set) — both mobile + web. **Grind** kettlebell moves (Strict Press, Front Squat, Deadlift, Turkish Get-Up, Windmill, Z Press, Double KB Press / Row / Thruster, Double KB Front Squat) keep `lift_type` NULL and stay on the weighted card.
+
+---
+
 ### Bodyweight consolidated detail card — locked design spec
 
 This is the spec for the consolidated detail page that covers **bodyweight movements** and their assisted variants on `StrengthDetail.jsx` (web) and `[exercise].tsx` (mobile). Push-Up, Pull-Up, Dip, etc. — any movement where `movements.equipment = 'bodyweight'`. The four assist tiers (`[Band + Knee]`, `[Knee]`, `[Band]`, `Full RX`) are presented as a single consolidated page rather than four separate entries.

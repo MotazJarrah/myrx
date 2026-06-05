@@ -16,6 +16,7 @@ import AdminStrengthCarryDetail from './detail/AdminStrengthCarryDetail'
 import AdminStrengthIsometricDetail from './detail/AdminStrengthIsometricDetail'
 import AdminStrengthRepsOnlyDetail from './detail/AdminStrengthRepsOnlyDetail'
 import AdminStrengthOlympicDetail from './detail/AdminStrengthOlympicDetail'
+import AdminStrengthBallisticDetail from './detail/AdminStrengthBallisticDetail'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -184,6 +185,9 @@ export default function AdminEffortDetail() {
       // Olympic lifts are barbell — this MUST come before the weighted branch.
       if (movement.lift_type === 'olympic')
         return <AdminStrengthOlympicDetail userId={userId} exercise={exercise} onBack={goBack} />
+      // Ballistic kettlebell lifts — also before the weighted branch (they're equip=kettlebell).
+      if (movement.lift_type === 'ballistic')
+        return <AdminStrengthBallisticDetail userId={userId} exercise={exercise} onBack={goBack} />
       if (WEIGHTED_STANDARD_EQUIP.includes(eq))
         return (
           <AdminStrengthWeightedDetail
