@@ -1170,7 +1170,10 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                                   <Check size={14} color={palette.blue[400]} strokeWidth={3} />
                                 </View>
                               ) : (
-                                <Text style={[
+                                <Text
+                                  numberOfLines={1}
+                                  adjustsFontSizeToFit
+                                  style={[
                                   s.tileValueMono,
                                   isSelected  ? s.tileTextSelected
                                   : isCurrent ? s.tileTextCurrent
@@ -1393,7 +1396,7 @@ function BodyweightConsolidatedBlock(props: BodyweightConsolidatedBlockProps) {
                                 </View>
                               </View>
                               {selectedBWTile.plates.length > 0 && (
-                                <View style={{ alignItems: 'flex-end' }}>
+                                <View style={{ alignItems: 'flex-end', flex: 1, minWidth: 0 }}>
                                   <Text style={[s.tinyText, { marginBottom: 4 }]}>belt / vest</Text>
                                   <View style={s.plateChipRow}>
                                     {selectedBWTile.plates.map((p, i) => (
@@ -1990,7 +1993,7 @@ function LoadHoldDetail({
           : { borderColor: alpha(colors.border, 0.4), backgroundColor: alpha(colors.card, 0.2) },
       ]}>
         <Text numberOfLines={1} style={{ fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 11, color: active ? palette.blue[400] : colors.mutedForeground }}>{fmtDuration(sec)}</Text>
-        <Text style={{ fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'], fontSize: 13, color: active ? palette.blue[400] : colors.foreground }}>{added > 0 ? `+${added}` : 'BW'}</Text>
+        <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'], fontSize: 13, alignSelf: 'stretch', textAlign: 'center', color: active ? palette.blue[400] : colors.foreground }}>{added > 0 ? `+${added}` : 'BW'}</Text>
       </Pressable>
     )
   }
@@ -4323,7 +4326,7 @@ function OlympicLiftDetail({
                   <Text style={s.calloutSubText}> {unit}</Text>
                 </View>
                 {selPlates.length > 0 && (
-                  <View style={{ alignItems: 'flex-end' }}>
+                  <View style={{ alignItems: 'flex-end', flex: 1, minWidth: 0 }}>
                     <Text style={[s.tinyText, { marginBottom: 4 }]}>per side</Text>
                     <View style={s.plateChipRow}>
                       {selPlates.map((p, i) => (
@@ -5611,9 +5614,9 @@ function StrengthDetail({
                         wholesale when tapped). See CLAUDE.md "TickerNumber
                         slot-machine animation" — locked list of where it
                         lives and where it does not. */}
-                    <Text style={{
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={{
                       fontFamily: fonts.mono[700], fontVariant: ['tabular-nums'],
-                      fontSize: 16, fontWeight: '700',
+                      fontSize: 16, fontWeight: '700', alignSelf: 'stretch', textAlign: 'center',
                       color: isSelected ? palette.blue[400] : colors.foreground,
                     }}>
                       {isEstimate ? `≈${w}` : w}
@@ -5690,7 +5693,7 @@ function StrengthDetail({
                       <TickerNumber value={targetWeight} fontSize={36} color={palette.blue[400]} fontWeight="700" />
                       <Text style={s.calloutSubText}>{unit}</Text>
                     </View>
-                    <View style={{ alignItems: 'flex-end' }}>
+                    <View style={{ alignItems: 'flex-end', flex: 1, minWidth: 0 }}>
                       <Text style={[s.tinyText, { marginBottom: 4 }]}>per side</Text>
                       <View style={s.plateChipRow}>
                         {targetPlatesBarbell.map((p, i) => (
@@ -6020,6 +6023,7 @@ const s = StyleSheet.create({
   // text-xs (12) — used by isometric milestones + bodyweight tiles
   tileValueMono: {
     fontSize: 12,
+    alignSelf: 'stretch', textAlign: 'center',
     fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'],
     color: colors.foreground,
     lineHeight: 14,                // leading-tight
