@@ -753,19 +753,20 @@ export default function AdminStrengthWeightedDetail({
                     </>
                   ) : (
                     <>
-                      <p className="flex flex-wrap items-baseline text-sm">
-                        <span className="text-foreground">Do&nbsp;</span>
+                      {/* Bullet STEPS, each on a single line (T088 round-2 #1). */}
+                      <p className="flex items-baseline whitespace-nowrap text-sm">
+                        <span className="text-foreground">•&nbsp;</span>
                         <span className="font-mono font-bold text-foreground">{selZoneCfg.setsText}</span>
                         <span className="text-foreground">&nbsp;of&nbsp;</span>
                         <TickerNumber value={selRepRange} className="font-mono font-bold text-foreground" />
-                        <span className="font-mono font-bold text-foreground">&nbsp;reps</span>
                         <span className="text-foreground">&nbsp;at&nbsp;</span>
                         <TickerNumber value={workingWeight} className="font-mono font-bold text-blue-400" />
                         <span className="font-mono font-bold text-blue-400">&nbsp;{unit}</span>
                       </p>
-                      <p className="text-[11px] text-muted-foreground">A weight you could do {couldDoReps} — but only do {selRepRange}</p>
-                      <p className="text-[11px] text-muted-foreground">Add {workingJump} {unit} each time all sets are clean — work up to {selRepRange} × {targetWeight} {unit}</p>
-                      <p className="text-[11px] text-muted-foreground">Rest {selZoneCfg.restText} between sets</p>
+                      <p className="truncate text-[11px] text-muted-foreground">• A weight you could do {couldDoReps}, but only do {selRepRange}</p>
+                      <p className="truncate text-[11px] text-muted-foreground">• Add {workingJump} {unit} when all sets are clean</p>
+                      <p className="truncate text-[11px] text-muted-foreground">• Work up to {selRepRange} × {targetWeight} {unit}</p>
+                      <p className="truncate text-[11px] text-muted-foreground">• Rest {selZoneCfg.restText}</p>
                     </>
                   )}
                 </div>

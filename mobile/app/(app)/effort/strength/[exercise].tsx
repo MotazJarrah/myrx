@@ -4352,10 +4352,18 @@ function BallisticLiftDetail({
   const bestBell   = parsed.length ? Math.max(...parsed.map(p => p.weight)) : 0
   const ladder     = (getLadder('kettlebell', unit) ?? []) as readonly number[]
   const targetBell = nextLoadableAbove(bestBell, 'kettlebell', unit) ?? bestBell
+  // At the heaviest bell in the ladder there's no "next" — show a top-bell state
+  // instead of a broken "move up to {same bell}" (T088 round-2 #3).
+  const atTopBell  = bestBell > 0 && nextLoadableAbove(bestBell, 'kettlebell', unit) == null
 
-  const benchmark = /swing/i.test(exercise)  ? 'Benchmark: 100 swings in 5 min (Simple & Sinister).'
-    : /snatch/i.test(exercise) ? 'Benchmark: 100 snatches in 5 min (the snatch test).'
+  // Benchmark text carries NO attribution (T088 round-2 #3 — never in the cue);
+  // the source credit lives on its own line below.
+  const benchmark = /swing/i.test(exercise)  ? 'Benchmark: 100 swings in 5 min.'
+    : /snatch/i.test(exercise) ? 'Benchmark: 100 snatches in 5 min.'
     : null
+  // The 100-in-5-min standard is set at the 24-32 kg test bell; past that the user
+  // has surpassed it, so only surface the benchmark up to ~32 kg / 70 lb.
+  const benchmarkApplies = benchmark != null && bestBell > 0 && bestBell <= (unit === 'kg' ? 32 : 70)
 
   const chartData = parsed.map(p => ({ ts: p.ts, y: p.weight }))
 
@@ -4409,14 +4417,29 @@ function BallisticLiftDetail({
             </ScrollView>
 
             <NextTargetCallout>
-              <View style={s.calloutValueRow}>
-                <TickerNumber value={targetBell} fontSize={36} color={palette.blue[400]} fontWeight="700" />
-                <Text style={s.calloutSubText}> {unit} — next bell</Text>
-              </View>
-              <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
-                <Text style={s.calloutLabel}>Train the {bestBell} {unit} bell in high-power sets of 5-10 with full rest. Own ~100 clean reps, then move up to {targetBell} {unit}.</Text>
-                {benchmark && <Text style={s.tinyText}>{benchmark}</Text>}
-              </View>
+              {atTopBell ? (
+                <>
+                  <View style={s.calloutValueRow}>
+                    <TickerNumber value={bestBell} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                    <Text style={s.calloutSubText}> {unit} — top bell</Text>
+                  </View>
+                  <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
+                    <Text style={s.calloutLabel}>You're on the heaviest bell — keep the sets explosive (5-10 powerful reps), resting at least as long as each set takes.</Text>
+                    {benchmarkApplies && <Text style={s.tinyText}>{benchmark}</Text>}
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={s.calloutValueRow}>
+                    <TickerNumber value={targetBell} fontSize={36} color={palette.blue[400]} fontWeight="700" />
+                    <Text style={s.calloutSubText}> {unit} — next bell</Text>
+                  </View>
+                  <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
+                    <Text style={s.calloutLabel}>Train the {bestBell} {unit} bell in explosive sets of 5-10, resting at least as long as each set takes (power needs full recovery). Own ~100 clean reps, then move up to {targetBell} {unit}.</Text>
+                    {benchmarkApplies && <Text style={s.tinyText}>{benchmark}</Text>}
+                  </View>
+                </>
+              )}
             </NextTargetCallout>
 
             <Text style={s.tinyText}>{'StrongFirst · Simple & Sinister (Pavel) · RKC/SFG snatch test'}</Text>
@@ -5609,20 +5632,21 @@ function StrengthDetail({
                   </>
                 ) : (
                   <>
-                    {/* Work line — submaximal WORKING weight (Fix 1.1 / T088), not the rep-max target */}
-                    <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap' }}>
-                      <Text style={s.calloutLabel}>Do </Text>
+                    {/* Bullet STEPS, each on a single line (T088 round-2 #1). Work
+                        line keeps the tickers; the rest are short plain steps. */}
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                      <Text style={s.calloutLabel}>• </Text>
                       <Text style={{ color: colors.foreground, fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}>{selZoneCfg.setsText}</Text>
                       <Text style={s.calloutLabel}> of </Text>
                       <TickerNumber value={selRepRange} fontSize={14} color={colors.foreground} fontWeight="700" />
-                      <Text style={{ color: colors.foreground, fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> reps</Text>
                       <Text style={s.calloutLabel}> at </Text>
                       <TickerNumber value={workingWeight} fontSize={14} color={palette.blue[400]} fontWeight="700" />
                       <Text style={{ color: palette.blue[400], fontWeight: '700', fontFamily: fonts.mono[600], fontVariant: ['tabular-nums'], fontSize: 14 }}> {unit}</Text>
                     </View>
-                    <Text style={s.tinyText}>A weight you could do {couldDoReps} — but only do {selRepRange}</Text>
-                    <Text style={s.tinyText}>Add {workingJump} {unit} each time all sets are clean — work up to {selRepRange} × {targetWeight} {unit}</Text>
-                    <Text style={s.tinyText}>Rest {selZoneCfg.restText} between sets</Text>
+                    <Text style={s.tinyText} numberOfLines={1}>• A weight you could do {couldDoReps}, but only do {selRepRange}</Text>
+                    <Text style={s.tinyText} numberOfLines={1}>• Add {workingJump} {unit} when all sets are clean</Text>
+                    <Text style={s.tinyText} numberOfLines={1}>• Work up to {selRepRange} × {targetWeight} {unit}</Text>
+                    <Text style={s.tinyText} numberOfLines={1}>• Rest {selZoneCfg.restText}</Text>
                   </>
                 )}
               </View>

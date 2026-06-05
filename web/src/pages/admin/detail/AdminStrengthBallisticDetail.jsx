@@ -101,9 +101,14 @@ export default function AdminStrengthBallisticDetail({ userId, exercise, onBack 
   const bestBell = parsed.length ? Math.max(...parsed.map(p => p.weight)) : 0
   const ladder   = KETTLEBELL_LADDER[unit] ?? KETTLEBELL_LADDER.kg
   const targetBell = nextBellAbove(bestBell, unit) ?? bestBell
-  const benchmark = /swing/i.test(exercise)  ? 'Benchmark: 100 swings in 5 min (Simple & Sinister).'
-    : /snatch/i.test(exercise) ? 'Benchmark: 100 snatches in 5 min (the snatch test).'
+  // Top-of-ladder state — no broken "move up to {same bell}" (T088 round-2 #3).
+  const atTopBell  = bestBell > 0 && nextBellAbove(bestBell, unit) == null
+  // Benchmark text carries NO attribution (round-2 #3); credit is on its own line.
+  const benchmark = /swing/i.test(exercise)  ? 'Benchmark: 100 swings in 5 min.'
+    : /snatch/i.test(exercise) ? 'Benchmark: 100 snatches in 5 min.'
     : null
+  // 100-in-5-min standard is set at the 24-32 kg test bell; hide it past that.
+  const benchmarkApplies = benchmark != null && bestBell > 0 && bestBell <= (unit === 'kg' ? 32 : 70)
 
   const chartData = useMemo(
     () => parsed.map(p => ({ ts: p.ts, date: fmtShort(p.ts), value: p.weight })),
@@ -194,14 +199,29 @@ export default function AdminStrengthBallisticDetail({ userId, exercise, onBack 
                 </div>
 
                 <div className="mt-3 flex flex-col gap-2 rounded-[9px] border border-blue-500/30 bg-blue-500/[0.08] p-4">
-                  <div className="flex items-baseline gap-1.5">
-                    <TickerNumber value={targetBell} className="font-mono text-3xl font-bold text-blue-400" />
-                    <span className="text-sm text-muted-foreground">{unit} — next bell</span>
-                  </div>
-                  <div className="mt-2.5 flex flex-col gap-1 border-t border-blue-500/15 pt-2.5">
-                    <p className="text-sm text-muted-foreground">Train the {bestBell} {unit} bell in high-power sets of 5-10 with full rest. Own ~100 clean reps, then move up to {targetBell} {unit}.</p>
-                    {benchmark && <p className="text-[11px] text-muted-foreground">{benchmark}</p>}
-                  </div>
+                  {atTopBell ? (
+                    <>
+                      <div className="flex items-baseline gap-1.5">
+                        <TickerNumber value={bestBell} className="font-mono text-3xl font-bold text-blue-400" />
+                        <span className="text-sm text-muted-foreground">{unit} — top bell</span>
+                      </div>
+                      <div className="mt-2.5 flex flex-col gap-1 border-t border-blue-500/15 pt-2.5">
+                        <p className="text-sm text-muted-foreground">On the heaviest bell — keep the sets explosive (5-10 powerful reps), resting at least as long as each set takes.</p>
+                        {benchmarkApplies && <p className="text-[11px] text-muted-foreground">{benchmark}</p>}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-baseline gap-1.5">
+                        <TickerNumber value={targetBell} className="font-mono text-3xl font-bold text-blue-400" />
+                        <span className="text-sm text-muted-foreground">{unit} — next bell</span>
+                      </div>
+                      <div className="mt-2.5 flex flex-col gap-1 border-t border-blue-500/15 pt-2.5">
+                        <p className="text-sm text-muted-foreground">Train the {bestBell} {unit} bell in explosive sets of 5-10, resting at least as long as each set takes (power needs full recovery). Own ~100 clean reps, then move up to {targetBell} {unit}.</p>
+                        {benchmarkApplies && <p className="text-[11px] text-muted-foreground">{benchmark}</p>}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <p className="mt-2 text-[11px] text-muted-foreground">{'StrongFirst · Simple & Sinister (Pavel) · RKC/SFG snatch test'}</p>
