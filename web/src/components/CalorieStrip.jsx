@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { useAuth } from '../contexts/AuthContext'
 import { Loader2 } from 'lucide-react'
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
@@ -62,7 +61,7 @@ const STATUS_GRAPH = {
 
 // ── Mini trend graph (the line chart UNDER the day tiles) ──────────────────────
 
-function CalorieGraph({ days, logs, dailyTarget, onDotClick }) {
+function CalorieGraph({ days, logs, dailyTarget }) {
   // Measure the real pixel width so the SVG renders 1:1 (round dots, no
   // preserveAspectRatio stretch) AND so the X columns line up exactly with the
   // tile row above (both are N equal columns separated by GAP px).
@@ -138,7 +137,7 @@ function CalorieGraph({ days, logs, dailyTarget, onDotClick }) {
             />
           )}
 
-          {/* Connecting line (always neutral) */}
+          {/* Connecting line */}
           {points.length > 1 && (
             <polyline
               points={polyline}
@@ -150,20 +149,10 @@ function CalorieGraph({ days, logs, dailyTarget, onDotClick }) {
             />
           )}
 
-          {/* Dots — coloured by status. Clickable only when a handler is given. */}
+          {/* Dots — coloured by status */}
           {points.map(p => {
             const { dot } = STATUS_GRAPH[p.status] ?? STATUS_GRAPH.logged
-            const cx = colCenter(p.idx)
-            const cy = toY(p.cal)
-            if (!onDotClick) {
-              return <circle key={p.iso} cx={cx} cy={cy} r="4" fill={dot} />
-            }
-            return (
-              <g key={p.iso} style={{ cursor: 'pointer' }} onClick={() => onDotClick(p.iso)}>
-                <circle cx={cx} cy={cy} r="10" fill="transparent" />
-                <circle cx={cx} cy={cy} r="4" fill={dot} />
-              </g>
-            )
+            return <circle key={p.iso} cx={colCenter(p.idx)} cy={toY(p.cal)} r="4" fill={dot} />
           })}
         </svg>
       ) : (
@@ -173,39 +162,27 @@ function CalorieGraph({ days, logs, dailyTarget, onDotClick }) {
   )
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Component (read-only — coach review of a client's intake) ───────────────────
 // Props:
-//   userId       — whose food_logs to read (optional; falls back to the logged-in
-//                  user). The coach view passes the CLIENT's id so the strip shows
-//                  that client's intake rather than the coach's own.
+//   userId       — whose food_logs to read (the client being viewed)
 //   dailyTarget  — kcal target (number | null) — drives the status colours + line
-//   onDayClick   — (isoDateStr) => void. When provided, tiles + dots are clickable
-//                  (athlete logging). When omitted, the strip is DISPLAY-ONLY
-//                  (coach review).
-//   selectedIso  — which tile is highlighted (controlled from parent)
-//   refreshKey   — increment to force a data refresh
 
-export default function CalorieStrip({ userId, dailyTarget, onDayClick, selectedIso, refreshKey = 0 }) {
-  const { user } = useAuth()
-  const uid = userId ?? user?.id
-  const interactive = typeof onDayClick === 'function'
+export default function CalorieStrip({ userId, dailyTarget }) {
   const [logs, setLogs]       = useState({})   // { [iso]: { calories } }
   const [loading, setLoading] = useState(true)
-  const stripRef  = useRef(null)
-  const todayRef  = useRef(null)
 
   const days = useMemo(() => buildDayWindow(), [])
 
   // ── Load 14-day window sums from food_logs ───────────────────────────────
   useEffect(() => {
-    if (!uid) return
+    if (!userId) return
     const fromIso = days[0].iso
     const toIso   = days[days.length - 1].iso
     setLoading(true)
     supabase
       .from('food_logs')
       .select('log_date, calories')
-      .eq('user_id', uid)
+      .eq('user_id', userId)
       .gte('log_date', fromIso)
       .lte('log_date', toIso)
       .then(({ data, error }) => {
@@ -218,17 +195,7 @@ export default function CalorieStrip({ userId, dailyTarget, onDayClick, selected
         setLogs(map)
         setLoading(false)
       })
-  }, [uid, days, refreshKey])
-
-  // ── Auto-scroll today into view ──────────────────────────────────────────
-  useEffect(() => {
-    if (todayRef.current && stripRef.current) {
-      const tile  = todayRef.current
-      const strip = stripRef.current
-      const left  = tile.offsetLeft - strip.clientWidth / 2 + tile.clientWidth / 2
-      strip.scrollTo({ left, behavior: 'instant' })
-    }
-  }, [loading])
+  }, [userId, days])
 
   const targetText = dailyTarget ? `${dailyTarget} kcal` : null
 
@@ -237,35 +204,25 @@ export default function CalorieStrip({ userId, dailyTarget, onDayClick, selected
       <div className="flex items-baseline justify-between">
         <div>
           <h2 className="text-sm font-semibold">Daily intake log</h2>
-          <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-            {interactive ? 'Tap a day to log food' : 'Last 14 days'}
-          </p>
+          <p className="text-[10px] text-muted-foreground/60 mt-0.5">Last 14 days</p>
         </div>
         {targetText && (
           <span className="text-[11px] text-muted-foreground">Target {targetText}</span>
         )}
       </div>
 
-      {/* Day tiles — 14 days back including today */}
-      <div
-        ref={stripRef}
-        className="flex gap-1.5"
-      >
+      {/* Day tiles — 14 equal columns; the graph below uses the same columns */}
+      <div className="flex gap-1.5">
         {days.map(day => {
-          const log        = logs[day.iso]
-          const status     = statusFor(log?.calories, dailyTarget)
-          const isSelected = selectedIso === day.iso
-
-          const cls = `relative flex-1 min-w-0 flex flex-col items-center justify-between rounded-xl border transition-all px-1.5 py-2 h-[72px] ${
-            isSelected
-              ? 'border-red-500/60 bg-red-500/10 ring-1 ring-red-500/30'
-              : day.isToday
-                ? 'border-red-500/40 bg-red-500/5'
-                : 'border-border bg-muted/20'
-          } ${interactive ? 'hover:border-red-500/40 hover:bg-red-500/5 active:scale-95 cursor-pointer' : ''}`
-
-          const inner = (
-            <>
+          const log    = logs[day.iso]
+          const status = statusFor(log?.calories, dailyTarget)
+          return (
+            <div
+              key={day.iso}
+              className={`relative flex-1 min-w-0 flex flex-col items-center justify-between rounded-xl border px-1.5 py-2 h-[72px] ${
+                day.isToday ? 'border-red-500/40 bg-red-500/5' : 'border-border bg-muted/20'
+              }`}
+            >
               <div className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground leading-none">
                 {day.day}
               </div>
@@ -278,28 +235,6 @@ export default function CalorieStrip({ userId, dailyTarget, onDayClick, selected
                   : <span className="text-muted-foreground/60">—</span>}
               </div>
               <span className={`absolute bottom-1 left-1/2 -translate-x-1/2 h-1 w-5 rounded-full ${STATUS_DOT[status]}`} />
-            </>
-          )
-
-          return interactive ? (
-            <button
-              key={day.iso}
-              ref={day.isToday ? todayRef : null}
-              type="button"
-              data-iso={day.iso}
-              onClick={() => onDayClick(day.iso)}
-              className={cls}
-            >
-              {inner}
-            </button>
-          ) : (
-            <div
-              key={day.iso}
-              ref={day.isToday ? todayRef : null}
-              data-iso={day.iso}
-              className={cls}
-            >
-              {inner}
             </div>
           )
         })}
@@ -312,12 +247,7 @@ export default function CalorieStrip({ userId, dailyTarget, onDayClick, selected
         </div>
       ) : (
         <div className="pt-1">
-          <CalorieGraph
-            days={days}
-            logs={logs}
-            dailyTarget={dailyTarget}
-            onDotClick={interactive ? (iso => onDayClick(iso)) : undefined}
-          />
+          <CalorieGraph days={days} logs={logs} dailyTarget={dailyTarget} />
         </div>
       )}
     </div>

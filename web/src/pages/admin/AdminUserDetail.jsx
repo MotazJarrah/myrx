@@ -1312,7 +1312,6 @@ export default function AdminUserDetail() {
           profile={profile}
           adminUserId={adminUser?.id}
           onPlanSaved={updated => setExistingPlan(updated)}
-          onSaved={() => setSnapshotKey(k => k + 1)}
         />
       )}
 
