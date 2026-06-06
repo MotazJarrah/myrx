@@ -2,7 +2,10 @@ import { useState, useEffect, useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { supabase } from '../../../lib/supabase'
 import { useMovements } from '../../../hooks/useMovements'
-import { Dumbbell, Activity, ChevronRight } from 'lucide-react'
+import { Dumbbell, Activity } from 'lucide-react'
+import {
+  LineChart, Line, YAxis, ResponsiveContainer,
+} from 'recharts'
 
 // Cardio direction-aware best parser — mirrors AdminUserDetail's parseCardioBest
 // (and mobile dashboard's). Returns { val, lowerBetter } so the caller picks the
@@ -20,6 +23,53 @@ function parseCardioBest(v) {
   }
   const m = v.match(/(\d+(?:\.\d+)?)/)
   return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
+}
+
+// ── Strength per-effort metric parsers ─────────────────────────────────────────
+// Each mirrors the parse logic in the matching detail surface so the mini-graph
+// plots the SAME progression metric the detail page plots.
+
+// Est. 1RM — weighted / olympic / ballistic / weighted-bodyweight Full-RX.
+// Effort value shape: "Est. 1RM 370 lb" (athlete also saves bare "1RM N unit").
+function parseOneRM(value) {
+  const m = value?.match(/(?:Est\. )?1RM (\d+(?:\.\d+)?)\s*(\w+)/)
+  return m ? { val: parseFloat(m[1]), unit: m[2] } : null
+}
+// Hold seconds — isometric / leverage / load. Value shape: "45 sec".
+function parseHoldSecs(value) {
+  const m = value?.match(/^(\d+)\s*sec/)
+  return m ? parseInt(m[1], 10) : null
+}
+// Reps — bodyweight tiers / rep-only families. Label shapes:
+//   "... × 8"  (band / band+knee / Full-RX weighted) OR "... · 8 reps" (knee).
+function parseReps(label) {
+  let m = label?.match(/×\s*(\d+)/)
+  if (m) return parseInt(m[1], 10)
+  m = label?.match(/·\s*(\d+)\s*reps?/)
+  return m ? parseInt(m[1], 10) : null
+}
+// Carry weight — "Farmer's Carry · 100 kg × 50 m" → { val: 100, unit: 'kg' }.
+// We plot WEIGHT (the carry detail plots weight + distance as two stacked
+// charts; the mini-graph defaults to weight per the brief).
+function parseCarryWeight(label) {
+  const m = label?.match(/·\s*([\d.]+)\s*(\w+)\s*×/)
+  return m ? { val: parseFloat(m[1]), unit: m[2] } : null
+}
+// Assisted-machine assistance — "Assisted Pull Up · 60 lb assist · X × 8".
+// LOWER is better (less help = harder), so the chart Y-axis is reversed.
+function parseAssistance(label) {
+  const m = label?.match(/·\s*([\d.]+)\s*(\w+)\s*assist/)
+  return m ? { val: parseFloat(m[1]), unit: m[2] } : null
+}
+
+// fmtDurationLong → "30s", "1m 10s" for the hold-seconds PR line.
+function fmtHold(secs) {
+  if (!secs) return '0s'
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  if (m === 0) return `${s}s`
+  if (s === 0) return `${m}m`
+  return `${m}m ${s}s`
 }
 
 // ── Variant-family collapse helpers (mirror the athlete index) ─────────────────
@@ -53,7 +103,7 @@ function bwBaseName(name) {
 }
 
 // Sled Work — two parallel variants ([Push] / [Drag]) collapse into one
-// "Sled Work" row, badge = most-recently-logged variant.
+// "Sled Work" row, badge = best-load variant (parallel, no hardness ranking).
 const SLED_WORK_BASE_NAME = 'Sled Work'
 function sledVariantFromName(name) {
   if (name === 'Sled Work [Push]') return 'push'
@@ -63,7 +113,7 @@ function sledVariantFromName(name) {
 
 // Swimming — four stroke variants ([Freestyle] / [Backstroke] / [Breaststroke]
 // / [Butterfly], plus legacy bare "Swimming") collapse into one "Swimming"
-// row, badge = most-recently-logged stroke.
+// row, badge = best-pace stroke (parallel, no hardness ranking).
 const SWIMMING_BASE_NAME = 'Swimming'
 const SWIM_STROKE_BADGE = {
   freestyle: 'FREE', backstroke: 'BACK', breaststroke: 'BREAST', butterfly: 'FLY',
@@ -80,39 +130,110 @@ function swimStrokeFromHead(head) {
   return SWIM_STROKE_BADGE[stroke] ? stroke : 'freestyle'
 }
 
-// ── Move card ─────────────────────────────────────────────────────────────────
+// ── Recency formatter ──────────────────────────────────────────────────────────
+function fmtRecency(ts) {
+  if (!ts || ts < 0) return null
+  const now = new Date()
+  const then = new Date(ts)
+  // Compare calendar days so "today / yesterday" read naturally regardless of time.
+  const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.round((startOfDay(now) - startOfDay(then)) / 86_400_000)
+  if (days <= 0) return 'Last trained today'
+  if (days === 1) return 'Last trained yesterday'
+  return `Last trained ${days} days ago`
+}
 
-function MoveCard({ label, type, count, stat, badge, onClick }) {
+// ── Mini progress sparkline ─────────────────────────────────────────────────────
+// Compact Recharts line, sparkline-style (no axes). Plots `points` oldest→newest.
+// `reversed` flips the Y-axis so lower-is-better metrics still read "up = better"
+// (locked chart-direction rule). <2 points → single-dot or placeholder.
+function MiniGraph({ points, color, reversed }) {
+  if (!points || points.length === 0) {
+    return (
+      <div className="flex h-[90px] items-center justify-center text-[11px] text-muted-foreground/60">
+        Not enough data yet
+      </div>
+    )
+  }
+  if (points.length === 1) {
+    // Single effort — render one centered dot so the card still reads as a graph.
+    const data = [{ v: points[0].val }, { v: points[0].val }]
+    return (
+      <div className="h-[90px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+            <YAxis hide domain={['dataMin', 'dataMax']} reversed={reversed} />
+            <Line
+              type="monotone" dataKey="v" stroke={color} strokeWidth={2}
+              dot={{ r: 3, fill: color, strokeWidth: 0 }} isAnimationActive={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+  const data = points.map(p => ({ v: p.val }))
+  const vals = data.map(d => d.v)
+  const minV = Math.min(...vals)
+  const maxV = Math.max(...vals)
+  const pad = (maxV - minV) * 0.18 || 1
+  return (
+    <div className="h-[90px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+          <YAxis hide domain={[minV - pad, maxV + pad]} reversed={reversed} />
+          <Line
+            type="monotone" dataKey="v" stroke={color} strokeWidth={2}
+            dot={false} activeDot={false} isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+// ── Move card (block) ──────────────────────────────────────────────────────────
+
+function MoveCard({ move, onClick }) {
   const meta = {
-    strength: { icon: Dumbbell, cls: 'bg-blue-500/10 text-blue-400',       chip: 'bg-blue-500/10 text-blue-400 border-blue-500/20'       },
-    cardio:   { icon: Activity, cls: 'bg-amber-500/10 text-amber-400',     chip: 'bg-amber-500/10 text-amber-400 border-amber-500/20'     },
-  }[type] ?? { icon: Dumbbell, cls: 'bg-muted text-muted-foreground', chip: 'bg-muted text-muted-foreground border-border' }
+    strength: { icon: Dumbbell, cls: 'bg-blue-500/10 text-blue-400',   chip: 'bg-blue-500/10 text-blue-400 border-blue-500/20',   line: '#60a5fa' },
+    cardio:   { icon: Activity, cls: 'bg-amber-500/10 text-amber-400', chip: 'bg-amber-500/10 text-amber-400 border-amber-500/20', line: '#fbbf24' },
+  }[move.type] ?? { icon: Dumbbell, cls: 'bg-muted text-muted-foreground', chip: 'bg-muted text-muted-foreground border-border', line: '#94a3b8' }
   const Icon = meta.icon
 
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left hover:bg-accent/30 transition-colors"
+      className="flex w-full flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left hover:bg-accent/30 transition-colors"
     >
-      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${meta.cls}`}>
-        <Icon className="h-3.5 w-3.5" />
+      {/* Title row — icon + name + variant badge */}
+      <div className="flex items-center gap-2.5">
+        <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${meta.cls}`}>
+          <Icon className="h-3.5 w-3.5" />
+        </div>
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold">{move.label}</p>
+        {/* Variant badge — which variant the graph below represents (collapsed
+            families: bodyweight tier, Sled PUSH/DRAG, Swimming stroke, admin
+            family short label). */}
+        {move.badge && (
+          <span className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${meta.chip}`}>
+            {move.badge}
+          </span>
+        )}
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{label}</p>
-        <p className="text-[11px] text-muted-foreground">{stat || `${count} ${count === 1 ? 'entry' : 'entries'}`}</p>
+
+      {/* Mini progress graph */}
+      <MiniGraph points={move.points} color={meta.line} reversed={move.reversed} />
+
+      {/* PR / best + recency, stacked under the graph */}
+      <div className="flex flex-col gap-0.5">
+        <p className={`text-xs font-semibold tabular-nums ${move.type === 'cardio' ? 'text-amber-400' : 'text-blue-400'}`}>
+          {move.bestText || '—'}
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          {move.recencyText || `${move.count} ${move.count === 1 ? 'entry' : 'entries'}`}
+        </p>
       </div>
-      {/* Variant badge — shown only for collapsed families (bodyweight tier,
-          Sled Work PUSH/DRAG, Swimming stroke). Mirrors the athlete index's
-          small variant chip. */}
-      {badge && (
-        <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded border shrink-0 ${meta.chip}`}>
-          {badge}
-        </span>
-      )}
-      <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 ${meta.chip}`}>
-        {type.charAt(0).toUpperCase() + type.slice(1)}
-      </span>
-      <ChevronRight className="h-4 w-4 text-muted-foreground/40 shrink-0" />
     </button>
   )
 }
@@ -162,10 +283,41 @@ export default function AdminUserActivity({ userId }) {
     return map
   }, [dbMovements])
 
+  // Movement record lookup by name — for equipment detection (carry / assisted).
+  const movementByName = useMemo(() => {
+    const map = {}
+    dbMovements.forEach(m => { map[m.name] = m })
+    return map
+  }, [dbMovements])
+
   // ── Group efforts into collapsed family rows ──────────────────────────────
   const { strengthMoves, cardioMoves } = useMemo(() => {
     const strengthMap = {}
     const cardioMap   = {}
+
+    // Parse the progression metric for ONE strength effort, given the group's
+    // equipment hint. Mirrors the matching detail surface:
+    //   carry    → weight   (parseCarryWeight)
+    //   assisted → assistance, LOWER better (parseAssistance)
+    //   else     → 1RM if present, else hold-seconds, else reps
+    // Returns { val, unit, kind } or null. `kind` drives the PR line formatter.
+    function strengthMetric(e, equipment) {
+      if (equipment === 'carry') {
+        const w = parseCarryWeight(e.label)
+        return w ? { val: w.val, unit: w.unit, kind: 'weight' } : null
+      }
+      if (equipment === 'assisted') {
+        const a = parseAssistance(e.label)
+        return a ? { val: a.val, unit: a.unit, kind: 'assist' } : null
+      }
+      const rm = parseOneRM(e.value)
+      if (rm) return { val: rm.val, unit: rm.unit, kind: 'onerm' }
+      const secs = parseHoldSecs(e.value)
+      if (secs !== null) return { val: secs, unit: 'sec', kind: 'hold' }
+      const reps = parseReps(e.label)
+      if (reps !== null) return { val: reps, unit: 'reps', kind: 'reps' }
+      return null
+    }
 
     // efforts arrive newest-first; track the most-recent variant by comparing
     // created_at so the badge always reflects the latest logged variant
@@ -182,41 +334,46 @@ export default function AdminUserActivity({ userId }) {
           const key = SLED_WORK_BASE_NAME
           const g = strengthMap[key] ??= {
             label: key, navName: key, kind: 'sled', count: 0,
-            best1RM: null, unit: 'lb', recentTs: -1, recentVariant: sledVariant,
+            maxTs: -1, metricKind: 'weight', unit: 'lb',
+            byVariant: {}, // variant → { best, unit, points: [{ts,val}] }
           }
           g.count++
-          if (ts > g.recentTs) { g.recentTs = ts; g.recentVariant = sledVariant }
-          const m = e.value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
+          if (ts > g.maxTs) g.maxTs = ts
+          const m = strengthMetric(e, 'carry') // sled is carry-equipment → weight
           if (m) {
-            const rm = parseFloat(m[1])
-            if (g.best1RM === null || rm > g.best1RM) { g.best1RM = rm; g.unit = m[2] }
+            const v = g.byVariant[sledVariant] ??= { best: null, unit: m.unit, points: [] }
+            v.points.push({ ts, val: m.val })
+            if (v.best === null || m.val > v.best) { v.best = m.val; v.unit = m.unit }
           }
           return
         }
 
         // ── Admin-added variant family consolidation ───────────────────────
         // If this effort's movement head is a family CHILD, group it under the
-        // PARENT name. Badge = variant_short_label of the most-recently-logged
-        // child (tracked via recentTs — efforts arrive newest-first but the
-        // ts comparison is order-independent). navName = PARENT so tapping
-        // routes to the consolidated family detail. Runs AFTER the Sled block
-        // (Sled is hardcoded, not catalog-driven) so Sled is never
-        // double-handled here.
+        // PARENT name. Badge = variant_short_label of the HARDEST/best variant
+        // (no known hardness order → best metric value). navName = PARENT so
+        // tapping routes to the consolidated family detail. Runs AFTER the Sled
+        // block (Sled is hardcoded, not catalog-driven).
         const family = familyChildMap[head]
         if (family) {
           const key = family.parentName
+          // The family's metric kind comes from the PARENT movement's equipment.
+          const parentEquip = movementByName[key]?.equipment
           const g = strengthMap[key] ??= {
             label: key, navName: key, kind: 'family', count: 0,
-            best1RM: null, unit: 'lb', recentTs: -1, recentShort: family.shortLabel,
+            maxTs: -1, parentEquip,
+            byVariant: {}, // childShortLabel → { best, unit, kind, points }
           }
           g.count++
-          if (ts > g.recentTs) { g.recentTs = ts; g.recentShort = family.shortLabel }
-          // Leverage holds store durations, not Est. 1RM — but capture a 1RM if
-          // a future weighted family ever logs one, so the stat line can show it.
-          const m = e.value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
+          if (ts > g.maxTs) g.maxTs = ts
+          const m = strengthMetric(e, parentEquip)
           if (m) {
-            const rm = parseFloat(m[1])
-            if (g.best1RM === null || rm > g.best1RM) { g.best1RM = rm; g.unit = m[2] }
+            const vk = family.shortLabel || head // group by short label (fallback child name)
+            const v = g.byVariant[vk] ??= { best: null, unit: m.unit, kind: m.kind, points: [], short: family.shortLabel }
+            v.points.push({ ts, val: m.val })
+            const better = v.best === null
+              || (m.kind === 'assist' ? m.val < v.best : m.val > v.best)
+            if (better) { v.best = m.val; v.unit = m.unit }
           }
           return
         }
@@ -225,7 +382,7 @@ export default function AdminUserActivity({ userId }) {
         const tier      = bwTierFromVariantName(head)
         const isVariant = tier !== 'rx'
         const base      = isVariant ? bwBaseName(head) : head
-        const rec       = dbMovements.find(m => m.name === base)
+        const rec       = movementByName[base]
         const isBodyweight = rec?.equipment === 'bodyweight'
         // Only Pull-Up / Dip / Chin-Up family (band/knee eligible) movements
         // actually have tier variants — gate the badge on that, mirroring the
@@ -236,32 +393,40 @@ export default function AdminUserActivity({ userId }) {
           const key = base
           const g = strengthMap[key] ??= {
             label: key, navName: key, kind: 'bw', count: 0,
-            best1RM: null, unit: 'lb', highestTier: tier, canHaveTiers,
+            maxTs: -1, highestTier: tier, canHaveTiers,
+            byTier: {}, // tier → { best, points: [{ts,val}] } — reps metric
           }
           g.count++
+          if (ts > g.maxTs) g.maxTs = ts
           g.canHaveTiers = g.canHaveTiers || canHaveTiers
           if (BW_TIER_RANK[tier] > BW_TIER_RANK[g.highestTier]) g.highestTier = tier
-          // Bodyweight tiers store rep-count efforts; weighted Full-RX efforts
-          // store an Est. 1RM. Capture the 1RM when present so the row can show
-          // a best-1RM line for weighted bodyweight work.
-          const m = e.value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
-          if (m) {
-            const rm = parseFloat(m[1])
-            if (g.best1RM === null || rm > g.best1RM) { g.best1RM = rm; g.unit = m[2] }
+          // Bodyweight tiers (and Full-RX) store rep-count efforts — plot reps,
+          // matching the bodyweight detail's per-tier reps-over-time chart.
+          const reps = parseReps(e.label)
+          if (reps !== null) {
+            const v = g.byTier[tier] ??= { best: 0, points: [] }
+            v.points.push({ ts, val: reps })
+            if (reps > v.best) v.best = reps
           }
           return
         }
 
         // ── Regular strength movement (no variants) ────────────────────────
         const key = head
+        const equip = movementByName[key]?.equipment
         const g = strengthMap[key] ??= {
-          label: key, navName: key, kind: 'plain', count: 0, best1RM: null, unit: 'lb',
+          label: key, navName: key, kind: 'plain', count: 0,
+          maxTs: -1, best: null, unit: null, metricKind: null, points: [], equip,
         }
         g.count++
-        const m = e.value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
+        if (ts > g.maxTs) g.maxTs = ts
+        const m = strengthMetric(e, equip)
         if (m) {
-          const rm = parseFloat(m[1])
-          if (g.best1RM === null || rm > g.best1RM) { g.best1RM = rm; g.unit = m[2] }
+          g.metricKind = m.kind
+          g.points.push({ ts, val: m.val })
+          const better = g.best === null
+            || (m.kind === 'assist' ? m.val < g.best : m.val > g.best)
+          if (better) { g.best = m.val; g.unit = m.unit }
         }
       } else if (e.type === 'cardio') {
         // ── Swimming stroke consolidation ──────────────────────────────────
@@ -269,16 +434,19 @@ export default function AdminUserActivity({ userId }) {
           const key = SWIMMING_BASE_NAME
           const g = cardioMap[key] ??= {
             label: key, navName: key, kind: 'swim', count: 0,
-            bestVal: null, bestStr: null, recentTs: -1, recentStroke: 'freestyle',
+            maxTs: -1, byStroke: {}, // stroke → { best, str, lowerBetter, points }
           }
           g.count++
+          if (ts > g.maxTs) g.maxTs = ts
           const stroke = swimStrokeFromHead(head)
-          if (ts > g.recentTs) { g.recentTs = ts; g.recentStroke = stroke }
           const parsed = parseCardioBest(e.value)
           if (parsed) {
-            const better = g.bestVal === null
-              || (parsed.lowerBetter ? parsed.val < g.bestVal : parsed.val > g.bestVal)
-            if (better) { g.bestVal = parsed.val; g.bestStr = e.value }
+            const v = g.byStroke[stroke] ??= { best: null, str: null, lowerBetter: parsed.lowerBetter, points: [] }
+            v.lowerBetter = parsed.lowerBetter
+            v.points.push({ ts, val: parsed.val })
+            const better = v.best === null
+              || (parsed.lowerBetter ? parsed.val < v.best : parsed.val > v.best)
+            if (better) { v.best = parsed.val; v.str = e.value }
           }
           return
         }
@@ -286,50 +454,123 @@ export default function AdminUserActivity({ userId }) {
         // ── Regular cardio activity (no variants) ──────────────────────────
         const key = head
         const g = cardioMap[key] ??= {
-          label: key, navName: key, kind: 'plain', count: 0, bestVal: null, bestStr: null,
+          label: key, navName: key, kind: 'plain', count: 0,
+          maxTs: -1, best: null, str: null, lowerBetter: false, points: [],
         }
         g.count++
+        if (ts > g.maxTs) g.maxTs = ts
         // Direction-aware best across ALL cardio formats (pace, speed, cal/min,
         // floors/min, distance) — not just "/km" pace.
         const parsed = parseCardioBest(e.value)
         if (parsed) {
-          const better = g.bestVal === null
-            || (parsed.lowerBetter ? parsed.val < g.bestVal : parsed.val > g.bestVal)
-          if (better) { g.bestVal = parsed.val; g.bestStr = e.value }
+          g.lowerBetter = parsed.lowerBetter
+          g.points.push({ ts, val: parsed.val })
+          const better = g.best === null
+            || (parsed.lowerBetter ? parsed.val < g.best : parsed.val > g.best)
+          if (better) { g.best = parsed.val; g.str = e.value }
         }
       }
     })
 
-    const entryStr = n => `${n} ${n === 1 ? 'entry' : 'entries'}`
+    const sortAsc = pts => [...pts].sort((a, b) => a.ts - b.ts)
 
-    const strengthMoves = Object.values(strengthMap)
-      .map(d => ({
-        label:   d.label,
-        navName: d.navName,
-        count:   d.count,
-        type:    'strength',
-        stat:    d.best1RM !== null ? `${entryStr(d.count)} · Best 1RM ${d.best1RM} ${d.unit}` : entryStr(d.count),
-        badge:
-          d.kind === 'sled' ? (d.recentVariant === 'push' ? 'PUSH' : 'DRAG')
-          : d.kind === 'bw'  ? (d.canHaveTiers ? BW_TIER_BADGE[d.highestTier] : null)
-          : d.kind === 'family' ? d.recentShort
-          : null,
-      }))
-      .sort((a, b) => b.count - a.count)
+    // ── Build strength cards ──────────────────────────────────────────────
+    const strengthMoves = Object.values(strengthMap).map(d => {
+      let badge = null
+      let points = []
+      let bestText = '—'
+      let reversed = false
 
-    const cardioMoves = Object.values(cardioMap)
-      .map(d => ({
-        label:   d.label,
-        navName: d.navName,
-        count:   d.count,
-        type:    'cardio',
-        stat:    d.bestStr ? `${entryStr(d.count)} · Best ${d.bestStr}` : entryStr(d.count),
-        badge:   d.kind === 'swim' ? SWIM_STROKE_BADGE[d.recentStroke] : null,
-      }))
-      .sort((a, b) => b.count - a.count)
+      if (d.kind === 'sled') {
+        // Best-load variant (parallel — no hardness order).
+        const variants = Object.entries(d.byVariant)
+        const winner = variants.reduce((best, [k, v]) =>
+          (best === null || (v.best ?? -Infinity) > (best[1].best ?? -Infinity)) ? [k, v] : best, null)
+        if (winner) {
+          const [vk, v] = winner
+          badge = vk === 'push' ? 'PUSH' : 'DRAG'
+          points = sortAsc(v.points)
+          bestText = v.best !== null ? `Best ${v.best} ${v.unit}` : '—'
+        }
+      } else if (d.kind === 'family') {
+        // Hardest variant has no reliable order → pick best metric value.
+        const variants = Object.entries(d.byVariant)
+        const winner = variants.reduce((best, [k, v]) => {
+          if (best === null) return [k, v]
+          const bv = best[1].best, cv = v.best
+          if (bv === null) return [k, v]
+          if (cv === null) return best
+          // assist lower-is-better; everything else higher-is-better.
+          const cWins = v.kind === 'assist' ? cv < bv : cv > bv
+          return cWins ? [k, v] : best
+        }, null)
+        if (winner) {
+          const [, v] = winner
+          badge = v.short || null
+          points = sortAsc(v.points)
+          reversed = v.kind === 'assist'
+          bestText = formatStrengthBest(v.best, v.unit, v.kind)
+        }
+      } else if (d.kind === 'bw') {
+        // Highest tier reached drives badge + graph (its reps series).
+        badge = d.canHaveTiers ? BW_TIER_BADGE[d.highestTier] : null
+        const v = d.byTier[d.highestTier]
+        if (v) {
+          points = sortAsc(v.points)
+          bestText = v.best > 0 ? `Best ${v.best} reps` : '—'
+        }
+      } else {
+        // plain
+        points = sortAsc(d.points)
+        reversed = d.metricKind === 'assist'
+        bestText = formatStrengthBest(d.best, d.unit, d.metricKind)
+      }
+
+      return {
+        label: d.label, navName: d.navName, type: 'strength', count: d.count,
+        badge, points, reversed, bestText,
+        recencyText: fmtRecency(d.maxTs),
+      }
+    }).sort((a, b) => a.label.localeCompare(b.label))
+
+    // ── Build cardio cards ────────────────────────────────────────────────
+    const cardioMoves = Object.values(cardioMap).map(d => {
+      let badge = null
+      let points = []
+      let bestText = '—'
+      let reversed = false
+
+      if (d.kind === 'swim') {
+        // Best-pace stroke (parallel — no hardness order). Pace lowerBetter.
+        const strokes = Object.entries(d.byStroke)
+        const winner = strokes.reduce((best, [k, v]) => {
+          if (best === null || v.best === null) return v.best === null ? best : (best === null ? [k, v] : best)
+          const bv = best[1].best, cv = v.best
+          const cWins = v.lowerBetter ? cv < bv : cv > bv
+          return cWins ? [k, v] : best
+        }, null)
+        if (winner) {
+          const [stroke, v] = winner
+          badge = SWIM_STROKE_BADGE[stroke]
+          points = sortAsc(v.points)
+          reversed = v.lowerBetter
+          bestText = v.str ? `Best ${v.str}` : '—'
+        }
+      } else {
+        points = sortAsc(d.points)
+        reversed = d.lowerBetter
+        bestText = d.str ? `Best ${d.str}` : '—'
+      }
+
+      return {
+        label: d.label, navName: d.navName, type: 'cardio', count: d.count,
+        badge, points, reversed, bestText,
+        recencyText: fmtRecency(d.maxTs),
+      }
+    }).sort((a, b) => a.label.localeCompare(b.label))
 
     return { strengthMoves, cardioMoves }
-  }, [efforts, dbMovements, familyChildMap])
+  }, [efforts, dbMovements, familyChildMap, movementByName])
 
   const visibleMoves = view === 'cardio' ? cardioMoves : strengthMoves
 
@@ -375,15 +616,11 @@ export default function AdminUserActivity({ userId }) {
           {view === 'cardio' ? 'No cardio logged yet' : 'No strength logged yet'}
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {visibleMoves.map(move => (
             <MoveCard
               key={`${move.type}-${move.navName}`}
-              label={move.label}
-              type={move.type}
-              count={move.count}
-              stat={move.stat}
-              badge={move.badge}
+              move={move}
               onClick={() => handleMoveClick(move)}
             />
           ))}
@@ -391,4 +628,17 @@ export default function AdminUserActivity({ userId }) {
       )}
     </div>
   )
+}
+
+// PR-line formatter for strength metrics by kind.
+function formatStrengthBest(val, unit, kind) {
+  if (val === null || val === undefined) return '—'
+  switch (kind) {
+    case 'onerm':  return `Best ${val} ${unit} 1RM`
+    case 'hold':   return `Best ${fmtHold(val)}`
+    case 'reps':   return `Best ${val} reps`
+    case 'weight': return `Best ${val} ${unit}`
+    case 'assist': return `Best ${val} ${unit} assist`
+    default:       return `Best ${val}${unit ? ` ${unit}` : ''}`
+  }
 }
