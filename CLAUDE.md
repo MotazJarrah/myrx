@@ -3305,16 +3305,16 @@ The user explicitly told us not to ask for the USB cable again once wireless adb
 
 **ALWAYS reconnect at session start (LOCKED, May 19 2026):** the wireless adb endpoint is sticky on the phone until reboot, but the laptop's adb daemon forgets paired WiFi devices when its own process restarts (laptop reboot, daemon kill, etc.). So at the start of every session — before touching anything mobile — run:
 ```powershell
-& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.111:5555
+& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.116:5555
 & "$env:ANDROID_HOME\platform-tools\adb.exe" devices    # should show the WiFi endpoint
 ```
-If `adb connect` returns `connected to 10.0.0.111:5555` and `adb devices` lists `10.0.0.111:5555  device`, you're set — no cable needed. If it returns `failed to connect` or the endpoint shows up as `offline`, the daemon's wireless mode dropped (phone reboot, etc.) — then ask the user to plug in USB ONCE so you can re-run the one-time setup below.
+If `adb connect` returns `connected to 10.0.0.116:5555` and `adb devices` lists `10.0.0.116:5555  device`, you're set — no cable needed. If it returns `failed to connect` or the endpoint shows up as `offline`, the daemon's wireless mode dropped (phone reboot, etc.) — then ask the user to plug in USB ONCE so you can re-run the one-time setup below.
 
 **One-time setup with the cable plugged in:**
 ```powershell
 & "$env:ANDROID_HOME\platform-tools\adb.exe" tcpip 5555
 Start-Sleep -Seconds 2
-& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.111:5555
+& "$env:ANDROID_HOME\platform-tools\adb.exe" connect 10.0.0.116:5555
 & "$env:ANDROID_HOME\platform-tools\adb.exe" devices    # should show both endpoints
 ```
 
@@ -3327,7 +3327,7 @@ Start-Sleep -Seconds 2
 
 **Wireless adb does NOT enable Metro tunneling.** The `adb reverse` trick that lets the phone hit `http://localhost:8081` over USB has no WiFi equivalent. Once you're wireless, the dev client URL MUST be the laptop's LAN IP. If the LAN bundle stream stalls (the `Software caused connection abort` mid-multipart symptom we've hit), the fallback is to physically replug the cable, run `adb tcpip 5555` if you want to stay wireless after, then deep-link the dev client to localhost; OR fix the underlying WiFi flakiness (Windows TCP keepalive / firewall / power-save on the phone's wlan0 chip).
 
-**Do not ask the user to re-plug for diagnostics.** If `adb devices` shows the WiFi endpoint as `10.0.0.111:5555 device`, everything else works the same — `logcat`, `pidof`, `dumpsys`, `pm list packages`, `run-as <pkg>`, `cat shared_prefs/...` all run unchanged over WiFi. The only commands that fail are `adb reverse` and `adb push` to large files (slower but functional).
+**Do not ask the user to re-plug for diagnostics.** If `adb devices` shows the WiFi endpoint as `10.0.0.116:5555 device`, everything else works the same — `logcat`, `pidof`, `dumpsys`, `pm list packages`, `run-as <pkg>`, `cat shared_prefs/...` all run unchanged over WiFi. The only commands that fail are `adb reverse` and `adb push` to large files (slower but functional).
 
 **Reading a device-side error / red box without asking the user (LOCKED, May 19 2026):**
 
@@ -3336,7 +3336,7 @@ When the user says "I have an error showing" or similar, do NOT ask them to past
 ```powershell
 # 1. Take a screenshot via wireless ADB — the LogBox red-box / yellow-box
 #    overlay renders as part of the device UI, so it's captured.
-adb -s 10.0.0.111:5555 exec-out screencap -p > "C:/Users/motaz/myrx-error-screen.png"
+adb -s 10.0.0.116:5555 exec-out screencap -p > "C:/Users/motaz/myrx-error-screen.png"
 
 # 2. Read the PNG via Claude's Read tool (multimodal — reads images natively).
 #    The error message + call stack is visible in the screenshot.
@@ -5473,4 +5473,4 @@ const [, setLeaf1] = useRiveBoolean(riveRef, 'leaf1')   // setLeaf1(true) should
 **Once per-leaf works:** wire into `mobile/app/(app)/hydration.tsx` — count taps/hydration, **2 clicks (tunable const) = +1 leaf**, map daily-water-% → open-leaf-count (0–5), fire the water animation near 100%. Then DELETE all spike screens + the hydration dashed card + throwaway assets, and add the **BradleyConners (CC BY)** credit.
 
 ### Dev-env reminders (full details in the mobile dev section)
-Wireless adb: `adb connect 10.0.0.111:5555` (phone endpoint — sticky until reboot). Laptop LAN IP was **10.0.0.187** (re-derive each session via `Get-NetIPAddress`; DHCP can change it). Dev-client scheme `exp+myrx-mobile`; app scheme `myrx`. Deep-link to LAN Metro: `exp+myrx-mobile://expo-development-client/?url=http%3A%2F%2F10.0.0.187%3A8081` (NEVER `localhost` over wifi). Device screencap = 1080×2340; **the Read tool can hit a per-session "many-image / 2000px" cap mid-session — once capped, downscaling does NOT help; rely on the user's eyes or a fresh session for visual verification.**
+Wireless adb: `adb connect 10.0.0.116:5555` (phone endpoint — sticky until reboot). Laptop LAN IP was **10.0.0.187** (re-derive each session via `Get-NetIPAddress`; DHCP can change it). Dev-client scheme `exp+myrx-mobile`; app scheme `myrx`. Deep-link to LAN Metro: `exp+myrx-mobile://expo-development-client/?url=http%3A%2F%2F10.0.0.187%3A8081` (NEVER `localhost` over wifi). Device screencap = 1080×2340; **the Read tool can hit a per-session "many-image / 2000px" cap mid-session — once capped, downscaling does NOT help; rely on the user's eyes or a fresh session for visual verification.**
