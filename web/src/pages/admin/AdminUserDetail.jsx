@@ -1296,6 +1296,7 @@ export default function AdminUserDetail() {
       {activeTab === 'body' && (
         <AdminUserBody
           userId={id}
+          profile={profile}
           onSaved={() => setSnapshotKey(k => k + 1)}
         />
       )}

@@ -2,7 +2,14 @@ import { useState, useEffect, useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { supabase } from '../../../lib/supabase'
 import { useMovements } from '../../../hooks/useMovements'
-import { Dumbbell, Activity, ChevronRight } from 'lucide-react'
+import { STRENGTH_MOVEMENTS, CARDIO_MOVEMENTS, ISOMETRIC_EXERCISE_NAMES, getCardioMode } from '../../../lib/movements'
+import { estimate1RM } from '../../../lib/formulas'
+import MovementSearch from '../../../components/MovementSearch'
+import CoachAddButton from '../../../components/CoachAddButton'
+import {
+  Dumbbell, Activity, ChevronRight,
+  Loader2, Check, AlertCircle, X, Timer,
+} from 'lucide-react'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
@@ -23,6 +30,283 @@ function parseCardioBest(v) {
   }
   const m = v.match(/(\d+(?:\.\d+)?)/)
   return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
+}
+
+// ── Time helpers (for the Add Effort form) ──────────────────────────────────────
+
+function parseTimeStr(str) {
+  if (!str) return null
+  const parts = str.split(':').map(Number)
+  if (parts.some(n => isNaN(n))) return null
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  return null
+}
+
+function applyTimeMask(raw) {
+  const digits = raw.replace(/\D/g, '').slice(0, 6)
+  if (!digits) return ''
+  if (digits.length <= 2) return digits
+  if (digits.length <= 4) return `${digits.slice(0, -2)}:${digits.slice(-2)}`
+  return `${digits.slice(0, -4)}:${digits.slice(-4, -2)}:${digits.slice(-2)}`
+}
+
+function fmtDuration(secs) {
+  if (!secs) return '0s'
+  const m = Math.floor(secs / 60), s = secs % 60
+  if (m === 0) return `${s}s`
+  if (s === 0) return `${m}m`
+  return `${m}m ${s}s`
+}
+
+// ── Add Effort Form ─────────────────────────────────────────────────────────────
+// Restored from commit a022b7f^ (removed in a022b7f when the Efforts tab became a
+// read-only mirror). The label/value construction is preserved verbatim so saved
+// efforts parse correctly on the detail pages.
+
+function AddEffortForm({ userId, onSaved, onClose }) {
+  const [type,         setType]         = useState(null)
+  const [exerciseName, setExerciseName] = useState('')
+  const [reps,         setReps]         = useState('')
+  const [weightVal,    setWeightVal]    = useState('')
+  const [weightUnit,   setWeightUnit]   = useState('lb')
+  const [timeStr,      setTimeStr]      = useState('')
+  const [distVal,      setDistVal]      = useState('')
+  const [distUnit,     setDistUnit]     = useState('km')
+  const [date,         setDate]         = useState(() => new Date().toISOString().split('T')[0])
+  const [saving,       setSaving]       = useState(false)
+  const [error,        setError]        = useState('')
+
+  const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
+
+  // Strength derived state
+  const isIsometric = exerciseName ? ISOMETRIC_EXERCISE_NAMES.has(exerciseName) : false
+  const durSecs     = parseTimeStr(timeStr) || 0
+  const r           = Number(reps)
+  const w           = Number(weightVal)
+  const liveOneRM   = !isIsometric && r >= 1 && r <= 30 && reps && w > 0
+    ? estimate1RM(w, r)
+    : null
+  const canSaveStrength = isIsometric ? durSecs >= 1 : liveOneRM != null
+
+  useEffect(() => { setTimeStr(''); setReps(''); setWeightVal('') }, [isIsometric])
+
+  // Cardio derived state
+  const cardioMode = exerciseName && type === 'cardio' ? getCardioMode(exerciseName) : 'pace'
+  const distKm     = distUnit === 'mi' ? (Number(distVal) || 0) * 1.60934 : (Number(distVal) || 0)
+  const timeSecs   = parseTimeStr(timeStr) || 0
+
+  const livePaceKm = (() => {
+    if (cardioMode !== 'pace' || distKm <= 0 || !timeSecs) return null
+    const sec = timeSecs / distKm
+    return `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}/km`
+  })()
+
+  const canSaveCardio = cardioMode === 'pace' ? (distKm > 0 && timeSecs > 0) : timeSecs > 0
+
+  useEffect(() => { setDistVal(''); setTimeStr('') }, [cardioMode])
+
+  function resetForm() {
+    setExerciseName(''); setReps(''); setWeightVal(''); setTimeStr('')
+    setDistVal('')
+  }
+
+  async function handleSave(e) {
+    e.preventDefault()
+    setError('')
+    setSaving(true)
+    try {
+      // Use actual current time for today; UTC noon (Z) for past dates so we
+      // never create a future timestamp regardless of the admin's local timezone.
+      const today = new Date().toISOString().split('T')[0]
+      const ts    = date === today
+        ? new Date().toISOString()
+        : new Date(date + 'T12:00:00Z').toISOString()
+
+      if (type === 'strength') {
+        if (!exerciseName.trim()) throw new Error('Enter an exercise name.')
+        let label, value
+        if (isIsometric) {
+          label = `${exerciseName} · ${durSecs} sec`
+          value = `${durSecs} sec`
+        } else {
+          label = `${exerciseName} · ${w} ${weightUnit} × ${reps}`
+          value = `Est. 1RM ${liveOneRM} ${weightUnit}`
+        }
+        const { error: err } = await supabase.from('efforts').insert({
+          user_id: userId, type: 'strength', label, value, created_at: ts,
+        })
+        if (err) throw err
+
+      } else if (type === 'cardio') {
+        if (!exerciseName.trim()) throw new Error('Enter an activity name.')
+        const label = cardioMode === 'pace'
+          ? `${exerciseName} · ${parseFloat(Number(distVal).toFixed(3))} ${distUnit} in ${timeStr}`
+          : `${exerciseName} · ${timeStr}`
+        const value = cardioMode === 'pace' ? livePaceKm : timeStr
+        const { error: err } = await supabase.from('efforts').insert({
+          user_id: userId, type: 'cardio', label, value, created_at: ts,
+        })
+        if (err) throw err
+      }
+
+      onSaved?.()
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Failed to save.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="rounded-xl border border-border bg-card p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold">Add effort</p>
+        <button type="button" onClick={onClose} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent transition-colors">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Type selector */}
+      <div>
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Type</p>
+        <div className="flex gap-2">
+          {[
+            { id: 'strength', label: 'Strength', icon: Dumbbell, cls: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
+            { id: 'cardio',   label: 'Cardio',   icon: Activity, cls: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
+          ].map(t => {
+            const Icon = t.icon
+            return (
+              <button key={t.id} type="button"
+                onClick={() => { setType(t.id); resetForm() }}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-semibold transition-all ${
+                  type === t.id ? t.cls : 'border-border text-muted-foreground hover:bg-accent'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />{t.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ── Strength ── */}
+      {type === 'strength' && (
+        <div className="space-y-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Exercise</p>
+            <MovementSearch value={exerciseName} onChange={setExerciseName} movements={STRENGTH_MOVEMENTS} placeholder="Search or type exercise…" />
+          </div>
+
+          {isIsometric ? (
+            <>
+              <div>
+                <p className="text-[10px] text-muted-foreground mb-1">Duration</p>
+                <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+              </div>
+              {durSecs >= 1 && (
+                <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
+                  <div className="flex items-center gap-2"><Timer className="h-3.5 w-3.5 text-blue-400" /><span className="text-xs text-muted-foreground">Hold duration</span></div>
+                  <span className="font-mono text-base tabular-nums font-bold text-blue-400">{fmtDuration(durSecs)}</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1.35fr 1fr' }}>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1">Reps</p>
+                  <input type="number" value={reps} onChange={e => setReps(e.target.value)} min="1" max="30" className={inputCls} />
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1">Weight</p>
+                  <input type="number" step="0.5" value={weightVal} onChange={e => setWeightVal(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1">Unit</p>
+                  <select value={weightUnit} onChange={e => setWeightUnit(e.target.value)} className={inputCls}>
+                    <option>lb</option><option>kg</option>
+                  </select>
+                </div>
+              </div>
+              {liveOneRM && (
+                <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
+                  <div className="flex items-center gap-2"><Dumbbell className="h-3.5 w-3.5 text-blue-400" /><span className="text-xs text-muted-foreground">Estimated 1RM</span></div>
+                  <span className="font-mono text-base tabular-nums font-bold text-blue-400">{liveOneRM} {weightUnit}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Cardio ── */}
+      {type === 'cardio' && (
+        <div className="space-y-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Activity</p>
+            <MovementSearch value={exerciseName} onChange={setExerciseName} movements={CARDIO_MOVEMENTS} placeholder="Search or type activity…" />
+          </div>
+
+          {cardioMode === 'duration' ? (
+            <>
+              <div>
+                <p className="text-[10px] text-muted-foreground mb-1">Duration</p>
+                <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+              </div>
+              {timeSecs > 0 && (
+                <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
+                  <div className="flex items-center gap-2"><Timer className="h-3.5 w-3.5 text-amber-400" /><span className="text-xs text-muted-foreground">Session time</span></div>
+                  <span className="font-mono text-base tabular-nums font-bold text-amber-400">{timeStr}</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 0.9fr 1.35fr' }}>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1">Distance</p>
+                  <input type="number" step="0.01" value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1">Unit</p>
+                  <select value={distUnit} onChange={e => setDistUnit(e.target.value)} className={inputCls}>
+                    <option value="km">km</option><option value="mi">mi</option>
+                  </select>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1">Time</p>
+                  <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                </div>
+              </div>
+              {livePaceKm && (
+                <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
+                  <div className="flex items-center gap-2"><Activity className="h-3.5 w-3.5 text-amber-400" /><span className="text-xs text-muted-foreground">Live pace</span></div>
+                  <span className="font-mono text-base tabular-nums font-bold text-amber-400">{livePaceKm}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Date + save */}
+      {type && (
+        <div className="space-y-3">
+          <div>
+            <p className="text-[10px] text-muted-foreground mb-1">Date</p>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} />
+          </div>
+          {error && <div className="flex items-center gap-2 text-xs text-destructive"><AlertCircle className="h-3.5 w-3.5 shrink-0" />{error}</div>}
+          <button type="submit" disabled={saving || (type === 'strength' && !canSaveStrength) || (type === 'cardio' && !canSaveCardio)}
+            className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">
+            {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save entry</>}
+          </button>
+        </div>
+      )}
+    </form>
+  )
 }
 
 // ── Strength per-effort metric parsers ─────────────────────────────────────────
@@ -306,28 +590,29 @@ function MoveCard({ move, onClick }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function AdminUserActivity({ userId }) {
-  const [, navigate] = useLocation()
-  const [efforts, setEfforts] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [view,    setView]    = useState('strength')
+export default function AdminUserActivity({ userId, onEffortSaved }) {
+  const [, navigate]  = useLocation()
+  const [efforts,  setEfforts]  = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [view,     setView]     = useState('strength')
+  const [showForm, setShowForm] = useState(false)
 
   // Movements table (cached) — used to detect equipment / bodyweight tier
   // eligibility, exactly as the athlete index does via useMovements().
   const dbMovements = useMovements()
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const efRes = await supabase.from('efforts')
-        .select('id, label, value, type, created_at')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-      setEfforts(efRes.data || [])
-      setLoading(false)
-    }
-    load()
-  }, [userId])
+  // Lifted out of the effect so the Add-effort form's onSaved can re-fetch.
+  async function load() {
+    setLoading(true)
+    const efRes = await supabase.from('efforts')
+      .select('id, label, value, type, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+    setEfforts(efRes.data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [userId])
 
   // ── Admin-added variant families (parent → children) ──────────────────────
   // Build childName → { parentName, shortLabel } from the movements catalog so
@@ -692,29 +977,42 @@ export default function AdminUserActivity({ userId }) {
   return (
     <div className="space-y-4">
 
-      {/* Segmented Strength ⇄ Cardio toggle */}
-      <div className="border border-border rounded-lg p-0.5 inline-flex">
-        {[
-          { id: 'strength', label: 'Strength', icon: Dumbbell },
-          { id: 'cardio',   label: 'Cardio',   icon: Activity },
-        ].map(t => {
-          const Icon = t.icon
-          const active = view === t.id
-          return (
-            <button
-              key={t.id}
-              onClick={() => setView(t.id)}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                active
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />{t.label}
-            </button>
-          )
-        })}
+      {/* Unified action row — segmented toggle (left) + Add effort (right) */}
+      <div className="flex items-center justify-between gap-3">
+        {/* Segmented Strength ⇄ Cardio toggle */}
+        <div className="border border-border rounded-lg p-0.5 inline-flex">
+          {[
+            { id: 'strength', label: 'Strength', icon: Dumbbell },
+            { id: 'cardio',   label: 'Cardio',   icon: Activity },
+          ].map(t => {
+            const Icon = t.icon
+            const active = view === t.id
+            return (
+              <button
+                key={t.id}
+                onClick={() => setView(t.id)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  active
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />{t.label}
+              </button>
+            )
+          })}
+        </div>
+        <CoachAddButton label="Add effort" onClick={() => setShowForm(f => !f)} />
       </div>
+
+      {/* Add effort form (toggled by the action-row button) */}
+      {showForm && (
+        <AddEffortForm
+          userId={userId}
+          onSaved={() => { load(); onEffortSaved?.() }}
+          onClose={() => setShowForm(false)}
+        />
+      )}
 
       {/* Move cards for the selected type */}
       {loading ? (
