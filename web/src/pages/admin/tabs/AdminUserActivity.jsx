@@ -6,6 +6,7 @@ import { STRENGTH_MOVEMENTS, CARDIO_MOVEMENTS, ISOMETRIC_EXERCISE_NAMES, getCard
 import { estimate1RM } from '../../../lib/formulas'
 import MovementSearch from '../../../components/MovementSearch'
 import CoachAddButton from '../../../components/CoachAddButton'
+import UnitToggle from '../../../components/UnitToggle'
 import {
   Dumbbell, Activity, ChevronRight,
   Loader2, Check, AlertCircle, X, Timer,
@@ -223,9 +224,7 @@ function AddEffortForm({ userId, onSaved, onClose }) {
                 </div>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-1">Unit</p>
-                  <select value={weightUnit} onChange={e => setWeightUnit(e.target.value)} className={inputCls}>
-                    <option>lb</option><option>kg</option>
-                  </select>
+                  <UnitToggle value={weightUnit} options={['lb', 'kg']} onChange={setWeightUnit} className="w-full" />
                 </div>
               </div>
               {liveOneRM && (
@@ -271,9 +270,7 @@ function AddEffortForm({ userId, onSaved, onClose }) {
                 </div>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-1">Unit</p>
-                  <select value={distUnit} onChange={e => setDistUnit(e.target.value)} className={inputCls}>
-                    <option value="km">km</option><option value="mi">mi</option>
-                  </select>
+                  <UnitToggle value={distUnit} options={['km', 'mi']} onChange={setDistUnit} className="w-full" />
                 </div>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-1">Time</p>

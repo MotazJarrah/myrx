@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase'
 import { Weight, Check, AlertCircle, Loader2, TrendingUp, TrendingDown, Target, Minus } from 'lucide-react'
 import SwipeDelete from '../../../components/SwipeDelete'
 import CoachAddButton from '../../../components/CoachAddButton'
+import UnitToggle from '../../../components/UnitToggle'
 import TickerNumber from '../../../components/TickerNumber'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 
@@ -268,10 +269,7 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
           <p className="text-sm font-semibold">New weigh-in</p>
           <div className="flex gap-2 flex-wrap">
             <input type="number" step="0.1" autoFocus value={newWeight} onChange={e => setNewWeight(e.target.value)} placeholder="Weight" className={inputCls + ' flex-1 min-w-[100px]'} />
-            <select value={newUnit} onChange={e => setNewUnit(e.target.value)} className={inputCls}>
-              <option value="lb">lb</option>
-              <option value="kg">kg</option>
-            </select>
+            <UnitToggle value={newUnit} options={['lb', 'kg']} onChange={setNewUnit} />
             <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className={inputCls} />
           </div>
           {saveErr && <div className="flex items-center gap-2 text-xs text-destructive"><AlertCircle className="h-3.5 w-3.5" />{saveErr}</div>}
