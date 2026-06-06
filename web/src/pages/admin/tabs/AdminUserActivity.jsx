@@ -44,6 +44,28 @@ function parseTimeStr(str) {
   return null
 }
 
+// ── T092: Riegel-normalize a cardio effort's pace to a common anchor distance ──
+// The move-card sparklines plotted RAW pace, so a longer (harder) effort logged a
+// slower pace and dipped the line — the same false-drop fixed on the detail charts.
+// Parse distance+time from the label ("5 km in 25:00", "2000 m in 7:00", "1.6 mi
+// in ...", "1500 m in ...") and project to an anchor: normalized = (t × (anchor/d)
+// ^1.06) / anchor sec-per-km. Returns null when the label has NO distance+time
+// (cal/min, floors/min efforts) so those keep their raw rate. The anchor only
+// scales values by a constant, so for an axis-less sparkline any anchor reproduces
+// the same trend — 5 km is used for every pace activity (incl. ergs/swim).
+function riegelNormPaceSecPerKm(label, anchorKm = 5) {
+  const part = (label || '').split(' · ')[1] || ''
+  const m = part.match(/([\d.]+)\s*(km|mi|yd|m)\s+in\s+([\d:]+)/)
+  if (!m) return null
+  let distKm = parseFloat(m[1])
+  if (m[2] === 'mi') distKm *= 1.60934
+  else if (m[2] === 'm') distKm /= 1000
+  else if (m[2] === 'yd') distKm *= 0.0009144
+  const timeSecs = parseTimeStr(m[3])
+  if (!distKm || distKm <= 0 || !timeSecs || timeSecs <= 0) return null
+  return (timeSecs * Math.pow(anchorKm / distKm, 1.06)) / anchorKm
+}
+
 function applyTimeMask(raw) {
   const digits = raw.replace(/\D/g, '').slice(0, 6)
   if (!digits) return ''
@@ -814,10 +836,14 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
           if (parsed) {
             const v = g.byStroke[stroke] ??= { best: null, str: null, lowerBetter: parsed.lowerBetter, points: [] }
             v.lowerBetter = parsed.lowerBetter
-            v.points.push({ ts, val: parsed.val, disp: e.value })
+            // T092: plot the Riegel-normalized pace so a longer swim doesn't dip the
+            // line; the hover (disp) still shows the raw logged pace.
+            const norm = parsed.lowerBetter ? riegelNormPaceSecPerKm(e.label) : null
+            const pv = norm != null ? norm : parsed.val
+            v.points.push({ ts, val: pv, disp: e.value })
             const better = v.best === null
-              || (parsed.lowerBetter ? parsed.val < v.best : parsed.val > v.best)
-            if (better) { v.best = parsed.val; v.str = e.value }
+              || (parsed.lowerBetter ? pv < v.best : pv > v.best)
+            if (better) { v.best = pv; v.str = e.value }
           }
           return
         }
@@ -856,10 +882,14 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
         const parsed = parseCardioBest(e.value)
         if (parsed) {
           g.lowerBetter = parsed.lowerBetter
-          g.points.push({ ts, val: parsed.val, disp: e.value })
+          // T092: pace points plot the Riegel-normalized pace (so a longer/harder
+          // effort doesn't dip the sparkline); cal/min + floors keep their raw rate.
+          const norm = parsed.lowerBetter ? riegelNormPaceSecPerKm(e.label) : null
+          const pv = norm != null ? norm : parsed.val
+          g.points.push({ ts, val: pv, disp: e.value })
           const better = g.best === null
-            || (parsed.lowerBetter ? parsed.val < g.best : parsed.val > g.best)
-          if (better) { g.best = parsed.val; g.str = e.value }
+            || (parsed.lowerBetter ? pv < g.best : pv > g.best)
+          if (better) { g.best = pv; g.str = e.value }
         }
       }
     })
