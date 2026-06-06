@@ -6,8 +6,8 @@
  * Schwinn Airdyne fan-resistance bikes). Air bike training is programmed in
  * CALORIES, not distance/pace — so this surface is fundamentally different
  * from the generic pace/duration cardio detail. The user's training anchor is
- * their peak CAL/MIN rate; everything else (zone targets, watts floors,
- * estimated rep times) derives from it.
+ * their peak CAL/MIN rate; everything else (zone targets, estimated rep
+ * times) derives from it.
  *
  * Faithfully reproduces the athlete surface defined in:
  *   - CLAUDE.md → "Air Bike detail card — locked design spec"
@@ -18,7 +18,7 @@
  *                 cold-start estimate line + AIR BIKE category pill (amber)
  *   2. Plan card — zone pill row (SPRINT / THRESHOLD / AEROBIC, hardest-first,
  *                 click chevrons/pill to switch) + tappable info panel +
- *                 3-row hero (work cals / watts floor "≥ N W" / est time) + cue
+ *                 2-row hero (work cals / est time) + cue  [watts overlay removed — T088]
  *   3. Chart    — Recharts cal/min-over-time line + personal-best reference.
  *                 Y-axis NOT reversed (higher rate = better = line trends UP).
  *   4. Efforts log — chronological list, per-effort DELETE kept (SwipeDelete),
