@@ -343,30 +343,6 @@ export function calsPerMinFromEffort(cals: number, timeSecs: number | null): num
   return cals / (timeSecs / 60)
 }
 
-/**
- * Convert a cal/min rate to mechanical wattage on an air bike (Assault,
- * Echo, Rogue, Schwinn Airdyne). Industry-standard conversion based on
- * the metabolic equation:
- *
- *   1 kcal = 4184 J
- *   1 cal/min = 4184 J / 60 sec = ~69.7 W of metabolic energy
- *               × 0.25 mechanical efficiency on cycle ergs (Brouwer 1957
- *                  refined by ACSM 2018) ≈ ~17.4 W of mechanical output
- *
- * Accuracy ~±10 % because of fan-speed effects (air resistance scales
- * with cube of velocity), per-manufacturer calibration differences, and
- * individual metabolic efficiency. For floor-advisory coaching ("hold
- * at or above X W"), ±10 % is plenty — the watts target is the EFFORT
- * LEVEL the user should sustain, not a precise instantaneous reading.
- *
- * Returned watts are rounded to the nearest integer (machine consoles
- * display ints).
- */
-export function calsPerMinToWatts(rate: number): number {
-  if (!rate || rate <= 0) return 0
-  return Math.round(rate * 17.4)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Rucking (May 19 2026)
 // ─────────────────────────────────────────────────────────────────────────────

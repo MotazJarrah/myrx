@@ -74,7 +74,6 @@ import {
   isAirBikeActivity,
   parseAirBikeLabel,
   calsPerMinFromEffort,
-  calsPerMinToWatts,
   genderBaselineCalsPerMin,
   // Row Erg display helpers — distances render in meters, pace as
   // per-500m split (Concept2 convention). Detail page stays on
@@ -3277,11 +3276,6 @@ const AIR_BIKE_ZONE_CONFIG: Record<AirBikeZone, AirBikeZoneCfg> = Object.freeze(
 interface AirBikeZoneRx {
   /** Cals per rep (for interval zones) or total cals (for continuous). */
   calsPerRep:        number
-  /** Wattage floor — the user should sustain AT or ABOVE this watt value
-   *  for the duration of each rep. Derived from cal/min × 0.85/0.65/1.0
-   *  × 17.4 (Assault/Echo standard conversion). Floor-advisory, not
-   *  a precise instantaneous target — ±10 % is fine. */
-  wattsFloor:        number
   /** Estimated wall-clock time per rep in seconds. */
   estimatedSecsPerRep: number
   /** Number of reps (1 for continuous). */
@@ -3301,16 +3295,11 @@ function buildAirBikeZoneRx(zone: AirBikeZone, peakCalsPerMin: number): AirBikeZ
   // Estimated time at the prescribed intensity. The user does each rep
   // "as fast as they can" but this gives them a rough wall-clock anchor.
   const estimatedSecsPerRep = Math.round((calsPerRep / (peakCalsPerMin * cfg.intensity)) * 60)
-  // Watts floor for the zone — derived from the zone's effective cal/min
-  // rate (peak × intensity) and the standard 17.4 W-per-cal/min conversion.
-  // See `calsPerMinToWatts` for the formula derivation.
-  const wattsFloor = calsPerMinToWatts(peakCalsPerMin * cfg.intensity)
   const shortWork = cfg.reps > 1
     ? `${cfg.reps} × ${calsPerRep} cal`
     : `${calsPerRep} cal`
   return {
     calsPerRep,
-    wattsFloor,
     estimatedSecsPerRep,
     reps:     cfg.reps,
     restSecs: cfg.restSecs,
@@ -3322,13 +3311,13 @@ function getAirBikeZoneCue(zone: AirBikeZone, rx: AirBikeZoneRx): string {
   const cfg = AIR_BIKE_ZONE_CONFIG[zone]
   if (cfg.reps === 1) {
     // Continuous zone — no rest, one effort.
-    return `Pedal ${rx.calsPerRep} cals at or above ${rx.wattsFloor} W, steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
+    return `Pedal ${rx.calsPerRep} cals at a steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
   }
   if (zone === 'sprint') {
-    return `Sprint ${rx.calsPerRep} cals as fast as you can, holding at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+    return `Sprint ${rx.calsPerRep} cals as fast as you can. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   // threshold
-  return `Hold ${rx.calsPerRep} cals at a sustained hard pace, keeping watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+  return `Hold ${rx.calsPerRep} cals at a sustained hard pace. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
 }
 
 function AirBikeDetail({
@@ -3589,18 +3578,6 @@ function AirBikeDetail({
 
                 <View style={s.heroValueRow}>
                   <TickerNumber
-                    value={`≥ ${selectedRx.wattsFloor} W`}
-                    fontSize={30}
-                    color={palette.amber[400]}
-                    fontWeight="700"
-                  />
-                  <Text style={s.heroValueDescriptor} numberOfLines={1}>
-                    hold at or above
-                  </Text>
-                </View>
-
-                <View style={s.heroValueRow}>
-                  <TickerNumber
                     value={fmtSecs(selectedRx.estimatedSecsPerRep)}
                     fontSize={30}
                     color={palette.amber[400]}
@@ -3619,7 +3596,7 @@ function AirBikeDetail({
           </View>
         </GestureDetector>
 
-        <Text style={s.tinyText}>Cal/min anchored zones · watts derived (cal/min × 17.4) · gender-calibrated baseline</Text>
+        <Text style={s.tinyText}>Cal/min anchored zones · gender-calibrated baseline</Text>
       </AnimateRise>
 
       {/* Chart — cal/min over time. Y-axis NOT reversed (higher = better;

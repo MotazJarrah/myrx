@@ -105,17 +105,6 @@ function calsPerMinFromEffort(cals, timeSecs) {
   return cals / (timeSecs / 60)
 }
 
-/**
- * Convert a cal/min rate to mechanical wattage on an air bike. Industry
- * standard: 1 cal/min ≈ 17.4 W of mechanical output (~25 % efficiency on
- * cycle ergs, Brouwer 1957 refined by ACSM 2018). Returns rounded int watts
- * (the PM/console shows integers).
- */
-function calsPerMinToWatts(rate) {
-  if (!rate || rate <= 0) return 0
-  return Math.round(rate * 17.4)
-}
-
 // ── Time formatter (mirror of mobile fmtSecs — m:ss / h:mm:ss) ───────────────
 function fmtSecs(totalSecs) {
   if (!totalSecs && totalSecs !== 0) return '—'
@@ -168,7 +157,6 @@ const AIR_BIKE_ZONE_CONFIG = Object.freeze({
  * of mobile `buildAirBikeZoneRx`:
  *   calsPerRep         = peakRate × durationMin × intensity, ≥ 1, rounded
  *   estimatedSecsPerRep = (calsPerRep / (peakRate × intensity)) × 60, rounded
- *   wattsFloor         = calsPerMinToWatts(peakRate × intensity)
  *   shortWork          = "N × X cal" (intervals) or "X cal" (continuous)
  */
 function buildAirBikeZoneRx(zone, peakCalsPerMin) {
@@ -176,22 +164,21 @@ function buildAirBikeZoneRx(zone, peakCalsPerMin) {
   const rawCals    = peakCalsPerMin * cfg.durationMin * cfg.intensity
   const calsPerRep = Math.max(1, Math.round(rawCals))
   const estimatedSecsPerRep = Math.round((calsPerRep / (peakCalsPerMin * cfg.intensity)) * 60)
-  const wattsFloor = calsPerMinToWatts(peakCalsPerMin * cfg.intensity)
   const shortWork  = cfg.reps > 1 ? `${cfg.reps} × ${calsPerRep} cal` : `${calsPerRep} cal`
-  return { calsPerRep, wattsFloor, estimatedSecsPerRep, reps: cfg.reps, restSecs: cfg.restSecs, shortWork }
+  return { calsPerRep, estimatedSecsPerRep, reps: cfg.reps, restSecs: cfg.restSecs, shortWork }
 }
 
 /** Single coaching cue for the active zone (verbatim mirror of mobile). */
 function getAirBikeZoneCue(zone, rx) {
   const cfg = AIR_BIKE_ZONE_CONFIG[zone]
   if (cfg.reps === 1) {
-    return `Pedal ${rx.calsPerRep} cals at or above ${rx.wattsFloor} W, steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
+    return `Pedal ${rx.calsPerRep} cals at a steady aerobic effort, about ${Math.round(cfg.durationMin)} min total.`
   }
   if (zone === 'sprint') {
-    return `Sprint ${rx.calsPerRep} cals as fast as you can, holding at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+    return `Sprint ${rx.calsPerRep} cals as fast as you can. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
   }
   // threshold
-  return `Hold ${rx.calsPerRep} cals at a sustained hard pace, keeping watts at or above ${rx.wattsFloor} W. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
+  return `Hold ${rx.calsPerRep} cals at a sustained hard pace. Rest ${rx.restSecs} sec, repeat ${rx.reps} times. Each interval should take about ${fmtSecs(rx.estimatedSecsPerRep)}.`
 }
 
 // ── Misc date helpers ─────────────────────────────────────────────────────────
@@ -437,16 +424,11 @@ export default function AdminCardioAirBikeDetail({
                 </div>
               )}
 
-              {/* Three stacked TickerNumber rows: work / watts floor / est time. */}
+              {/* Stacked TickerNumber rows: work / est time. */}
               <div className="mt-3 space-y-3.5">
                 <div className="flex items-baseline justify-between gap-2">
                   <TickerNumber value={selectedRx.shortWork} className="font-mono text-3xl font-bold text-amber-400" />
                   <span className="shrink-0 text-[11px] text-muted-foreground">the work</span>
-                </div>
-
-                <div className="flex items-baseline justify-between gap-2">
-                  <TickerNumber value={`≥ ${selectedRx.wattsFloor} W`} className="font-mono text-3xl font-bold text-amber-400" />
-                  <span className="shrink-0 text-[11px] text-muted-foreground">hold at or above</span>
                 </div>
 
                 <div className="flex items-baseline justify-between gap-2">
@@ -457,7 +439,7 @@ export default function AdminCardioAirBikeDetail({
                 </div>
               </div>
 
-              {/* Thin separator + full coaching cue (rest + watts floor inline). */}
+              {/* Thin separator + full coaching cue. */}
               <div className="mt-2.5 border-t border-amber-500/15 pt-2.5">
                 <CueText className="text-sm text-foreground">{selectedCue}</CueText>
               </div>

@@ -2027,7 +2027,7 @@ Users with no logged air bike efforts get bootstrapped with a gender-aware basel
 
 - `profile.gender === 'male'` → 18 cal/min baseline (typical intermediate-male output on an Assault Bike at normal resistance)
 - `profile.gender === 'female'` → 13 cal/min baseline (typical intermediate-female output — power-based scaling reflects average watt differences)
-- Other / unset → 15 cal/min (averaged)
+- Other / unset → 13 cal/min (same as female — the uniform "male / else=female" rule; code is `gender === 'male' ? 18 : 13`)
 
 The baseline only affects the page on first visit. After the first logged effort, the user's actual `peakCalsPerMin` replaces the baseline (peak > 0 always takes precedence). The page header reads "No efforts logged yet · using N cal/min as a starting estimate" until the user logs their first effort.
 
@@ -2037,27 +2037,16 @@ The baseline only affects the page on first visit. After the first logged effort
 2. **Progression plan card** (`<AnimateRise delay={0}>`):
    - Title `Your progression plan` + helper text "Three zones to train, each anchored on your cal/min rate. Swipe the pill to switch zones."
    - **In-frame variation swipe pill** — single pill in the center showing the active zone (SPRINT / THRESHOLD / AEROBIC, hardest-first), flanked by pulsing amber chevrons (Pattern 3 + Pattern 4 swipe choreography). Pan gesture swipes between zones; chevron taps also navigate. Matches Carry's `carryZoneRow` pill exactly, just amber instead of blue.
-   - **Hero card** (amber chrome): top-right info pill (zone label + Info icon, tappable for inline "why this zone" panel — Pattern 5). Three stacked TickerNumber rows:
+   - **Hero card** (amber chrome): top-right info pill (zone label + Info icon, tappable for inline "why this zone" panel — Pattern 5). Two stacked TickerNumber rows:
      - Row 1 = work (`8 × 9 cal` for intervals, `59 cal` for continuous AEROBIC) — sub-text "the work"
-     - Row 2 = **watts floor** with `≥` prefix (e.g. `≥ 313 W` for SPRINT at male peak rate 18 cal/min) — sub-text "hold at or above". Derived from cal/min × intensity × 17.4, NOT stored. See `calsPerMinToWatts` in movements.ts for the formula derivation (industry-standard Assault / Echo / Rogue / Schwinn conversion based on ~25 % mechanical efficiency on cycle ergs).
-     - Row 3 = estimated wall-clock time per rep (or total for AEROBIC) — sub-text "est. per rep" / "est. total"
-   - Full coaching cue underneath the thin separator: includes the watts floor AND the rest interval. e.g. SPRINT: `Sprint 9 cals as fast as you can — hold at or above 313 W. Rest 45 sec, repeat 8 times. Each rep should take about 30 sec.` AEROBIC (continuous): `Pedal 59 cals at or above 204 W — steady aerobic effort, about 5 min total.`
-   - **Info-pill expanded panel** also mentions the watts derivation: *"Watts derived from cal/min × 17.4 — standard Assault / Echo / Rogue / Schwinn conversion based on ~25 % mechanical efficiency on cycle ergs. Aim to stay AT or ABOVE the floor; exceeding it is fine. The floor scales with your gender baseline and the zone's intensity factor."*
-   - Attribution: `Cal/min anchored zones · watts derived (cal/min × 17.4) · gender-calibrated baseline`
+     - Row 2 = estimated wall-clock time per rep (or total for AEROBIC) — sub-text "est. per interval" / "est. total"
+   - Full coaching cue underneath the thin separator: the work + the rest interval, NO watts. e.g. SPRINT: `Sprint 9 cals as fast as you can. Rest 45 sec, repeat 8 times. Each interval should take about 30 sec.` AEROBIC (continuous): `Pedal 59 cals at a steady aerobic effort, about 5 min total.`
+   - Attribution: `Cal/min anchored zones · gender-calibrated baseline`
+   - **Watts overlay REMOVED (June 2026, T088 verify-first):** the old "hold ≥ X W" row derived `watts = cal/min × 17.4` (a generic ~25%-efficiency calc). That is NOT a published Assault/Echo/Rogue/Schwinn standard, and it doesn't match the Assault console's own watts readout — so a target the user couldn't validate against the machine was unactionable noise. Dropped from the hero rows, the cues, and the attribution; cal/min (on every console + our anchor) stands alone. A console-calibrated watts readout would need physical hardware testing — deferred.
 3. **Chart** (`<AnimateRise delay={250}>`) — cal/min rate over time. **Y-axis NOT reversed** — higher rate = better progress = line trends UP. Distinct from pace charts where the Y-axis is reversed (lower = faster = trend down). Reference line at peak rate.
 4. **Log list** (`<AnimateRise delay={500}>`) — each row shows the cal/min rate on the right.
 
-**Wattage advisory (LOCKED, May 19 2026):** users enter cal + time on the form (`isCalorieMode`); the system derives cal/min and from there derives the watts floor for each zone. Watts is NEVER an input — it's purely a coaching overlay because air bike wattage is too variable (fan-speed cubed, manufacturer calibration differences, individual metabolic efficiency) to ask the user to read off the console mid-effort. The wattage advice is a FLOOR ("at or above X W"), not a precise instantaneous target.
-
-Per-zone watts floor table for the gender-baseline cold-start (apply `calsPerMinToWatts = rate × 17.4` to baseline × intensity):
-
-| Gender | Peak cal/min | SPRINT (100 %) | THRESHOLD (85 %) | AEROBIC (65 %) |
-|---|---:|---:|---:|---:|
-| Male | 18 | 313 W | 266 W | 204 W |
-| Female | 13 | 226 W | 192 W | 147 W |
-| Other / unset | 15 | 261 W | 222 W | 170 W |
-
-After the user's first effort, `peakCalsPerMin = max observed across all efforts` and all floors recompute from that.
+**Wattage overlay — REMOVED (June 2026, T088 verify-first).** The page formerly derived a per-zone watts floor (`watts = cal/min × 17.4`, a generic ~25%-efficiency calc) and showed "hold ≥ X W". Dropped because: (1) `× 17.4` is NOT a published Assault/Echo/Rogue/Schwinn standard (the earlier "industry-standard conversion" claim was false); (2) it doesn't match the Assault console's own watts display, so the target was unverifiable mid-effort. Watts is gone from the hero rows, the cues, and the attribution. cal/min remains the sole anchor (it's on every console). Re-adding a console-calibrated watts readout would require physically measuring a specific machine — deferred. The `calsPerMinToWatts` helper was deleted from both `movements.ts` and the web mirror.
 
 **Log form (`cardio.tsx`) — calorie-input mode (LOCKED):**
 
@@ -2081,8 +2070,7 @@ The "Your activities" row for Air Bike shows `Best rate — N.N cal/min` on the 
 | `isAirBikeActivity(name)` | True iff name equals AIR_BIKE_ACTIVITY |
 | `parseAirBikeLabel(label)` | Parse `"Air Bike · N cal in M:SS"` → `{ cals, timeSecs }` |
 | `calsPerMinFromEffort(cals, timeSecs)` | Compute cal/min rate (returns 0 for invalid) |
-| `calsPerMinToWatts(rate)` | Convert cal/min → mechanical watts via × 17.4 (Assault/Echo standard) |
-| `genderBaselineCalsPerMin(gender)` | Cold-start baseline (18/13/15 for male/female/other) |
+| `genderBaselineCalsPerMin(gender)` | Cold-start baseline (18 male / 13 else) |
 
 **Out of v1 scope (deferred):**
 
@@ -3919,7 +3907,7 @@ Single source of truth for "which scientific work each formula in MyRX comes fro
 | VO2 max interval prescription | **Veronique Billat — time-at-VO2max research**, **Daniels' "I pace"**, **Norwegian 4×4** | `PACE_ZONE_SESSIONS.vo2max` |
 | Endurance baseline + aerobic-base methodology | **Phil Maffetone (MAF method)**, **Iñigo San Millán (polarized)**, **ACSM aerobic-base recommendation** | Endurance session prescriptions across PaceDetail |
 | Concept2 erg watts↔pace | **Concept2 official formula** — `watts = 2.80 × (m/s)³` (drag-factor constant × velocity cubed). Identical across Row Erg, Bike Erg, Ski Erg (same flywheel + PM5) | `mobile/src/lib/movements.ts` `pacePer500mToWatts` |
-| Air Bike cal/min ↔ watts | **Assault / Echo / Rogue / Schwinn industry convention** — `watts ≈ cal/min × 17.4` (calibrated at ~25% mechanical efficiency on cycle ergs, refined by ACSM 2018) | `movements.ts` `calsPerMinToWatts` |
+| Air Bike watts overlay | **REMOVED June 2026 (T088)** — `cal/min × 17.4` was a generic 25%-efficiency calc, NOT an Assault/Echo standard, and didn't match the console; dropped as unverifiable noise. cal/min is the sole anchor. | — |
 | StairMill VO2 protocol | **Allison et al. (2017) Med Sci Sports Exerc** — 3×20-sec stair sprints, 3×/week → +12% VO2peak in 6 weeks | `[activity].tsx` `STAIRMILL_ZONE_CONFIG.vo2max` |
 | StairMill Threshold protocol | **Interval research (Seiler 2010; Laursen & Jenkins 2002) + ACSM 12th ed** — hard 3-min intervals → lactate-threshold adaptation | `STAIRMILL_ZONE_CONFIG.threshold` |
 | StairMill Endurance protocol | **Boreham et al. (2000) Prev Med + ACSM 12th ed** — accumulated daily stair climbing improved VO2max; ACSM backs the 20-min continuous block | `STAIRMILL_ZONE_CONFIG.endurance` |
@@ -3963,7 +3951,7 @@ Single source of truth for "which scientific work each formula in MyRX comes fro
 
 | Surface / formula | Source | Where it lives |
 |---|---|---|
-| Air Bike cold-start cal/min | **MyRX-calibrated** from typical commercial Assault Bike output at intermediate effort — male 18 / female 13 / else 15 | `mobile/src/lib/movements.ts` `genderBaselineCalsPerMin` |
+| Air Bike cold-start cal/min | **MyRX-calibrated** from typical commercial Assault Bike output at intermediate effort — male 18 / else 13 (male/else=female rule) | `mobile/src/lib/movements.ts` `genderBaselineCalsPerMin` |
 | StairMill cold-start floors/min | **MyRX-calibrated** from typical Stairmaster Gauntlet output at moderate-vigorous effort — male 12 / else 9 (male/else=female rule) | `mobile/src/lib/movements.ts` `genderBaselineFloorsPerMin` |
 | Per-second HR storage | **Samsung Health Data SDK v1.1.0** — `ExerciseSession.log[].heartRate` field (1 Hz cadence) → stored as `wearable_workouts.raw_meta.hr_log` JSONB array | `mobile/android/.../SamsungHealthModule.kt` + `mobile/src/lib/integrations/samsungHealth.ts` |
 
