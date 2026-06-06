@@ -5063,42 +5063,13 @@ function StrengthDetail({
   const profileUnit = (profile?.weight_unit as 'lb' | 'kg' | undefined) || (unit as 'lb' | 'kg')
 
   // ── Added-load awareness for the chart (false-drop fix) ──────────────────
-  // A bodyweight-equipment movement can be trained at pure bodyweight (e.g.
-  // "15 reps") OR with added load (e.g. "1 rep at +150 lb"). Plotting REPS
-  // makes the line DROP when the athlete swaps a high-rep bodyweight set for
-  // a far-harder loaded single. So: if the movement has ANY added-load effort
-  // we switch the chart (and its reference line + Best subtitle) to ESTIMATED
-  // 1RM; pure-bodyweight movements keep plotting reps (more reps = better,
-  // never a false drop). The max-attempt TILE GRID is untouched — still reps.
-  // Per ACTIVE tier (not global): only the tier being viewed switches to e1RM,
-  // so band/knee tiers (assisted — effective load is LESS than bodyweight) keep
-  // plotting reps and never get an inflated bodyweight-based 1RM. Mirrors the
-  // web's per-tier `tierHasWeighted`.
-  const bwHasWeighted = isBodyweightExercise
-    && efforts.some(e =>
-      bwTierFromVariantName(e.label.split(' · ')[0]) === bwActiveTier
-      && parseAddedWeightFromLabel(e.label) > 0)
-  // Same bodyweight source the rest of the bodyweight branch uses for math.
-  const bwForMath = profileBW
-  // e1RM for a single bodyweight effort. Weighted-progression efforts already
-  // store "Est. 1RM N unit" (= estimate1RM(bodyweight + added, reps) computed
-  // at save time) so we read that directly when present; otherwise we compute
-  // from the athlete's current bodyweight + parsed added load. Returns null
-  // only when neither path is available (rare — no value string AND no BW).
-  const bwE1RMForEffort = (e: Effort): number | null => {
-    const stored = parseOneRM(e.value)?.oneRM
-    if (stored != null) return stored
-    const r = parseRepsFromBwLabel(e.label)
-    if (r === null) return null
-    const aw = parseAddedWeightFromLabel(e.label)
-    if (bwForMath != null) return estimate1RM(bwForMath + aw, r)
-    return null
-  }
-  const bwBestE1RM = bwHasWeighted
-    ? Math.max(0, ...efforts
-        .filter(e => bwTierFromVariantName(e.label.split(' · ')[0]) === bwActiveTier)
-        .map(e => bwE1RMForEffort(e) ?? 0))
-    : 0
+  // NOTE: the actual definitions (bwHasWeighted / bwForMath / bwE1RMForEffort /
+  // bwBestE1RM) live BELOW, right after `bwActiveTier` is computed. They were
+  // moved there because the per-active-tier check (`=== bwActiveTier`) reads
+  // `bwActiveTier`, which is a const declared further down in this component —
+  // referencing it up here left it in the temporal dead zone, so the check was
+  // silently always-false and the chart never switched to Est. 1RM. See the
+  // "Added-load awareness (moved here so bwActiveTier is in scope)" block below.
 
   const effectiveOneRM = isBodyweightExercise && bestOneRM === 0 && profileBW && bestReps > 0
     ? estimate1RM(profileBW, bestReps)
@@ -5253,6 +5224,44 @@ function StrengthDetail({
     bwChartCanLeft.value  = __bwIdx > 0
     bwChartCanRight.value = __bwIdx >= 0 && __bwIdx < bwLoggedTiers.length - 1
   }
+
+  // ── Added-load awareness for the chart (moved here so bwActiveTier is in scope) ──
+  // A bodyweight-equipment movement can be trained at pure bodyweight (e.g.
+  // "15 reps") OR with added load (e.g. "1 rep at +150 lb"). Plotting REPS
+  // makes the line DROP when the athlete swaps a high-rep bodyweight set for
+  // a far-harder loaded single. So: if the ACTIVE tier has ANY added-load effort
+  // we switch the chart (and its reference line + Best subtitle) to ESTIMATED
+  // 1RM; pure-bodyweight tiers keep plotting reps (more reps = better, never a
+  // false drop). The max-attempt TILE GRID is untouched — still reps. Per ACTIVE
+  // tier (not global) so band/knee tiers (assisted — effective load is LESS than
+  // bodyweight) keep plotting reps. Mirrors the web's per-tier `tierHasWeighted`.
+  // MUST stay below `bwActiveTier` — referencing it earlier puts it in the TDZ
+  // and the `=== bwActiveTier` check becomes silently always-false.
+  const bwHasWeighted = isBodyweightExercise
+    && efforts.some(e =>
+      bwTierFromVariantName(e.label.split(' · ')[0]) === bwActiveTier
+      && parseAddedWeightFromLabel(e.label) > 0)
+  // Same bodyweight source the rest of the bodyweight branch uses for math.
+  const bwForMath = profileBW
+  // e1RM for a single bodyweight effort. Weighted-progression efforts already
+  // store "Est. 1RM N unit" (= estimate1RM(bodyweight + added, reps) computed
+  // at save time) so we read that directly when present; otherwise we compute
+  // from the athlete's current bodyweight + parsed added load. Returns null
+  // only when neither path is available (rare — no value string AND no BW).
+  const bwE1RMForEffort = (e: Effort): number | null => {
+    const stored = parseOneRM(e.value)?.oneRM
+    if (stored != null) return stored
+    const r = parseRepsFromBwLabel(e.label)
+    if (r === null) return null
+    const aw = parseAddedWeightFromLabel(e.label)
+    if (bwForMath != null) return estimate1RM(bwForMath + aw, r)
+    return null
+  }
+  const bwBestE1RM = bwHasWeighted
+    ? Math.max(0, ...efforts
+        .filter(e => bwTierFromVariantName(e.label.split(' · ')[0]) === bwActiveTier)
+        .map(e => bwE1RMForEffort(e) ?? 0))
+    : 0
 
   const bwLatestBandLevel: string | null = (() => {
     if (bwActiveTier !== 'band' || bwEffortsByTier.band.length === 0) return null
