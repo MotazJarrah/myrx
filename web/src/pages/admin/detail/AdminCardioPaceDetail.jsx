@@ -260,9 +260,35 @@ const CARDIO_ZONE_CONFIG = Object.freeze({
   },
 })
 
-// Target pace at this zone in s/km, anchored on the user's fastest logged pace.
+// Target pace at this zone in s/km, anchored on the user's Critical Speed (or
+// fastest logged pace when CS can't be estimated).
 function getZonePaceSecPerKm(zone, bestPaceSecPerKm) {
   return Math.max(60, bestPaceSecPerKm + CARDIO_ZONE_CONFIG[zone].paceOffset)
+}
+
+// Critical Speed pace anchor (June 2026, T088) — mirror of mobile. Across efforts
+// at DIFFERENT distances, time grows linearly with distance, so the slope of
+// time-vs-distance (distance in km) IS the CS pace in s/km. Fastest time per
+// distinct distance + least-squares slope; null when <2 distinct distances so the
+// caller falls back to fastest pace. (Per-modality power/HR zones wait for HR
+// integration, Phase 2.)
+function criticalSpeedPaceSecsPerKm(efforts) {
+  const bestByDist = new Map()
+  for (const e of efforts) {
+    const parsed = parseEffortLabel(e.label)
+    if (!parsed || parsed.timeSecs == null || parsed.timeSecs <= 0 || parsed.distKm <= 0) continue
+    const key = Math.round(parsed.distKm * 1000)
+    const prev = bestByDist.get(key)
+    if (prev == null || parsed.timeSecs < prev) bestByDist.set(key, parsed.timeSecs)
+  }
+  if (bestByDist.size < 2) return null
+  let n = 0, sx = 0, sy = 0, sxy = 0, sxx = 0
+  bestByDist.forEach((t, mKey) => { const d = mKey / 1000; n++; sx += d; sy += t; sxy += d * t; sxx += d * d })
+  const denom = n * sxx - sx * sx
+  if (denom <= 0) return null
+  const slope = (n * sxy - sx * sy) / denom
+  if (slope <= 0) return null
+  return slope
 }
 
 // Classify a logged effort into a zone based on its pace vs the user's best.
@@ -624,13 +650,16 @@ export default function AdminCardioPaceDetail({ userId, activity, onBack }) {
     return { bestEffort: be, bestPaceSecs: bp }
   }, [efforts])
   const hasBestPace = bestPaceSecs > 0 && bestPaceSecs !== Infinity
+  // Zone anchor — Critical Speed from ≥2 distances, else the fastest pace (T088).
+  // Header "Best" + chart PB stay on bestPaceSecs; only the prescriptions use this.
+  const anchorPaceSecs = useMemo(() => criticalSpeedPaceSecsPerKm(efforts) ?? bestPaceSecs, [efforts, bestPaceSecs])
 
   // ── Progression plan (Group A only) — regenerated live every render. ───────
   const planQueue = useMemo(
     () => (isGroupA && hasBestPace)
-      ? generatePlanQueue(activity, efforts, bestPaceSecs, distUnit, 8)
+      ? generatePlanQueue(activity, efforts, anchorPaceSecs, distUnit, 8)
       : [],
-    [isGroupA, hasBestPace, activity, efforts, bestPaceSecs, distUnit],
+    [isGroupA, hasBestPace, activity, efforts, anchorPaceSecs, distUnit],
   )
 
   // When the queue regenerates (after a delete), reset the selection to step 0

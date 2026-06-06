@@ -293,11 +293,43 @@ const CARDIO_ZONE_CONFIG: Record<CardioZone, CardioZoneCfg> = Object.freeze({
   },
 })
 
-// Target pace at this zone in s/km, anchored on the user's fastest logged pace.
-// VO2 zone is floored at 60 s/km to prevent absurd projections for slow users.
+// Target pace at this zone in s/km, anchored on the user's Critical Speed (or
+// fastest logged pace when CS can't be estimated). VO2 zone is floored at 60 s/km
+// to prevent absurd projections for slow users.
 function getZonePaceSecPerKm(zone: CardioZone, bestPaceSecPerKm: number): number {
   const offset = CARDIO_ZONE_CONFIG[zone].paceOffset
   return Math.max(60, bestPaceSecPerKm + offset)
+}
+
+// ── Critical Speed pace anchor (June 2026, T088) ────────────────────────────
+//
+// The zone offsets above were applied to the user's single FASTEST logged pace.
+// A single best pace is usually a short, anaerobic-heavy effort — too fast to be a
+// true threshold anchor, so every zone came out too hard. Critical Speed is the
+// honest anchor: across efforts at DIFFERENT distances, time grows linearly with
+// distance (time = distance / CS + anaerobic term), so the SLOPE of time-vs-
+// distance (with distance in km) IS the CS pace in seconds per km. Uses the
+// fastest time at each distinct distance + a least-squares slope; returns null
+// when <2 distinct distances are logged so the caller falls back to fastest pace.
+// (Per-modality power/HR zones — the other half of the audit — wait for HR/power
+// integration, Phase 2.)
+function criticalSpeedPaceSecsPerKm(efforts: Effort[]): number | null {
+  const bestByDist = new Map<number, number>()  // distinct distance (metres) → fastest time (s)
+  for (const e of efforts) {
+    const parsed = parseEffortLabel(e.label)
+    if (!parsed || parsed.timeSecs == null || parsed.timeSecs <= 0 || parsed.distKm <= 0) continue
+    const key = Math.round(parsed.distKm * 1000)
+    const prev = bestByDist.get(key)
+    if (prev == null || parsed.timeSecs < prev) bestByDist.set(key, parsed.timeSecs)
+  }
+  if (bestByDist.size < 2) return null
+  let n = 0, sx = 0, sy = 0, sxy = 0, sxx = 0
+  bestByDist.forEach((t, mKey) => { const d = mKey / 1000; n++; sx += d; sy += t; sxy += d * t; sxx += d * d })
+  const denom = n * sxx - sx * sx
+  if (denom <= 0) return null
+  const slope = (n * sxy - sx * sy) / denom  // seconds per km at critical speed = CS pace
+  if (slope <= 0) return null
+  return slope
 }
 
 // ── Activity categorization ──────────────────────────────────────────────────
@@ -1690,6 +1722,10 @@ function PaceDetail({
     if (secs !== null && secs < bestPaceSecs) { bestPaceSecs = secs; bestEffort = e }
   })
   const hasBestPace = bestPaceSecs > 0 && bestPaceSecs !== Infinity
+  // Zone anchor — Critical Speed from ≥2 distances, else the fastest pace (T088).
+  // The header "Best" subtitle stays on bestPaceSecs (the actual best); only the
+  // zone prescriptions below use this CS anchor.
+  const anchorPaceSecs = criticalSpeedPaceSecsPerKm(efforts) ?? bestPaceSecs
 
   // Chart data — for speed machines, plot SPEED over time (higher = better,
   // line trends UP as user improves); for everyone else plot pace (lower =
@@ -1712,9 +1748,9 @@ function PaceDetail({
   // never staleness-rots — it's a pure function of training data.
   const planQueue: PlanStep[] = useMemo(
     () => isGroupA && hasBestPace
-      ? generatePlanQueue(activity, efforts, bestPaceSecs, distUnit, 8)
+      ? generatePlanQueue(activity, efforts, anchorPaceSecs, distUnit, 8)
       : [],
-    [isGroupA, hasBestPace, activity, efforts, bestPaceSecs, distUnit],
+    [isGroupA, hasBestPace, activity, efforts, anchorPaceSecs, distUnit],
   )
 
   // UI state for the progression card. Default selection = step 0 (the

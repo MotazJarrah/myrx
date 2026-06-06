@@ -1373,19 +1373,19 @@ The 5-zone HR model is still the underlying science, but the app exposes only th
 
 **Science backing (locked):** ACSM *Guidelines for Exercise Testing and Prescription* (12th ed., 2025); Karvonen, Kentala & Mustala (1957) for HR-reserve methodology; Jack Daniels' *Running Formula* (3rd ed., 2014) for VDOT-to-zone mapping; Garmin / Polar / Suunto / Apple Watch all default to the same 5-zone model. The 50/60/70/80/90% HRmax boundaries are the global standard, not novel.
 
-Until heart-rate integration lands (Phase 2 — via Apple Health / Strava / Garmin / Polar), zones derive from **pace as the proxy** using Riegel-scaled offsets from the user's fastest logged pace. Once HR data is available, zones recalibrate from actual HR.
+Until heart-rate integration lands (Phase 2 — via Apple Health / Strava / Garmin / Polar), zones derive from **pace as the proxy**, anchored on the user's **Critical Speed** with the offsets below. Once HR data is available, zones recalibrate from actual HR.
 
 **Per-zone pace formula (pace mode):**
 
-Anchored on the user's fastest logged pace `Pbest` for the activity:
+**Anchor — Critical Speed (UPDATED June 2026, T088).** `Panchor` is the user's **Critical Speed** pace, not their single fastest effort. `criticalSpeedPaceSecsPerKm(efforts)` fits a least-squares line of time-vs-distance across the fastest effort at each DISTINCT logged distance; the slope (distance in km) IS the CS pace in s/km. With <2 distinct distances logged it falls back to the fastest pace `Pbest`. *Why:* a single fastest pace is usually a short, anaerobic-heavy effort, so anchoring zones on it made every prescription too hard; CS is the honest sustainable-threshold anchor. Only the zone PRESCRIPTIONS use `Panchor` — the "Best pace —" header subtitle + the chart PB reference line still show the actual fastest `Pbest`. Mobile `[activity].tsx` PaceDetail + web `AdminCardioPaceDetail.jsx` (BeatYourBest is untouched — it has no zone plan queue).
 
 | Zone | Target pace offset (running, /km) | Notes |
 |------|-----------------------------------|-------|
-| Z2 | `Pbest + 60 s/km` | conversational, aerobic base |
-| Z4 | `Pbest + 10 s/km` | ≈ 10K race pace, "comfortably hard sustained" |
-| Z5 | `Pbest − 15 s/km` | ≈ 3K race pace, "max sustainable" |
+| Z2 | `Panchor + 60 s/km` | conversational, aerobic base |
+| Z4 | `Panchor + 10 s/km` | ≈ 10K race pace, "comfortably hard sustained" |
+| Z5 | `Panchor − 15 s/km` | ≈ 3K race pace, "max sustainable" |
 
-Offsets scale to the activity's pace units (km or mi). For non-running activities (rowing, swimming, cycling, ski erg) the offsets translate to the activity's typical pace scale; calibration tables per activity will land alongside the implementation. Riegel projection (`projectPaces` in `formulas.ts`) handles cross-distance pace mapping — unchanged from today.
+Offsets scale to the activity's pace units (km or mi) and are applied **uniformly across modalities** today (running, cycling, ergs, elliptical). The audit's other half — per-modality power/HR zones (power for ergs/bike, HR/RPE for elliptical) — is DEFERRED to Phase 2 (needs HR/power integration). Riegel projection (`projectPaces` in `formulas.ts`) still handles cross-distance pace mapping for the tiles.
 
 **Per-zone session prescription (the hero card cue):**
 
