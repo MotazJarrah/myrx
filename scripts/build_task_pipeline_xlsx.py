@@ -616,9 +616,9 @@ TASKS = [
      "mobile [exercise].tsx, [activity].tsx, cardio.tsx; web admin/detail/AdminStrengthBodyweightDetail + AdminCardio{Pace,BeatYourBest,Swimming}Detail; CLAUDE.md; commits 05d21c2 / f03b01b / cbb9ce6 / 4ab892e; web hash index-ONd0qB5j",
      "2026-06-06"),
 
-    ("T092", "Coach Efforts-tab cardio mini-graph sparklines -- Riegel-normalize", "Coach/Admin", "Web coach", "Deferred",
+    ("T092", "Coach Efforts-tab cardio mini-graph sparklines -- Riegel-normalize", "Coach/Admin", "Web coach", "Done",
      "Follow-up flagged during T091. The coach Efforts-tab move-card mini-graph sparklines (AdminUserActivity.jsx, the cardio + swim builders ~L802-863) still plot RAW pace per point (parseCardioBest(value), no distance), so a longer cardio effort dips the sparkline -- the same false-drop T091 fixed on the detail charts. The DETAIL charts (primary surface) are done on mobile + coach web; these tiny axisless sparklines were deferred (the hover popup still shows the real logged value).",
-     "Normalize the cardio pace sparkline points: needs per-point label parsing for distance + per-stroke swim handling (mirror the detail-chart Riegel fix). Apply only to pace activities; leave cal/min + floors/min (rates) alone.",
+     "DONE 2026-06-06 (6bb3d4c, deployed). Added riegelNormPaceSecPerKm(label) to AdminUserActivity (parses distance+time, projects to a 5km anchor; returns null for cal/min + floors so those keep their raw rate). The generic-cardio + swim move-card builders now plot the NORMALIZED pace for pace points (parseCardioBest lowerBetter=true); the hover popup still shows the raw logged value. A single 5km anchor suffices -- for an axis-less sparkline the anchor only scales values by a constant, so the trend is identical for every pace activity (running/ergs/swim). NONE remaining.",
      "web/src/pages/admin/tabs/AdminUserActivity.jsx (cardio mini-graph builder ~L802-863)",
      "2026-06-06"),
 
