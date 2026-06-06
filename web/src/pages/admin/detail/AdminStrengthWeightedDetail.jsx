@@ -50,6 +50,27 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
+import { useAuth } from '../../../contexts/AuthContext'
+
+// ── Coach-units conversion (T093) ────────────────────────────────────────────
+// The coach views a client's strength in the COACH's weight unit. Weights are
+// stored/parsed in the unit the athlete logged; convert to the coach's unit for
+// display. The strongman kg unitLock still wins (handled at the `unit` derivation).
+const KG_PER_LB_W = 0.453592
+function convW(w, from, to) {
+  if (w == null || !from || from === to) return w
+  return Math.round((to === 'kg' ? w * KG_PER_LB_W : w / KG_PER_LB_W) * 10) / 10
+}
+// Rewrite any "<n> lb" / "<n> kg" inside a logged effort-detail string into the
+// target unit (e.g. "225 lb × 5" → "102 kg × 5"). No-op when the unit is locked.
+function convDetail(detail, to, locked) {
+  if (!detail || locked) return detail
+  return detail.replace(/([\d.]+)\s*(lb|kg)\b/gi, (m, n, u) => {
+    const from = u.toLowerCase()
+    if (from === to) return `${n} ${to}`
+    return `${convW(parseFloat(n), from, to)} ${to}`
+  })
+}
 
 // ── Equipment ladders (verbatim mirror of mobile EQUIPMENT_LADDERS) ──────────
 // Fixed, non-uniform weight progressions matching physically-available
@@ -313,7 +334,10 @@ export default function AdminStrengthWeightedDetail({
 }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
-  const [profileUnit, setProfileUnit] = useState('lb')
+  // T093: the coach views a client's strength in the COACH's weight unit (via
+  // useAuth), not the client's. The strongman kg unitLock still overrides below.
+  const { profile: coachProfile } = useAuth()
+  const coachUnit = coachProfile?.weight_unit || 'lb'
 
   // Movement metadata fetched from the `movements` row (only when the
   // dispatcher didn't pass it). Props always take precedence — see the
@@ -350,11 +374,6 @@ export default function AdminStrengthWeightedDetail({
           .eq('type', 'strength')
           .ilike('label', `${exercise} · %`)
           .order('created_at', { ascending: true }),
-        supabase
-          .from('profiles')
-          .select('weight_unit')
-          .eq('id', userId)
-          .maybeSingle(),
       ]
 
       // Only hit the movements table when the dispatcher didn't pass equipment.
@@ -372,9 +391,8 @@ export default function AdminStrengthWeightedDetail({
       const results = await Promise.all(queries)
       if (cancelled) return
 
-      const [efRes, profRes, movRes] = results
+      const [efRes, movRes] = results
       setEntries(efRes.data || [])
-      setProfileUnit(profRes.data?.weight_unit || 'lb')
       if (needMovement) setFetchedMeta(movRes?.data ?? null)
       setLoading(false)
     }
@@ -395,9 +413,13 @@ export default function AdminStrengthWeightedDetail({
     return parsed.oneRM > acc.val ? { val: parsed.oneRM, unit: parsed.unit } : acc
   }, { val: 0, unit: null }), [entries])
 
-  const bestOneRM = best.val
-  // Unit precedence: movement unit_lock → unit parsed off the effort → profile pref → lb.
-  const unit = unitLock || best.unit || profileUnit || 'lb'
+  // Unit precedence (T093): movement unit_lock → the COACH's unit → lb. The coach
+  // always views in their own unit (this used to fall back to the best effort's
+  // logged unit). `unit` is declared BEFORE bestOneRM so the conversion below is
+  // not in the temporal dead zone.
+  const unit = unitLock || coachUnit || 'lb'
+  // Best 1RM converted from its logged unit into the coach's display unit.
+  const bestOneRM = convW(best.val, best.unit, unit)
 
   // Equipment used for ladder/jump math. `strongman` resolves through getLadder
   // to the atlas-stone ladder (mirrors mobile). Default to barbell if unknown
@@ -481,9 +503,9 @@ export default function AdminStrengthWeightedDetail({
   const chartData = useMemo(() => entries
     .map(e => {
       const parsed = parseOneRM(e.value)
-      return parsed ? { ts: e.created_at, date: fmtShort(e.created_at), value: parsed.oneRM } : null
+      return parsed ? { ts: e.created_at, date: fmtShort(e.created_at), value: convW(parsed.oneRM, parsed.unit, unit) } : null
     })
-    .filter(Boolean), [entries])
+    .filter(Boolean), [entries, unit])
 
   const values = chartData.map(d => d.value)
   const minV   = values.length ? Math.min(...values) : 0
@@ -827,7 +849,7 @@ export default function AdminStrengthWeightedDetail({
             <div className="overflow-hidden rounded-xl border border-border bg-card">
               <div className="divide-y divide-border">
                 {[...entries].reverse().map(e => {
-                  const detail = e.label.split(' · ').slice(1).join(' · ')
+                  const detail = convDetail(e.label.split(' · ').slice(1).join(' · '), unit, !!unitLock)
                   const parsed = parseOneRM(e.value)
                   return (
                     <SwipeDelete key={e.id} onDelete={() => deleteEntry(e.id)}>
@@ -838,7 +860,7 @@ export default function AdminStrengthWeightedDetail({
                         </div>
                         {parsed && (
                           <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-blue-400">
-                            {parsed.oneRM} {parsed.unit} 1RM
+                            {convW(parsed.oneRM, parsed.unit, unit)} {unit} 1RM
                           </span>
                         )}
                       </div>
