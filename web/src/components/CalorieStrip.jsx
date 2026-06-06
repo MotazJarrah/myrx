@@ -63,11 +63,28 @@ const STATUS_GRAPH = {
 // ── Mini trend graph (the line chart UNDER the day tiles) ──────────────────────
 
 function CalorieGraph({ days, logs, dailyTarget, onDotClick }) {
-  const W   = 320
-  const H   = 72
-  const PAD = { top: 10, right: 12, bottom: 10, left: 12 }
-  const innerW = W - PAD.left - PAD.right
-  const innerH = H - PAD.top  - PAD.bottom
+  // Measure the real pixel width so the SVG renders 1:1 (round dots, no
+  // preserveAspectRatio stretch) AND so the X columns line up exactly with the
+  // tile row above (both are N equal columns separated by GAP px).
+  const wrapRef = useRef(null)
+  const [W, setW] = useState(0)
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const measure = () => setW(el.clientWidth || 0)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const H      = 72
+  const PADY   = 12
+  const innerH = H - PADY * 2
+  const N      = days.length
+  const GAP    = 6   // must match the tile row's gap-1.5 (0.375rem = 6px)
+  const colW   = W > 0 ? (W - GAP * (N - 1)) / N : 0
+  const colCenter = (i) => i * (colW + GAP) + colW / 2
 
   const points = days
     .map((d, i) => {
@@ -77,96 +94,82 @@ function CalorieGraph({ days, logs, dailyTarget, onDotClick }) {
     })
     .filter(Boolean)
 
-  if (points.length === 0) {
-    return (
-      <div className="h-[72px] flex items-center justify-center">
-        <p className="text-[11px] text-muted-foreground/40">No intake logged in the last 14 days</p>
-      </div>
-    )
-  }
-
-  const maxX   = days.length - 1
   const allCal = points.map(p => p.cal)
   const minCal = Math.min(...allCal, dailyTarget ?? Infinity)
   const maxCal = Math.max(...allCal, dailyTarget ?? 0)
   const span   = maxCal - minCal || 200
-
-  const toX = (idx) => PAD.left + (idx / maxX) * innerW
-  const toY = (cal) => PAD.top  + (1 - (cal - minCal) / span) * innerH
-
-  const bandW = innerW / maxX
-
-  // Target line Y
+  const toY    = (cal) => PADY + (1 - (cal - minCal) / span) * innerH
   const targetY = dailyTarget != null ? toY(dailyTarget) : null
-
-  const polyline = points.map(p => `${toX(p.idx)},${toY(p.cal)}`).join(' ')
+  const polyline = points.map(p => `${colCenter(p.idx)},${toY(p.cal)}`).join(' ')
 
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className="w-full h-[72px]"
-      aria-hidden="true"
-    >
-      {/* Per-day status-coloured vertical bands */}
-      {points.map(p => {
-        const { fill } = STATUS_GRAPH[p.status] ?? STATUS_GRAPH.logged
-        const x = toX(p.idx) - bandW / 2
-        const y = toY(p.cal)
-        return (
-          <rect
-            key={p.iso}
-            x={Math.max(PAD.left, x)}
-            y={y}
-            width={Math.min(bandW, W - PAD.right - Math.max(PAD.left, x))}
-            height={H - PAD.bottom - y}
-            fill={fill}
-            rx="2"
-          />
-        )
-      })}
+    <div ref={wrapRef} className="w-full">
+      {points.length === 0 ? (
+        <div className="h-[72px] flex items-center justify-center">
+          <p className="text-[11px] text-muted-foreground/40">No intake logged in the last 14 days</p>
+        </div>
+      ) : W > 0 ? (
+        <svg width={W} height={H} className="block" aria-hidden="true">
+          {/* Per-day status-coloured vertical bands */}
+          {points.map(p => {
+            const { fill } = STATUS_GRAPH[p.status] ?? STATUS_GRAPH.logged
+            const y = toY(p.cal)
+            return (
+              <rect
+                key={p.iso}
+                x={colCenter(p.idx) - colW / 2}
+                y={y}
+                width={colW}
+                height={H - PADY - y}
+                fill={fill}
+                rx="3"
+              />
+            )
+          })}
 
-      {/* Target dashed line */}
-      {targetY != null && (
-        <line
-          x1={PAD.left} y1={targetY}
-          x2={W - PAD.right} y2={targetY}
-          stroke="hsl(var(--muted-foreground) / 0.2)"
-          strokeWidth="1"
-          strokeDasharray="3 3"
-        />
+          {/* Target dashed line */}
+          {targetY != null && (
+            <line
+              x1={colW / 2} y1={targetY}
+              x2={W - colW / 2} y2={targetY}
+              stroke="hsl(var(--muted-foreground) / 0.2)"
+              strokeWidth="1"
+              strokeDasharray="3 3"
+            />
+          )}
+
+          {/* Connecting line (always neutral) */}
+          {points.length > 1 && (
+            <polyline
+              points={polyline}
+              fill="none"
+              stroke="hsl(var(--muted-foreground) / 0.30)"
+              strokeWidth="1.5"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+          )}
+
+          {/* Dots — coloured by status. Clickable only when a handler is given. */}
+          {points.map(p => {
+            const { dot } = STATUS_GRAPH[p.status] ?? STATUS_GRAPH.logged
+            const cx = colCenter(p.idx)
+            const cy = toY(p.cal)
+            if (!onDotClick) {
+              return <circle key={p.iso} cx={cx} cy={cy} r="4" fill={dot} />
+            }
+            return (
+              <g key={p.iso} style={{ cursor: 'pointer' }} onClick={() => onDotClick(p.iso)}>
+                <circle cx={cx} cy={cy} r="10" fill="transparent" />
+                <circle cx={cx} cy={cy} r="4" fill={dot} />
+              </g>
+            )
+          })}
+        </svg>
+      ) : (
+        <div className="h-[72px]" />
       )}
-
-      {/* Connecting line (always neutral) */}
-      {points.length > 1 && (
-        <polyline
-          points={polyline}
-          fill="none"
-          stroke="hsl(var(--muted-foreground) / 0.30)"
-          strokeWidth="1.5"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-      )}
-
-      {/* Dots — coloured by status. Clickable only when a handler is given. */}
-      {points.map(p => {
-        const { dot } = STATUS_GRAPH[p.status] ?? STATUS_GRAPH.logged
-        const cx = toX(p.idx)
-        const cy = toY(p.cal)
-        if (!onDotClick) {
-          return <circle key={p.iso} cx={cx} cy={cy} r="4" fill={dot} />
-        }
-        return (
-          <g key={p.iso} style={{ cursor: 'pointer' }} onClick={() => onDotClick(p.iso)}>
-            {/* Invisible larger hit target */}
-            <circle cx={cx} cy={cy} r="10" fill="transparent" />
-            {/* Visible dot */}
-            <circle cx={cx} cy={cy} r="4" fill={dot} />
-          </g>
-        )
-      })}
-    </svg>
+    </div>
   )
 }
 
@@ -246,15 +249,14 @@ export default function CalorieStrip({ userId, dailyTarget, onDayClick, selected
       {/* Day tiles — 14 days back including today */}
       <div
         ref={stripRef}
-        className="flex gap-1.5 overflow-x-auto scroll-smooth snap-x snap-mandatory pb-1 -mx-1 px-1"
-        style={{ scrollbarWidth: 'none' }}
+        className="flex gap-1.5"
       >
         {days.map(day => {
           const log        = logs[day.iso]
           const status     = statusFor(log?.calories, dailyTarget)
           const isSelected = selectedIso === day.iso
 
-          const cls = `relative shrink-0 snap-center flex flex-col items-center justify-between rounded-xl border transition-all px-2 py-2 w-[58px] h-[72px] ${
+          const cls = `relative flex-1 min-w-0 flex flex-col items-center justify-between rounded-xl border transition-all px-1.5 py-2 h-[72px] ${
             isSelected
               ? 'border-red-500/60 bg-red-500/10 ring-1 ring-red-500/30'
               : day.isToday
