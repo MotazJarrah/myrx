@@ -278,6 +278,8 @@ onMomentumScrollEnd={e => {
 
 This ensures the pill label updates when the user swipes the body directly. The pill won't physically animate in this case (only its label re-renders).
 
+**The body ScrollView mechanic is IDENTICAL on every variant pager — keep it that way (LOCKED, June 2026).** Plain `pagingEnabled` + `decelerationRate="fast"` + this one `onMomentumScrollEnd`. `pagingEnabled` is velocity-aware natively, so a quick flick advances one page on its own — no extra scaffolding needed. Carry/Sled briefly carried an "L4" band-aid (`disableIntervalMomentum` + `snapToInterval` + an `onScrollEndDrag` settle-timeout + a ±1 clamp) added for a suspected rapid-swipe stuck-mid-page bug; it made a fast short flick round back to the ORIGIN (visible bounce-back) and diverged Carry's feel from every other pager. Removed June 2026 — all pagers (BW tiers, Carry, Sled, Swimming, the leverage family carousel, Air Bike / Ruck / StairMill zones) now share this exact mechanic.
+
 **Negative-margin trick for slot width:**
 
 The page padding is 16 px each side from `(app)/_layout.tsx`. The page content normally lives inside that padding. For the paged ScrollView to span edge-to-edge (so slides look full-bleed), wrap it in `<View style={{ marginHorizontal: -PAGE_PADDING_HORIZONTAL }}>` then re-pad inside each slot with `paddingHorizontal: PAGE_PADDING_HORIZONTAL`. The inner content lines up with where the page header sits.
@@ -288,6 +290,7 @@ The page padding is 16 px each side from `(app)/_layout.tsx`. The page content n
 - Calling `setActiveVariant` synchronously from `onUpdate` (during the pan). State change should fire AFTER the slide-off animation completes, via `runOnJS` in the slide-off callback.
 - Forgetting the initial scrollTo. Result: page opens on slot 0, pill shows correct variant, body shows wrong variant.
 - Calling `scrollTo` without a `slotWidth > 0` guard. Result: NaN / Infinity scroll positions on first render before onLayout fires.
+- Adding `disableIntervalMomentum` / `snapToInterval` / an `onScrollEndDrag` settle-timeout / a ±1 clamp to ONE pager. It diverges that page's swipe feel from every other pager AND causes a fast-flick bounce-back (the settle target rounds a quick short flick back to the origin). Use the plain `pagingEnabled` mechanic above on every pager.
 
 ---
 

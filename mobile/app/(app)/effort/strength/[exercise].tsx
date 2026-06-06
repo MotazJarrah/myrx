@@ -3130,23 +3130,6 @@ function CarryDetail({
   // The previous `carryLayoutAnimEnabled` first-paint gate is no longer needed:
   // the inline info panel now uses direct-height-animation (ExpandPanel) which
   // doesn't fight with the carry pager's slot-width measurement on first paint.
-  // Tracks the slot index at the start of a manual drag so `onMomentumScrollEnd`
-  // can clamp the result to ±1 (lock page swipe to a single page max).
-  const dragStartIdxRef = useRef(0)
-
-  // L4 "stuck mid-swipe" fallback — pagingEnabled's snap animation can be
-  // interrupted on Android when the user swipes back and forth rapidly,
-  // landing the ScrollView at a non-page-aligned offset (visibly stuck
-  // mid-zone). onMomentumScrollEnd never fires in that case because momentum
-  // is permanently cancelled. This timeout is armed in onScrollEndDrag and
-  // disarmed in onMomentumScrollEnd; if it fires, we force a programmatic
-  // scrollTo to the closest page boundary, which always lands cleanly even
-  // when native paging glitches.
-  const scrollSettleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => {
-    if (scrollSettleTimeoutRef.current) clearTimeout(scrollSettleTimeoutRef.current)
-  }, [])
-
   // On first paint after the hero ScrollView measures itself, scroll to the
   // active zone's slot (default `max_load` = idx 0) without animation so the
   // page opens directly on the right slot. Mirrors BW's `bwInitialScrollDoneRef`
@@ -3169,19 +3152,8 @@ function CarryDetail({
     const targetZone = CARRY_ZONE_ORDER[targetIdx]
     setCarrySelZone(targetZone)
     setCarryZoneInfoOpen(false)
-    // CRITICAL: refresh dragStartIdxRef to the CURRENT zone before the
-    // programmatic scrollTo below. The hero ScrollView's onMomentumScrollEnd
-    // clamps the landed slot to ±1 from `dragStartIdxRef.current` to prevent
-    // velocity skips on USER drags — but the ref only updates via
-    // `onScrollBeginDrag`, which never fires for programmatic scrolls. Without
-    // this refresh, the clamp would compare the target (e.g. CONDITIONING,
-    // idx 2) against the stale ref (e.g. 0 from initial mount), force the
-    // result back to idx 1 (DISTANCE BUILD), and silently revert the pill
-    // swipe the user just committed. The bug manifested as "pill swipes to
-    // next zone, then immediately bounces back to the previous one".
-    dragStartIdxRef.current = carryZoneIdx
     // Programmatically scroll the hero ScrollView in parallel with the pill's
-    // slide animation. Mirrors BW's `navigateTier` calling scrollTo.
+    // slide animation. Mirrors the family carousel + BW's `navigateTier`.
     if (slotWidth > 0 && carryZoneScrollRef.current) {
       carryZoneScrollRef.current.scrollTo({ x: targetIdx * slotWidth, animated: true })
     }
@@ -3436,85 +3408,19 @@ function CarryDetail({
               ref={carryZoneScrollRef}
               horizontal
               pagingEnabled
-              // L4 fix — disableIntervalMomentum + snapToInterval gives the
-              // hero ScrollView stricter page-boundary snapping than plain
-              // pagingEnabled. Without these, rapid back-and-forth swipes
-              // on Android can leave the offset mid-page because pagingEnabled's
-              // native snap animation gets cancelled by the next drag before it
-              // completes. Together with the onScrollEndDrag settle-fallback
-              // below, the hero is guaranteed to land on a page boundary.
-              disableIntervalMomentum
-              snapToInterval={slotWidth > 0 ? slotWidth : undefined}
-              snapToAlignment="start"
               showsHorizontalScrollIndicator={false}
               decelerationRate="fast"
-              onScrollBeginDrag={() => {
-                if (scrollSettleTimeoutRef.current) {
-                  clearTimeout(scrollSettleTimeoutRef.current)
-                  scrollSettleTimeoutRef.current = null
-                }
-                dragStartIdxRef.current = carryZoneIdx
-              }}
-              onScrollEndDrag={e => {
-                // L4 fallback — arm a settle timeout in case onMomentumScrollEnd
-                // never fires (rapid swipes can permanently cancel native momentum).
-                // After 350ms the page is forcibly snapped to the closest valid
-                // slot. Disarmed by the next onScrollBeginDrag or onMomentumScrollEnd.
-                if (slotWidth === 0) return
-                const endX  = e.nativeEvent.contentOffset.x
-                const vx    = e.nativeEvent.velocity?.x ?? 0
-                const start = dragStartIdxRef.current
-                // Velocity-aware target: a quick flick commits ONE page in the
-                // direction the finger moved, even if it didn't cross the halfway
-                // point. Without this, a fast short flick rounds back to the origin
-                // and — when native momentum gets cancelled (exactly the case this
-                // fallback covers) — the card snaps back instead of advancing.
-                let idx = Math.round(endX / slotWidth)
-                const moved = endX - start * slotWidth
-                if (Math.abs(vx) > 0.15 && Math.abs(moved) > 4) {
-                  idx = moved > 0 ? start + 1 : start - 1
-                }
-                if (idx > start + 1) idx = start + 1
-                if (idx < start - 1) idx = start - 1
-                if (idx < 0) idx = 0
-                if (idx > CARRY_ZONE_ORDER.length - 1) idx = CARRY_ZONE_ORDER.length - 1
-                if (scrollSettleTimeoutRef.current) clearTimeout(scrollSettleTimeoutRef.current)
-                scrollSettleTimeoutRef.current = setTimeout(() => {
-                  if (!carryZoneScrollRef.current) return
-                  carryZoneScrollRef.current.scrollTo({ x: idx * slotWidth, animated: true })
-                  const z = CARRY_ZONE_ORDER[idx]
-                  if (z && z !== carrySelZone) {
-                    setCarrySelZone(z)
-                    setCarryZoneInfoOpen(false)
-                  }
-                }, 350)
-              }}
+              // Standard variant-pager mechanic — identical to the family
+              // carousel + BW / Swimming / Air Bike pagers. pagingEnabled is
+              // velocity-aware natively, so a quick flick advances one page;
+              // onMomentumScrollEnd syncs the active zone to the landed slot.
               onMomentumScrollEnd={e => {
-                if (scrollSettleTimeoutRef.current) {
-                  clearTimeout(scrollSettleTimeoutRef.current)
-                  scrollSettleTimeoutRef.current = null
-                }
                 if (slotWidth === 0) return
-                const x = e.nativeEvent.contentOffset.x
-                const rawIdx = Math.round(x / slotWidth)
-                const start = dragStartIdxRef.current
-                // Clamp to ±1 from drag-start so a hard swipe can never skip past
-                // a single zone (lock page swipe to one page max).
-                let idx = rawIdx
-                if (idx > start + 1) idx = start + 1
-                if (idx < start - 1) idx = start - 1
+                const idx = Math.round(e.nativeEvent.contentOffset.x / slotWidth)
                 const z = CARRY_ZONE_ORDER[idx]
                 if (z && z !== carrySelZone) {
                   setCarrySelZone(z)
                   setCarryZoneInfoOpen(false)
-                }
-                // If we clamped OR landed at a non-integer offset, animate to
-                // the corrected slot so the visible page lines up with the new
-                // state. The integer-offset reconciliation is the L4 "stuck
-                // mid-swipe" defence at the momentum-end stage.
-                const expectedX = idx * slotWidth
-                if (carryZoneScrollRef.current && Math.abs(x - expectedX) > 1) {
-                  carryZoneScrollRef.current.scrollTo({ x: expectedX, animated: true })
                 }
               }}
             >
