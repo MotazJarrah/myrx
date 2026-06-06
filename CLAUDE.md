@@ -1385,7 +1385,7 @@ Until heart-rate integration lands (Phase 2 — via Apple Health / Strava / Garm
 | Z4 | `Panchor + 10 s/km` | ≈ 10K race pace, "comfortably hard sustained" |
 | Z5 | `Panchor − 15 s/km` | ≈ 3K race pace, "max sustainable" |
 
-Offsets scale to the activity's pace units (km or mi) and are applied **uniformly across modalities** today (running, cycling, ergs, elliptical). The audit's other half — per-modality power/HR zones (power for ergs/bike, HR/RPE for elliptical) — is DEFERRED to Phase 2 (needs HR/power integration). Riegel projection (`projectPaces` in `formulas.ts`) still handles cross-distance pace mapping for the tiles.
+Offsets scale to the activity's pace units (km or mi) and are applied **uniformly across modalities** today (running, cycling, ergs, elliptical). The audit's other half — per-modality power/HR zones (power for ergs/bike, HR/RPE for elliptical) — is **DEFERRED to V2** (it needs the HR/power data the Phase-2 wearable integrations will provide). Riegel projection (`projectPaces` in `formulas.ts`) still handles cross-distance pace mapping for the tiles.
 
 **Per-zone session prescription (the hero card cue):**
 
