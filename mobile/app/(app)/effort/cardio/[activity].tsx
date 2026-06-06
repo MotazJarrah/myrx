@@ -622,6 +622,44 @@ function riegelProjectCSS(efforts: Effort[]): number | null {
   return bestCSS
 }
 
+// ── Swimming CSS — 2-point linear Critical Swim Speed (June 2026, T088) ──────
+//
+// The single-point Riegel proxy above projects EACH effort to a 1000m-equivalent
+// and takes the MIN (fastest) projection — which biases CSS too FAST (the fastest
+// projection is usually a short, anaerobic-heavy effort), and the 1.06 exponent
+// is a RUNNING fatigue constant, a poor fit for swimming (especially fly/breast).
+// The honest estimate is the canonical 2-point Critical Speed model: across
+// efforts at DIFFERENT distances, time grows linearly with distance
+// (time = distance / CS + anaerobic term), so the SLOPE of time-vs-distance is
+// 1 / CS (seconds per metre) and CSS per 100m = slope × 100. Uses the fastest
+// time at each distinct distance, then a least-squares slope (handles 2+
+// distances). Returns null when the stroke has <2 distinct distances (can't fit
+// a line with one x) so the caller can fall back to the Riegel proxy.
+function linearProjectCSS(efforts: Effort[]): number | null {
+  const bestByDist = new Map<number, number>()  // distinct distance (m) → fastest time (s)
+  for (const e of efforts) {
+    const parsed = parseEffortLabel(e.label)
+    if (!parsed || parsed.timeSecs == null || parsed.timeSecs <= 0 || parsed.distKm <= 0) continue
+    const distM = Math.round(parsed.distKm * 1000)
+    const prev = bestByDist.get(distM)
+    if (prev == null || parsed.timeSecs < prev) bestByDist.set(distM, parsed.timeSecs)
+  }
+  if (bestByDist.size < 2) return null
+  let n = 0, sx = 0, sy = 0, sxy = 0, sxx = 0
+  bestByDist.forEach((t, d) => { n++; sx += d; sy += t; sxy += d * t; sxx += d * d })
+  const denom = n * sxx - sx * sx
+  if (denom <= 0) return null
+  const slope = (n * sxy - sx * sy) / denom  // seconds per metre at critical speed
+  if (slope <= 0) return null                 // degenerate fit → caller falls back
+  return slope * 100                           // seconds per 100m
+}
+
+// Critical Swim Speed for a stroke: prefer the 2-point linear model, fall back to
+// the single-point Riegel proxy when fewer than 2 distinct distances are logged.
+function computeSwimCSS(efforts: Effort[]): number | null {
+  return linearProjectCSS(efforts) ?? riegelProjectCSS(efforts)
+}
+
 function getSwimZonePaceSecsPer100m(zone: CardioZone, cssSecsPer100m: number): number {
   // Floor at 40 s/100m — faster than the world record swim pace, so a
   // sanity guard against absurd projections for ultra-fast users.
@@ -2170,7 +2208,7 @@ function SwimmingConsolidatedDetail({
   // paged ScrollView physically slides. Mirrors the Sled Work consolidated
   // wrapper, which also surfaces the active variant's best in its subtitle.
   const activeStrokeCSS = useMemo(
-    () => riegelProjectCSS(effortsByStroke[activeStroke]),
+    () => computeSwimCSS(effortsByStroke[activeStroke]),
     [effortsByStroke, activeStroke],
   )
   const hasActiveCSS = activeStrokeCSS !== null && activeStrokeCSS > 0
@@ -2518,7 +2556,7 @@ function SwimmingDetail({
   // CSS proxy via Riegel projection — the lowest projected per-100m pace
   // across all efforts. Improves automatically as the user logs faster
   // swims; never regresses on off-days. See riegelProjectCSS docstring.
-  const cssSecsPer100m = useMemo(() => riegelProjectCSS(efforts), [efforts])
+  const cssSecsPer100m = useMemo(() => computeSwimCSS(efforts), [efforts])
   const hasCSS         = cssSecsPer100m !== null && cssSecsPer100m > 0
 
   // Per-100m chart series. Pace is stored in seconds-per-km (legacy unit

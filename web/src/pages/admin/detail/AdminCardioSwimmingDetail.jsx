@@ -260,6 +260,36 @@ function riegelProjectCSS(efforts) {
   return bestCSS
 }
 
+// 2-point linear Critical Swim Speed (June 2026, T088) — mirror of mobile. The
+// Riegel proxy above takes the MIN (fastest) single-point projection, biasing CSS
+// too fast, with a running-derived 1.06 exponent. The canonical CS model fits a
+// line to time-vs-distance across DIFFERENT distances: slope = 1/CS (sec per
+// metre), so CSS per 100m = slope × 100. Uses the fastest time per distinct
+// distance + a least-squares slope. Returns null with <2 distinct distances so
+// the caller falls back to Riegel.
+function linearProjectCSS(efforts) {
+  const bestByDist = new Map()  // distinct distance (m) → fastest time (s)
+  for (const e of efforts) {
+    const parsed = parseEffortLabel(e.label)
+    if (!parsed || parsed.timeSecs == null || parsed.timeSecs <= 0 || parsed.distKm <= 0) continue
+    const distM = Math.round(parsed.distKm * 1000)
+    const prev = bestByDist.get(distM)
+    if (prev == null || parsed.timeSecs < prev) bestByDist.set(distM, parsed.timeSecs)
+  }
+  if (bestByDist.size < 2) return null
+  let n = 0, sx = 0, sy = 0, sxy = 0, sxx = 0
+  bestByDist.forEach((t, d) => { n++; sx += d; sy += t; sxy += d * t; sxx += d * d })
+  const denom = n * sxx - sx * sx
+  if (denom <= 0) return null
+  const slope = (n * sxy - sx * sy) / denom  // seconds per metre at critical speed
+  if (slope <= 0) return null
+  return slope * 100                           // seconds per 100m
+}
+
+function computeSwimCSS(efforts) {
+  return linearProjectCSS(efforts) ?? riegelProjectCSS(efforts)
+}
+
 function getSwimZonePaceSecsPer100m(zone, cssSecsPer100m) {
   // Floor at 40 s/100m — faster than the world record swim pace.
   return Math.max(40, cssSecsPer100m + SWIM_ZONE_OFFSETS_SECS_PER_100M[zone])
@@ -400,7 +430,7 @@ function fmtShort(iso) {
 function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) {
   // CSS proxy from this stroke's efforts only — strokes are physiologically
   // independent, no cross-stroke estimation.
-  const cssSecsPer100m = useMemo(() => riegelProjectCSS(strokeEfforts), [strokeEfforts])
+  const cssSecsPer100m = useMemo(() => computeSwimCSS(strokeEfforts), [strokeEfforts])
   const hasCSS = cssSecsPer100m !== null && cssSecsPer100m > 0
 
   const planQueue = useMemo(
@@ -748,7 +778,7 @@ export default function AdminCardioSwimmingDetail({ userId, activity, onBack }) 
 
   // Active stroke's CSS for the header subtitle.
   const activeStrokeCSS = useMemo(
-    () => riegelProjectCSS(effortsByStroke[resolvedStroke] || []),
+    () => computeSwimCSS(effortsByStroke[resolvedStroke] || []),
     [effortsByStroke, resolvedStroke],
   )
   const hasActiveCSS = activeStrokeCSS !== null && activeStrokeCSS > 0

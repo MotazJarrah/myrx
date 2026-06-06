@@ -2089,7 +2089,7 @@ This is the spec for the swim-native coaching surface on `[activity].tsx` (mobil
 1. **Workouts are interval SETS on a clock.** Not "swim X km at Y pace." Real swim sessions look like "8 × 100m, leave every 1:50" — every rep ends at a wall, the user touches, gets whatever rest is left from the leaving interval, then pushes off for the next rep. The "leaving interval" is the canonical swim concept; running has no equivalent.
 2. **Distances come in pool lengths, not arbitrary km.** Pool lengths are 25m, 50m (Olympic), or 25 yards. Rep distances are always multiples of pool length: 50m, 100m, 200m, etc. The current SWIM_ZONE_SESSIONS data uses 50m and 100m chunks that fit any pool layout.
 3. **Pace is per 100m, not per km.** Universal swim convention. Storage stays in seconds-per-km for cross-activity uniformity, but the detail page divides by 10 at display time.
-4. **CSS anchors all zones.** CSS = Critical Swim Speed = swimming's threshold pace (analogous to a runner's lactate threshold). Canonical formula is `(400m_TT_time - 200m_TT_time) ÷ 200`, but v1 uses a Riegel-projected proxy instead (see "CSS proxy" below) to skip the calibration session.
+4. **CSS anchors all zones.** CSS = Critical Swim Speed = swimming's threshold pace (analogous to a runner's lactate threshold). Canonical formula is `(400m_TT_time - 200m_TT_time) ÷ 200`; MyRX estimates it without a forced calibration session — a 2-point linear Critical-Speed fit across the user's logged distances, falling back to a Riegel proxy when a stroke has <2 distances (see "CSS estimation" below).
 5. **Hero card stacks THREE values, not two.** Running's hero shows work + pace. Swimming's shows work + pace + leaving interval — the leaving interval is what the swimmer actually reads off the pool clock to know when to push off, so it's a first-class number.
 
 **Stroke consolidation (May 17 2026 — LOCKED):**
@@ -2107,13 +2107,14 @@ Swimming has 4 stroke variants — Freestyle, Backstroke, Breaststroke, Butterfl
 
 The 4 stroke movements live in `mobile/src/lib/movements.ts` (`SWIMMING_STROKE_MOVEMENTS`, `SWIM_STROKE_ORDER`, `SWIM_STROKE_LABELS`, `parseSwimStroke`, `isSwimActivity`, `swimStrokeFromMovementName`) so the log form, the index collapse, and the detail page all import from the same authoritative source.
 
-**CSS proxy via Riegel projection (LOCKED):**
+**CSS estimation — 2-point linear, Riegel fallback (UPDATED June 2026, T088):**
 
-For each logged effort, the system projects the user's time to a 1000m-equivalent time using Riegel's law `T2 = T1 × (D2/D1)^1.06`, then divides by 10 for per-100m pace. The CSS proxy = MIN of those projected per-100m paces across all efforts.
+CSS is computed per stroke by `computeSwimCSS(efforts)`:
 
-- **Why MIN?** An off-day at easy pace shouldn't downgrade CSS — that would make next session's prescription artificially easy. CSS only improves when the user swims faster than current fitness. If they genuinely detrain, the prescription will be too aggressive until they log a fresh harder effort; accepted divergence for v1.
-- **Distance-aware:** a 50m sprint projects to a SLOWER 1000m pace than a 1500m steady swim does (Riegel exponent 1.06 means longer distances scale better than naive linear projection). So cross-distance comparisons work without per-distance weighting.
-- **Convergence:** the proxy is initially slightly aggressive vs true CSS (because the user's "best ever" is closer to a peak than a sustainable threshold), but the gap narrows as the user accumulates efforts at varied distances. If users complain prescriptions are too hard, optional escalations: (a) add a canonical 400m+200m calibration onboarding flow, or (b) auto-shave 3–5 sec off the proxy to bias toward sustainability.
+1. **Preferred — 2-point linear Critical Speed** (`linearProjectCSS`). Take the fastest time at each DISTINCT logged distance, then fit a least-squares line of time-vs-distance. The critical-speed model says `time = distance / CS + anaerobic term`, so the line's SLOPE is `1 / CS` (seconds per metre) and `CSS per 100m = slope × 100`. Needs ≥2 distinct distances for the stroke.
+2. **Fallback — single-point Riegel proxy** (`riegelProjectCSS`, the old method): when a stroke has <2 distinct distances, project each effort to a 1000m-equivalent via `T2 = T1 × (D2/D1)^1.06`, ÷10 for per-100m, take the MIN. Still per-stroke.
+
+**Why the change (verify-first, T088):** the old single-point Riegel + MIN was the SOLE method. It biased CSS too FAST — MIN picks the *fastest* projection, usually a short anaerobic-heavy effort, not a sustainable threshold — and the 1.06 exponent is a *running* fatigue constant (a poor fit for swimming, worse for fly/breast). The 2-point linear fit is the canonical CS estimate and self-corrects as the user logs varied distances; Riegel stays only as the cold-start fallback (1 distance). **Zone offsets unchanged** (Endurance +12, Threshold 0, VO2 −7 s/100m): the audit suggested deepening VO2 to CSS−8..−10, but that was premised on the OLD over-fast CSS; against the corrected (slower, more honest) CSS the existing −7 is appropriate, so it was deliberately left.
 
 **Per-zone session prescriptions (`SWIM_ZONE_SESSIONS`, LOCKED):**
 
@@ -2171,7 +2172,9 @@ When `activity === 'Swimming'`:
 
 | Function | Purpose |
 |----------|---------|
-| `riegelProjectCSS(efforts)` | Compute the user's CSS proxy via Riegel projection; returns secs per 100m or null |
+| `computeSwimCSS(efforts)` | CSS per stroke: 2-point linear fit, Riegel fallback; secs per 100m or null |
+| `linearProjectCSS(efforts)` | 2-point linear Critical Speed (slope of time-vs-distance × 100); null if <2 distinct distances |
+| `riegelProjectCSS(efforts)` | Cold-start fallback — single-point Riegel projection, MIN across efforts |
 | `getSwimZonePaceSecsPer100m(zone, css)` | Apply zone offset to CSS; floor at 40 s/100m (faster than world record) |
 | `buildSwimPlanStep(zone, css, swimUnit, session)` | Build one queue entry (work + pace + leaving interval + cue) |
 | `generateSwimPlanQueue(efforts, css, swimUnit, count)` | Polarized-rule queue generator (same shape as running's, but per-100m and pulling from `SWIM_ZONE_SESSIONS`) |
@@ -3911,7 +3914,7 @@ Single source of truth for "which scientific work each formula in MyRX comes fro
 | StairMill VO2 protocol | **Allison et al. (2017) Med Sci Sports Exerc** — 3×20-sec stair sprints, 3×/week → +12% VO2peak in 6 weeks | `[activity].tsx` `STAIRMILL_ZONE_CONFIG.vo2max` |
 | StairMill Threshold protocol | **Interval research (Seiler 2010; Laursen & Jenkins 2002) + ACSM 12th ed** — hard 3-min intervals → lactate-threshold adaptation | `STAIRMILL_ZONE_CONFIG.threshold` |
 | StairMill Endurance protocol | **Boreham et al. (2000) Prev Med + ACSM 12th ed** — accumulated daily stair climbing improved VO2max; ACSM backs the 20-min continuous block | `STAIRMILL_ZONE_CONFIG.endurance` |
-| Swimming CSS (Critical Swim Speed) | **Costill's lactate-threshold work (Indiana University)** — canonical `(400m TT − 200m TT) ÷ 200`; MyRX uses Riegel-projected proxy until calibration session ships | `[activity].tsx` `riegelProjectCSS` |
+| Swimming CSS (Critical Swim Speed) | **Critical Power/Speed model (Monod & Scherrer; Wakayoshi 1992 for swimming)** — 2-point linear fit of time-vs-distance (slope = 1/CS); canonical `(400m TT − 200m TT) ÷ 200` is the same idea. Riegel proxy is the <2-distance fallback | `[activity].tsx` `computeSwimCSS` |
 | Swim training prescriptions (pace zones) | **Maglischo "Swimming Even Faster" (1993)**, **Doc Counsilman "Science of Swimming" (1968)** | `SWIM_ZONE_SESSIONS`, `SWIM_ZONE_PACE_OFFSETS` |
 | Swim T-pace test set (canonical 10×100m) | **Costill** — used at every level from age-group to Olympic prep | `SWIM_ZONE_SESSIONS.threshold` |
 | Cardio "lower is better" / chart-direction rule | **MyRX-locked design rule** (May 19 2026) — see "Chart-direction rule" section above | LineChart `reversed` prop usage across pace surfaces |
