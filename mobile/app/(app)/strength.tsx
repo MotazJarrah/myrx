@@ -324,6 +324,11 @@ export default function Strength() {
   // the logging form hides the weight field and extends the rep max to 200.
   const weightedProgression = !!isBodyweightExercise && movementRecord?.weighted_progression === true
   const isDumbbell        = movementRecord?.equipment === 'dumbbell'
+  // Olympic / ballistic lifts (lift_type tagged) progress on %-of-best (Layout 9)
+  // and the bell ladder (Layout 10), NOT a rep-max — so they must NOT show the
+  // "Estimated 1RM" chip (a 20RM snatch is meaningless + implies bad practice).
+  const isOlympic         = (movementRecord as any)?.lift_type === 'olympic'
+  const isBallistic       = (movementRecord as any)?.lift_type === 'ballistic'
   // Force unit to the movement's `unit_lock` when set (e.g. strongman events
   // and stone/object carries are universally kg worldwide). Runs after the
   // profile-weight-unit effect so the movement lock wins. The UnitToggle is
@@ -422,6 +427,7 @@ export default function Strength() {
   // etc.) — they have no weighted-progression concept, so an Est. 1RM banner
   // would be meaningless / misleading.
   const liveOneRM = !isIsometric && !isCarry && !bandLevel && !kneeAssist
+    && !isOlympic && !isBallistic
     && !(isBodyweightExercise && !weightedProgression)
     && r >= 1 && r <= 30 && reps && effectiveWeight > 0
     ? estimate1RM(effectiveWeight, r)
@@ -1068,6 +1074,17 @@ export default function Strength() {
                     : (isDumbbell ? 'Est. 1RM per hand' : 'Estimated 1RM')}
                 </Text>
                 <Text style={[s.chipValue, { color: palette.blue[400], marginLeft: 'auto' }]}>{liveOneRM} {unit}</Text>
+              </ChipBlue>
+            )}
+
+            {/* Olympic / ballistic lifts: NO rep-max chip (excluded from
+                liveOneRM above). Show the working set being logged instead —
+                these lifts progress on %-of-best load + bar speed, not a 1RM. */}
+            {(isOlympic || isBallistic) && r >= 1 && reps && Number(weight) > 0 && (
+              <ChipBlue>
+                <Dumbbell size={14} color={palette.blue[400]} />
+                <Text style={s.chipLabel}>Working set</Text>
+                <Text style={[s.chipValue, { color: palette.blue[400], marginLeft: 'auto' }]}>{Number(weight)} {unit} × {r}</Text>
               </ChipBlue>
             )}
 

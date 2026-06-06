@@ -603,6 +603,12 @@ TASKS = [
      "DONE + user-confirmed on device 2026-06-05: swipeable elements run the slide animation (BW chart slides + flips tiers with the hero pager following; Weighted hero slides the pill identically to a pill swipe). ONLY remaining sub-item = web coach-mirror swipe parity (lighter impl) -- deferred unless requested.",
      "mobile [exercise].tsx (BodyweightConsolidatedBlock scroll-sync, bwChartSwipeGesture, wsHeroSwipeGesture); docs/Layout Design.xlsx; CLAUDE.md",
      "2026-06-05"),
+
+    ("T090", "Strength log: move-type-aware live summary chip ('Estimated 1RM' banner)", "Strength", "Mobile", "Done",
+     "User 2026-06-05 (mid Model-4): the live 'Estimated 1RM' chip under the strength log form 'doesn't make sense for most moves now'; asked to fix it to show something relevant + register a task so we don't forget. VERIFY-FIRST (read strength.tsx via an Explore agent before changing anything): the chip is ALREADY move-type-aware -- the liveOneRM guard (strength.tsx ~L424) nulls it for isometric, carry, band/knee-assisted, and rep-only bodyweight, and each of those types renders its OWN chip instead (load-hold: 'W unit x duration'; carry: 'W . dist of work'; band/knee: 'band . reps'; assisted: 'BW - assist = effective' breakdown; plain iso: hold time). So the user's 'shows 1RM for most moves' was the pre-Olympic mental model -- 4th audit/assumption this session that our code already handled (band/knee, BW-in-1RM, now this).",
+     "THE ONE REAL GAP + FIX: Olympic + ballistic lifts (lift_type tagged THIS session in Model 1) had no isOlympic/isBallistic flag in the LOG form, so they fell through to the generic weighted branch and showed 'Estimated 1RM' -- exactly the meaningless/dangerous readout audit A1 flagged (a 20RM snatch). Mobile strength.tsx: added isOlympic/isBallistic flags (read movementRecord.lift_type), excluded both from the liveOneRM guard, added a neutral 'Working set -- W unit x reps' chip for them instead (echoes the load being logged, matching the other non-1RM chips' input-echo pattern, no 1RM claim). Web end-user log form FROZEN (2026-05-12) -> no web mirror. OPTIONAL DEFERRED: the assisted-machine log chip shows a bare effective-1RM value at its right edge with no label (agent suggested 'Effective 1RM') -- minor clarity nit, not a misnomer, left as-is.",
+     "mobile/app/(app)/strength.tsx (isOlympic/isBallistic flags, liveOneRM guard, Working-set chip)",
+     "2026-06-05"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
