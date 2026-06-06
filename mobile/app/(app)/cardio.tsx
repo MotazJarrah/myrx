@@ -569,7 +569,10 @@ export default function Cardio() {
   const livePaceDisplay: string | null = (() => {
     if (!livePaceKm) return null
     if (isSwimMode) {
-      const paceSecPer100 = (effectiveTimeSecs / distKm) / 10  // pace per 100m derived from /km
+      // per-100m derived from /km; for yards, 100 yd = 91.44 m so ×0.9144 to
+      // match the /100yd label (Push 2 #8 — was showing per-100m under /100yd).
+      const paceSecPer100m = (effectiveTimeSecs / distKm) / 10
+      const paceSecPer100  = swimUnit === 'yd' ? paceSecPer100m * 0.9144 : paceSecPer100m
       const m = Math.floor(paceSecPer100 / 60)
       const sc = Math.round(paceSecPer100 % 60)
       return `${m}:${String(sc).padStart(2, '0')}/100${swimUnit}`
@@ -1318,7 +1321,10 @@ export default function Cardio() {
                       <Text style={s.listRowSub}>Best pace</Text>
                       <Text style={s.listRowVal}>{(() => {
                         if (!act.secs || act.secs <= 0) return '—'
-                        const secsPer100 = act.secs / 10
+                        // /km → per-100m; ×0.9144 for yards so the number matches
+                        // the /100yd label (Push 2 #8). Math stays per-100m.
+                        const secsPer100m = act.secs / 10
+                        const secsPer100  = swimUnit === 'yd' ? secsPer100m * 0.9144 : secsPer100m
                         const mm = Math.floor(secsPer100 / 60)
                         const ss = Math.round(secsPer100 % 60)
                         return `${mm}:${String(ss).padStart(2, '0')}/100${swimUnit}`

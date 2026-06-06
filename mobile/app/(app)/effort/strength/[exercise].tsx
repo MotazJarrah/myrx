@@ -1959,9 +1959,26 @@ function LoadHoldDetail({
   const [selLoadDur, setSelLoadDur] = useState<number>(LOAD_HOLD_TARGET_SECS)
   const selAdded = projectedAddedFor(selLoadDur)
 
-  // Once loaded, the meaningful progression is LOAD; before that, hold time.
+  // Once loaded, the meaningful progression is LOAD. But plotting RAW load drops
+  // the line when a later hold uses less weight yet is held much longer (more
+  // work), and lets a brief near-max hold outrank a solid longer one — duration
+  // is ignored. Fix: score every loaded hold as its EQUIVALENT load at the
+  // canonical 30 s duration via the Rohmert curve (load × rohmert(30) / rohmert
+  // (dur)) — the isometric analog of the pace Riegel-normalization. A 20 lb × 90 s
+  // hold and a 35 lb × 20 s hold land near the same score. Before any load is
+  // added, the chart still plots hold time.
+  const equivLoadAt30 = (load: number, dur: number): number =>
+    Math.round(load * rohmertFactor(LOAD_HOLD_TARGET_SECS) / rohmertFactor(dur > 0 ? dur : LOAD_HOLD_TARGET_SECS))
+  const bestEquivLoad = hasWeighted
+    ? Math.max(0, ...weighted.map(p => equivLoadAt30(p.load, p.dur)))
+    : 0
   const chartData = (hasWeighted
-    ? efforts.map(e => { const w = parseLoadHoldWeight(e.label); return w > 0 ? { ts: e.created_at, y: w } : null })
+    ? efforts.map(e => {
+        const w = parseLoadHoldWeight(e.label)
+        if (w <= 0) return null
+        const d = parseDurationSecs(e.value) ?? LOAD_HOLD_TARGET_SECS
+        return { ts: e.created_at, y: equivLoadAt30(w, d) }
+      })
     : efforts.map(e => { const d = parseDurationSecs(e.value); return d !== null ? { ts: e.created_at, y: d } : null })
   ).filter((p): p is { ts: string; y: number } => p !== null)
 
@@ -2067,12 +2084,18 @@ function LoadHoldDetail({
           <Text style={s.h2}>{hasWeighted ? 'Load over time' : 'Hold time over time'}</Text>
           <LineChart
             data={chartData}
-            referenceY={chartData.length > 1 ? (hasWeighted ? bestLoad : bestBwHold) : null}
+            referenceY={chartData.length > 1 ? (hasWeighted ? bestEquivLoad : bestBwHold) : null}
             yTickFormatter={(v) => hasWeighted ? `${Math.round(v)}` : `${Math.round(v)}s`}
             tooltipValueFormatter={(v) => hasWeighted ? `${Math.round(v)} ${unit}` : fmtDurationLong(Math.round(v))}
             tooltipLabel={hasWeighted ? 'Load' : 'Hold time'}
             yDomain={{ min: (mn) => Math.max(0, Math.round(mn * 0.85)), max: (mx) => Math.round(mx * 1.15) }}
-            caption={<Text style={s.tinyText}>{hasWeighted ? 'Dashed line = heaviest hold' : 'Dashed line = personal best'}</Text>}
+            caption={
+              <Text style={s.tinyText}>
+                {hasWeighted
+                  ? 'Dashed = personal best · weight shown as equivalent at a 30 s hold so longer holds count fairly'
+                  : 'Dashed line = personal best'}
+              </Text>
+            }
           />
         </AnimateRise>
       )}
@@ -5263,6 +5286,23 @@ function StrengthDetail({
         .map(e => bwE1RMForEffort(e) ?? 0))
     : 0
 
+  // Band tiers (Band, Band+Knee) progress by THINNING the band — which resets the
+  // rep count per level — so plotting RAW reps drops the line exactly when the user
+  // gets HARDER. Score each band effort as (band rank × graduation reps) + reps, so
+  // moving to a thinner band OR adding reps both raise the line. Knee (single
+  // variant, no sub-bands) and unweighted Full RX keep plotting reps; weighted
+  // Full RX plots Est. 1RM (above). (Push 2 #7b — false-drop crosscheck.)
+  const bwTierHasBands = bwActiveTier === 'band' || bwActiveTier === 'band+knee'
+  const bwChartMode: 'e1rm' | 'difficulty' | 'reps' =
+    bwHasWeighted ? 'e1rm' : (bwTierHasBands ? 'difficulty' : 'reps')
+  const bwBandDifficulty = (e: Effort): number | null => {
+    const r = parseRepsFromBwLabel(e.label)
+    if (r === null) return null
+    const lvl  = parseBandLevelFromBwLabel(e.label)
+    const rank = lvl ? Math.max(0, BAND_LEVELS_PROGRESSION.indexOf(lvl)) : 0
+    return rank * BW_GRADUATION_REPS + r
+  }
+
   const bwLatestBandLevel: string | null = (() => {
     if (bwActiveTier !== 'band' || bwEffortsByTier.band.length === 0) return null
     const lastBand = bwEffortsByTier.band[bwEffortsByTier.band.length - 1]
@@ -5330,6 +5370,10 @@ function StrengthDetail({
         .map(e => {
           if (bwHasWeighted) {
             const y = bwE1RMForEffort(e)
+            return y === null ? null : { ts: e.created_at, y }
+          }
+          if (bwChartMode === 'difficulty') {
+            const y = bwBandDifficulty(e)
             return y === null ? null : { ts: e.created_at, y }
           }
           const r = parseRepsFromBwLabel(e.label)
@@ -5764,25 +5808,31 @@ function StrengthDetail({
           <AnimateRise delay={250} style={s.card}>
             <Text style={s.h2}>
               {isBodyweightExercise
-                ? (bwHasWeighted ? `Est. 1RM (${unit}) over time` : 'Max attempts over time')
+                ? (bwChartMode === 'e1rm' ? `Est. 1RM (${unit}) over time`
+                   : bwChartMode === 'difficulty' ? 'Band progress over time'
+                   : 'Max attempts over time')
                 : 'Est. 1RM over time'}
             </Text>
             <LineChart
               data={chartData}
               referenceY={chartData.length > 1
                 ? (isBodyweightExercise
-                    ? (bwHasWeighted
-                        ? Math.max(0, ...chartData.map(p => p.y))
-                        : bwBestByTier[bwActiveTier])
+                    ? (bwChartMode === 'reps'
+                        ? bwBestByTier[bwActiveTier]
+                        : Math.max(0, ...chartData.map(p => p.y)))
                     : bestOneRM)
                 : null}
               yTickFormatter={(v) => `${Math.round(v)}`}
               tooltipValueFormatter={(v) =>
                 isBodyweightExercise
-                  ? (bwHasWeighted ? `${Math.round(v)} ${unit}` : `${Math.round(v)} reps`)
+                  ? (bwChartMode === 'e1rm' ? `${Math.round(v)} ${unit}`
+                     : bwChartMode === 'difficulty' ? `${Math.round(v)} pts`
+                     : `${Math.round(v)} reps`)
                   : `${Math.round(v)} ${unit}`
               }
-              tooltipLabel={isBodyweightExercise ? (bwHasWeighted ? 'Est. 1RM' : 'Max attempts') : 'Est. 1RM'}
+              tooltipLabel={isBodyweightExercise
+                ? (bwChartMode === 'e1rm' ? 'Est. 1RM' : bwChartMode === 'difficulty' ? 'Band progress' : 'Max attempts')
+                : 'Est. 1RM'}
               yDomain={{
                 min: (mn) => Math.max(0, Math.round(mn * 0.9)),
                 max: (mx) => Math.round(mx * 1.1),
@@ -5790,7 +5840,8 @@ function StrengthDetail({
               caption={
                 <Text style={s.tinyText}>
                   Dashed line = personal best
-                  {isBodyweightExercise && !bwHasWeighted && ' on ' + bwTierLabel(bwActiveTier)}
+                  {isBodyweightExercise && bwChartMode !== 'e1rm' && ' on ' + bwTierLabel(bwActiveTier)}
+                  {isBodyweightExercise && bwChartMode === 'difficulty' && ' · thinner band + more reps both raise the line'}
                 </Text>
               }
             />

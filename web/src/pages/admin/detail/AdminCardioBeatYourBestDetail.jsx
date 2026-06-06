@@ -133,6 +133,22 @@ function parseEffortLabel(label) {
   return null
 }
 
+// ── Riegel pace normalization for the chart (Push 2, June 2026) ───────────────
+// Plotting each effort's RAW pace dips the line when efforts span different
+// distances (a longer/harder effort logs a slower raw pace). Project every effort
+// to a common anchor distance via Riegel's law and plot the equivalent pace, so
+// the line reflects true fitness. Mirrors the athlete chart fix exactly. Ergs use
+// the 2 km test distance; everything else 5 km.
+const PACE_CHART_ANCHOR_KM = { 'Row Erg': 2, 'Bike Erg': 2, 'Ski Erg': 2 }
+function paceChartAnchorKm(activity) {
+  return PACE_CHART_ANCHOR_KM[activity] ?? 5
+}
+function riegelNormalizedPaceSecsPerKm(effort, anchorKm) {
+  const p = parseEffortLabel(effort.label)
+  if (!p || p.distKm <= 0 || p.timeSecs == null || p.timeSecs <= 0) return null
+  return (p.timeSecs * (anchorKm / p.distKm) ** 1.06) / anchorKm
+}
+
 // ── Canonical distances + Beat-Your-Best dispatch predicate ───────────────────
 
 // The 5-row goal card distances (km). Same set across all three Beat-Your-Best
@@ -284,16 +300,22 @@ export default function AdminCardioBeatYourBestDetail({ userId, activity, onBack
     })
   }, [efforts])
 
-  // ── Chart data — pace over time. Y-axis is REVERSED in the chart props so
-  //    faster pace renders at the TOP; the line trends UP as the client
-  //    improves. No "lower is better" caption — the visual speaks for itself. ──
+  // ── Chart data — pace over time, Riegel-normalized to a standard distance so
+  //    a longer (harder) effort doesn't read as a false drop (Push 2). Mirrors
+  //    the athlete chart. Y-axis is REVERSED in the chart props so faster pace
+  //    renders at the TOP; the line trends UP as the client improves. No
+  //    "lower is better" caption — the visual speaks for itself. Header "Best"
+  //    + efforts list stay on the raw pace. ──
+  const chartAnchorKm = paceChartAnchorKm(activity)
   const chartData = useMemo(() => efforts
     .map(e => {
-      const secs = parsePaceToSecs(e.value)
+      const secs = riegelNormalizedPaceSecsPerKm(e, chartAnchorKm) ?? parsePaceToSecs(e.value)
       if (secs === null) return null
       return { date: new Date(e.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), secs }
     })
-    .filter(Boolean), [efforts])
+    .filter(Boolean), [efforts, chartAnchorKm])
+  // Dashed PB = best normalized pace plotted (lowest secs), so it sits on the points.
+  const chartBestSecs = chartData.length ? Math.min(...chartData.map(d => d.secs)) : null
 
   function backFn() {
     if (onBack) return onBack()
@@ -431,8 +453,8 @@ export default function AdminCardioBeatYourBestDetail({ userId, activity, onBack
                       }}
                       formatter={(v) => [fmtPaceStr(v, distUnit), 'Pace']}
                     />
-                    {hasBestPace && (
-                      <ReferenceLine y={bestPaceSecs} stroke="#fbbf24" strokeDasharray="4 3" strokeOpacity={0.4} />
+                    {chartBestSecs != null && (
+                      <ReferenceLine y={chartBestSecs} stroke="#fbbf24" strokeDasharray="4 3" strokeOpacity={0.4} />
                     )}
                     <Line
                       type="monotone"
@@ -452,7 +474,9 @@ export default function AdminCardioBeatYourBestDetail({ userId, activity, onBack
                   Log a second session to see the trend.
                 </p>
               )}
-              <p className="mt-2 text-[11px] text-muted-foreground">Dashed = your fastest pace</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Dashed = personal best · pace shown as {chartAnchorKm} km-equivalent (Riegel) so longer efforts compare fairly
+              </p>
             </AnimateRise>
           )}
         </>

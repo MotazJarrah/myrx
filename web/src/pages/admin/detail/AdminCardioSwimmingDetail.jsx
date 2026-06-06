@@ -450,12 +450,27 @@ function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) 
   const selectedStep = planQueue[safeStepIdx] ?? planQueue[0] ?? null
   const paceUnitLabel = swimPaceUnitLabel(swimUnit)
 
-  // Chart series — per-100m pace over time (stored per-km ÷ 10).
+  // Chart series — per-100m pace over time, Riegel-normalized across distances
+  // (June 2026). Plotting each effort's RAW per-100m pace dips the line when
+  // efforts span different distances (a longer swim logs a slower raw per-100m).
+  // Project every effort to a 1000m equivalent (T2 = T1 × (1000/D)^1.06) and
+  // divide by 10 for an equivalent per-100m — the SAME normalization the CSS
+  // reference line uses — so the line reflects true fitness. Falls back to the
+  // raw per-100m (stored per-km ÷ 10) for any effort whose distance/time can't
+  // be parsed. Mirrors the athlete chart + AdminCardioPaceDetail fix.
   const chartData = useMemo(() => strokeEfforts
     .map(e => {
-      const paceSecsPerKm = parsePaceToSecs(e.value)
-      if (paceSecsPerKm === null) return null
-      return { date: fmtShort(e.created_at), y: paceSecsPerKm / 10 }
+      const parsed = parseEffortLabel(e.label)
+      let per100m = null
+      if (parsed && parsed.distKm > 0 && parsed.timeSecs != null && parsed.timeSecs > 0) {
+        const distM = parsed.distKm * 1000
+        per100m = (parsed.timeSecs * Math.pow(1000 / distM, RIEGEL_EXPONENT)) / 10
+      } else {
+        const paceSecsPerKm = parsePaceToSecs(e.value)
+        per100m = paceSecsPerKm === null ? null : paceSecsPerKm / 10
+      }
+      if (per100m === null) return null
+      return { date: fmtShort(e.created_at), y: per100m }
     })
     .filter(Boolean), [strokeEfforts])
 
@@ -637,7 +652,7 @@ function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) 
               Only one effort logged.
             </p>
           )}
-          <p className="mt-2 text-[11px] text-muted-foreground">Dashed = personal best</p>
+          <p className="mt-2 text-[11px] text-muted-foreground">Dashed = personal best · normalized across distances (Riegel) so longer swims compare fairly</p>
         </AnimateRise>
       )}
 

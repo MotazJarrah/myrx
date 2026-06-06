@@ -419,6 +419,36 @@ function isBeatYourBestActivity(activityName: string): boolean {
   return BEAT_YOUR_BEST_CATEGORIES.includes(categorizeActivity(activityName))
 }
 
+// ── Riegel pace normalization for charts (Push 2, June 2026) ──────────────────
+// Plotting each effort's RAW pace/speed produces a false drop when efforts span
+// different distances: a longer (harder) effort logs a slower raw pace and dips
+// the line even though the athlete improved. Fix: project every effort to a
+// common anchor distance via Riegel's law (T_anchor = t × (anchor/d)^1.06) and
+// plot the equivalent pace there, so the line reflects true fitness regardless
+// of the distance each effort happened to be. This is the SAME math already used
+// for the BeatYourBest goal targets and the Critical-Swim-Speed proxy — here it's
+// applied to every chart point, not just the best. The efforts LIST still shows
+// each effort's real logged pace; only the CHART normalizes.
+//
+// Anchor distance = the universal benchmark for that sport. Ergs use the 2 km
+// test distance; everything else (running, treadmill, cycling, elliptical) uses
+// 5 km. The anchor only shifts the absolute numbers, never the trend.
+const PACE_CHART_ANCHOR_KM: Record<string, number> = {
+  'Row Erg': 2, 'Bike Erg': 2, 'Ski Erg': 2,
+}
+function paceChartAnchorKm(activity: string): number {
+  return PACE_CHART_ANCHOR_KM[activity] ?? 5
+}
+// Riegel-project an effort's pace to `anchorKm`, returning the equivalent pace in
+// seconds-per-km. Returns null when the label has no parseable distance+time, so
+// the caller can fall back to the raw stored pace (legacy / malformed rows).
+function riegelNormalizedPaceSecsPerKm(effort: Effort, anchorKm: number): number | null {
+  const p = parseEffortLabel(effort.label)
+  if (!p || p.distKm <= 0 || p.timeSecs == null || p.timeSecs <= 0) return null
+  const projectedTimeSecs = p.timeSecs * (anchorKm / p.distKm) ** 1.06
+  return projectedTimeSecs / anchorKm
+}
+
 // Classify a logged effort into one of the three zones based on its pace
 // relative to the user's current best. Used by the plan-queue generator to
 // detect what zone the user just trained, and to decide what zone is next.
@@ -698,9 +728,14 @@ function getSwimZonePaceSecsPer100m(zone: CardioZone, cssSecsPer100m: number): n
   return Math.max(40, cssSecsPer100m + SWIM_ZONE_OFFSETS_SECS_PER_100M[zone])
 }
 
-function fmtPaceSecsPer100m(secsPer100m: number): string {
-  const m = Math.floor(secsPer100m / 60)
-  const s = Math.round(secsPer100m % 60)
+// Format a per-100m pace as m:ss. Storage keeps swim pace per-100m; for YARD
+// swimmers 100 yd = 91.44 m, so the per-100yd time is per-100m × 0.9144. Pass
+// swimUnit so the displayed number matches the "/100yd" label — without it, yard
+// swimmers saw per-100m values under a /100yd label (~9% off). (Push 2 #8.)
+function fmtPaceSecsPer100m(secsPer100m: number, swimUnit: 'm' | 'yd' = 'm'): string {
+  const v = swimUnit === 'yd' ? secsPer100m * 0.9144 : secsPer100m
+  const m = Math.floor(v / 60)
+  const s = Math.round(v % 60)
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
@@ -752,7 +787,7 @@ function buildSwimPlanStep(
 
   const repDistFormatted = fmtSwimDist(session.repDistanceM, swimUnit)
   const shortWork    = `${session.reps} × ${repDistFormatted}`
-  const shortPace    = `${fmtPaceSecsPer100m(zonePace)}${swimPaceUnitLabel(swimUnit)}`
+  const shortPace    = `${fmtPaceSecsPer100m(zonePace, swimUnit)}${swimPaceUnitLabel(swimUnit)}`
   const shortLeaving = fmtSecs(leavingInterval)
 
   const feelByZone: Record<CardioZone, string> = {
@@ -1731,15 +1766,26 @@ function PaceDetail({
   // line trends UP as user improves); for everyone else plot pace (lower =
   // better, line trends DOWN, axis reversed). y in the (ts,y) tuple holds
   // whatever metric the chart's Y-axis is currently showing.
-  const chartIsSpeed = isSpeedMachine(activity)
+  const chartIsSpeed  = isSpeedMachine(activity)
+  const chartAnchorKm = paceChartAnchorKm(activity)
   const chartData = efforts
     .map(e => {
-      const paceSecs = parsePaceToSecs(e.value)
-      if (paceSecs === null) return { ts: e.created_at, y: -1 }
-      const y = chartIsSpeed ? paceSecsPerKmToSpeedDisplay(paceSecs, distUnit) : paceSecs
+      // Riegel-normalize to the anchor distance so a longer (harder) effort
+      // doesn't read as a false drop. Fall back to the raw stored pace only
+      // when the label can't be parsed for distance + time (legacy rows).
+      const normPaceSecs = riegelNormalizedPaceSecsPerKm(e, chartAnchorKm)
+        ?? parsePaceToSecs(e.value)
+      if (normPaceSecs === null) return { ts: e.created_at, y: -1 }
+      const y = chartIsSpeed ? paceSecsPerKmToSpeedDisplay(normPaceSecs, distUnit) : normPaceSecs
       return { ts: e.created_at, y }
     })
     .filter(d => d.y >= 0)
+  // Dashed reference = the best NORMALIZED value actually plotted, so the line
+  // sits ON the points (best pace = MIN y; best speed = MAX y). The header
+  // subtitle still shows the raw personal best — only the chart normalizes.
+  const chartBestY = chartData.length > 0
+    ? (chartIsSpeed ? Math.max(...chartData.map(d => d.y)) : Math.min(...chartData.map(d => d.y)))
+    : null
 
   // ── Progression plan (Group A only) ──────────────────────────────────────
   // The queue is regenerated live from (activity, efforts, bestPace) every
@@ -2051,13 +2097,7 @@ function PaceDetail({
           <Text style={s.h2}>{chartIsSpeed ? 'Speed over time' : 'Pace over time'}</Text>
           <LineChart
             data={chartData}
-            referenceY={
-              bestPaceSecs !== Infinity
-                ? (chartIsSpeed
-                    ? paceSecsPerKmToSpeedDisplay(bestPaceSecs, distUnit)
-                    : bestPaceSecs)
-                : null
-            }
+            referenceY={chartBestY}
             reversed={!chartIsSpeed}
             yWidth={chartIsSpeed ? 56 : 52}
             yTickFormatter={(v) =>
@@ -2081,7 +2121,10 @@ function PaceDetail({
               max: (mx) => Math.round(mx * 1.05),
             }}
             caption={
-              <Text style={s.tinyText}>Dashed = personal best</Text>
+              <Text style={s.tinyText}>
+                Dashed = personal best · {chartIsSpeed ? 'speed' : 'pace'} shown as{' '}
+                {fmtCanonicalDistance(chartAnchorKm)}-equivalent (Riegel) so longer efforts compare fairly
+              </Text>
             }
           />
         </AnimateRise>
@@ -2388,7 +2431,7 @@ function SwimmingConsolidatedDetail({
           <View style={s.subRow}>
             <Text style={s.subText}>Best — </Text>
             <TickerNumber
-              value={`${fmtPaceSecsPer100m(activeStrokeCSS!)}${swimPaceUnitLabel(swimUnit)}`}
+              value={`${fmtPaceSecsPer100m(activeStrokeCSS!, swimUnit)}${swimPaceUnitLabel(swimUnit)}`}
               fontSize={14}
               color={palette.amber[400]}
               fontWeight="600"
@@ -2595,13 +2638,24 @@ function SwimmingDetail({
   const cssSecsPer100m = useMemo(() => computeSwimCSS(efforts), [efforts])
   const hasCSS         = cssSecsPer100m !== null && cssSecsPer100m > 0
 
-  // Per-100m chart series. Pace is stored in seconds-per-km (legacy unit
-  // for cardio); divide by 10 to convert to seconds-per-100m for display.
+  // Per-100m chart series — Riegel-normalized to a 1000m-equivalent (then /10),
+  // the SAME projection riegelProjectCSS uses for the dashed CSS reference. This
+  // makes each point line up with the CSS line and stops a long swim (slower raw
+  // per-100m) from reading as a false drop vs a short fast one. Falls back to the
+  // raw stored per-100m only when the label can't be parsed for distance + time.
   const chartData = useMemo(() => efforts
     .map(e => {
-      const paceSecsPerKm = parsePaceToSecs(e.value)
-      if (paceSecsPerKm === null) return { ts: e.created_at, y: -1 }
-      return { ts: e.created_at, y: paceSecsPerKm / 10 }
+      const parsed = parseEffortLabel(e.label)
+      let per100m: number | null
+      if (parsed && parsed.timeSecs != null && parsed.timeSecs > 0 && parsed.distKm > 0) {
+        const distM = parsed.distKm * 1000
+        per100m = (parsed.timeSecs * Math.pow(1000 / distM, RIEGEL_EXPONENT)) / 10
+      } else {
+        const raw = parsePaceToSecs(e.value)
+        per100m = raw === null ? null : raw / 10
+      }
+      if (per100m === null) return { ts: e.created_at, y: -1 }
+      return { ts: e.created_at, y: per100m }
     })
     .filter(d => d.y >= 0)
   , [efforts])
@@ -2624,7 +2678,7 @@ function SwimmingDetail({
   const selectedStep = planQueue[selectedStepIdx] ?? planQueue[0]
   const paceUnitLabel = swimPaceUnitLabel(swimUnit)
   const bestSubtitle = hasCSS
-    ? `${fmtPaceSecsPer100m(cssSecsPer100m!)}${paceUnitLabel}`
+    ? `${fmtPaceSecsPer100m(cssSecsPer100m!, swimUnit)}${paceUnitLabel}`
     : '—'
 
   return (
@@ -2809,15 +2863,19 @@ function SwimmingDetail({
             referenceY={cssSecsPer100m}
             reversed
             yWidth={52}
-            yTickFormatter={(v) => fmtPaceSecsPer100m(v)}
-            tooltipValueFormatter={(v) => `${fmtPaceSecsPer100m(v)}${paceUnitLabel}`}
+            yTickFormatter={(v) => fmtPaceSecsPer100m(v, swimUnit)}
+            tooltipValueFormatter={(v) => `${fmtPaceSecsPer100m(v, swimUnit)}${paceUnitLabel}`}
             tooltipLabel="Pace"
             lineColor={palette.amber[400]}
             yDomain={{
               min: (mn) => Math.max(0, Math.round(mn * 0.95)),
               max: (mx) => Math.round(mx * 1.05),
             }}
-            caption={<Text style={s.tinyText}>Dashed = personal best</Text>}
+            caption={
+              <Text style={s.tinyText}>
+                Dashed = personal best · normalized across distances (Riegel) so longer swims compare fairly
+              </Text>
+            }
           />
         </AnimateRise>
       )}
@@ -2832,7 +2890,7 @@ function SwimmingDetail({
           {[...efforts].reverse().map((e, i, arr) => {
             const paceSecsPerKm = parsePaceToSecs(e.value)
             const rightVal = paceSecsPerKm !== null
-              ? `${fmtPaceSecsPer100m(paceSecsPerKm / 10)}${paceUnitLabel}`
+              ? `${fmtPaceSecsPer100m(paceSecsPerKm / 10, swimUnit)}${paceUnitLabel}`
               : '—'
             return (
               <DeleteAction
@@ -2975,13 +3033,21 @@ function BeatYourBestDetail({
   // upward as the user improves, even though smaller-second values are
   // "better" mathematically. No "lower is better" caption text — the
   // visual direction speaks for itself.
+  // Riegel-normalize every point to the anchor distance (5 km for cycling /
+  // stationary / elliptical) so a longer effort doesn't read as a false drop.
+  // Falls back to raw pace only when the label can't be parsed. The goal-target
+  // rows above already Riegel-project; this brings the chart in line.
+  const chartAnchorKm = paceChartAnchorKm(activity)
   const chartData = efforts
     .map(e => {
-      const paceSecs = parsePaceToSecs(e.value)
-      if (paceSecs === null) return { ts: e.created_at, y: -1 }
-      return { ts: e.created_at, y: paceSecs }
+      const normPaceSecs = riegelNormalizedPaceSecsPerKm(e, chartAnchorKm)
+        ?? parsePaceToSecs(e.value)
+      if (normPaceSecs === null) return { ts: e.created_at, y: -1 }
+      return { ts: e.created_at, y: normPaceSecs }
     })
     .filter(d => d.y >= 0)
+  // Dashed reference = best normalized pace plotted (MIN y), so it sits on the points.
+  const chartBestY = chartData.length > 0 ? Math.min(...chartData.map(d => d.y)) : null
 
   return (
     <View style={s.page}>
@@ -3099,7 +3165,7 @@ function BeatYourBestDetail({
           <Text style={s.h2}>Pace over time</Text>
           <LineChart
             data={chartData}
-            referenceY={hasBestPace ? bestPaceSecs : null}
+            referenceY={chartBestY}
             yWidth={52}
             yTickFormatter={(v) => fmtPaceStr(v, distUnit)}
             tooltipValueFormatter={(v) => fmtPaceStr(v, distUnit)}
@@ -3107,7 +3173,9 @@ function BeatYourBestDetail({
             lineColor={palette.amber[400]}
             reversed
             caption={
-              <Text style={s.tinyText}>Dashed = your fastest pace</Text>
+              <Text style={s.tinyText}>
+                Dashed = personal best · pace shown as {fmtCanonicalDistance(chartAnchorKm)}-equivalent (Riegel) so longer efforts compare fairly
+              </Text>
             }
           />
         </AnimateRise>
