@@ -376,8 +376,10 @@ export default function CalorieDashboard({ userId, profile, plan }) {
                 ? Math.round(plan.energy_balance_pct * 100)
                 : Math.round((result.energyAdj / result.tdee) * 100)
               const energyLabel = getEnergyLabel(energyPct)
-              const adjAbs = Math.abs(result.energyAdj)
-              const adjWord = result.energyAdj < 0 ? 'minus' : result.energyAdj > 0 ? 'plus' : null
+              // Coach view: BMR/TDEE/energy are OPT-IN info pills (collapsed by
+              // default). No always-visible athlete-education prose — per the
+              // coach-mirror "strip athlete-only explanatory copy" rule (T086).
+              if (!activePill) return null
 
               let title, body
               if (activePill === 'bmr') {
@@ -406,14 +408,6 @@ export default function CalorieDashboard({ userId, profile, plan }) {
                     </span>{' '}
                     ({energyPct > 0 ? '+' : ''}{energyPct}% of TDEE), set as <span className="font-medium text-foreground">{energyLabel}</span>. Added to TDEE ({result.tdee}), this gives a daily target of{' '}
                     <span className="font-semibold text-red-400 tabular-nums">{result.dailyTarget} kcal</span>.
-                  </>
-                )
-              } else {
-                title = 'Daily calorie target'
-                body = (
-                  <>
-                    How many calories this client should aim to eat each day to move toward their goal. It's their TDEE ({result.tdee}){adjWord ? <> {adjWord} their energy balance of {adjAbs}</> : ''}, giving{' '}
-                    <span className="font-semibold text-red-400 tabular-nums">{result.dailyTarget} kcal/day</span>. Tap any pill above to learn more about that number.
                   </>
                 )
               }
@@ -539,12 +533,6 @@ export default function CalorieDashboard({ userId, profile, plan }) {
                       </div>
                     )
                   })()}
-                  <p className="text-sm text-muted-foreground mt-1">
-                    A small change with a balanced target — recomposition territory. With consistent training and adequate protein, fat loss and muscle gain can happen together.
-                  </p>
-                  <p className="mt-2 text-[11px] text-muted-foreground">
-                    Net body weight in recomp typically shifts ~0.25–0.5 kg per month. The scale may stay flat while composition improves — track photos and strength too.
-                  </p>
                 </>
               ) : result.timeline.mode === 'mismatch' ? (
                 <>
@@ -580,9 +568,6 @@ export default function CalorieDashboard({ userId, profile, plan }) {
                     {result.goalWeightKg && (
                       <> and reach the goal weight of <span className="font-medium text-foreground">{fmtWeight(result.goalWeightKg, wUnit)}</span></>
                     )}
-                  </p>
-                  <p className="mt-2 text-[11px] text-muted-foreground">
-                    Best-case assumes full daily adherence. Realistic estimate accounts for rest days and variation.
                   </p>
                 </>
               )}

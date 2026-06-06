@@ -3792,6 +3792,23 @@ When you change one side, you change the other in the **same turn**:
 
 The mirror rule is one of the most-broken rules in this codebase's history (analogous to the web↔mobile rule above). Most "but admin doesn't match coach" complaints come from one-sided edits. The cross-check is non-negotiable.
 
+### Coach/admin DATA mirror = data + prescription, strip athlete-education (MANDATORY — LOCKED June 4 2026, originally ledger T086)
+
+When a mobile athlete surface is mirrored into the **web coach/admin view**, that view shows **client DATA + the actionable prescription only** — it is NOT a copy of the athlete's coaching/teaching layer. The coach is a NEXT-STEP OVERSEER (see the coach-scope lock ~"Coach is a NEXT-STEP OVERSEER, NOT a workout programmer"), not a student of the algorithm, so athlete-facing explanatory copy has no value to a coach and just clutters the review surface.
+
+**This rule INTENTIONALLY DIVERGES the web coach/admin mirror from mobile** — the prose below STAYS on the mobile athlete page and is STRIPPED from the web mirror, so the web↔mobile cross-check does NOT apply to these prose blocks. (The admin↔coach cross-check above still applies: admin and coach mirrors stay in sync with EACH OTHER — both stripped.)
+
+**STRIP from the coach/admin mirror:**
+- Motivational / encouragement lines (goal-progress pep talk, "Steady sips beat chugging it all at once", random progress messages).
+- How/what-to-log instructions + feature help-text subtitles ("Pick an adaptation zone…", "Pick a training focus…", "Tap a day to log food", "Tap any pill to learn more").
+- Eligibility / definition notes ("only no- and low-calorie drinks count").
+- Science attributions / citation footers ("National Academies · Maughan 2016", "Epley · Brzycki · Lombardi", "Riegel · Daniels'…").
+- Always-visible metric explainers ("BMR is the calories your body burns at rest…", recomp / timeline science paragraphs, best-case-vs-realistic notes).
+
+**KEEP:** the data (charts, logs, best/PR/current numbers), the prescription numbers + the single cue line, section headers / badges / tiles, and OPT-IN "why this zone" info pills (collapsed by default — not clutter; flag to the user if they want those gone too). If an explainer can't be made opt-in/collapsed, strip it. Neutralize athlete-instruction empty states to factual ones ("Log your first…" → "No X logged yet") and drop celebratory emoji/decoration.
+
+Applies to EVERY coach/admin mirror surface — existing and future (the `AdminUser*` tabs, the `AdminStrength*` / `AdminCardio*` detail pages, the calorie dashboard, and anything added later). Apply it AT BUILD TIME when you create a new mirror; don't ship the athlete prose and strip it later. Original sweep (June 4 2026): AdminUser{Sleep,Hydration,Heart} + all AdminStrength*/AdminCardio* detail pages.
+
 ### Client Detail page — locked patterns (admin + coach mirror, May 26 2026)
 
 The client detail page (`AdminUserDetail.jsx` on the admin side, `CoachClientDetail.jsx` on the coach side) is the single most action-dense surface in either portal. Three patterns are locked as of May 26, 2026 — every future edit must honour them, and they apply to BOTH the admin and coach versions per the portal-mirror rule above.
