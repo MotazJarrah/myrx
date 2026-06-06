@@ -136,17 +136,17 @@ export default function AdminStrengthFamilyDetail({ userId, exercise, onBack }) 
       ) : (
         <>
           {/* ── 2. Click-based variant pill row ── */}
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
             {shown.map(c => {
               const isSel = c.name === selectedChild?.name
               return (
                 <button
                   key={c.name}
                   onClick={() => setSelected(c.name)}
-                  className={`rounded-lg border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide transition-colors ${
+                  className={`rounded-full border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide transition-colors ${
                     isSel
                       ? 'border-blue-500 bg-blue-500/15 text-blue-400'
-                      : 'border-border/40 bg-card/20 text-muted-foreground hover:text-foreground hover:border-border'
+                      : 'border-border bg-card/40 text-muted-foreground hover:border-blue-500/40'
                   }`}
                 >
                   {variantPillLabel(c)}

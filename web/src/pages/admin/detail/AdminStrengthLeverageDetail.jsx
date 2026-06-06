@@ -205,7 +205,7 @@ export default function AdminStrengthLeverageDetail({ userId, exercise, onBack, 
                   const isCurrent = v === exercise
                   return (
                     <div key={v} className="flex items-center gap-1.5">
-                      <span className={`rounded-lg border px-2.5 py-1 text-[11px] font-bold ${
+                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
                         isCurrent ? 'border-blue-500 bg-blue-500/15 text-blue-400' : 'border-border/40 bg-card/20 text-muted-foreground'
                       }`}>
                         {leverageVariantLabel(v)}
