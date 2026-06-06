@@ -3461,17 +3461,26 @@ function CarryDetail({
                 // After 350ms the page is forcibly snapped to the closest valid
                 // slot. Disarmed by the next onScrollBeginDrag or onMomentumScrollEnd.
                 if (slotWidth === 0) return
-                const endX = e.nativeEvent.contentOffset.x
+                const endX  = e.nativeEvent.contentOffset.x
+                const vx    = e.nativeEvent.velocity?.x ?? 0
+                const start = dragStartIdxRef.current
+                // Velocity-aware target: a quick flick commits ONE page in the
+                // direction the finger moved, even if it didn't cross the halfway
+                // point. Without this, a fast short flick rounds back to the origin
+                // and — when native momentum gets cancelled (exactly the case this
+                // fallback covers) — the card snaps back instead of advancing.
+                let idx = Math.round(endX / slotWidth)
+                const moved = endX - start * slotWidth
+                if (Math.abs(vx) > 0.15 && Math.abs(moved) > 4) {
+                  idx = moved > 0 ? start + 1 : start - 1
+                }
+                if (idx > start + 1) idx = start + 1
+                if (idx < start - 1) idx = start - 1
+                if (idx < 0) idx = 0
+                if (idx > CARRY_ZONE_ORDER.length - 1) idx = CARRY_ZONE_ORDER.length - 1
                 if (scrollSettleTimeoutRef.current) clearTimeout(scrollSettleTimeoutRef.current)
                 scrollSettleTimeoutRef.current = setTimeout(() => {
                   if (!carryZoneScrollRef.current) return
-                  const rawIdx = Math.round(endX / slotWidth)
-                  const start = dragStartIdxRef.current
-                  let idx = rawIdx
-                  if (idx > start + 1) idx = start + 1
-                  if (idx < start - 1) idx = start - 1
-                  if (idx < 0) idx = 0
-                  if (idx > CARRY_ZONE_ORDER.length - 1) idx = CARRY_ZONE_ORDER.length - 1
                   carryZoneScrollRef.current.scrollTo({ x: idx * slotWidth, animated: true })
                   const z = CARRY_ZONE_ORDER[idx]
                   if (z && z !== carrySelZone) {
