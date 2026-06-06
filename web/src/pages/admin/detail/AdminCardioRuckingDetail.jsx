@@ -344,7 +344,7 @@ export default function AdminCardioRuckingDetail({
     setZoneInfoOpen(false) // auto-close info panel on zone change (Pattern 5)
   }
 
-  // ── Chart data — single "Workload" series (pack weight × distance) ────────
+  // ── Chart data — single "Total work" series (pack weight × distance) ──────
   // Rucking progress is two-dimensional (heavier pack OR farther); a weight-
   // only chart made a distance PR look flat. Higher = better. Hero targets +
   // log list keep the per-axis (weight / distance) split.
@@ -508,10 +508,10 @@ export default function AdminCardioRuckingDetail({
                   foreground), same visual weight as "Adaptation zone". */}
               <h2 className="text-sm font-bold">Progress over time</h2>
 
-              {/* Workload (pack weight × distance) over time. Higher = better
+              {/* Total work (pack weight × distance) over time. Higher = better
                   → NOT reversed. Replaces the two stacked weight + distance
                   charts so a distance-only PR still reads as progress. */}
-              <p className="mb-2 mt-4 text-xs text-muted-foreground">Workload (pack weight × distance)</p>
+              <p className="mb-2 mt-4 text-xs text-muted-foreground">Total work (pack weight × distance)</p>
               {workloadChartData.length >= 2 ? (
                 <ResponsiveContainer width="100%" height={150}>
                   <LineChart data={workloadChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
@@ -537,7 +537,7 @@ export default function AdminCardioRuckingDetail({
                         borderRadius: 8,
                         fontSize: 12,
                       }}
-                      formatter={(v) => [`${Math.round(v)}`, 'Workload']}
+                      formatter={(v) => [`${Math.round(v)}`, 'Total work']}
                     />
                     {bestWorkload > 0 && (
                       <ReferenceLine y={bestWorkload} stroke="#fbbf24" strokeDasharray="4 3" strokeOpacity={0.5} />
@@ -560,7 +560,7 @@ export default function AdminCardioRuckingDetail({
                   Not enough data for the workload trend yet.
                 </p>
               )}
-              <p className="mt-1 text-[11px] text-muted-foreground">Pack weight × distance · dashed line = personal best</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">Total work = pack weight × distance · dashed line = personal best. A heavier-but-shorter ruck can read lower (less total work).</p>
             </AnimateRise>
           )}
         </>

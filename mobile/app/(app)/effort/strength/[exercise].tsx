@@ -3508,19 +3508,19 @@ function CarryDetail({
         <AnimateRise delay={250} style={s.card}>
           <Text style={s.h2}>Carry progress over time</Text>
           <View style={s.chartTagBlue}>
-            <Text style={s.chartTagText}>Workload</Text>
+            <Text style={s.chartTagText}>Total work</Text>
           </View>
           <LineChart
             data={workloadChartData}
             referenceY={workloadChartData.length > 1 && bestWorkload > 0 ? bestWorkload : null}
             yTickFormatter={(v) => `${Math.round(v)}`}
             tooltipValueFormatter={(v) => `${Math.round(v)}`}
-            tooltipLabel="Workload"
+            tooltipLabel="Total work"
             yDomain={{
               min: (mn) => Math.max(0, Math.round(mn * 0.85)),
               max: (mx) => Math.round(mx * 1.15),
             }}
-            caption={<Text style={s.tinyText}>Weight × distance · dashed line = personal best</Text>}
+            caption={<Text style={s.tinyText}>Total work = weight × distance · dashed line = personal best. A heavier-but-shorter session can read lower because it's less total work — a deliberate max-load day isn't a regression.</Text>}
           />
         </AnimateRise>
       )}
@@ -5062,6 +5062,44 @@ function StrengthDetail({
   const profileBW   = (profile?.current_weight as number | null | undefined) ?? null
   const profileUnit = (profile?.weight_unit as 'lb' | 'kg' | undefined) || (unit as 'lb' | 'kg')
 
+  // ── Added-load awareness for the chart (false-drop fix) ──────────────────
+  // A bodyweight-equipment movement can be trained at pure bodyweight (e.g.
+  // "15 reps") OR with added load (e.g. "1 rep at +150 lb"). Plotting REPS
+  // makes the line DROP when the athlete swaps a high-rep bodyweight set for
+  // a far-harder loaded single. So: if the movement has ANY added-load effort
+  // we switch the chart (and its reference line + Best subtitle) to ESTIMATED
+  // 1RM; pure-bodyweight movements keep plotting reps (more reps = better,
+  // never a false drop). The max-attempt TILE GRID is untouched — still reps.
+  // Per ACTIVE tier (not global): only the tier being viewed switches to e1RM,
+  // so band/knee tiers (assisted — effective load is LESS than bodyweight) keep
+  // plotting reps and never get an inflated bodyweight-based 1RM. Mirrors the
+  // web's per-tier `tierHasWeighted`.
+  const bwHasWeighted = isBodyweightExercise
+    && efforts.some(e =>
+      bwTierFromVariantName(e.label.split(' · ')[0]) === bwActiveTier
+      && parseAddedWeightFromLabel(e.label) > 0)
+  // Same bodyweight source the rest of the bodyweight branch uses for math.
+  const bwForMath = profileBW
+  // e1RM for a single bodyweight effort. Weighted-progression efforts already
+  // store "Est. 1RM N unit" (= estimate1RM(bodyweight + added, reps) computed
+  // at save time) so we read that directly when present; otherwise we compute
+  // from the athlete's current bodyweight + parsed added load. Returns null
+  // only when neither path is available (rare — no value string AND no BW).
+  const bwE1RMForEffort = (e: Effort): number | null => {
+    const stored = parseOneRM(e.value)?.oneRM
+    if (stored != null) return stored
+    const r = parseRepsFromBwLabel(e.label)
+    if (r === null) return null
+    const aw = parseAddedWeightFromLabel(e.label)
+    if (bwForMath != null) return estimate1RM(bwForMath + aw, r)
+    return null
+  }
+  const bwBestE1RM = bwHasWeighted
+    ? Math.max(0, ...efforts
+        .filter(e => bwTierFromVariantName(e.label.split(' · ')[0]) === bwActiveTier)
+        .map(e => bwE1RMForEffort(e) ?? 0))
+    : 0
+
   const effectiveOneRM = isBodyweightExercise && bestOneRM === 0 && profileBW && bestReps > 0
     ? estimate1RM(profileBW, bestReps)
     : bestOneRM
@@ -5274,10 +5312,17 @@ function StrengthDetail({
   // ACTIVE tier only (round-2 #4) — blending band-assisted reps with full-RX reps
   // on one curve is misleading, so each pill/tier gets its own line (uses the same
   // bwActiveTier the hero/tiles track, so the chart follows the pill swipe).
+  // EXCEPTION: when the movement has added-load efforts (bwHasWeighted) we plot
+  // estimated 1RM for EVERY point so a loaded single doesn't read as a regression
+  // vs a high-rep bodyweight set. Pure-bodyweight movements stay reps-based.
   const chartData = isBodyweightExercise
     ? efforts
         .filter(e => bwTierFromVariantName(e.label.split(' · ')[0]) === bwActiveTier)
         .map(e => {
+          if (bwHasWeighted) {
+            const y = bwE1RMForEffort(e)
+            return y === null ? null : { ts: e.created_at, y }
+          }
           const r = parseRepsFromBwLabel(e.label)
           if (r === null) return null
           return { ts: e.created_at, y: r }
@@ -5319,6 +5364,13 @@ function StrengthDetail({
         </View>
         {isBodyweightExercise ? (
           bwLoggedTiers.length > 0 ? (
+            bwHasWeighted ? (
+              <View style={[s.subRow, { flexWrap: 'wrap' }]}>
+                <Text style={s.subText}>Best Est. 1RM — </Text>
+                <TickerNumber value={bwBestE1RM} fontSize={14} color={palette.blue[400]} fontWeight="600" />
+                <Text style={[s.subText, s.subValueBlue]}> {unit}</Text>
+              </View>
+            ) : (
             <View style={[s.subRow, { flexWrap: 'wrap' }]}>
               <Text style={s.subText}>Best — </Text>
               <TickerNumber value={bwBestByTier[bwHighestTier]} fontSize={14} color={palette.blue[400]} fontWeight="600" />
@@ -5330,6 +5382,7 @@ function StrengthDetail({
                 </>
               )}
             </View>
+            )
           ) : (
             <Text style={s.subText}>No efforts logged yet</Text>
           )
@@ -5701,18 +5754,26 @@ function StrengthDetail({
         const chartCard = (
           <AnimateRise delay={250} style={s.card}>
             <Text style={s.h2}>
-              {isBodyweightExercise ? 'Max attempts over time' : 'Est. 1RM over time'}
+              {isBodyweightExercise
+                ? (bwHasWeighted ? `Est. 1RM (${unit}) over time` : 'Max attempts over time')
+                : 'Est. 1RM over time'}
             </Text>
             <LineChart
               data={chartData}
               referenceY={chartData.length > 1
-                ? (isBodyweightExercise ? bwBestByTier[bwActiveTier] : bestOneRM)
+                ? (isBodyweightExercise
+                    ? (bwHasWeighted
+                        ? Math.max(0, ...chartData.map(p => p.y))
+                        : bwBestByTier[bwActiveTier])
+                    : bestOneRM)
                 : null}
               yTickFormatter={(v) => `${Math.round(v)}`}
               tooltipValueFormatter={(v) =>
-                isBodyweightExercise ? `${Math.round(v)} reps` : `${Math.round(v)} ${unit}`
+                isBodyweightExercise
+                  ? (bwHasWeighted ? `${Math.round(v)} ${unit}` : `${Math.round(v)} reps`)
+                  : `${Math.round(v)} ${unit}`
               }
-              tooltipLabel={isBodyweightExercise ? 'Max attempts' : 'Est. 1RM'}
+              tooltipLabel={isBodyweightExercise ? (bwHasWeighted ? 'Est. 1RM' : 'Max attempts') : 'Est. 1RM'}
               yDomain={{
                 min: (mn) => Math.max(0, Math.round(mn * 0.9)),
                 max: (mx) => Math.round(mx * 1.1),
@@ -5720,7 +5781,7 @@ function StrengthDetail({
               caption={
                 <Text style={s.tinyText}>
                   Dashed line = personal best
-                  {isBodyweightExercise && ' on ' + bwTierLabel(bwActiveTier)}
+                  {isBodyweightExercise && !bwHasWeighted && ' on ' + bwTierLabel(bwActiveTier)}
                 </Text>
               }
             />

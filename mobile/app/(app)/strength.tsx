@@ -182,6 +182,13 @@ function parseRepsFromBwLabel(label: string | null | undefined): number | null {
   return null
 }
 
+// Added load on a bodyweight effort label: "Pull Up · 180+25 lb × 10" → 25.
+// Pure-bodyweight labels ("Pull Up · 180 lb × 10") have no "+" → 0.
+function parseAddedWeightFromBwLabel(label: string | null | undefined): number {
+  const m = label?.match(/\+([\d.]+)\s*\w+\s*×/)
+  return m ? parseFloat(m[1]) : 0
+}
+
 type SledVariant = 'push' | 'drag'
 
 // Shared fields populated for any row that's a member of an admin-added
@@ -199,7 +206,7 @@ type MoveBest =
   | ({ name: string; kind: 'isometric'; bestSecs: number } & FamilyBadgeFields)
   | ({ name: string; kind: 'assisted';  bestAssistance: number; unit: string } & FamilyBadgeFields)
   | ({ name: string; kind: 'carry';     bestDist: number } & FamilyBadgeFields)
-  | { name: string; kind: 'bodyweight-consolidated'; bestByTier: Record<BwTier, number>; highestTier: BwTier; canHaveTiers: boolean }
+  | { name: string; kind: 'bodyweight-consolidated'; bestByTier: Record<BwTier, number>; highestTier: BwTier; canHaveTiers: boolean; hasWeighted: boolean; bestE1RM: number; e1RMUnit: string }
   // Sled Work consolidates [Push] and [Pull] variants into one row keyed
   // by the base name "Sled Work". Tapping the row routes to the
   // consolidated detail page (SledDragConsolidatedDetail) which has a
@@ -679,6 +686,18 @@ export default function Strength() {
             // because there's no assisted-tier progression. Gate the badge
             // rendering on this flag — see the same fix in the detail page.
             const canHaveTiers = !!(rec?.band_assist || rec?.knee_assist)
+            // Added-load awareness so the row's "Best" can switch from reps to
+            // Est. 1RM when the movement is trained with added weight — mirrors
+            // the detail page's false-drop fix. Weighted-progression efforts
+            // already store "Est. 1RM N unit" (computed at save time); read
+            // that, else compute from current bodyweight + parsed added load.
+            const addedW   = parseAddedWeightFromBwLabel(e.label)
+            const storedRM = parseOneRM(e.value)
+            const profBW   = (profile?.current_weight as number | null | undefined) ?? null
+            const e1RM     = storedRM
+              ? storedRM.oneRM
+              : (profBW != null ? estimate1RM(profBW + addedW, repsVal) : 0)
+            const e1RMUnit = storedRM?.unit ?? (profile?.weight_unit as string | undefined) ?? 'lb'
             if (!ex) {
               map.set(baseName, {
                 name: baseName,
@@ -686,12 +705,22 @@ export default function Strength() {
                 bestByTier:  { 'band+knee': 0, 'knee': 0, 'band': 0, 'rx': 0, [tier]: repsVal },
                 highestTier: tier,
                 canHaveTiers,
+                hasWeighted: addedW > 0,
+                bestE1RM: e1RM,
+                e1RMUnit,
               })
             } else {
               const prevBestForTier = ex.bestByTier[tier] ?? 0
               const newBestByTier   = { ...ex.bestByTier, [tier]: Math.max(prevBestForTier, repsVal) }
               const newHighestTier: BwTier = BW_TIER_RANK[tier] > BW_TIER_RANK[ex.highestTier] ? tier : ex.highestTier
-              map.set(baseName, { ...ex, bestByTier: newBestByTier, highestTier: newHighestTier })
+              map.set(baseName, {
+                ...ex,
+                bestByTier: newBestByTier,
+                highestTier: newHighestTier,
+                hasWeighted: ex.hasWeighted || addedW > 0,
+                bestE1RM: Math.max(ex.bestE1RM, e1RM),
+                e1RMUnit: storedRM?.unit ?? ex.e1RMUnit,
+              })
             }
           } else {
             const parsed = parseOneRM(e.value)
@@ -718,7 +747,7 @@ export default function Strength() {
         setMovements([...map.values()].sort((a, b) => a.name.localeCompare(b.name)))
         setLoading(false)
       })
-  }, [user, saved, dbMovements])
+  }, [user, saved, dbMovements, profile?.current_weight, profile?.weight_unit])
 
   const headerSubtext = isIsometric       ? 'Log a timed hold to track your progress.'
     : isAssistedMachine ? 'Lower assistance = less help = harder. Goal: reach 0.'
@@ -1215,8 +1244,12 @@ export default function Strength() {
                     </>
                   ) : mov.kind === 'bodyweight-consolidated' ? (
                     <>
-                      <Text style={s.listRowSub}>Best</Text>
-                      <Text style={s.listRowVal}>{mov.bestByTier[mov.highestTier]} reps</Text>
+                      <Text style={s.listRowSub}>{mov.hasWeighted ? 'Best Est. 1RM' : 'Best'}</Text>
+                      <Text style={s.listRowVal}>
+                        {mov.hasWeighted
+                          ? `${Math.round(mov.bestE1RM)} ${mov.e1RMUnit}`
+                          : `${mov.bestByTier[mov.highestTier]} reps`}
+                      </Text>
                       {mov.canHaveTiers && (
                         <View style={{
                           borderWidth: 1, borderColor: withAlpha(palette.blue[500], 0.3),

@@ -301,6 +301,9 @@ function fmtShort(iso) {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+const KG_PER_LB = 0.453592
+const THIRTY_DAYS_MS = 30 * 86_400_000
+
 // The equipment kind this component handles. Dispatcher routes here when the
 // movement's `equipment === 'bodyweight'`. Kept un-exported so the file only
 // exports the component (Fast Refresh requirement).
@@ -334,6 +337,11 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
   const [loading, setLoading] = useState(true)
   const [profileUnit, setProfileUnit] = useState('lb')
   const [profileBW, setProfileBW]     = useState(null)
+  // Client bodyweight resolved like AdminStrengthCarry/AssistedDetail do — a
+  // recent (≤30-day) `bodyweight` row preferred over `profiles.current_weight`.
+  // Stored in the effort's label unit so the chart's e1RM math
+  // (estimate1RM(bodyweight + addedWeight, reps)) lines up with the logged load.
+  const [clientBWInLabelUnit, setClientBWInLabelUnit] = useState(null)
   const [meta, setMeta]               = useState(null) // { band_assist, knee_assist, weighted_progression }
 
   // Active tier (clickable pill). Null until efforts resolve → defaults to the
@@ -383,21 +391,54 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
           )
         : effortsQuery.ilike('label', `${baseExercise} ·%`)
 
-      const [efRes, profRes] = await Promise.all([
+      const [efRes, profRes, bwRes] = await Promise.all([
         filtered,
         supabase
           .from('profiles')
           .select('weight_unit, current_weight')
           .eq('id', userId)
           .maybeSingle(),
+        supabase
+          .from('bodyweight')
+          .select('weight, unit, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1),
       ])
       if (cancelled) return
 
       const loaded = efRes.data || []
       setEntries(loaded)
-      setProfileUnit(profRes.data?.weight_unit || 'lb')
+      const pUnit = profRes.data?.weight_unit || 'lb'
+      setProfileUnit(pUnit)
       setProfileBW(profRes.data?.current_weight ?? null)
       setMeta(movement)
+
+      // Resolve the client's bodyweight the SAME way the Carry / Assisted
+      // detail pages do: a recent (≤30-day) `bodyweight` row in kg wins; else
+      // fall back to `profiles.current_weight`. Express it in the EFFORT LABEL
+      // unit (weighted Full RX efforts are logged in the user's unit) so the
+      // chart's e1RM = estimate1RM(bodyweight + addedWeight, reps) math is
+      // unit-consistent with the logged load.
+      const labelUnit = (() => {
+        for (const e of loaded) {
+          const pv = parseOneRM(e.value)
+          if (pv?.unit === 'kg' || pv?.unit === 'lb') return pv.unit
+          const wm = e.label?.match(/·\s*[\d.+]+\s*(kg|lb)\s*×/)
+          if (wm) return wm[1]
+        }
+        return pUnit === 'kg' ? 'kg' : 'lb'
+      })()
+      const bwRow = bwRes.data?.[0]
+      let bwKg = null
+      if (bwRow && (Date.now() - new Date(bwRow.created_at).getTime()) < THIRTY_DAYS_MS) {
+        bwKg = bwRow.unit === 'lb' ? bwRow.weight * KG_PER_LB : bwRow.weight
+      } else if (profRes.data?.current_weight != null) {
+        bwKg = pUnit === 'lb' ? profRes.data.current_weight * KG_PER_LB : profRes.data.current_weight
+      }
+      setClientBWInLabelUnit(
+        bwKg == null ? null : (labelUnit === 'kg' ? bwKg : bwKg / KG_PER_LB)
+      )
 
       // Default active tier = highest logged tier (matches athlete's slot-0
       // landing rule). If a bracketed variant was passed AND it's logged,
@@ -554,21 +595,60 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
     if (achievable) setSelectedRM(r)
   }
 
-  // ── Chart data — max attempts over time for the ACTIVE tier only (round-2 #4):
-  // blending band-assisted reps with full-RX reps on one curve is misleading, so
-  // each pill/tier gets its own line (follows the active `tier`). ───────────────
-  const chartData = useMemo(() => entries
-    .filter(e => bwTierFromVariantName(e.label.split(' · ')[0]) === tier)
+  // ── Chart data — for the ACTIVE tier only (round-2 #4): blending band-assisted
+  // reps with full-RX reps on one curve is misleading, so each pill/tier gets its
+  // own line (follows the active `tier`).
+  //
+  // Reps alone hide added load: "15 reps at bodyweight" then "1 rep at +150 lb"
+  // makes a rep-count line DROP even though the loaded single is harder. So when
+  // the active tier has ANY weighted effort (added belt/vest load), we plot
+  // ESTIMATED 1RM per effort — e1RM = estimate1RM(bodyweight + addedWeight, reps)
+  // — which rises with both more reps AND more load. Pure-bodyweight tiers (no
+  // added load — band / knee, or Full RX without weight) keep plotting reps.
+  // The e1RM switch needs a client bodyweight; without one we can't compute it
+  // honestly, so we fall back to reps. ─────────────────────────────────────────
+  const tierEfforts = useMemo(
+    () => entries.filter(e => bwTierFromVariantName(e.label.split(' · ')[0]) === tier),
+    [entries, tier]
+  )
+  const tierHasWeighted = useMemo(
+    () => tierEfforts.some(e => parseAddedWeightFromLabel(e.label) > 0),
+    [tierEfforts]
+  )
+  const chartIsE1RM = tierHasWeighted && clientBWInLabelUnit != null
+  // Unit shown alongside e1RM values — derive from this tier's weighted efforts
+  // (they carry the lb/kg), defaulting to the profile unit.
+  const chartUnit = useMemo(() => {
+    for (const e of tierEfforts) {
+      const pv = parseOneRM(e.value)
+      if (pv?.unit === 'kg' || pv?.unit === 'lb') return pv.unit
+      const wm = e.label?.match(/·\s*[\d.+]+\s*(kg|lb)\s*×/)
+      if (wm) return wm[1]
+    }
+    return profileUnit === 'kg' ? 'kg' : 'lb'
+  }, [tierEfforts, profileUnit])
+
+  const chartData = useMemo(() => tierEfforts
     .map(e => {
       const r = parseRepsFromBwLabel(e.label)
-      return r !== null ? { ts: e.created_at, date: fmtShort(e.created_at), value: r } : null
+      if (r === null) return null
+      if (chartIsE1RM) {
+        const added = parseAddedWeightFromLabel(e.label)
+        const e1RM  = estimate1RM(clientBWInLabelUnit + added, r)
+        return { ts: e.created_at, date: fmtShort(e.created_at), value: e1RM }
+      }
+      return { ts: e.created_at, date: fmtShort(e.created_at), value: r }
     })
-    .filter(Boolean), [entries, tier])
+    .filter(Boolean), [tierEfforts, chartIsE1RM, clientBWInLabelUnit])
 
   const values = chartData.map(d => d.value)
   const minV   = values.length ? Math.min(...values) : 0
   const maxV   = values.length ? Math.max(...values) : 10
-  const bestForChart = chartData.length > 1 ? bwBestByTier[tier] : null
+  // Reference line = personal best on the charted metric. For e1RM that's the
+  // max e1RM across this tier's efforts; for reps it's the tier's best reps.
+  const bestForChart = chartData.length > 1
+    ? (chartIsE1RM ? Math.max(...values) : bwBestByTier[tier])
+    : null
 
   function backFn() {
     if (onBack) return onBack()
@@ -923,10 +1003,12 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
             </div>
           </AnimateRise>
 
-          {/* ── 6. Chart — max attempts over time, across all tiers ── */}
+          {/* ── 6. Chart — reps OR est. 1RM over time (per active tier) ── */}
           {chartData.length >= 1 && (
             <AnimateRise delay={250} className="rounded-xl border border-border bg-card p-4">
-              <p className="mb-3 text-xs font-semibold text-muted-foreground">Max attempts over time</p>
+              <p className="mb-3 text-xs font-semibold text-muted-foreground">
+                {chartIsE1RM ? 'Est. 1RM over time' : 'Max attempts over time'}
+              </p>
               {chartData.length >= 2 ? (
                 <ResponsiveContainer width="100%" height={160}>
                   <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
@@ -952,7 +1034,9 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
                         borderRadius: 8,
                         fontSize: 12,
                       }}
-                      formatter={(v) => [`${Math.round(v)} reps`, 'Max attempts']}
+                      formatter={(v) => chartIsE1RM
+                        ? [`${Math.round(v)} ${chartUnit}`, 'Est. 1RM']
+                        : [`${Math.round(v)} reps`, 'Max attempts']}
                     />
                     {bestForChart && (
                       <ReferenceLine y={bestForChart} stroke="#60a5fa" strokeDasharray="4 3" strokeOpacity={0.5} />

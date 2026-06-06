@@ -483,7 +483,7 @@ function CarrySurface({
   const activeZone = zoneMath[selZone]
 
   // ── Chart data ──────────────────────────────────────────────────────────────
-  // Single "Workload" series = weight × distance (display units). Carry
+  // Single "Total work" series = weight × distance (display units). Carry
   // progress is two-dimensional; a weight-only chart made a distance PR look
   // flat. Higher = better. Hero targets + log list keep the per-axis split.
   const workloadChartData = useMemo(() => parsed.map(e => ({
@@ -637,11 +637,11 @@ function CarrySurface({
         </AnimateRise>
       )}
 
-      {/* ── 4. Chart (single "Workload" = weight × distance over time) ── */}
+      {/* ── 4. Chart (single "Total work" = weight × distance over time) ── */}
       {cascadeReady && parsed.length >= 1 && (
         <AnimateRise delay={250} className="rounded-xl border border-border bg-card p-4">
           <h2 className="text-sm font-bold">Carry progress over time</h2>
-          <MiniChart data={workloadChartData} label="Workload" best={bestWorkload} unit="" stroke="#60a5fa" caption="Weight × distance · dashed line = personal best" />
+          <MiniChart data={workloadChartData} label="Total work" best={bestWorkload} unit="" stroke="#60a5fa" caption="Total work = weight × distance · dashed line = personal best. A heavier-but-shorter session can read lower (less total work)." />
         </AnimateRise>
       )}
 

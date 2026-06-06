@@ -4043,16 +4043,16 @@ function RuckingDetail({
       {parsed.length >= 1 && (
         <AnimateRise delay={500} style={s.card}>
           <Text style={s.h2}>Progress over time</Text>
-          <Text style={[s.helpTextSm, { marginBottom: 8, marginTop: 4 }]}>Workload</Text>
+          <Text style={[s.helpTextSm, { marginBottom: 8, marginTop: 4 }]}>Total work</Text>
           <LineChart
             data={workloadChartData}
             referenceY={bestWorkload > 0 ? bestWorkload : null}
             yWidth={42}
             yTickFormatter={(v) => `${Math.round(v)}`}
             tooltipValueFormatter={(v) => `${Math.round(v)}`}
-            tooltipLabel="Workload"
+            tooltipLabel="Total work"
             lineColor={palette.amber[400]}
-            caption={<Text style={s.tinyText}>Pack weight × distance · dashed line = personal best</Text>}
+            caption={<Text style={s.tinyText}>Total work = pack weight × distance · dashed line = personal best. A heavier-but-shorter session can read lower because it's less total work — a deliberate max-load day isn't a regression.</Text>}
           />
         </AnimateRise>
       )}

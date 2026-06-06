@@ -453,7 +453,7 @@ function fmtShortDate(ts) {
 // "12 reps", "1m 30s", "60 lb assist").
 function fmtMetricDisp(kind, val, unit) {
   switch (kind) {
-    case 'workload': return `Workload: ${val}`
+    case 'workload': return `Total work: ${val}`
     case 'onerm':    return `${val} ${unit} 1RM`
     case 'hold':     return fmtHold(val)
     case 'reps':     return `${val} reps`
@@ -692,7 +692,7 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
           const m = strengthMetric(e, 'carry') // sled is carry-equipment → workload (w × d)
           if (m) {
             const v = g.byVariant[sledVariant] ??= { best: null, unit: m.unit, points: [] }
-            v.points.push({ ts, val: m.val, disp: `Workload: ${m.val}` })
+            v.points.push({ ts, val: m.val, disp: `Total work: ${m.val}` })
             if (v.best === null || m.val > v.best) {
               v.best = m.val; v.unit = m.unit
               v.bestW = m.weight; v.bestWUnit = m.unit; v.bestDistM = m.distM
@@ -753,13 +753,26 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
           if (ts > g.maxTs) g.maxTs = ts
           g.canHaveTiers = g.canHaveTiers || canHaveTiers
           if (BW_TIER_RANK[tier] > BW_TIER_RANK[g.highestTier]) g.highestTier = tier
-          // Bodyweight tiers (and Full-RX) store rep-count efforts — plot reps,
-          // matching the bodyweight detail's per-tier reps-over-time chart.
+          // Plotting metric depends on whether the tier carries added load.
+          // Rep count alone hides load: "15 reps at bodyweight" then "1 rep at
+          // +150 lb" makes a rep-count line DROP even though the loaded single
+          // is harder. So when a tier has ANY weighted effort (Full-RX with
+          // weighted progression stores "Est. 1RM N unit" in `value` —
+          // computed as estimate1RM(bodyweight + addedWeight, reps) at log
+          // time), we plot e1RM; pure-bodyweight tiers (band / knee, or rep-only
+          // Full-RX where value is "N reps") keep plotting reps. We track BOTH
+          // series per tier + a hasWeighted flag, then choose at card-build time.
           const reps = parseReps(e.label)
+          const rm   = parseOneRM(e.value)   // "Est. 1RM N unit" → present only on weighted efforts
+          const v = g.byTier[tier] ??= { best: 0, points: [], e1rmBest: 0, e1rmPoints: [], hasWeighted: false }
           if (reps !== null) {
-            const v = g.byTier[tier] ??= { best: 0, points: [] }
             v.points.push({ ts, val: reps, disp: `${reps} reps` })
             if (reps > v.best) v.best = reps
+          }
+          if (rm) {
+            v.hasWeighted = true
+            v.e1rmPoints.push({ ts, val: rm.val, disp: `${rm.val} ${rm.unit} 1RM`, unit: rm.unit })
+            if (rm.val > v.e1rmBest) { v.e1rmBest = rm.val; v.e1rmUnit = rm.unit }
           }
           return
         }
@@ -824,7 +837,7 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
           const r = parseRuckWD(e.label)
           if (r) {
             const wl = r.packLb * r.distMi
-            g.points.push({ ts, val: wl, disp: `Workload: ${Math.round(wl)}` })
+            g.points.push({ ts, val: wl, disp: `Total work: ${Math.round(wl)}` })
             if (g.best === null || wl > g.best) { g.best = wl; g.bestW = r.packLb; g.bestDistMi = r.distMi }
           }
           return
@@ -891,12 +904,19 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
           bestText = formatStrengthBest(v.best, v.unit, v.kind)
         }
       } else if (d.kind === 'bw') {
-        // Highest tier reached drives badge + graph (its reps series).
+        // Highest tier reached drives badge + graph. When that tier carries
+        // added load, plot est. 1RM (rises with reps AND load) instead of reps,
+        // so a heavier-but-fewer-reps session doesn't read as a drop.
         badge = d.canHaveTiers ? BW_TIER_BADGE[d.highestTier] : null
         const v = d.byTier[d.highestTier]
         if (v) {
-          points = sortAsc(v.points)
-          bestText = v.best > 0 ? `Best ${v.best} reps` : '—'
+          if (v.hasWeighted) {
+            points = sortAsc(v.e1rmPoints)
+            bestText = v.e1rmBest > 0 ? `Best ${v.e1rmBest} ${v.e1rmUnit} 1RM` : '—'
+          } else {
+            points = sortAsc(v.points)
+            bestText = v.best > 0 ? `Best ${v.best} reps` : '—'
+          }
         }
       } else {
         // plain
@@ -938,7 +958,7 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
           bestText = v.str ? `Best ${v.str}` : '—'
         }
       } else if (d.kind === 'ruck') {
-        // Workload (pack weight × distance) — higher = better, no reversal.
+        // Total work (pack weight × distance) — higher = better, no reversal.
         points = sortAsc(d.points)
         reversed = false
         bestText = d.bestW != null ? `Best ${d.bestW} lb × ${d.bestDistMi} mi` : '—'
