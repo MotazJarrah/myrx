@@ -4088,7 +4088,7 @@ interface StairMillZoneCfg {
 const STAIRMILL_ZONE_CONFIG: Record<StairMillZone, StairMillZoneCfg> = Object.freeze({
   vo2: {
     label:       'VO2 MAX',
-    whyText:     "Short max-effort sprints at the ceiling of your aerobic capacity. The Allison protocol (2017 Med Sci Sports Exerc) showed 3 × 20-sec all-out stair climbs three times per week produced a 12 % VO2peak improvement in 6 weeks — among the most efficient cardio interventions ever published. Use sparingly: 1 session per week, full recovery between intervals.",
+    whyText:     "Short, max-effort climbs at the ceiling of your aerobic capacity. The stimulus is central — your heart and muscles both adapt to take in and use more oxygen, lifting the engine every easier zone runs on. Use it sparingly: one session a week, full recovery between efforts.",
     durationMin: 1.0,    // ~60 sec per rep (Allison protocol used 20s, extended here for Step Mill console pacing)
     intensity:   1.10,   // 110 % of peak FPM — short reps tolerate above-peak
     reps:        3,
@@ -4096,7 +4096,7 @@ const STAIRMILL_ZONE_CONFIG: Record<StairMillZone, StairMillZoneCfg> = Object.fr
   },
   threshold: {
     label:       'THRESHOLD',
-    whyText:     'Sustained hard intervals at the edge of what you can hold. Trains lactate clearance and the ability to maintain high climbing output past the initial burn. Honda et al. (2014) used 3-min stair-climbing intervals to drive metabolic adaptation; comparable to Pete Pfitzinger\'s cruise interval programming. 1–2 sessions per week max.',
+    whyText:     'Sustained hard climbing at the edge of what you can hold. This trains lactate clearance — your body learns to process the burn faster, so the pace you can sustain keeps climbing with it. One or two sessions a week, max.',
     durationMin: 3.0,    // 3 min per rep — Honda protocol
     intensity:   0.85,   // 85 % of peak FPM — "comfortably hard sustained"
     reps:        4,
@@ -4104,7 +4104,7 @@ const STAIRMILL_ZONE_CONFIG: Record<StairMillZone, StairMillZoneCfg> = Object.fr
   },
   aerobic: {
     label:       'ENDURANCE',
-    whyText:     'Continuous moderate climbing at conversational effort. Boreham et al. (2000) showed sustained moderate stair climbing produced a 17 % VO2max improvement in 8 weeks in previously sedentary adults — the foundation that supports every higher-intensity zone above it. Stay disciplined and steady; resist the urge to push.',
+    whyText:     'Continuous, conversational climbing. This is your aerobic base — it builds the mitochondrial density and capillary networks that support every harder zone above. Stay steady and resist the urge to push.',
     durationMin: 20.0,   // 20 min continuous — Boreham protocol
     intensity:   0.65,   // 65 % of peak FPM — Zone 2 conversational
     reps:        1,

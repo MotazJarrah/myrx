@@ -1757,8 +1757,8 @@ The StairMaster Step Mill is one of the highest-MET sustainable cardio machines 
 | Zone | Protocol source | Key finding |
 |------|-----------------|-------------|
 | **VO2 MAX** | Allison et al. (2017) *Med Sci Sports Exerc* | 3 × 20-sec all-out stair climbs, 3×/week → **+12% VO2peak in 6 weeks**. Drives the VO2 zone protocol (extended to 60-sec reps for Step Mill console pacing). |
-| **THRESHOLD** | Honda et al. (2014) *Diabetol Metab Syndr* | 3-min stair-climbing intervals drove metabolic adaptation. Drives the 4 × 3-min threshold protocol. |
-| **ENDURANCE** | Boreham et al. (2000) *Prev Med* | Sustained moderate stair climbing → **+17% VO2max in 8 weeks** in previously sedentary adults. Drives the 20-min continuous endurance protocol. |
+| **THRESHOLD** | Interval research (Seiler 2010; Laursen & Jenkins 2002) + ACSM 12th ed | Hard 3-min intervals drive lactate-threshold adaptation. Drives the 4 × 3-min threshold protocol. (Was mis-cited to Honda 2014, a blood-glucose study — corrected June 2026.) |
+| **ENDURANCE** | Boreham et al. (2000) *Prev Med* + ACSM 12th ed | Accumulated daily stair climbing improved VO2max ~17% in sedentary adults; ACSM backs the 20-min continuous vigorous block we actually prescribe. (Boreham's protocol was accumulated bouts, not one continuous session — clarified June 2026.) |
 | Global framework | ACSM Guidelines 12th ed (2025) | Endorses stair climbing as vigorous-intensity (8+ METs) and supports 3-zone polarized programming across all endurance disciplines. |
 
 **Three adaptation zones (LOCKED — `STAIRMILL_ZONE_CONFIG`):**
@@ -1776,8 +1776,7 @@ VO2 zone allows above-peak intensity (110%) because short reps tolerate above-pe
 Gender-aware, mirrors Air Bike's 18 / 13 / 15 cal/min pattern. Numbers derived from typical Stairmaster Gauntlet level 8-10 sustained output at moderate-vigorous effort:
 
 - Male → 12 floors/min
-- Female → 9 floors/min
-- Other / unset → 10 floors/min
+- Everyone else (female, non-binary, prefer-not-to-say, unset) → 9 floors/min — the uniform "male / else=female" rule used across every gender-driven calc (see calorie `calcBMR`). (Code is `gender === 'male' ? 12 : 9`; the earlier "other → 10" averaging was retired May 23 2026.)
 
 Replaced by user's actual peak FPM after their first logged effort.
 
@@ -3918,8 +3917,8 @@ Single source of truth for "which scientific work each formula in MyRX comes fro
 | Concept2 erg watts↔pace | **Concept2 official formula** — `watts = 2.80 × (m/s)³` (drag-factor constant × velocity cubed). Identical across Row Erg, Bike Erg, Ski Erg (same flywheel + PM5) | `mobile/src/lib/movements.ts` `pacePer500mToWatts` |
 | Air Bike cal/min ↔ watts | **Assault / Echo / Rogue / Schwinn industry convention** — `watts ≈ cal/min × 17.4` (calibrated at ~25% mechanical efficiency on cycle ergs, refined by ACSM 2018) | `movements.ts` `calsPerMinToWatts` |
 | StairMill VO2 protocol | **Allison et al. (2017) Med Sci Sports Exerc** — 3×20-sec stair sprints, 3×/week → +12% VO2peak in 6 weeks | `[activity].tsx` `STAIRMILL_ZONE_CONFIG.vo2max` |
-| StairMill Threshold protocol | **Honda et al. (2014) Diabetol Metab Syndr** — 3-min stair-climbing intervals | `STAIRMILL_ZONE_CONFIG.threshold` |
-| StairMill Endurance protocol | **Boreham et al. (2000) Prev Med** — sustained moderate stair climbing → +17% VO2max in 8 weeks | `STAIRMILL_ZONE_CONFIG.endurance` |
+| StairMill Threshold protocol | **Interval research (Seiler 2010; Laursen & Jenkins 2002) + ACSM 12th ed** — hard 3-min intervals → lactate-threshold adaptation | `STAIRMILL_ZONE_CONFIG.threshold` |
+| StairMill Endurance protocol | **Boreham et al. (2000) Prev Med + ACSM 12th ed** — accumulated daily stair climbing improved VO2max; ACSM backs the 20-min continuous block | `STAIRMILL_ZONE_CONFIG.endurance` |
 | Swimming CSS (Critical Swim Speed) | **Costill's lactate-threshold work (Indiana University)** — canonical `(400m TT − 200m TT) ÷ 200`; MyRX uses Riegel-projected proxy until calibration session ships | `[activity].tsx` `riegelProjectCSS` |
 | Swim training prescriptions (pace zones) | **Maglischo "Swimming Even Faster" (1993)**, **Doc Counsilman "Science of Swimming" (1968)** | `SWIM_ZONE_SESSIONS`, `SWIM_ZONE_PACE_OFFSETS` |
 | Swim T-pace test set (canonical 10×100m) | **Costill** — used at every level from age-group to Olympic prep | `SWIM_ZONE_SESSIONS.threshold` |
@@ -3961,7 +3960,7 @@ Single source of truth for "which scientific work each formula in MyRX comes fro
 | Surface / formula | Source | Where it lives |
 |---|---|---|
 | Air Bike cold-start cal/min | **MyRX-calibrated** from typical commercial Assault Bike output at intermediate effort — male 18 / female 13 / else 15 | `mobile/src/lib/movements.ts` `genderBaselineCalsPerMin` |
-| StairMill cold-start floors/min | **MyRX-calibrated** from typical Stairmaster Gauntlet output at moderate-vigorous effort — male 12 / female 9 / else 10 | `mobile/src/lib/movements.ts` `genderBaselineFloorsPerMin` |
+| StairMill cold-start floors/min | **MyRX-calibrated** from typical Stairmaster Gauntlet output at moderate-vigorous effort — male 12 / else 9 (male/else=female rule) | `mobile/src/lib/movements.ts` `genderBaselineFloorsPerMin` |
 | Per-second HR storage | **Samsung Health Data SDK v1.1.0** — `ExerciseSession.log[].heartRate` field (1 Hz cadence) → stored as `wearable_workouts.raw_meta.hr_log` JSONB array | `mobile/android/.../SamsungHealthModule.kt` + `mobile/src/lib/integrations/samsungHealth.ts` |
 
 ### Mobility / ROM, Bodyweight

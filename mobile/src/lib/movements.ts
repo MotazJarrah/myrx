@@ -420,10 +420,12 @@ export const RUCK_WEIGHT_LOG_LADDER_LB: readonly number[] = [0, ...RUCK_WEIGHT_L
 //   • Allison et al. (2017) Med Sci Sports Exerc — "Brief Intense Stair
 //     Climbing Improves Cardiorespiratory Fitness". 3 × 20-sec sprints,
 //     3×/week → +12 % VO2peak in 6 weeks. Drives the VO2 zone protocol.
-//   • Boreham et al. (2000) Prev Med — sustained moderate stair climbing
-//     → +17 % VO2max in 8 weeks. Drives the Endurance zone protocol.
-//   • Honda et al. (2014) Diabetol Metab Syndr — 3-min interval sets for
-//     metabolic adaptation. Drives the Threshold zone protocol.
+//   • Boreham et al. (2000) Prev Med — accumulated daily stair climbing
+//     improved VO2max ~17 % in sedentary adults; ACSM 12th ed supports
+//     20-min continuous vigorous climbing. Drives the Endurance zone.
+//   • Interval-training research (Seiler 2010; Laursen & Jenkins 2002) +
+//     ACSM 12th ed — hard 3-min intervals drive lactate-threshold
+//     adaptation. Drives the Threshold zone protocol.
 //   • ACSM Guidelines for Exercise Testing and Prescription, 12th ed (2025)
 //     — rates stair climbing as vigorous-intensity, endorses 3-zone
 //     polarized programming.
