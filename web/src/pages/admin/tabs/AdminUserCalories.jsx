@@ -7,6 +7,7 @@ import SwipeDelete from '../../../components/SwipeDelete'
 import { calcFullPlan, ACTIVITY_FACTORS } from '../../../lib/calorieFormulas'
 import MacroPlanEditor from '../../../components/MacroPlanEditor'
 import { useAuth } from '../../../contexts/AuthContext'
+import { BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
 
@@ -506,6 +507,50 @@ function WeightGoalCard({ plan, clientProfile, latestBW, coachUnit }) {
   )
 }
 
+// ── Calorie-intake trend chart ────────────────────────────────────────────────
+// The athlete page itself has no line chart, but every other coach tab (Bodyweight
+// / Sleep / Hydration) shows a trend chart, and the old Manual-Logs tab had the
+// calorie chart. This restores a graph: daily logged calories (from food_logs)
+// over the 14-day window, with a dashed reference line at the plan's daily target.
+// Days over target render amber, at/under target emerald (mirrors Hydration's bar
+// chart style). Renders only once there's at least one logged day.
+function CaloriesTrendChart({ logsMap, dailyTarget }) {
+  const data = buildDayWindow().map(d => ({
+    label:    `${d.day} ${d.num}`,
+    calories: Math.round(logsMap[d.iso]?.calories || 0),
+  }))
+  if (!data.some(d => d.calories > 0)) return null
+  const yMax = Math.ceil(Math.max(dailyTarget || 0, ...data.map(d => d.calories), 1) * 1.1)
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <h2 className="text-sm font-semibold mb-3">
+        Calorie intake <span className="text-muted-foreground font-normal">(last 14 days)</span>
+      </h2>
+      <ResponsiveContainer width="100%" height={160}>
+        <BarChart data={data} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+          <YAxis domain={[0, yMax]} tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} tickCount={4} />
+          <Tooltip
+            contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }}
+            formatter={(v) => [`${v} kcal`, 'Intake']}
+          />
+          {dailyTarget > 0 && <ReferenceLine y={dailyTarget} stroke="#60a5fa" strokeDasharray="4 3" strokeOpacity={0.5} />}
+          <Bar dataKey="calories" radius={[3, 3, 0, 0]} isAnimationActive animationDuration={700}>
+            {data.map((d, i) => (
+              <Cell key={i} fill={dailyTarget > 0 && d.calories > dailyTarget ? '#f59e0b' : '#34d399'} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      {dailyTarget > 0 && (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Dashed line = daily target ({Math.round(dailyTarget)} kcal). Days over target in amber.
+        </p>
+      )}
+    </div>
+  )
+}
+
 // ── Food Log tab (reads from food_logs) ───────────────────────────────────────
 
 const MEAL_SLOTS = [
@@ -821,6 +866,9 @@ export default function AdminUserCalories({ userId, existingPlan, profile, admin
             dailyTarget={dailyTarget}
             macroTargets={macroTargets}
           />
+
+          {/* Calorie-intake trend (last 14 days) — restores a graph to this tab */}
+          <CaloriesTrendChart logsMap={logsMap} dailyTarget={dailyTarget} />
 
           {/* Weight-goal progress (coach's units) */}
           <WeightGoalCard
