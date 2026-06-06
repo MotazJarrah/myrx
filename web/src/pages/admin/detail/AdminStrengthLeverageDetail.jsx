@@ -76,7 +76,11 @@ function leverageVariantLabel(name) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-export default function AdminStrengthLeverageDetail({ userId, exercise, onBack }) {
+// `hideHeader` — when true, suppress this component's OWN header block (back
+// button + h1 movement name + "Best —" subtitle + SKILL badge) so it can be
+// embedded inside AdminStrengthFamilyDetail without a duplicate header. The
+// tiles + hero + chart + log all still render.
+export default function AdminStrengthLeverageDetail({ userId, exercise, onBack, hideHeader = false }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
 
@@ -154,32 +158,36 @@ export default function AdminStrengthLeverageDetail({ userId, exercise, onBack }
 
   return (
     <div className="space-y-5">
-      <button
-        onClick={backFn}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to Client
-      </button>
+      {/* ── 1. Header (suppressed when embedded inside the family detail) ── */}
+      {!hideHeader && (
+        <>
+          <button
+            onClick={backFn}
+            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back to Client
+          </button>
 
-      {/* ── 1. Header ── */}
-      <div>
-        <h1 className="text-xl font-bold tracking-tight">{exercise}</h1>
-        <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
-          {bestSecs > 0 ? (
-            <>
-              <span>Best —</span>
-              <TickerNumber value={fmtDurationLong(bestSecs)} className="font-mono font-semibold text-blue-400" />
-            </>
-          ) : (
-            <span>No efforts logged yet</span>
-          )}
-        </p>
-        <div className="mt-1.5 flex flex-col items-start gap-1">
-          <span className="inline-flex items-center rounded border border-blue-500/30 bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-400">
-            SKILL
-          </span>
-        </div>
-      </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">{exercise}</h1>
+            <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
+              {bestSecs > 0 ? (
+                <>
+                  <span>Best —</span>
+                  <TickerNumber value={fmtDurationLong(bestSecs)} className="font-mono font-semibold text-blue-400" />
+                </>
+              ) : (
+                <span>No efforts logged yet</span>
+              )}
+            </p>
+            <div className="mt-1.5 flex flex-col items-start gap-1">
+              <span className="inline-flex items-center rounded border border-blue-500/30 bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-blue-400">
+                SKILL
+              </span>
+            </div>
+          </div>
+        </>
+      )}
 
       {loading ? (
         <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>

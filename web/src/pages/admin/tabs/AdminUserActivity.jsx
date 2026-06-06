@@ -142,6 +142,26 @@ export default function AdminUserActivity({ userId }) {
     load()
   }, [userId])
 
+  // ── Admin-added variant families (parent → children) ──────────────────────
+  // Build childName → { parentName, shortLabel } from the movements catalog so
+  // we can collapse a family's children (e.g. "Planche Hold [Tuck]" /
+  // "[Straddle]" / "[Full]") into ONE row keyed by the PARENT ("Planche Hold"),
+  // mirroring the athlete strength index. The badge = variant_short_label of
+  // the most-recently-logged child; the row routes to the PARENT name so the
+  // AdminEffortDetail dispatch renders the consolidated family detail.
+  const familyChildMap = useMemo(() => {
+    const byId = {}
+    dbMovements.forEach(m => { byId[m.id] = m })
+    const map = {}
+    dbMovements.forEach(m => {
+      if (!m.parent_movement_id) return
+      const parent = byId[m.parent_movement_id]
+      if (!parent) return
+      map[m.name] = { parentName: parent.name, shortLabel: m.variant_short_label || null }
+    })
+    return map
+  }, [dbMovements])
+
   // ── Group efforts into collapsed family rows ──────────────────────────────
   const { strengthMoves, cardioMoves } = useMemo(() => {
     const strengthMap = {}
@@ -166,6 +186,33 @@ export default function AdminUserActivity({ userId }) {
           }
           g.count++
           if (ts > g.recentTs) { g.recentTs = ts; g.recentVariant = sledVariant }
+          const m = e.value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
+          if (m) {
+            const rm = parseFloat(m[1])
+            if (g.best1RM === null || rm > g.best1RM) { g.best1RM = rm; g.unit = m[2] }
+          }
+          return
+        }
+
+        // ── Admin-added variant family consolidation ───────────────────────
+        // If this effort's movement head is a family CHILD, group it under the
+        // PARENT name. Badge = variant_short_label of the most-recently-logged
+        // child (tracked via recentTs — efforts arrive newest-first but the
+        // ts comparison is order-independent). navName = PARENT so tapping
+        // routes to the consolidated family detail. Runs AFTER the Sled block
+        // (Sled is hardcoded, not catalog-driven) so Sled is never
+        // double-handled here.
+        const family = familyChildMap[head]
+        if (family) {
+          const key = family.parentName
+          const g = strengthMap[key] ??= {
+            label: key, navName: key, kind: 'family', count: 0,
+            best1RM: null, unit: 'lb', recentTs: -1, recentShort: family.shortLabel,
+          }
+          g.count++
+          if (ts > g.recentTs) { g.recentTs = ts; g.recentShort = family.shortLabel }
+          // Leverage holds store durations, not Est. 1RM — but capture a 1RM if
+          // a future weighted family ever logs one, so the stat line can show it.
           const m = e.value?.match(/Est\. 1RM (\d+(?:\.\d+)?)\s*(\w+)/)
           if (m) {
             const rm = parseFloat(m[1])
@@ -265,6 +312,7 @@ export default function AdminUserActivity({ userId }) {
         badge:
           d.kind === 'sled' ? (d.recentVariant === 'push' ? 'PUSH' : 'DRAG')
           : d.kind === 'bw'  ? (d.canHaveTiers ? BW_TIER_BADGE[d.highestTier] : null)
+          : d.kind === 'family' ? d.recentShort
           : null,
       }))
       .sort((a, b) => b.count - a.count)
@@ -281,7 +329,7 @@ export default function AdminUserActivity({ userId }) {
       .sort((a, b) => b.count - a.count)
 
     return { strengthMoves, cardioMoves }
-  }, [efforts, dbMovements])
+  }, [efforts, dbMovements, familyChildMap])
 
   const visibleMoves = view === 'cardio' ? cardioMoves : strengthMoves
 

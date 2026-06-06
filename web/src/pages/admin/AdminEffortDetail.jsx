@@ -19,6 +19,7 @@ import AdminStrengthOlympicDetail from './detail/AdminStrengthOlympicDetail'
 import AdminStrengthBallisticDetail from './detail/AdminStrengthBallisticDetail'
 import AdminStrengthLeverageDetail from './detail/AdminStrengthLeverageDetail'
 import AdminStrengthLoadDetail from './detail/AdminStrengthLoadDetail'
+import AdminStrengthFamilyDetail from './detail/AdminStrengthFamilyDetail'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
@@ -108,6 +109,10 @@ export default function AdminEffortDetail() {
   const [entries,  setEntries]  = useState([])
   const [loading,  setLoading]  = useState(true)
   const [movement, setMovement] = useState(undefined) // undefined = loading, null = not found
+  // Number of CHILD movements pointing at this row as their parent. ≥2 (and this
+  // row being a parent itself, i.e. parent_movement_id == null) means an
+  // admin-added variant family → render the consolidated family detail.
+  const [familyChildCount, setFamilyChildCount] = useState(0)
 
   useEffect(() => {
     async function load() {
@@ -139,11 +144,27 @@ export default function AdminEffortDetail() {
       .replace(/ \[Knee\]$/, '')
     let alive = true
     setMovement(undefined)
-    supabase.from('movements')
-      .select('equipment, strength_type, lift_type, hold_type, unit_lock, uses_pair, weight_ladder_override')
-      .eq('name', baseExercise)
-      .maybeSingle()
-      .then(({ data }) => { if (alive) setMovement(data ?? null) })
+    setFamilyChildCount(0)
+    ;(async () => {
+      const { data } = await supabase.from('movements')
+        .select('id, parent_movement_id, equipment, strength_type, lift_type, hold_type, unit_lock, uses_pair, weight_ladder_override')
+        .eq('name', baseExercise)
+        .maybeSingle()
+      if (!alive) return
+      // Only a PARENT row (parent_movement_id == null) can head a variant
+      // family. Count its children FIRST so the dispatch can pick the family
+      // detail (needs ≥2) without a flicker through a per-variant branch. A
+      // child row (parent_movement_id != null) routes to its normal
+      // per-variant detail and skips the count.
+      if (data && data.parent_movement_id == null) {
+        const { count } = await supabase.from('movements')
+          .select('id', { count: 'exact', head: true })
+          .eq('parent_movement_id', data.id)
+        if (!alive) return
+        setFamilyChildCount(count ?? 0)
+      }
+      setMovement(data ?? null)
+    })()
     return () => { alive = false }
   }, [kind, exercise])
 
@@ -174,6 +195,13 @@ export default function AdminEffortDetail() {
         : / \[Band\]$/.test(exercise) ? 'band'
         : / \[Knee\]$/.test(exercise) ? 'knee'
         : null
+      // Admin-added variant family — a PARENT row (parent_movement_id == null)
+      // with ≥2 children. Render the consolidated family detail BEFORE any
+      // per-variant branch. A CHILD row (parent_movement_id != null, e.g. opened
+      // directly as "Planche Hold [Full]") falls through to its per-variant
+      // detail below.
+      if (movement.parent_movement_id == null && familyChildCount >= 2)
+        return <AdminStrengthFamilyDetail userId={userId} exercise={exercise} onBack={goBack} />
       // Leverage/skill holds (planche, levers, flag…) — before the isometric
       // branch (they ARE strength_type='isometric', just a different progression).
       if (movement.hold_type === 'leverage')
