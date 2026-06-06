@@ -17,7 +17,7 @@
  *   - mobile/app/(app)/effort/strength/[exercise].tsx → AssistedMachineDetail
  *
  * Sections, top to bottom (matching the athlete):
- *   1. Header               — movement name + "Best Est. 1RM — N <unit> assist"
+ *   1. Header               — movement name + "Best — N <unit> assist"
  *                             (TickerNumber) + "ASSIST MACHINE" category pill
  *   2. Bodyweight gate       — if no bodyweight log ≤ 30 days, the rep-max card
  *                             + hero are REPLACED by a CTA pointing at the
@@ -389,7 +389,7 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
         <h1 className="text-xl font-bold tracking-tight">{exercise}</h1>
         {best1RMAssistance != null ? (
           <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
-            <span>Best Est. 1RM —</span>
+            <span>Best —</span>
             <TickerNumber value={best1RMAssistance} className="font-mono font-semibold text-blue-400" />
             <span className="text-blue-400">{labelUnit} assist</span>
           </p>
@@ -397,7 +397,7 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
           <p className="mt-0.5 text-sm text-muted-foreground">No efforts logged yet</p>
         ) : (
           <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
-            <span>Best Est. 1RM —</span>
+            <span>Best —</span>
             <span className="text-blue-400">— {labelUnit} assist</span>
           </p>
         )}
@@ -556,9 +556,9 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
                     {showAttemptUnassisted ? (
                       selRepRange === 1 ? (
-                        <CueText className="text-sm text-foreground">{`Attempt an unassisted ${bareName}, they're ready.`}</CueText>
+                        <CueText className="text-sm text-foreground">{`They've earned their way off the stack, but the machine eased the hardest part of every rep, so they should bridge to a strict ${bareName} with slow negatives and partial reps.`}</CueText>
                       ) : (
-                        <CueText className="text-sm text-foreground">{`Attempt ${selRepRange} unassisted ${bareName}s, they're ready.`}</CueText>
+                        <CueText className="text-sm text-foreground">{`They've earned their way off the stack, but the machine eased the hardest part of every rep, so they should bridge to ${selRepRange} strict ${bareName}s with slow negatives and partial reps.`}</CueText>
                       )
                     ) : selRepRange === 1 ? (
                       <>

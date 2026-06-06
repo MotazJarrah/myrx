@@ -2424,7 +2424,7 @@ function AssistedMachineDetail({
         <Text style={s.h1}>{exercise}</Text>
         {best1RMAssistance != null ? (
           <View style={s.subRow}>
-            <Text style={s.subText}>Best Est. 1RM — </Text>
+            <Text style={s.subText}>Best — </Text>
             <TickerNumber value={best1RMAssistance} fontSize={14} color={palette.blue[400]} fontWeight="600" />
             <Text style={[s.subText, s.subValueBlue]}> {labelUnit} assist</Text>
           </View>
@@ -2432,7 +2432,7 @@ function AssistedMachineDetail({
           <Text style={s.subText}>No efforts logged yet</Text>
         ) : (
           <View style={s.subRow}>
-            <Text style={s.subText}>Best Est. 1RM — </Text>
+            <Text style={s.subText}>Best — </Text>
             <Text style={[s.subText, s.subValueBlue]}>— {labelUnit} assist</Text>
           </View>
         )}
@@ -2668,9 +2668,9 @@ function AssistedMachineDetail({
               >
                 {showAttemptUnassisted ? (
                   selRepRange === 1 ? (
-                    <CueText>{`Attempt an unassisted ${bareName}, you're ready.`}</CueText>
+                    <CueText>{`You've earned your way off the stack, but the machine eased the hardest part of every rep, so bridge to a strict ${bareName} with slow negatives and partial reps.`}</CueText>
                   ) : (
-                    <CueText>{`Attempt ${selRepRange} unassisted ${bareName}s, you're ready.`}</CueText>
+                    <CueText>{`You've earned your way off the stack, but the machine eased the hardest part of every rep, so bridge to ${selRepRange} strict ${bareName}s with slow negatives and partial reps.`}</CueText>
                   )
                 ) : selRepRange === 1 ? (
                   <>
