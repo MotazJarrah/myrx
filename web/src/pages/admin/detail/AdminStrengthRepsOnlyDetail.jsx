@@ -114,9 +114,10 @@ function fmtShort(iso) {
 //   onBack      (fn, optional)      — custom back handler. Defaults to
 //                                     returning to the client's detail page.
 //
-// Self-contained: fetches efforts (filtered to the suffixed movement) + the
-// client's profile unit (unused for math but kept for parity with the weighted
-// mirror's fetch shape). Wiring is just:
+// Self-contained: fetches efforts (filtered to the suffixed movement). The
+// display unit comes from the COACH's profile (useAuth → coachUnit), not the
+// client — though this reps-only page shows no weights, so it's display-parity
+// only. Wiring is just:
 //   <AdminStrengthRepsOnlyDetail userId exercise assistType={...} />
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AdminStrengthRepsOnlyDetail({
@@ -127,6 +128,9 @@ export default function AdminStrengthRepsOnlyDetail({
 }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
+  // T093 note: this page is reps-only (band/knee assisted reps) and displays NO
+  // weights, so there is nothing to convert to the coach's unit. The vestigial
+  // client `profiles.weight_unit` fetch was removed (it was discarded anyway).
 
   // Assist type: prop wins (dispatcher passes it from the suffix), else derive.
   const assistType = assistTypeProp ?? assistTypeFromName(exercise)
@@ -139,27 +143,23 @@ export default function AdminStrengthRepsOnlyDetail({
     : assistType === 'knee'    ? 'Knee assisted'
                                : 'Band assisted'
 
-  // ── Load efforts (suffixed movement only) + profile ──────────────────────────
+  // ── Load efforts (suffixed movement only) ────────────────────────────────────
+  // T093: the client's weight_unit is no longer fetched — the coach views in
+  // their own unit (coachUnit). This page is reps-only so no weight display
+  // depends on it anyway.
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
-      const [efRes] = await Promise.all([
-        supabase
-          .from('efforts')
-          .select('id, label, value, type, created_at')
-          .eq('user_id', userId)
-          .eq('type', 'strength')
-          .ilike('label', `${exercise} · %`)
-          .order('created_at', { ascending: true }),
-        supabase
-          .from('profiles')
-          .select('weight_unit')
-          .eq('id', userId)
-          .maybeSingle(),
-      ])
+      const { data: efData } = await supabase
+        .from('efforts')
+        .select('id, label, value, type, created_at')
+        .eq('user_id', userId)
+        .eq('type', 'strength')
+        .ilike('label', `${exercise} · %`)
+        .order('created_at', { ascending: true })
       if (cancelled) return
-      setEntries(efRes.data || [])
+      setEntries(efData || [])
       setLoading(false)
     }
     load()

@@ -62,9 +62,33 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
+import { useAuth } from '../../../contexts/AuthContext'
 
 const LB_PER_KG = 0.453592
 const THIRTY_DAYS_MS = 30 * 86_400_000
+
+// ── Coach-units conversion (T093) ────────────────────────────────────────────
+// The coach views a client's strength in the COACH's weight unit. Assistance
+// values are stored/parsed in the unit the athlete logged (labelUnit); convert
+// the RESULTING displayed numbers to the coach's unit. CRITICAL: the inverted
+// effective-load / 1RM math runs in labelUnit using the client's actual
+// bodyweight — NONE of those inputs are converted here. Only render-boundary
+// display numbers are passed through convW.
+const KG_PER_LB_W = 0.453592
+function convW(w, from, to) {
+  if (w == null || !from || from === to) return w
+  return Math.round((to === 'kg' ? w * KG_PER_LB_W : w / KG_PER_LB_W) * 10) / 10
+}
+// Rewrite any "<n> lb" / "<n> kg" inside a logged effort-detail string into the
+// target unit (e.g. "60 lb assist · X × 8" → "27 kg assist · X × 8").
+function convDetail(detail, to) {
+  if (!detail) return detail
+  return detail.replace(/([\d.]+)\s*(lb|kg)\b/gi, (m, n, u) => {
+    const from = u.toLowerCase()
+    if (from === to) return `${n} ${to}`
+    return `${convW(parseFloat(n), from, to)} ${to}`
+  })
+}
 
 // ── 1RM estimation (Epley + Lombardi, +Brzycki ≤10 reps) ─────────────────────
 // Verbatim mirror of mobile estimate1RM. Brzycki's linear assumption breaks
@@ -165,14 +189,22 @@ function fmtShort(iso) {
 //   onBack    (fn)               — optional custom back handler. Defaults to
 //                                  returning to the client's detail page.
 //
-// Self-contained: fetches efforts, profile (weight_unit + current_weight), and
-// the client's latest bodyweight row itself, so wiring is just
+// Self-contained: fetches efforts, the client's profile current_weight (a MATH
+// input — the inverted effective-load math needs the client's actual bodyweight),
+// and the client's latest bodyweight row. The DISPLAY weight unit is the COACH's
+// unit (via useAuth), NOT the client's. Wiring is just
 // <AdminStrengthAssistedDetail userId exercise />.
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
-  const [profileUnit, setProfileUnit] = useState('lb')
+  // T093: the coach views a client's strength in the COACH's weight unit (via
+  // useAuth), not the client's. This is the DISPLAY unit only — all assistance/
+  // 1RM math still runs in the unit the athlete logged (labelUnit), and the
+  // client's bodyweight (current_weight / bodyweight log) stays in its own unit
+  // as a math input.
+  const { profile: coachProfile } = useAuth()
+  const coachUnit = coachProfile?.weight_unit || 'lb'
 
   // Bodyweight: { bwKg, isStale } | null. Fresh log < 30 d wins (used for math);
   // profile.current_weight falls back as stale (triggers the gate). Mirrors the
@@ -203,6 +235,11 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
           .eq('type', 'strength')
           .ilike('label', `${exercise} · %`)
           .order('created_at', { ascending: true }),
+        // current_weight is a MATH input (the client's actual bodyweight feeds
+        // the effective-load math). weight_unit is still read ONLY to interpret
+        // current_weight into kg — it is NOT used for display (display uses the
+        // coach's unit). The bodyweight-log row is self-describing (its own
+        // `unit` column), so the profile unit only matters for the stale fallback.
         supabase
           .from('profiles')
           .select('weight_unit, current_weight')
@@ -220,16 +257,17 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
       setEntries(efRes.data || [])
 
       const prof = profRes.data || null
-      const pUnit = prof?.weight_unit || 'lb'
-      setProfileUnit(pUnit)
 
       // Resolve bodyweight: fresh log < 30d → fresh; else profile fallback → stale.
+      // bwKg is the client's ACTUAL bodyweight in kg — unchanged math input.
       const row = bwRes.data?.[0]
       if (row && (Date.now() - new Date(row.created_at).getTime()) < THIRTY_DAYS_MS) {
         const rowKg = row.unit === 'lb' ? row.weight * LB_PER_KG : row.weight
         setBwInfo({ bwKg: rowKg, isStale: false })
       } else if (prof?.current_weight != null) {
-        const pKg = pUnit === 'lb' ? prof.current_weight * LB_PER_KG : prof.current_weight
+        // Interpret current_weight using the CLIENT's stored unit (math only).
+        const clientUnit = prof.weight_unit || 'lb'
+        const pKg = clientUnit === 'lb' ? prof.current_weight * LB_PER_KG : prof.current_weight
         setBwInfo({ bwKg: pKg, isStale: true })
       } else {
         setBwInfo(null)
@@ -257,7 +295,13 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
     })
     .filter(Boolean), [entries])
 
-  const labelUnit = parsed[0]?.unit || profileUnit
+  // labelUnit drives all MATH (assistance, effective-load, 1RM projections). For
+  // real efforts it's the unit the athlete logged (unchanged). Falls back to the
+  // coach's unit only when there are no efforts to parse.
+  const labelUnit = parsed[0]?.unit || coachUnit
+  // dispUnit is the DISPLAY unit (T093) — the coach's own unit. Every rendered
+  // weight is converted from labelUnit → dispUnit via convW at the render boundary.
+  const dispUnit = coachUnit
 
   // ── Inverted assistance math (CLAUDE.md "Assisted Machine detail card") ─────
   //   effective_load(effort) = max(0, bodyweight − assistance)
@@ -354,9 +398,12 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
   }
 
   // ── Chart data — assistance over time ────────────────────────────────────────
+  // Each logged assistance is parsed in its own unit (p.unit) and converted to
+  // the coach's display unit. maxV / yMax / bestAssistance below derive from
+  // these already-converted values, so the whole chart renders in dispUnit.
   const chartData = useMemo(() => parsed
-    .map(p => ({ ts: p.ts, date: fmtShort(p.ts), value: p.assistance })),
-    [parsed])
+    .map(p => ({ ts: p.ts, date: fmtShort(p.ts), value: convW(p.assistance, p.unit, dispUnit) })),
+    [parsed, dispUnit])
 
   const values = chartData.map(d => d.value)
   const maxV   = values.length ? Math.max(...values) : 10
@@ -390,15 +437,15 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
         {best1RMAssistance != null ? (
           <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
             <span>Best —</span>
-            <TickerNumber value={best1RMAssistance} className="font-mono font-semibold text-blue-400" />
-            <span className="text-blue-400">{labelUnit} assist</span>
+            <TickerNumber value={convW(best1RMAssistance, labelUnit, dispUnit)} className="font-mono font-semibold text-blue-400" />
+            <span className="text-blue-400">{dispUnit} assist</span>
           </p>
         ) : parsed.length === 0 ? (
           <p className="mt-0.5 text-sm text-muted-foreground">No efforts logged yet</p>
         ) : (
           <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
             <span>Best —</span>
-            <span className="text-blue-400">— {labelUnit} assist</span>
+            <span className="text-blue-400">— {dispUnit} assist</span>
           </p>
         )}
         <span className="mt-1 inline-flex items-center rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-400">
@@ -496,8 +543,9 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                         {r}RM
                       </span>
                       <span className={`mt-0.5 font-mono text-base font-bold tabular-nums ${isSelected ? 'text-blue-400' : 'text-foreground'}`}>
-                        {a}
+                        {convW(a, labelUnit, dispUnit)}
                       </span>
+                      {/* bwPct is a ratio (assistance ÷ bodyweight) — unit-invariant, NOT converted. */}
                       <span className={`mt-0.5 font-mono text-[9px] tabular-nums leading-none ${isSelected ? 'text-blue-400/70' : 'text-muted-foreground/50'}`}>
                         {bwPct}% BW
                       </span>
@@ -537,8 +585,8 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                   <div className="mt-1">
                     <div className="flex items-baseline justify-between">
                       <div className="flex items-baseline gap-1">
-                        <TickerNumber value={targetAssistance} className="font-mono text-3xl font-bold text-blue-400" />
-                        <span className="text-blue-400">{labelUnit}</span>
+                        <TickerNumber value={convW(targetAssistance, labelUnit, dispUnit)} className="font-mono text-3xl font-bold text-blue-400" />
+                        <span className="text-blue-400">{dispUnit}</span>
                       </div>
                       <span className="text-blue-400">assist</span>
                     </div>
@@ -562,11 +610,11 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                       )
                     ) : selRepRange === 1 ? (
                       <>
-                        <CueText className="text-sm text-foreground">{`Hit one clean rep with ${targetAssistance} ${labelUnit} assistance.`}</CueText>
+                        <CueText className="text-sm text-foreground">{`Hit one clean rep with ${convW(targetAssistance, labelUnit, dispUnit)} ${dispUnit} assistance.`}</CueText>
                         <p className="text-[11px] text-muted-foreground">Benchmark attempt</p>
                       </>
                     ) : (
-                      <CueText className="text-sm text-foreground">{`Do ${selZoneCfg.setsText} of ${selRepRange} reps with ${targetAssistance} ${labelUnit} assistance; rest ${selZoneCfg.restText} between sets.`}</CueText>
+                      <CueText className="text-sm text-foreground">{`Do ${selZoneCfg.setsText} of ${selRepRange} reps with ${convW(targetAssistance, labelUnit, dispUnit)} ${dispUnit} assistance; rest ${selZoneCfg.restText} between sets.`}</CueText>
                     )}
                   </div>
                 </div>
@@ -606,7 +654,7 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                         borderRadius: 8,
                         fontSize: 12,
                       }}
-                      formatter={(v) => [`${v} ${labelUnit}`, 'Assistance']}
+                      formatter={(v) => [`${v} ${dispUnit}`, 'Assistance']}
                     />
                     {bestAssistance != null && (
                       <ReferenceLine y={bestAssistance} stroke="#60a5fa" strokeDasharray="4 3" strokeOpacity={0.5} />
@@ -648,12 +696,15 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                 {[...entries].reverse().map(e => {
                   const p = parseAssistanceFromLabel(e.label)
                   const reps = parseRepsFromLabel(e.label)
+                  // Fallback detail string (when reps don't parse) — convert any
+                  // embedded lb/kg weight into the coach's display unit.
+                  const fallbackDetail = convDetail(e.label.split(' · ').slice(1).join(' · '), dispUnit)
                   return (
                     <SwipeDelete key={e.id} onDelete={() => deleteEntry(e.id)}>
                       <div className="flex items-center gap-3 px-4 py-2.5">
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">
-                            {reps ? `${reps} rep${reps !== 1 ? 's' : ''}` : (e.label.split(' · ').slice(1).join(' · ') || e.label)}
+                            {reps ? `${reps} rep${reps !== 1 ? 's' : ''}` : (fallbackDetail || e.label)}
                           </p>
                           <p className="text-[11px] text-muted-foreground">{fmtDate(e.created_at)}</p>
                         </div>
@@ -661,7 +712,7 @@ export default function AdminStrengthAssistedDetail({ userId, exercise, onBack }
                           <span className="shrink-0 text-right">
                             <span className="block text-[10px] text-muted-foreground">assistance</span>
                             <span className="block font-mono text-xs font-semibold tabular-nums text-blue-400">
-                              {p.assistance} {p.unit}
+                              {convW(p.assistance, p.unit, dispUnit)} {dispUnit}
                             </span>
                           </span>
                         )}

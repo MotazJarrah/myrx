@@ -60,6 +60,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
+import { useAuth } from '../../../contexts/AuthContext'
 
 // ── Carry tier benchmarks (verbatim mirror of mobile CARRY_BENCHMARKS) ────────
 // Tuple format: [minRatio_or_minKg, minDist_m]
@@ -294,19 +295,22 @@ function MiniChart({ data, label, best, unit, stroke, caption }) {
 //                              Hug Carry" or "Sled Work [Push]".
 //   displayName     (string) — h1 override (Sled Work uses "Sled Work").
 //   efforts         (array)  — already-filtered efforts for THIS variant.
-//   profileWeightU  ('lb'|'kg') — client's profile weight unit.
+//   coachUnit       ('lb'|'kg') — the COACH's weight unit (T093). The coach
+//                              views in their own unit, not the client's.
 //   unitLock        ('lb'|'kg'|null) — movements.unit_lock for this movement.
 //   userId          (string) — client auth id (for the bodyweight fetch).
 //   onDelete        (fn)     — delete one effort by id.
 //   hideHeader      (bool)   — skip the header (Sled wrapper draws its own).
 // ─────────────────────────────────────────────────────────────────────────────
 function CarrySurface({
-  exercise, displayName, efforts, profileWeightU, unitLock, userId, onDelete, hideHeader,
+  exercise, displayName, efforts, coachUnit, unitLock, userId, onDelete, hideHeader,
 }) {
-  // Display units: unit_lock wins, else profile preference.
+  // Display units (T093): unit_lock wins (strongman kg lock), else the COACH's
+  // unit. distUnit (m vs ft) derives from displayUnit below, so distance follows
+  // the coach's unit automatically.
   const displayUnit = (unitLock === 'kg' || unitLock === 'lb')
     ? unitLock
-    : (profileWeightU === 'kg' ? 'kg' : 'lb')
+    : coachUnit
   // Distance display: meters for kg users, feet for lb users (matches athlete).
   const distUnit = displayUnit === 'kg' ? 'm' : 'ft'
 
@@ -731,9 +735,15 @@ function sledBestFor(variantEfforts, displayUnit, distUnit) {
 export default function AdminStrengthCarryDetail({ userId, exercise, onBack }) {
   const isSledConsolidated = exercise === 'Sled Work'
 
+  // T093: the coach views a client's strength in the COACH's weight unit (via
+  // useAuth), not the client's. The strongman kg unitLock still overrides at the
+  // `displayUnit` derivation inside CarrySurface. Distance (m vs ft) derives from
+  // displayUnit, so it follows the coach's unit automatically.
+  const { profile: coachProfile } = useAuth()
+  const coachUnit = coachProfile?.weight_unit || 'lb'
+
   const [entries, setEntries]     = useState([])
   const [loading, setLoading]     = useState(true)
-  const [profileUnit, setProfileUnit] = useState('lb')
   const [unitLock, setUnitLock]   = useState(null)   // standalone path only
 
   // Sled toggle state. `null` = no explicit pick yet → fall back to slot 0 of
@@ -763,22 +773,22 @@ export default function AdminStrengthCarryDetail({ userId, exercise, onBack }) {
           ].join(','))
         : effortQuery.ilike('label', `${exercise} · %`)
 
-      const queries = [
-        filtered,
-        supabase.from('profiles').select('weight_unit').eq('id', userId).maybeSingle(),
-      ]
+      const queries = [filtered]
       // Only the standalone path has a real movement row to read unit_lock from.
+      // (The client's weight_unit is intentionally NOT fetched — T093: the coach
+      // views in their own unit, sourced from useAuth above. The client's
+      // current_weight is still fetched separately inside CarrySurface's
+      // bodyweight effect for the ratio-tier math.)
       if (!isSledConsolidated) {
         queries.push(
           supabase.from('movements').select('unit_lock').eq('name', exercise).maybeSingle()
         )
       }
 
-      const [efRes, profRes, movRes] = await Promise.all(queries)
+      const [efRes, movRes] = await Promise.all(queries)
       if (cancelled) return
 
       setEntries(efRes.data || [])
-      setProfileUnit(profRes.data?.weight_unit || 'lb')
       if (!isSledConsolidated) setUnitLock(movRes?.data?.unit_lock ?? null)
       setLoading(false)
     }
@@ -852,14 +862,14 @@ export default function AdminStrengthCarryDetail({ userId, exercise, onBack }) {
           sledVariantOrder={sledVariantOrder}
           activeVariant={activeVariant}
           setActiveVariant={setPickedVariant}
-          profileWeightU={profileUnit}
+          coachUnit={coachUnit}
           onDelete={deleteEntry}
         />
       ) : (
         <CarrySurface
           exercise={exercise}
           efforts={entries}
-          profileWeightU={profileUnit}
+          coachUnit={coachUnit}
           unitLock={unitLock}
           userId={userId}
           onDelete={deleteEntry}
@@ -876,9 +886,11 @@ export default function AdminStrengthCarryDetail({ userId, exercise, onBack }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function SledConsolidatedView({
   userId, effortsByVariant, sledVariantOrder, activeVariant, setActiveVariant,
-  profileWeightU, onDelete,
+  coachUnit, onDelete,
 }) {
-  const displayUnit = profileWeightU === 'kg' ? 'kg' : 'lb'
+  // T093: Sled Work is ratio-mode but NOT unit-locked, so the display unit is the
+  // COACH's unit (no unitLock to win here). distUnit (m vs ft) follows.
+  const displayUnit = coachUnit === 'kg' ? 'kg' : 'lb'
   const distUnit    = displayUnit === 'kg' ? 'm' : 'ft'
 
   const variantEfforts = effortsByVariant[activeVariant] ?? []
@@ -943,7 +955,7 @@ function SledConsolidatedView({
         exercise={`Sled Work [${activeVariant === 'push' ? 'Push' : 'Drag'}]`}
         displayName="Sled Work"
         efforts={variantEfforts}
-        profileWeightU={profileWeightU}
+        coachUnit={coachUnit}
         unitLock={null}
         userId={userId}
         onDelete={onDelete}

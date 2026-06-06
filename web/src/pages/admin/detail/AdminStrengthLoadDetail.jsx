@@ -24,6 +24,22 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
+import { useAuth } from '../../../contexts/AuthContext'
+
+// ── Coach-units conversion (T093) ────────────────────────────────────────────
+// The coach views a client's strength in the COACH's weight unit. The added load
+// is stored/parsed in the unit the athlete logged; convert to the coach's unit
+// for display ONLY. Durations (seconds) are never weights and stay untouched.
+const KG_PER_LB_W = 0.453592
+function convW(w, from, to) {
+  if (w == null || !from || from === to) return w
+  return Math.round((to === 'kg' ? w * KG_PER_LB_W : w / KG_PER_LB_W) * 10) / 10
+}
+// NOTE: the template's convDetail (rewrites "<n> lb/kg" inside a raw effort-detail
+// string) is intentionally NOT included here — this view rebuilds its efforts-list
+// rows from parsed numerics (load + formatted duration), so there's no raw
+// detail string to rewrite. The numeric load is converted directly via convW;
+// durations are never weights and stay as-is.
 
 // ── Duration formatters (verbatim mirror of mobile) ───────────────────────────
 function fmtDuration(secs) {
@@ -84,9 +100,14 @@ function rohmertFactor(secs) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
+export default function AdminStrengthLoadDetail({ userId, exercise, unitLock = null, onBack }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
+  // T093: the coach views a client's strength in the COACH's weight unit (via
+  // useAuth), not the client's. Load-holds have no unit_lock today, but honor it
+  // defensively if ever passed (strongman kg lock precedence).
+  const { profile: coachProfile } = useAuth()
+  const coachUnit = coachProfile?.weight_unit || 'lb'
 
   useEffect(() => {
     let cancelled = false
@@ -127,9 +148,12 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
   )
   const bestLoad    = bestWeightedEffort?.weight ?? 0
   const bestLoadDur = (bestWeightedEffort && bestWeightedEffort.dur > 0) ? bestWeightedEffort.dur : LOAD_HOLD_TARGET_SECS
-  const unit        = (parsed.find(p => p.unit)?.unit) || 'lb'
+  // srcUnit = the unit the client logged in (drives all load MATH below, unchanged).
+  // unit    = the coach's DISPLAY unit (T093): unit_lock → coach unit → lb.
+  const srcUnit     = (parsed.find(p => p.unit)?.unit) || 'lb'
+  const unit        = unitLock || coachUnit || 'lb'
 
-  const LOAD_INC      = unit === 'kg' ? 2.5 : 5
+  const LOAD_INC      = srcUnit === 'kg' ? 2.5 : 5
   const nextMilestone = LOAD_HOLD_BUILD_MILESTONES.find(m => m > bestBwHold) ?? null
 
   // Project the added weight to aim for at a given hold duration (Rohmert ratio),
@@ -143,15 +167,15 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
   const selAdded = projectedAddedFor(selLoadDur)
 
   const chartData = useMemo(() => (hasWeighted
-    ? entries.map(e => { const w = parseLoadHold(e.label).weight; return w > 0 ? { ts: e.created_at, date: fmtShort(e.created_at), value: w } : null })
+    ? entries.map(e => { const lh = parseLoadHold(e.label); return lh.weight > 0 ? { ts: e.created_at, date: fmtShort(e.created_at), value: convW(lh.weight, lh.unit, unit) } : null })
     : entries.map(e => { const d = parseDurationSecs(e.value); return d !== null ? { ts: e.created_at, date: fmtShort(e.created_at), value: d } : null })
-  ).filter(Boolean), [entries, hasWeighted])
+  ).filter(Boolean), [entries, hasWeighted, unit])
   const values = chartData.map(d => d.value)
   const minV   = values.length ? Math.min(...values) : 0
   const maxV   = values.length ? Math.max(...values) : 10
   const yMin   = Math.max(0, Math.round(minV * 0.85))
   const yMax   = Math.round(maxV * 1.15)
-  const refY   = chartData.length > 1 ? (hasWeighted ? bestLoad : bestBwHold) : null
+  const refY   = chartData.length > 1 ? (hasWeighted ? convW(bestLoad, srcUnit, unit) : bestBwHold) : null
 
   function backFn() {
     if (onBack) return onBack()
@@ -181,7 +205,8 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
       )
     }
     // Loaded phase: projected added weight per duration; click drives the hero.
-    const added  = projectedAddedFor(sec)
+    // Math runs in srcUnit; display in the coach's unit (T093).
+    const added  = convW(projectedAddedFor(sec), srcUnit, unit)
     const active = sec === selLoadDur
     return (
       <button
@@ -212,7 +237,7 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
         <h1 className="text-xl font-bold tracking-tight">{exercise}</h1>
         <p className="mt-0.5 flex items-baseline gap-1 text-sm text-muted-foreground">
           {hasWeighted ? (
-            <><span>Best —</span><TickerNumber value={bestLoad} className="font-mono font-semibold text-blue-400" /><span>{unit}</span></>
+            <><span>Best —</span><TickerNumber value={convW(bestLoad, srcUnit, unit)} className="font-mono font-semibold text-blue-400" /><span>{unit}</span></>
           ) : bestBwHold > 0 ? (
             <><span>Best —</span><TickerNumber value={fmtDurationLong(bestBwHold)} className="font-mono font-semibold text-blue-400" /></>
           ) : (
@@ -249,14 +274,14 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
                 <>
                   <div className="flex items-baseline gap-1.5">
                     {selAdded > 0 ? (
-                      <><TickerNumber value={selAdded} className="font-mono text-3xl font-bold text-blue-400" /><span className="text-sm text-muted-foreground">{unit} added</span></>
+                      <><TickerNumber value={convW(selAdded, srcUnit, unit)} className="font-mono text-3xl font-bold text-blue-400" /><span className="text-sm text-muted-foreground">{unit} added</span></>
                     ) : (
                       <span className="text-2xl font-bold text-blue-400">Bodyweight</span>
                     )}
                   </div>
                   <div className="mt-2.5 border-t border-blue-500/15 pt-2.5">
                     <CueText>{selAdded > 0
-                      ? `Hold ${selLoadDur < 60 ? `${selLoadDur} sec` : fmtDurationLong(selLoadDur)} with ${selAdded} ${unit} added, then add ${LOAD_INC} ${unit} once you hold it clean.`
+                      ? `Hold ${selLoadDur < 60 ? `${selLoadDur} sec` : fmtDurationLong(selLoadDur)} with ${convW(selAdded, srcUnit, unit)} ${unit} added, then add ${convW(LOAD_INC, srcUnit, unit)} ${unit} once you hold it clean.`
                       : `Hold ${selLoadDur < 60 ? `${selLoadDur} sec` : fmtDurationLong(selLoadDur)} at bodyweight — at that duration bodyweight alone is the work.`}</CueText>
                   </div>
                 </>
@@ -314,7 +339,10 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
               <div className="divide-y divide-border">
                 {[...entries].reverse().map(e => {
                   const secs = parseDurationSecs(e.value)
-                  const { weight: w } = parseLoadHold(e.label)
+                  const { weight: w, unit: wUnit } = parseLoadHold(e.label)
+                  // Convert the logged added-load to the coach's display unit (T093).
+                  // Durations (fmtDuration / fmtDurationLong) are not weights — kept as-is.
+                  const wDisp = convW(w, wUnit, unit)
                   return (
                     <SwipeDelete key={e.id} onDelete={() => deleteEntry(e.id)}>
                       <div className="flex items-center gap-3 px-4 py-2.5">
@@ -322,7 +350,7 @@ export default function AdminStrengthLoadDetail({ userId, exercise, onBack }) {
                           <p className="text-[11px] text-muted-foreground">{fmtDate(e.created_at)}</p>
                         </div>
                         <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-blue-400">
-                          {w > 0 ? `${w} ${unit} × ${fmtDuration(secs ?? 0)}` : fmtDurationLong(secs)}
+                          {w > 0 ? `${wDisp} ${unit} × ${fmtDuration(secs ?? 0)}` : fmtDurationLong(secs)}
                         </span>
                       </div>
                     </SwipeDelete>

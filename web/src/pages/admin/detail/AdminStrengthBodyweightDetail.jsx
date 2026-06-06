@@ -73,6 +73,42 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from 'recharts'
+import { useAuth } from '../../../contexts/AuthContext'
+
+// ── Coach-units conversion (T093) ────────────────────────────────────────────
+// The coach views a client's strength in the COACH's weight unit. Bodyweight
+// DISPLAY weights (e1RM, hero added-load, "+X" tile labels, efforts list) are
+// stored/parsed in the unit the athlete logged; convert to the coach's unit for
+// display ONLY. The e1RM MATH (estimate1RM(clientBodyweight + added, reps)) keeps
+// using the client's actual bodyweight + added load in the label unit — see the
+// clientBWInLabelUnit derivation — and only the RESULTING number is converted at
+// the display boundary. Bodyweight has no unit_lock, so coachUnit effectively wins.
+const KG_PER_LB_W = 0.453592
+function convW(w, from, to) {
+  if (w == null || !from || from === to) return w
+  return Math.round((to === 'kg' ? w * KG_PER_LB_W : w / KG_PER_LB_W) * 10) / 10
+}
+// Rewrite weights inside a logged effort-detail string into the target unit.
+// Two shapes appear on Full RX labels:
+//   plain     "162.9 lb × 27"  → "73.9 kg × 27"
+//   compound  "25+10 lb × 8"   → "11.3+4.5 kg × 8"  (base bodyweight + added load,
+//                                share one trailing unit — BOTH numbers convert)
+// The compound pass runs first so its base number isn't left unconverted by the
+// single-token regex (which only sees the digit-group directly before the unit).
+function convDetail(detail, to) {
+  if (!detail) return detail
+  let out = detail.replace(/([\d.]+)\+([\d.]+)\s*(lb|kg)\b/gi, (m, a, b, u) => {
+    const from = u.toLowerCase()
+    if (from === to) return `${a}+${b} ${to}`
+    return `${convW(parseFloat(a), from, to)}+${convW(parseFloat(b), from, to)} ${to}`
+  })
+  out = out.replace(/([\d.]+)\s*(lb|kg)\b/gi, (m, n, u) => {
+    const from = u.toLowerCase()
+    if (from === to) return `${n} ${to}`
+    return `${convW(parseFloat(n), from, to)} ${to}`
+  })
+  return out
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Tier model (verbatim mirror of mobile BW_TIERS / BW_TIER_RANK / labels)
@@ -288,6 +324,23 @@ function getNextAddedWeight(projected, unit = 'lb') {
   return { weight: target, plates: usedPlates }
 }
 
+// DISPLAY-only plate breakdown (T093): greedily break an EXACT added weight into
+// belt/vest plates of `unit` — no rounding-up (unlike getNextAddedWeight). Used
+// to re-plate the coach-unit added load so the chips match the coach-unit big
+// number instead of showing the client-unit plate sizes.
+function platesForAddedWeight(weight, unit = 'lb') {
+  const plates = PLATE_SIZES[unit] ?? PLATE_SIZES.lb
+  const used = []
+  let rem = Math.max(0, weight)
+  for (const p of plates) {
+    while (rem >= p - 0.001) {
+      used.push(p)
+      rem = Math.round((rem - p) * 1000) / 1000
+    }
+  }
+  return used
+}
+
 // ── Misc formatters ─────────────────────────────────────────────────────────
 function fmtDate(iso) {
   const d = new Date(iso)
@@ -333,9 +386,21 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
     .replace(/ \[Band\]$/, '')
     .replace(/ \[Knee\]$/, '')
 
+  // T093: the coach views a client's strength in the COACH's weight unit (via
+  // useAuth). Bodyweight has no unit_lock, so this is the DISPLAY unit for every
+  // shown weight. The client's own weight_unit is still tracked separately
+  // (clientWeightUnit, below) as a MATH input — it's needed to interpret the raw
+  // `current_weight` number and as the label-unit fallback for the e1RM math.
+  const { profile: coachProfile } = useAuth()
+  const coachUnit = coachProfile?.weight_unit || 'lb'
+
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
-  const [profileUnit, setProfileUnit] = useState('lb')
+  // MATH-only: the client's logged weight_unit. Used to interpret the raw
+  // `current_weight` number and as the label-unit fallback for the e1RM math
+  // (estimate1RM(clientBodyweight + added, reps)). NEVER used for display — all
+  // displayed weights use coachUnit.
+  const [clientWeightUnit, setClientWeightUnit] = useState('lb')
   const [profileBW, setProfileBW]     = useState(null)
   // Client bodyweight resolved like AdminStrengthCarry/AssistedDetail do — a
   // recent (≤30-day) `bodyweight` row preferred over `profiles.current_weight`.
@@ -409,8 +474,9 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
 
       const loaded = efRes.data || []
       setEntries(loaded)
+      // MATH input only — interprets current_weight + is the label-unit fallback.
       const pUnit = profRes.data?.weight_unit || 'lb'
-      setProfileUnit(pUnit)
+      setClientWeightUnit(pUnit)
       setProfileBW(profRes.data?.current_weight ?? null)
       setMeta(movement)
 
@@ -558,7 +624,11 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
       const targetRaw    = bestActualAdded > 0
         ? Math.max(formulaAdded, bestActualAdded + 0.001)
         : formulaAdded
-      const nextAdded    = targetRaw > 0 ? getNextAddedWeight(targetRaw, profileUnit) : null
+      // MATH: targetRaw / formulaAdded live in the client/label unit space (they
+      // derive from projections off effectiveOneRM in label unit), so plate
+      // sizing runs in the client unit. The resulting addedWeight + plates are
+      // converted to coachUnit at the DISPLAY boundary (tile labels + hero card).
+      const nextAdded    = targetRaw > 0 ? getNextAddedWeight(targetRaw, clientWeightUnit) : null
       const isGraduation = (r === bestRxReps) && (bestRxReps === BODYWEIGHT_THRESHOLD) && (bestActualAdded === 0)
       return {
         reps: r, mode: 'weighted',
@@ -567,7 +637,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
         achievable, isGraduation,
       }
     })
-  }, [weightedProgression, bestRxReps, projections, rxOnlyEfforts, profileBW, effectiveOneRM, profileUnit])
+  }, [weightedProgression, bestRxReps, projections, rxOnlyEfforts, profileBW, effectiveOneRM, clientWeightUnit])
 
   const selectedBWTile = bwTiles.find(t => t.reps === selectedRM) ?? null
 
@@ -616,30 +686,40 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
     [tierEfforts]
   )
   const chartIsE1RM = tierHasWeighted && clientBWInLabelUnit != null
-  // Unit shown alongside e1RM values — derive from this tier's weighted efforts
-  // (they carry the lb/kg), defaulting to the profile unit.
-  const chartUnit = useMemo(() => {
+  // MATH: the unit the raw e1RM is computed in. e1RM = estimate1RM(
+  // clientBWInLabelUnit + added, reps) — clientBWInLabelUnit is in the effort
+  // LABEL unit and `added` is parsed from the label, so the result is in this
+  // label unit. Derived from this tier's weighted efforts (they carry lb/kg),
+  // falling back to the client's weight_unit. This is converted to coachUnit
+  // for display below.
+  const chartLabelUnit = useMemo(() => {
     for (const e of tierEfforts) {
       const pv = parseOneRM(e.value)
       if (pv?.unit === 'kg' || pv?.unit === 'lb') return pv.unit
       const wm = e.label?.match(/·\s*[\d.+]+\s*(kg|lb)\s*×/)
       if (wm) return wm[1]
     }
-    return profileUnit === 'kg' ? 'kg' : 'lb'
-  }, [tierEfforts, profileUnit])
+    return clientWeightUnit === 'kg' ? 'kg' : 'lb'
+  }, [tierEfforts, clientWeightUnit])
+  // DISPLAY unit for the chart — the COACH's unit (T093). Tooltip/axis label
+  // match the converted e1RM values plotted below.
+  const chartUnit = coachUnit
 
   const chartData = useMemo(() => tierEfforts
     .map(e => {
       const r = parseRepsFromBwLabel(e.label)
       if (r === null) return null
       if (chartIsE1RM) {
+        // MATH (unchanged): e1RM from the client's actual bodyweight + added
+        // load, both in label unit. DISPLAY: convert the RESULT into coachUnit.
         const added = parseAddedWeightFromLabel(e.label)
         const e1RM  = estimate1RM(clientBWInLabelUnit + added, r)
-        return { ts: e.created_at, date: fmtShort(e.created_at), value: e1RM }
+        return { ts: e.created_at, date: fmtShort(e.created_at), value: convW(e1RM, chartLabelUnit, coachUnit) }
       }
+      // Reps mode — not a weight, no conversion.
       return { ts: e.created_at, date: fmtShort(e.created_at), value: r }
     })
-    .filter(Boolean), [tierEfforts, chartIsE1RM, clientBWInLabelUnit])
+    .filter(Boolean), [tierEfforts, chartIsE1RM, clientBWInLabelUnit, chartLabelUnit, coachUnit])
 
   const values = chartData.map(d => d.value)
   const minV   = values.length ? Math.min(...values) : 0
@@ -688,9 +768,11 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
             </span>
           ) : (
             <span className={`mt-1 whitespace-nowrap font-mono text-xs font-bold tabular-nums ${isSelected ? 'text-blue-400' : isCurrent ? 'text-blue-400' : achievable ? 'text-blue-400/70' : 'text-muted-foreground/50'}`}>
+              {/* aw is the added-load MATH result in clientWeightUnit; convert
+                  to coachUnit for DISPLAY. aw === 0 means bodyweight (unit-agnostic). */}
               {mode === 'locked' ? '—'
                 : mode === 'push' ? `→ ${nextRep}`
-                : aw === 0 ? 'BW' : `+${aw}`}
+                : aw === 0 ? 'BW' : `+${convW(aw, clientWeightUnit, coachUnit)}`}
             </span>
           )}
         </button>
@@ -829,27 +911,33 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
           </>
         )
       }
-      // weighted
-      return (
-        <>
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">attempt {selectedRM} {repWord(selectedRM)}</p>
-            <div className="mt-0.5 flex items-baseline gap-1">
-              <TickerNumber value={`+${selectedBWTile.addedWeight}`} className="font-mono text-4xl font-bold text-blue-400" />
-              <span className="text-sm text-muted-foreground">{profileUnit} added</span>
+      // weighted — DISPLAY in coachUnit. selectedBWTile.addedWeight + .plates are
+      // the MATH result in clientWeightUnit; convert the added load to coachUnit
+      // and re-plate it in coachUnit so the chips match the coach-unit big number.
+      {
+        const dispAdded  = convW(selectedBWTile.addedWeight, clientWeightUnit, coachUnit)
+        const dispPlates = platesForAddedWeight(dispAdded, coachUnit)
+        return (
+          <>
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">attempt {selectedRM} {repWord(selectedRM)}</p>
+              <div className="mt-0.5 flex items-baseline gap-1">
+                <TickerNumber value={`+${dispAdded}`} className="font-mono text-4xl font-bold text-blue-400" />
+                <span className="text-sm text-muted-foreground">{coachUnit} added</span>
+              </div>
             </div>
-          </div>
-          {selectedBWTile.plates.length > 0 && (
-            <div className="mt-2 flex flex-nowrap items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">belt / vest</span>
-              {selectedBWTile.plates.map((p, i) => (
-                <span key={i} className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-blue-400">{p}</span>
-              ))}
-            </div>
-          )}
-          <CueText className="mt-1 text-[11px] text-muted-foreground">{`Add ${selectedBWTile.addedWeight} ${profileUnit} of load, aim for ${selectedRM} clean rep${selectedRM > 1 ? 's' : ''}`}</CueText>
-        </>
-      )
+            {dispPlates.length > 0 && (
+              <div className="mt-2 flex flex-nowrap items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground">belt / vest</span>
+                {dispPlates.map((p, i) => (
+                  <span key={i} className="rounded border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-blue-400">{p}</span>
+                ))}
+              </div>
+            )}
+            <CueText className="mt-1 text-[11px] text-muted-foreground">{`Add ${dispAdded} ${coachUnit} of load, aim for ${selectedRM} clean rep${selectedRM > 1 ? 's' : ''}`}</CueText>
+          </>
+        )
+      }
     }
 
     // 4. Assisted tier, still working toward graduation.
@@ -1078,7 +1166,10 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
             <div className="overflow-hidden rounded-xl border border-border bg-card">
               <div className="divide-y divide-border">
                 {[...entries].reverse().map(e => {
-                  const detail   = e.label.split(' · ').slice(1).join(' · ')
+                  // convDetail rewrites any weight tokens (Full RX +load efforts)
+                  // into coachUnit; rep-only labels have none → no-op. The "× N"
+                  // / "N reps" rep count is NOT a weight and is left alone.
+                  const detail   = convDetail(e.label.split(' · ').slice(1).join(' · '), coachUnit)
                   const reps     = parseRepsFromBwLabel(e.label) || 0
                   const rowTier  = bwTierFromVariantName(e.label.split(' · ')[0])
                   return (
