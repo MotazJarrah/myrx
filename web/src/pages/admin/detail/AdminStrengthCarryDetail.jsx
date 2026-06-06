@@ -219,7 +219,7 @@ function carryVerbFor(exercise) {
 // mobile LineChart is single-axis too, so two stacked charts keep parity with
 // the web's dual-axis intent without adding chart deps. Module-scoped so it's a
 // stable component identity across renders (react-hooks/static-components).
-function MiniChart({ data, label, best, unit, stroke }) {
+function MiniChart({ data, label, best, unit, stroke, caption }) {
   const values = data.map(d => d.value)
   const minV = values.length ? Math.min(...values) : 0
   const maxV = values.length ? Math.max(...values) : 10
@@ -255,7 +255,7 @@ function MiniChart({ data, label, best, unit, stroke }) {
                 borderRadius: 8,
                 fontSize: 12,
               }}
-              formatter={(v) => [`${v} ${unit}`, label]}
+              formatter={(v) => [unit ? `${v} ${unit}` : `${v}`, label]}
             />
             {best > 0 && (
               <ReferenceLine y={best} stroke={stroke} strokeDasharray="4 3" strokeOpacity={0.5} />
@@ -278,7 +278,7 @@ function MiniChart({ data, label, best, unit, stroke }) {
           Not enough data to show a trend yet.
         </p>
       )}
-      <p className="mt-1 text-[11px] text-muted-foreground">Dashed line = personal best {label.toLowerCase()}</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">{caption ?? `Dashed line = personal best ${label.toLowerCase()}`}</p>
     </>
   )
 }
@@ -483,12 +483,13 @@ function CarrySurface({
   const activeZone = zoneMath[selZone]
 
   // ── Chart data ──────────────────────────────────────────────────────────────
-  const weightChartData = useMemo(() => parsed.map(e => ({
-    ts: e.ts, date: fmtShort(e.ts), value: Math.round(weightInDisplayUnit(e)),
-  })), [parsed, displayUnit]) // eslint-disable-line react-hooks/exhaustive-deps
-  const distChartData = useMemo(() => parsed.map(e => ({
-    ts: e.ts, date: fmtShort(e.ts), value: Math.round(distInDisplayUnit(e)),
-  })), [parsed, distUnit]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Single "Workload" series = weight × distance (display units). Carry
+  // progress is two-dimensional; a weight-only chart made a distance PR look
+  // flat. Higher = better. Hero targets + log list keep the per-axis split.
+  const workloadChartData = useMemo(() => parsed.map(e => ({
+    ts: e.ts, date: fmtShort(e.ts), value: Math.round(weightInDisplayUnit(e) * distInDisplayUnit(e)),
+  })), [parsed, displayUnit, distUnit]) // eslint-disable-line react-hooks/exhaustive-deps
+  const bestWorkload = workloadChartData.length ? Math.max(...workloadChartData.map(d => d.value)) : 0
 
   const tierBadge = currentTier ? CARRY_TIER_LABELS[currentTier] : null
 
@@ -636,12 +637,11 @@ function CarrySurface({
         </AnimateRise>
       )}
 
-      {/* ── 4. Charts (weight + distance over time) ── */}
+      {/* ── 4. Chart (single "Workload" = weight × distance over time) ── */}
       {cascadeReady && parsed.length >= 1 && (
         <AnimateRise delay={250} className="rounded-xl border border-border bg-card p-4">
           <h2 className="text-sm font-bold">Carry progress over time</h2>
-          <MiniChart data={weightChartData} label="Weight"   best={bestWeight}      unit={wUnit} stroke="#60a5fa" />
-          <MiniChart data={distChartData}   label="Distance" best={bestDistDisplay} unit={dUnit} stroke="#93c5fd" />
+          <MiniChart data={workloadChartData} label="Workload" best={bestWorkload} unit="" stroke="#60a5fa" caption="Weight × distance · dashed line = personal best" />
         </AnimateRise>
       )}
 

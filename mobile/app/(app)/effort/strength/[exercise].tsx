@@ -3260,11 +3260,13 @@ function CarryDetail({
     opacity: carryChevronOpacityOverride.value,
   }))
 
-  // ── Chart data (one series for weight, one for distance) ─────────────────
-  // Mobile LineChart is single-axis, so we render two stacked charts to keep
-  // parity with the web's dual-axis layout without adding new chart deps.
-  const weightChartData = parsed.map(e => ({ ts: e.ts, y: Math.round(weightInDisplayUnit(e)) }))
-  const distChartData   = parsed.map(e => ({ ts: e.ts, y: Math.round(distInDisplayUnit(e)) }))
+  // ── Chart data — single "Workload" series (weight × distance) ────────────
+  // Carry progress is two-dimensional (heavier OR farther). Plotting weight
+  // alone made a distance-only PR look flat, so we consolidate both axes into
+  // one workload score = weight × distance (both in display units). Higher =
+  // better → no reversed axis. Hero targets + log list keep the per-axis split.
+  const workloadChartData = parsed.map(e => ({ ts: e.ts, y: Math.round(weightInDisplayUnit(e) * distInDisplayUnit(e)) }))
+  const bestWorkload = workloadChartData.length ? Math.max(...workloadChartData.map(d => d.y)) : 0
 
   // ── Render ────────────────────────────────────────────────────────────────
   const tierBadge = currentTier ? CARRY_TIER_LABELS[currentTier] : null
@@ -3496,46 +3498,29 @@ function CarryDetail({
         </AnimateRise>
       )}
 
-      {/* ── Weight chart ──
-          Gated on `isRatio ? bwLoaded : true` so for ratio movements the
-          chart waits for the BW fetch to complete alongside the main card.
-          Without this gate the chart renders immediately on first paint
-          (efforts are already loaded), animates in, and appears BEFORE the
-          main card which is still waiting for `bwLoaded`. Abs movements
-          (Atlas Stone, etc.) don't need bw so the chart renders normally. */}
-      {(isRatio ? bwLoaded : true) && weightChartData.length >= 1 && (
+      {/* ── Workload chart ──
+          Carry progress is two-dimensional (heavier OR farther). A weight-only
+          chart made a distance PR look flat, so we plot ONE workload score =
+          weight × distance (display units). Gated on `isRatio ? bwLoaded : true`
+          so for ratio movements the chart waits for the BW fetch to complete
+          alongside the main card (cascade ordering). */}
+      {(isRatio ? bwLoaded : true) && workloadChartData.length >= 1 && (
         <AnimateRise delay={250} style={s.card}>
           <Text style={s.h2}>Carry progress over time</Text>
           <View style={s.chartTagBlue}>
-            <Text style={s.chartTagText}>Weight</Text>
+            <Text style={s.chartTagText}>Workload</Text>
           </View>
           <LineChart
-            data={weightChartData}
-            referenceY={weightChartData.length > 1 && bestWeight > 0 ? bestWeight : null}
+            data={workloadChartData}
+            referenceY={workloadChartData.length > 1 && bestWorkload > 0 ? bestWorkload : null}
             yTickFormatter={(v) => `${Math.round(v)}`}
-            tooltipValueFormatter={(v) => `${Math.round(v)} ${wUnit}`}
-            tooltipLabel="Weight"
+            tooltipValueFormatter={(v) => `${Math.round(v)}`}
+            tooltipLabel="Workload"
             yDomain={{
               min: (mn) => Math.max(0, Math.round(mn * 0.85)),
               max: (mx) => Math.round(mx * 1.15),
             }}
-            caption={<Text style={s.tinyText}>Dashed line = personal best weight</Text>}
-          />
-          <View style={s.chartTagBlue}>
-            <Text style={s.chartTagText}>Distance</Text>
-          </View>
-          <LineChart
-            data={distChartData}
-            referenceY={distChartData.length > 1 && bestDistDisplay > 0 ? bestDistDisplay : null}
-            yTickFormatter={(v) => `${Math.round(v)}`}
-            tooltipValueFormatter={(v) => `${Math.round(v)} ${dUnit}`}
-            tooltipLabel="Distance"
-            lineColor={withAlpha(palette.blue[400], 0.85)}
-            yDomain={{
-              min: (mn) => Math.max(0, Math.round(mn * 0.85)),
-              max: (mx) => Math.round(mx * 1.15),
-            }}
-            caption={<Text style={s.tinyText}>Dashed line = personal best distance</Text>}
+            caption={<Text style={s.tinyText}>Weight × distance · dashed line = personal best</Text>}
           />
         </AnimateRise>
       )}

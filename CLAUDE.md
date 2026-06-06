@@ -1232,7 +1232,7 @@ Each zone prescribes a genuinely different workout, anchored on the user's actua
      - **Bottom row — distance**: `<TickerNumber: D_target> <dUnit>` + delta string (`+ <diff> <dUnit>` if longer, `same as your best` if equal — distance never goes below best in any zone).
    - Thin separator + cue line specific to the active zone, plugging the same `W_target` / `D_target` numbers. e.g. for MAX LOAD: `Carry <W_target> <wUnit> for <D_target> <dUnit> — focus on grip and posture` (verb is "Carry", not "Walk" — applies to all carry variants including stone bear-hug carries which aren't walked).
 
-5. **Chart** — dual-axis line chart, weight (left, primary blue) + distance (right, lighter blue). Each effort = single data point on both axes. PB dashed lines for both. Chart's y-axis labels show units. (Mobile uses two stacked single-axis charts because the shared `LineChart` component doesn't support dual axes natively — accepted divergence.)
+5. **Chart** — single **Workload** line chart (UPDATED June 2026): `workload = weight × distance` per effort, plotted over time. Replaces the earlier two-chart (weight + distance) layout — a distance-only PR was invisible on a weight-only graph, so the two axes consolidate into one "work" metric where heavier OR farther both trend the line up. PB dashed line = best workload. The hero's two targets (go heavier / go farther) + the log list (each effort shown as `weight × distance`) still carry the per-axis breakdown; only the trend chart consolidates. Same on athlete mobile + coach web (AdminStrengthCarryDetail) + the coach Efforts card mini-graph.
 
 6. **Log list** — same row format. Each row shows `<weight> × <distance>` and a timestamp.
 
@@ -1718,7 +1718,7 @@ Rucking · 2.5 mi in 45:00
    - Title "Adaptation zone" + help text "Pick a training focus, then aim at the next target."
    - **Zone pill row** — single amber pill flanked by pulsing chevrons. Same Pattern-3 chevron animation + Pattern-4 swipe choreography as Air Bike's zone pill and Carry's adaptation zone pill.
    - **Hero card** (amber chrome): top-right info pill + 2 stacked `TickerNumber` rows (weight target + distance target with delta strings) + thin separator + cue line.
-3. **Progress charts** (`<AnimateRise delay={500}>`): two stacked single-axis line charts (pack weight over time + distance over time). Mobile `LineChart` doesn't support dual axes natively, so we stack two charts — same pattern as Carry's strength detail.
+3. **Progress chart** (`<AnimateRise delay={500}>`): single **Workload** line chart (UPDATED June 2026) — `workload = pack weight × distance` per effort, plotted over time. Replaces the earlier two-chart (pack weight + distance) layout, same reason as Carry (a distance-only PR was invisible on a weight-only graph). PB dashed line = best workload; the hero targets + log list keep the per-axis breakdown. Same on athlete mobile + coach web (AdminCardioRuckingDetail) + the coach Efforts card.
 4. **Log list** (`<AnimateRise delay={500}>`): each row shows the workout shape on the left (`35 lb × 2.5 mi`) and wall-clock time on the right.
 
 **Header tags (LOCKED — mirrors strength's equipment-pill convention):**

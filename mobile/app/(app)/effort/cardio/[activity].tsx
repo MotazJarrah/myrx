@@ -3902,9 +3902,13 @@ function RuckingDetail({
   const ruckPillAnimatedStyle    = useAnimatedStyle(() => ({ transform: [{ translateX: ruckPillTranslateX.value }] }))
   const ruckChevronAnimatedStyle = useAnimatedStyle(() => ({ opacity: ruckChevronOpacityOverride.value }))
 
-  // ── Chart data (two stacked single-axis charts) ───────────────────────────
-  const weightChartData = useMemo(() => parsed.map(p => ({ ts: p.ts, y: p.packLb })), [parsed])
-  const distChartData   = useMemo(() => parsed.map(p => ({ ts: p.ts, y: p.distMi })), [parsed])
+  // ── Chart data — single "Workload" series (pack weight × distance) ────────
+  // Rucking progress is two-dimensional (heavier pack OR farther). Plotting
+  // pack weight alone made a distance-only PR look flat, so we consolidate into
+  // one workload score = packLb × distMi. Higher = better → no reversed axis.
+  // Hero targets + log list keep the per-axis (weight / distance) split.
+  const workloadChartData = useMemo(() => parsed.map(p => ({ ts: p.ts, y: Math.round(p.packLb * p.distMi) })), [parsed])
+  const bestWorkload = useMemo(() => workloadChartData.length ? Math.max(...workloadChartData.map(d => d.y)) : 0, [workloadChartData])
 
   // ── Selected zone math ────────────────────────────────────────────────────
   const selectedZone = zoneMath[selZone]
@@ -4032,31 +4036,23 @@ function RuckingDetail({
           still appears as a small TIER pill in the header below the
           subtitle (mirrors Atlas Stone Bear Hug Carry's tier badge). */}
 
-      {/* Progress charts — two stacked single-axis line charts (pack weight
-          + distance over time). Mobile LineChart doesn't support dual axes
-          natively, so we stack two charts — same pattern as Carry. */}
+      {/* Progress chart — single "Workload" line (pack weight × distance over
+          time). Rucking improves on two axes (heavier pack OR farther); a
+          weight-only chart made a distance PR look flat, so we plot one
+          workload score. Higher = better → NOT reversed. */}
       {parsed.length >= 1 && (
         <AnimateRise delay={500} style={s.card}>
           <Text style={s.h2}>Progress over time</Text>
-          <Text style={[s.helpTextSm, { marginBottom: 8, marginTop: 4 }]}>Pack weight</Text>
+          <Text style={[s.helpTextSm, { marginBottom: 8, marginTop: 4 }]}>Workload</Text>
           <LineChart
-            data={weightChartData}
-            referenceY={bestWeight > 0 ? bestWeight : null}
+            data={workloadChartData}
+            referenceY={bestWorkload > 0 ? bestWorkload : null}
             yWidth={42}
-            yTickFormatter={(v) => `${Math.round(v)} lb`}
-            tooltipValueFormatter={(v) => `${Math.round(v)} lb`}
-            tooltipLabel="Weight"
+            yTickFormatter={(v) => `${Math.round(v)}`}
+            tooltipValueFormatter={(v) => `${Math.round(v)}`}
+            tooltipLabel="Workload"
             lineColor={palette.amber[400]}
-          />
-          <Text style={[s.helpTextSm, { marginTop: 16, marginBottom: 8 }]}>Distance</Text>
-          <LineChart
-            data={distChartData}
-            referenceY={bestDistRaw > 0 ? bestDistRaw : null}
-            yWidth={42}
-            yTickFormatter={(v) => `${v.toFixed(1)} mi`}
-            tooltipValueFormatter={(v) => `${v.toFixed(1)} mi`}
-            tooltipLabel="Distance"
-            lineColor={palette.amber[400]}
+            caption={<Text style={s.tinyText}>Pack weight × distance · dashed line = personal best</Text>}
           />
         </AnimateRise>
       )}

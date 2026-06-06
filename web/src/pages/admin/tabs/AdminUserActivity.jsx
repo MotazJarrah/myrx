@@ -48,12 +48,35 @@ function parseReps(label) {
   m = label?.match(/·\s*(\d+)\s*reps?/)
   return m ? parseInt(m[1], 10) : null
 }
-// Carry weight — "Farmer's Carry · 100 kg × 50 m" → { val: 100, unit: 'kg' }.
-// We plot WEIGHT (the carry detail plots weight + distance as two stacked
-// charts; the mini-graph defaults to weight per the brief).
-function parseCarryWeight(label) {
-  const m = label?.match(/·\s*([\d.]+)\s*(\w+)\s*×/)
-  return m ? { val: parseFloat(m[1]), unit: m[2] } : null
+// Carry weight + distance — "Farmer's Carry · 100 kg × 50 m" →
+// { weight: 100, unit: 'kg', distM: 50 }. Carry/Sled progress is two-
+// dimensional (heavier OR farther); the detail pages plot ONE workload score
+// (weight × distance) so a distance-only PR still reads as progress, and the
+// card mirrors that.
+function parseCarryWD(label) {
+  const w = label?.match(/·\s*([\d.]+)\s*(\w+)\s*×/)
+  const d = label?.match(/×\s*([\d.]+)\s*m\b/)
+  if (!w || !d) return null
+  return { weight: parseFloat(w[1]), unit: w[2], distM: parseFloat(d[1]) }
+}
+// Rucking weight + distance — "Rucking · 35 lb × 2.5 mi in 45:00" →
+// { packLb: 35, distMi: 2.5 }. Legacy "Rucking · 2.5 mi in 45:00" (no pack) →
+// packLb 0. Workload = packLb × distMi.
+function parseRuckWD(label) {
+  let m = label?.match(/·\s*(\d+)\s*lb\s*×\s*([\d.]+)\s*mi/)
+  if (m) return { packLb: parseInt(m[1], 10), distMi: parseFloat(m[2]) }
+  m = label?.match(/·\s*([\d.]+)\s*mi/)
+  if (m) return { packLb: 0, distMi: parseFloat(m[1]) }
+  return null
+}
+// Workload "Best" line for carry/sled: "10 lb × 262 ft" (lb→ft) or
+// "100 kg × 50 m" (kg→m). The card has no profile, so we infer the distance
+// display unit from the logged weight unit (imperial logs → ft), matching how
+// the carry detail derives its distance unit.
+function fmtCarryWorkloadBest(weight, unit, distM) {
+  const imperial = unit === 'lb'
+  const dDisp = imperial ? Math.round(distM / 0.3048) : Math.round(distM)
+  return `${weight} ${unit} × ${dDisp} ${imperial ? 'ft' : 'm'}`
 }
 // Assisted-machine assistance — "Assisted Pull Up · 60 lb assist · X × 8".
 // LOWER is better (less help = harder), so the chart Y-axis is reversed.
@@ -304,8 +327,11 @@ export default function AdminUserActivity({ userId }) {
     // Returns { val, unit, kind } or null. `kind` drives the PR line formatter.
     function strengthMetric(e, equipment) {
       if (equipment === 'carry') {
-        const w = parseCarryWeight(e.label)
-        return w ? { val: w.val, unit: w.unit, kind: 'weight' } : null
+        // Workload = weight × distance (matches the carry detail's single
+        // progress metric). `val` drives the graph + best comparison; weight +
+        // distM ride along for the "w × d" best line.
+        const c = parseCarryWD(e.label)
+        return c ? { val: c.weight * c.distM, unit: c.unit, kind: 'workload', weight: c.weight, distM: c.distM } : null
       }
       if (equipment === 'assisted') {
         const a = parseAssistance(e.label)
@@ -340,11 +366,14 @@ export default function AdminUserActivity({ userId }) {
           }
           g.count++
           if (ts > g.maxTs) g.maxTs = ts
-          const m = strengthMetric(e, 'carry') // sled is carry-equipment → weight
+          const m = strengthMetric(e, 'carry') // sled is carry-equipment → workload (w × d)
           if (m) {
             const v = g.byVariant[sledVariant] ??= { best: null, unit: m.unit, points: [] }
             v.points.push({ ts, val: m.val })
-            if (v.best === null || m.val > v.best) { v.best = m.val; v.unit = m.unit }
+            if (v.best === null || m.val > v.best) {
+              v.best = m.val; v.unit = m.unit
+              v.bestW = m.weight; v.bestWUnit = m.unit; v.bestDistM = m.distM
+            }
           }
           return
         }
@@ -427,7 +456,12 @@ export default function AdminUserActivity({ userId }) {
           g.points.push({ ts, val: m.val })
           const better = g.best === null
             || (m.kind === 'assist' ? m.val < g.best : m.val > g.best)
-          if (better) { g.best = m.val; g.unit = m.unit }
+          if (better) {
+            g.best = m.val; g.unit = m.unit
+            // Carry (workload): remember the best effort's weight + distance
+            // for the "w × d" best line.
+            if (m.kind === 'workload') { g.bestW = m.weight; g.bestWUnit = m.unit; g.bestDistM = m.distM }
+          }
         }
       } else if (e.type === 'cardio') {
         // ── Swimming stroke consolidation ──────────────────────────────────
@@ -448,6 +482,27 @@ export default function AdminUserActivity({ userId }) {
             const better = v.best === null
               || (parsed.lowerBetter ? parsed.val < v.best : parsed.val > v.best)
             if (better) { v.best = parsed.val; v.str = e.value }
+          }
+          return
+        }
+
+        // ── Rucking workload (cardio tab, but carry-like: pack × distance) ──
+        // Rucking improves on two axes (heavier pack OR farther), so we plot a
+        // workload score = packLb × distMi instead of pace — mirrors the
+        // rucking detail's single workload chart.
+        if (head === 'Rucking') {
+          const key = head
+          const g = cardioMap[key] ??= {
+            label: key, navName: key, kind: 'ruck', count: 0,
+            maxTs: -1, best: null, bestW: null, bestDistMi: null, points: [],
+          }
+          g.count++
+          if (ts > g.maxTs) g.maxTs = ts
+          const r = parseRuckWD(e.label)
+          if (r) {
+            const wl = r.packLb * r.distMi
+            g.points.push({ ts, val: wl })
+            if (g.best === null || wl > g.best) { g.best = wl; g.bestW = r.packLb; g.bestDistMi = r.distMi }
           }
           return
         }
@@ -491,7 +546,7 @@ export default function AdminUserActivity({ userId }) {
           const [vk, v] = winner
           badge = vk === 'push' ? 'PUSH' : 'DRAG'
           points = sortAsc(v.points)
-          bestText = v.best !== null ? `Best ${v.best} ${v.unit}` : '—'
+          bestText = v.bestW != null ? `Best ${fmtCarryWorkloadBest(v.bestW, v.bestWUnit, v.bestDistM)}` : '—'
         }
       } else if (d.kind === 'family') {
         // Hardest variant has no reliable order → pick best metric value.
@@ -524,7 +579,9 @@ export default function AdminUserActivity({ userId }) {
         // plain
         points = sortAsc(d.points)
         reversed = d.metricKind === 'assist'
-        bestText = formatStrengthBest(d.best, d.unit, d.metricKind)
+        bestText = d.metricKind === 'workload'
+          ? (d.bestW != null ? `Best ${fmtCarryWorkloadBest(d.bestW, d.bestWUnit, d.bestDistM)}` : '—')
+          : formatStrengthBest(d.best, d.unit, d.metricKind)
       }
 
       return {
@@ -557,6 +614,11 @@ export default function AdminUserActivity({ userId }) {
           reversed = v.lowerBetter
           bestText = v.str ? `Best ${v.str}` : '—'
         }
+      } else if (d.kind === 'ruck') {
+        // Workload (pack weight × distance) — higher = better, no reversal.
+        points = sortAsc(d.points)
+        reversed = false
+        bestText = d.bestW != null ? `Best ${d.bestW} lb × ${d.bestDistMi} mi` : '—'
       } else {
         points = sortAsc(d.points)
         reversed = d.lowerBetter

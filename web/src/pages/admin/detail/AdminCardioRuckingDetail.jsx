@@ -344,24 +344,20 @@ export default function AdminCardioRuckingDetail({
     setZoneInfoOpen(false) // auto-close info panel on zone change (Pattern 5)
   }
 
-  // ── Chart data — two stacked single-axis series (weight + distance) ────────
-  const weightChartData = useMemo(() => parsed.map(p => ({
-    ts: p.ts, date: fmtShort(p.ts), value: p.packLb,
+  // ── Chart data — single "Workload" series (pack weight × distance) ────────
+  // Rucking progress is two-dimensional (heavier pack OR farther); a weight-
+  // only chart made a distance PR look flat. Higher = better. Hero targets +
+  // log list keep the per-axis (weight / distance) split.
+  const workloadChartData = useMemo(() => parsed.map(p => ({
+    ts: p.ts, date: fmtShort(p.ts), value: Math.round(p.packLb * p.distMi),
   })), [parsed])
-  const distChartData = useMemo(() => parsed.map(p => ({
-    ts: p.ts, date: fmtShort(p.ts), value: p.distMi,
-  })), [parsed])
+  const bestWorkload = workloadChartData.length ? Math.max(...workloadChartData.map(d => d.value)) : 0
 
-  // Weight chart axis bounds.
-  const wVals = weightChartData.map(d => d.value)
-  const wMin  = wVals.length ? Math.min(...wVals) : 0
-  const wMax  = wVals.length ? Math.max(...wVals) : 10
-  const wPad  = (wMax - wMin) * 0.15 || 1
-  // Distance chart axis bounds.
-  const dVals = distChartData.map(d => d.value)
-  const dMin  = dVals.length ? Math.min(...dVals) : 0
-  const dMax  = dVals.length ? Math.max(...dVals) : 1
-  const dPad  = (dMax - dMin) * 0.15 || 0.5
+  // Workload chart axis bounds.
+  const wlVals = workloadChartData.map(d => d.value)
+  const wlMin  = wlVals.length ? Math.min(...wlVals) : 0
+  const wlMax  = wlVals.length ? Math.max(...wlVals) : 10
+  const wlPad  = (wlMax - wlMin) * 0.15 || 1
 
   function backFn() {
     if (onBack) return onBack()
@@ -512,11 +508,13 @@ export default function AdminCardioRuckingDetail({
                   foreground), same visual weight as "Adaptation zone". */}
               <h2 className="text-sm font-bold">Progress over time</h2>
 
-              {/* Pack weight over time. Higher = better → NOT reversed. */}
-              <p className="mb-2 mt-4 text-xs text-muted-foreground">Pack weight</p>
-              {weightChartData.length >= 2 ? (
+              {/* Workload (pack weight × distance) over time. Higher = better
+                  → NOT reversed. Replaces the two stacked weight + distance
+                  charts so a distance-only PR still reads as progress. */}
+              <p className="mb-2 mt-4 text-xs text-muted-foreground">Workload (pack weight × distance)</p>
+              {workloadChartData.length >= 2 ? (
                 <ResponsiveContainer width="100%" height={150}>
-                  <LineChart data={weightChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <LineChart data={workloadChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
                     <XAxis
                       dataKey="date"
                       tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
@@ -525,7 +523,7 @@ export default function AdminCardioRuckingDetail({
                       interval="preserveStartEnd"
                     />
                     <YAxis
-                      domain={[wMin - wPad, wMax + wPad]}
+                      domain={[wlMin - wlPad, wlMax + wlPad]}
                       tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
                       tickLine={false}
                       axisLine={false}
@@ -539,10 +537,10 @@ export default function AdminCardioRuckingDetail({
                         borderRadius: 8,
                         fontSize: 12,
                       }}
-                      formatter={(v) => [`${Math.round(v)} ${wUnit}`, 'Weight']}
+                      formatter={(v) => [`${Math.round(v)}`, 'Workload']}
                     />
-                    {bestWeight > 0 && (
-                      <ReferenceLine y={bestWeight} stroke="#fbbf24" strokeDasharray="4 3" strokeOpacity={0.5} />
+                    {bestWorkload > 0 && (
+                      <ReferenceLine y={bestWorkload} stroke="#fbbf24" strokeDasharray="4 3" strokeOpacity={0.5} />
                     )}
                     <Line
                       type="monotone"
@@ -559,60 +557,10 @@ export default function AdminCardioRuckingDetail({
                 </ResponsiveContainer>
               ) : (
                 <p className="py-6 text-center text-xs text-muted-foreground">
-                  Not enough data for the weight trend yet.
+                  Not enough data for the workload trend yet.
                 </p>
               )}
-
-              {/* Distance over time. Higher = better → NOT reversed. */}
-              <p className="mb-2 mt-4 text-xs text-muted-foreground">Distance</p>
-              {distChartData.length >= 2 ? (
-                <ResponsiveContainer width="100%" height={150}>
-                  <LineChart data={distChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                    <XAxis
-                      dataKey="date"
-                      tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                      tickLine={false}
-                      axisLine={false}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      domain={[dMin - dPad, dMax + dPad]}
-                      tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-                      tickLine={false}
-                      axisLine={false}
-                      tickCount={4}
-                      tickFormatter={(v) => `${v.toFixed(1)}`}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        background: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: 8,
-                        fontSize: 12,
-                      }}
-                      formatter={(v) => [`${Number(v).toFixed(1)} ${dUnit}`, 'Distance']}
-                    />
-                    {bestDistRaw > 0 && (
-                      <ReferenceLine y={bestDistRaw} stroke="#fbbf24" strokeDasharray="4 3" strokeOpacity={0.5} />
-                    )}
-                    <Line
-                      type="monotone"
-                      dataKey="value"
-                      stroke="#fbbf24"
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: '#fbbf24', strokeWidth: 0 }}
-                      activeDot={{ r: 5 }}
-                      isAnimationActive
-                      animationDuration={900}
-                      animationEasing="ease-in-out"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <p className="py-6 text-center text-xs text-muted-foreground">
-                  Not enough data for the distance trend yet.
-                </p>
-              )}
+              <p className="mt-1 text-[11px] text-muted-foreground">Pack weight × distance · dashed line = personal best</p>
             </AnimateRise>
           )}
         </>
