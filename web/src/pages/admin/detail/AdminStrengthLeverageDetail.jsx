@@ -61,17 +61,17 @@ function parseDurationSecs(value) {
 const LEVERAGE_MILESTONES = [5, 10, 15, 20, 30]
 const LEVERAGE_GATE = 30
 const LEVERAGE_LADDERS = [
-  ['Planche Hold (Tuck)', 'Planche Hold (Straddle)', 'Planche Hold'],
-  ['Front Lever Hold (Tuck)', 'Front Lever Hold'],
-  ['Back Lever Hold (Tuck)', 'Back Lever Hold'],
-  ['Handstand Hold (Wall)', 'Handstand Hold (Freestanding)'],
+  ['Planche Hold [Tuck]', 'Planche Hold [Straddle]', 'Planche Hold [Full]'],
+  ['Front Lever Hold [Tuck]', 'Front Lever Hold [Full]'],
+  ['Back Lever Hold [Tuck]', 'Back Lever Hold [Full]'],
+  ['Handstand Hold [Wall]', 'Handstand Hold [Freestanding]'],
 ]
 function leverageLadderFor(name) {
   for (const l of LEVERAGE_LADDERS) if (l.includes(name)) return l
   return null
 }
 function leverageVariantLabel(name) {
-  const m = name.match(/\(([^)]+)\)/)
+  const m = name.match(/\[([^\]]+)\]/)
   return m ? m[1] : 'Full'
 }
 
