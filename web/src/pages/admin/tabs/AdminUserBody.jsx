@@ -6,6 +6,7 @@ import CoachAddButton from '../../../components/CoachAddButton'
 import UnitToggle from '../../../components/UnitToggle'
 import TickerNumber from '../../../components/TickerNumber'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { useAuth } from '../../../contexts/AuthContext'
 
 function convertWeight(weight, fromUnit, toUnit) {
   if (fromUnit === toUnit) return Number(weight)
@@ -75,16 +76,12 @@ function StatCard({ title, children, className = '' }) {
 
 // ── Progress chart (emerald, mirrors the athlete page) ──────────────────────────
 
-function BodyweightChart({ entries }) {
+function BodyweightChart({ entries, displayUnit }) {
   if (entries.length < 2) return null
 
-  // Pick display unit = most common unit in entries (or lb by default)
-  const unitCounts = entries.reduce((acc, e) => {
-    acc[e.unit] = (acc[e.unit] || 0) + 1
-    return acc
-  }, {})
-  const displayUnit = Object.keys(unitCounts).sort((a, b) => unitCounts[b] - unitCounts[a])[0] || 'lb'
-
+  // displayUnit = the COACH's weight unit (Push 3 — the coach views the client's
+  // data in their own units). Every point is converted to it, so the line stays
+  // consistent even when the client logged weigh-ins in mixed units.
   // Sort ascending for chart, use timestamp as unique key to avoid duplicate date strings
   const sorted = [...entries].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
   const data = sorted.map(e => ({
@@ -163,8 +160,15 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
 
   useEffect(() => { load() }, [userId])
 
-  // Default the new-weigh-in unit to the client's preferred unit once profile loads.
-  useEffect(() => { if (profile?.weight_unit) setNewUnit(profile.weight_unit) }, [profile?.weight_unit])
+  // Coach's units (Push 3): the logged-in user here is the COACH viewing a
+  // client, so useAuth().profile is the coach. Charts + headline stats + the
+  // add-form default use the coach's unit; the entries LIST keeps each weigh-in's
+  // own logged unit (mixed-unit rule).
+  const { profile: coachProfile } = useAuth()
+  const coachUnit = coachProfile?.weight_unit || 'lb'
+
+  // Default the new-weigh-in unit to the COACH's unit.
+  useEffect(() => { setNewUnit(coachUnit) }, [coachUnit])
 
   async function load() {
     setLoading(true)
@@ -209,9 +213,9 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
     setSaving(false)
   }
 
-  // ── Derived stats (use the CLIENT's units from the profile prop) ─────────────
+  // ── Derived stats (Push 3 — shown in the COACH's units) ──────────────────────
 
-  const preferredUnit = profile?.weight_unit || newUnit
+  const preferredUnit = coachUnit
   const heightM       = getHeightM(profile)
 
   // Source of truth for "current": profile.current_weight; fall back to latest log.
@@ -223,9 +227,9 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
     ?? (latestLog ? toKg(latestLog.weight, latestLog.unit) : null)
 
   const currentDisplay = profile?.current_weight != null
-    ? `${profile.current_weight} ${profile.weight_unit || 'lb'}`
+    ? `${convertWeight(profile.current_weight, profile.weight_unit || 'lb', coachUnit)} ${coachUnit}`
     : latestLog
-      ? `${latestLog.weight} ${latestLog.unit}`
+      ? `${convertWeight(latestLog.weight, latestLog.unit, coachUnit)} ${coachUnit}`
       : null
 
   // BMI
@@ -377,7 +381,7 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
       </div>
 
       {/* Chart */}
-      {!loading && entries.length >= 2 && <BodyweightChart entries={entries} />}
+      {!loading && entries.length >= 2 && <BodyweightChart entries={entries} displayUnit={coachUnit} />}
 
       {/* List */}
       {loading ? (
