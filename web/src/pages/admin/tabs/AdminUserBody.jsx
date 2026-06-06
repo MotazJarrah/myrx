@@ -267,7 +267,7 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
         <form onSubmit={handleAdd} className="rounded-xl border border-border bg-card p-4 space-y-3">
           <p className="text-sm font-semibold">New weigh-in</p>
           <div className="flex gap-2 flex-wrap">
-            <input type="number" step="0.1" value={newWeight} onChange={e => setNewWeight(e.target.value)} placeholder="Weight" className={inputCls + ' flex-1 min-w-[100px]'} />
+            <input type="number" step="0.1" autoFocus value={newWeight} onChange={e => setNewWeight(e.target.value)} placeholder="Weight" className={inputCls + ' flex-1 min-w-[100px]'} />
             <select value={newUnit} onChange={e => setNewUnit(e.target.value)} className={inputCls}>
               <option value="lb">lb</option>
               <option value="kg">kg</option>

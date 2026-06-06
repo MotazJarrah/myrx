@@ -73,7 +73,6 @@ function AddEffortForm({ userId, onSaved, onClose }) {
   const [timeStr,      setTimeStr]      = useState('')
   const [distVal,      setDistVal]      = useState('')
   const [distUnit,     setDistUnit]     = useState('km')
-  const [date,         setDate]         = useState(() => new Date().toISOString().split('T')[0])
   const [saving,       setSaving]       = useState(false)
   const [error,        setError]        = useState('')
 
@@ -116,12 +115,9 @@ function AddEffortForm({ userId, onSaved, onClose }) {
     setError('')
     setSaving(true)
     try {
-      // Use actual current time for today; UTC noon (Z) for past dates so we
-      // never create a future timestamp regardless of the admin's local timezone.
-      const today = new Date().toISOString().split('T')[0]
-      const ts    = date === today
-        ? new Date().toISOString()
-        : new Date(date + 'T12:00:00Z').toISOString()
+      // Coach entries log at the current time — the date field was removed
+      // (coaches add for "now"; back-dating stays the athlete's job).
+      const ts = new Date().toISOString()
 
       if (type === 'strength') {
         if (!exerciseName.trim()) throw new Error('Enter an exercise name.')
@@ -196,14 +192,16 @@ function AddEffortForm({ userId, onSaved, onClose }) {
         <div className="space-y-3">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Exercise</p>
-            <MovementSearch value={exerciseName} onChange={setExerciseName} movements={STRENGTH_MOVEMENTS} placeholder="Search or type exercise…" />
+            <MovementSearch value={exerciseName} onChange={setExerciseName} movements={STRENGTH_MOVEMENTS} placeholder="Search or type exercise…" autoFocus />
           </div>
 
-          {isIsometric ? (
+          {/* Fields cascade in only after a movement is chosen — and only the
+              ones relevant to it (isometric → a hold; otherwise reps + weight). */}
+          {exerciseName && (isIsometric ? (
             <>
               <div>
                 <p className="text-[10px] text-muted-foreground mb-1">Duration</p>
-                <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                <input type="text" inputMode="numeric" autoFocus value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
               </div>
               {durSecs >= 1 && (
                 <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
@@ -217,7 +215,7 @@ function AddEffortForm({ userId, onSaved, onClose }) {
               <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1.35fr 1fr' }}>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-1">Reps</p>
-                  <input type="number" value={reps} onChange={e => setReps(e.target.value)} min="1" max="30" className={inputCls} />
+                  <input type="number" autoFocus value={reps} onChange={e => setReps(e.target.value)} min="1" max="30" className={inputCls} />
                 </div>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-1">Weight</p>
@@ -237,7 +235,7 @@ function AddEffortForm({ userId, onSaved, onClose }) {
                 </div>
               )}
             </>
-          )}
+          ))}
         </div>
       )}
 
@@ -246,14 +244,16 @@ function AddEffortForm({ userId, onSaved, onClose }) {
         <div className="space-y-3">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Activity</p>
-            <MovementSearch value={exerciseName} onChange={setExerciseName} movements={CARDIO_MOVEMENTS} placeholder="Search or type activity…" />
+            <MovementSearch value={exerciseName} onChange={setExerciseName} movements={CARDIO_MOVEMENTS} placeholder="Search or type activity…" autoFocus />
           </div>
 
-          {cardioMode === 'duration' ? (
+          {/* Fields cascade in only after an activity is chosen — pace gets
+              distance + time, duration-only activities get a single duration. */}
+          {exerciseName && (cardioMode === 'duration' ? (
             <>
               <div>
                 <p className="text-[10px] text-muted-foreground mb-1">Duration</p>
-                <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                <input type="text" inputMode="numeric" autoFocus value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
               </div>
               {timeSecs > 0 && (
                 <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
@@ -267,7 +267,7 @@ function AddEffortForm({ userId, onSaved, onClose }) {
               <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 0.9fr 1.35fr' }}>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-1">Distance</p>
-                  <input type="number" step="0.01" value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
+                  <input type="number" step="0.01" autoFocus value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
                 </div>
                 <div>
                   <p className="text-[10px] text-muted-foreground mb-1">Unit</p>
@@ -287,17 +287,13 @@ function AddEffortForm({ userId, onSaved, onClose }) {
                 </div>
               )}
             </>
-          )}
+          ))}
         </div>
       )}
 
-      {/* Date + save */}
-      {type && (
+      {/* Save — appears once a movement is selected; entries log at "now". */}
+      {type && exerciseName && (
         <div className="space-y-3">
-          <div>
-            <p className="text-[10px] text-muted-foreground mb-1">Date</p>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} />
-          </div>
           {error && <div className="flex items-center gap-2 text-xs text-destructive"><AlertCircle className="h-3.5 w-3.5 shrink-0" />{error}</div>}
           <button type="submit" disabled={saving || (type === 'strength' && !canSaveStrength) || (type === 'cardio' && !canSaveCardio)}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 disabled:opacity-50">

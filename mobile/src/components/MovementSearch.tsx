@@ -39,17 +39,29 @@ interface Props {
 }
 
 // ── Filter helpers (1:1 with web) ────────────────────────────────────────────
+// Equipment abbreviation aliases: typing "kb"/"db"/"bb" matches (and leads with)
+// kettlebell / dumbbell / barbell moves, as if the full word was typed.
+// (The abbreviations aren't substrings of the full words, so the alias is needed.)
+const SEARCH_ALIASES: Record<string, string> = { kb: 'kettlebell', db: 'dumbbell', bb: 'barbell' }
+const termsForToken = (t: string): string[] => (SEARCH_ALIASES[t] ? [t, SEARCH_ALIASES[t]] : [t])
+
 function tokenMatch(name: string, tokens: string[]): boolean {
   const lower = name.toLowerCase()
-  return tokens.every(t => lower.includes(t))
+  return tokens.every(t => termsForToken(t).some(term => lower.includes(term)))
 }
 
 function scoreMatch(name: string, tokens: string[]): number {
   const lower = name.toLowerCase()
-  const first = tokens[0]
-  if (lower.startsWith(first)) return 0
-  if (lower.split(/\s+/).some(w => w.startsWith(first))) return 1
-  return 2
+  const words = lower.split(/\s+/)
+  let best = 3
+  for (const term of termsForToken(tokens[0])) {
+    let sc = 3
+    if (lower.startsWith(term)) sc = 0
+    else if (words.some(w => w.startsWith(term))) sc = 1
+    else if (lower.includes(term)) sc = 2
+    if (sc < best) best = sc
+  }
+  return best
 }
 
 const DROPDOWN_MAX_HEIGHT = 240   // matches web's max-h-60 (15rem)

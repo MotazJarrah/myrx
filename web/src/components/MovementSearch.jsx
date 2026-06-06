@@ -15,7 +15,7 @@ const inputCls =
  *   movements    string[] – master list to filter
  *   placeholder  string   – input placeholder text
  */
-export default function MovementSearch({ value, onChange, onSuggest, onQueryChange, movements = [], placeholder = 'Search movement…' }) {
+export default function MovementSearch({ value, onChange, onSuggest, onQueryChange, movements = [], placeholder = 'Search movement…', autoFocus = false }) {
   const [query, setQuery]           = useState('')
   const [open, setOpen]             = useState(false)
   const [focused, setFocused]       = useState(false)
@@ -24,22 +24,38 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
   const inputRef     = useRef(null)
   const listRef      = useRef(null)
 
-  // Smart multi-token match: every whitespace-separated token must appear somewhere in the name
+  // Equipment abbreviation aliases: typing "kb"/"db"/"bb" matches (and leads
+  // with) kettlebell / dumbbell / barbell moves, as if the full word was typed.
+  // (The abbreviations aren't substrings of the full words, so the alias is needed.)
+  const SEARCH_ALIASES = { kb: 'kettlebell', db: 'dumbbell', bb: 'barbell' }
+  const termsForToken = t => (SEARCH_ALIASES[t] ? [t, SEARCH_ALIASES[t]] : [t])
+
+  // Smart multi-token match: every whitespace-separated token must appear
+  // somewhere in the name (alias tokens match the abbreviation OR the full word).
   function tokenMatch(name, tokens) {
     const lower = name.toLowerCase()
-    return tokens.every(t => lower.includes(t))
+    return tokens.every(t => termsForToken(t).some(term => lower.includes(term)))
   }
 
   // Priority score based on where the FIRST token lands in the name:
-  //   0 — name starts with the first token         ("push" → "Push Up")
-  //   1 — a later word starts with the first token ("push" → "Archer Push Up")
-  //   2 — first token is a mid-word substring only
+  //   0 — name starts with the term          ("push" → "Push Up")
+  //   1 — a later word starts with the term   ("push" → "Archer Push Up")
+  //   2 — term is a mid-word substring only
+  // For alias tokens (kb/db/bb) take the BEST score across the abbreviation and
+  // its expansion, so "kb" ranks "Kettlebell …" (starts-with) ahead of a move
+  // that merely contains the abbreviation mid-name.
   function scoreMatch(name, tokens) {
     const lower = name.toLowerCase()
-    const first = tokens[0]
-    if (lower.startsWith(first)) return 0
-    if (lower.split(/\s+/).some(w => w.startsWith(first))) return 1
-    return 2
+    const words = lower.split(/\s+/)
+    let best = 3
+    for (const term of termsForToken(tokens[0])) {
+      let sc = 3
+      if (lower.startsWith(term)) sc = 0
+      else if (words.some(w => w.startsWith(term))) sc = 1
+      else if (lower.includes(term)) sc = 2
+      if (sc < best) best = sc
+    }
+    return best
   }
 
   // True when user has typed something not in the movement list — triggers red border + suggestion mode
@@ -172,6 +188,7 @@ export default function MovementSearch({ value, onChange, onSuggest, onQueryChan
           }`}
           autoComplete="off"
           spellCheck={false}
+          autoFocus={autoFocus}
           onFocus={() => {
             setFocused(true)
             setOpen(true)
