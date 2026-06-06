@@ -4,7 +4,7 @@ import { supabase } from '../../../lib/supabase'
 import { useMovements } from '../../../hooks/useMovements'
 import { Dumbbell, Activity, ChevronRight } from 'lucide-react'
 import {
-  LineChart, Line, YAxis, ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
 
 // Cardio direction-aware best parser — mirrors AdminUserDetail's parseCardioBest
@@ -166,6 +166,38 @@ function fmtRecency(ts) {
   return `Last trained ${days} days ago`
 }
 
+// Short date for the card hover popup, e.g. "Jun 6".
+function fmtShortDate(ts) {
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+// Per-point value string for the card hover popup, matching the move's metric
+// (mirrors the mobile tap-to-pin tooltip — e.g. "Workload: 2625", "225 lb 1RM",
+// "12 reps", "1m 30s", "60 lb assist").
+function fmtMetricDisp(kind, val, unit) {
+  switch (kind) {
+    case 'workload': return `Workload: ${val}`
+    case 'onerm':    return `${val} ${unit} 1RM`
+    case 'hold':     return fmtHold(val)
+    case 'reps':     return `${val} reps`
+    case 'assist':   return `${val} ${unit} assist`
+    default:         return `${val}${unit ? ` ${unit}` : ''}`
+  }
+}
+
+// Hover popup for the card mini-graph — date + the point's display value.
+// Same role as the mobile chart's tap-to-pin tooltip.
+function MiniTip({ active, payload, color }) {
+  if (!active || !payload || !payload.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="rounded-lg border border-border bg-card px-2.5 py-1.5 shadow-md">
+      <div className="text-[11px] text-muted-foreground">{p.date}</div>
+      <div className="text-xs font-semibold" style={{ color }}>{p.disp}</div>
+    </div>
+  )
+}
+
 // ── Mini progress sparkline ─────────────────────────────────────────────────────
 // Compact Recharts line, sparkline-style (no axes). Plots `points` oldest→newest.
 // `reversed` flips the Y-axis so lower-is-better metrics still read "up = better"
@@ -178,24 +210,31 @@ function MiniGraph({ points, color, reversed }) {
       </div>
     )
   }
+  // Each point carries a ready-to-show `disp` string + a short date so the hover
+  // popup matches the mobile chart's tap-to-pin tooltip ("Jun 6 / Workload: 2625").
+  // Dots mark every logged session so the data points are visible.
+  const mk = p => ({ v: p.val, date: fmtShortDate(p.ts), disp: p.disp ?? String(p.val) })
   if (points.length === 1) {
-    // Single effort — render one centered dot so the card still reads as a graph.
-    const data = [{ v: points[0].val }, { v: points[0].val }]
+    const one = mk(points[0])
+    const data = [one, one]
     return (
       <div className="h-[90px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+            <XAxis dataKey="date" hide />
             <YAxis hide domain={['dataMin', 'dataMax']} reversed={reversed} />
+            <Tooltip content={<MiniTip color={color} />} cursor={false} />
             <Line
               type="monotone" dataKey="v" stroke={color} strokeWidth={2}
-              dot={{ r: 3, fill: color, strokeWidth: 0 }} isAnimationActive={false}
+              dot={{ r: 3, fill: color, strokeWidth: 0 }} activeDot={{ r: 4, fill: color, strokeWidth: 0 }}
+              isAnimationActive={false}
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
     )
   }
-  const data = points.map(p => ({ v: p.val }))
+  const data = points.map(mk)
   const vals = data.map(d => d.v)
   const minV = Math.min(...vals)
   const maxV = Math.max(...vals)
@@ -204,10 +243,13 @@ function MiniGraph({ points, color, reversed }) {
     <div className="h-[90px]">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+          <XAxis dataKey="date" hide />
           <YAxis hide domain={[minV - pad, maxV + pad]} reversed={reversed} />
+          <Tooltip content={<MiniTip color={color} />} cursor={{ stroke: color, strokeOpacity: 0.35, strokeDasharray: '3 3' }} />
           <Line
             type="monotone" dataKey="v" stroke={color} strokeWidth={2}
-            dot={false} activeDot={false} isAnimationActive={false}
+            dot={{ r: 2, fill: color, strokeWidth: 0 }} activeDot={{ r: 4, fill: color, strokeWidth: 0 }}
+            isAnimationActive={false}
           />
         </LineChart>
       </ResponsiveContainer>
@@ -327,11 +369,14 @@ export default function AdminUserActivity({ userId }) {
     // Returns { val, unit, kind } or null. `kind` drives the PR line formatter.
     function strengthMetric(e, equipment) {
       if (equipment === 'carry') {
-        // Workload = weight × distance (matches the carry detail's single
-        // progress metric). `val` drives the graph + best comparison; weight +
+        // Workload = weight × distance. Use the DISPLAY distance (lb logs → ft,
+        // else m) so the card's workload numbers match the detail page's chart
+        // and the athlete app. `val` drives the graph + best comparison; weight +
         // distM ride along for the "w × d" best line.
         const c = parseCarryWD(e.label)
-        return c ? { val: c.weight * c.distM, unit: c.unit, kind: 'workload', weight: c.weight, distM: c.distM } : null
+        if (!c) return null
+        const distDisp = c.unit === 'lb' ? c.distM / 0.3048 : c.distM
+        return { val: Math.round(c.weight * distDisp), unit: c.unit, kind: 'workload', weight: c.weight, distM: c.distM }
       }
       if (equipment === 'assisted') {
         const a = parseAssistance(e.label)
@@ -369,7 +414,7 @@ export default function AdminUserActivity({ userId }) {
           const m = strengthMetric(e, 'carry') // sled is carry-equipment → workload (w × d)
           if (m) {
             const v = g.byVariant[sledVariant] ??= { best: null, unit: m.unit, points: [] }
-            v.points.push({ ts, val: m.val })
+            v.points.push({ ts, val: m.val, disp: `Workload: ${m.val}` })
             if (v.best === null || m.val > v.best) {
               v.best = m.val; v.unit = m.unit
               v.bestW = m.weight; v.bestWUnit = m.unit; v.bestDistM = m.distM
@@ -400,7 +445,7 @@ export default function AdminUserActivity({ userId }) {
           if (m) {
             const vk = family.shortLabel || head // group by short label (fallback child name)
             const v = g.byVariant[vk] ??= { best: null, unit: m.unit, kind: m.kind, points: [], short: family.shortLabel }
-            v.points.push({ ts, val: m.val })
+            v.points.push({ ts, val: m.val, disp: fmtMetricDisp(m.kind, m.val, m.unit) })
             const better = v.best === null
               || (m.kind === 'assist' ? m.val < v.best : m.val > v.best)
             if (better) { v.best = m.val; v.unit = m.unit }
@@ -435,7 +480,7 @@ export default function AdminUserActivity({ userId }) {
           const reps = parseReps(e.label)
           if (reps !== null) {
             const v = g.byTier[tier] ??= { best: 0, points: [] }
-            v.points.push({ ts, val: reps })
+            v.points.push({ ts, val: reps, disp: `${reps} reps` })
             if (reps > v.best) v.best = reps
           }
           return
@@ -453,7 +498,7 @@ export default function AdminUserActivity({ userId }) {
         const m = strengthMetric(e, equip)
         if (m) {
           g.metricKind = m.kind
-          g.points.push({ ts, val: m.val })
+          g.points.push({ ts, val: m.val, disp: fmtMetricDisp(m.kind, m.val, m.unit) })
           const better = g.best === null
             || (m.kind === 'assist' ? m.val < g.best : m.val > g.best)
           if (better) {
@@ -478,7 +523,7 @@ export default function AdminUserActivity({ userId }) {
           if (parsed) {
             const v = g.byStroke[stroke] ??= { best: null, str: null, lowerBetter: parsed.lowerBetter, points: [] }
             v.lowerBetter = parsed.lowerBetter
-            v.points.push({ ts, val: parsed.val })
+            v.points.push({ ts, val: parsed.val, disp: e.value })
             const better = v.best === null
               || (parsed.lowerBetter ? parsed.val < v.best : parsed.val > v.best)
             if (better) { v.best = parsed.val; v.str = e.value }
@@ -501,7 +546,7 @@ export default function AdminUserActivity({ userId }) {
           const r = parseRuckWD(e.label)
           if (r) {
             const wl = r.packLb * r.distMi
-            g.points.push({ ts, val: wl })
+            g.points.push({ ts, val: wl, disp: `Workload: ${Math.round(wl)}` })
             if (g.best === null || wl > g.best) { g.best = wl; g.bestW = r.packLb; g.bestDistMi = r.distMi }
           }
           return
@@ -520,7 +565,7 @@ export default function AdminUserActivity({ userId }) {
         const parsed = parseCardioBest(e.value)
         if (parsed) {
           g.lowerBetter = parsed.lowerBetter
-          g.points.push({ ts, val: parsed.val })
+          g.points.push({ ts, val: parsed.val, disp: e.value })
           const better = g.best === null
             || (parsed.lowerBetter ? parsed.val < g.best : parsed.val > g.best)
           if (better) { g.best = parsed.val; g.str = e.value }
