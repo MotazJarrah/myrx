@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useLocation } from 'wouter'
 import { supabase } from '../../../lib/supabase'
 import { useMovements } from '../../../hooks/useMovements'
-import { Dumbbell, Activity } from 'lucide-react'
+import { Dumbbell, Activity, ChevronRight } from 'lucide-react'
 import {
   LineChart, Line, YAxis, ResponsiveContainer,
 } from 'recharts'
@@ -204,7 +204,7 @@ function MoveCard({ move, onClick }) {
   return (
     <button
       onClick={onClick}
-      className="flex w-full flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left hover:bg-accent/30 transition-colors"
+      className="group flex w-full flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left hover:bg-accent/30 transition-colors"
     >
       {/* Title row — icon + name + variant badge */}
       <div className="flex items-center gap-2.5">
@@ -220,6 +220,7 @@ function MoveCard({ move, onClick }) {
             {move.badge}
           </span>
         )}
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
       </div>
 
       {/* Mini progress graph */}
