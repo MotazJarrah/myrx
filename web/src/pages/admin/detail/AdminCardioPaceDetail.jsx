@@ -63,6 +63,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useAuth } from '../../../contexts/AuthContext'
 import CueText from '../../../components/CueText'
 import { projectPaces } from '../../../lib/formulas'
 import TickerNumber from '../../../components/TickerNumber'
@@ -607,8 +608,11 @@ function generatePlanQueue(activity, efforts, bestPaceSecPerKm, distUnit, count 
 //   <AdminCardioPaceDetail userId activity />.
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AdminCardioPaceDetail({ userId, activity, onBack }) {
+  // T093: the coach views a client's cardio in the COACH's units, not the client's.
+  // Ergs stay metric / per-500m via their own branches; this only affects km/mi.
+  const { profile: coachProfile } = useAuth()
+  const distUnit = coachProfile?.distance_unit || 'km'
   const [efforts,  setEfforts]  = useState([])
-  const [distUnit, setDistUnit] = useState('km')
   const [loading,  setLoading]  = useState(true)
 
   // Progression-plan UI state.
@@ -622,23 +626,15 @@ export default function AdminCardioPaceDetail({ userId, activity, onBack }) {
     let cancelled = false
     async function load() {
       setLoading(true)
-      const [efRes, profRes] = await Promise.all([
-        supabase
-          .from('efforts')
-          .select('id, user_id, label, value, type, created_at')
-          .eq('user_id', userId)
-          .eq('type', 'cardio')
-          .ilike('label', `${activity} ·%`)
-          .order('created_at', { ascending: true }),
-        supabase
-          .from('profiles')
-          .select('distance_unit')
-          .eq('id', userId)
-          .maybeSingle(),
-      ])
+      const efRes = await supabase
+        .from('efforts')
+        .select('id, user_id, label, value, type, created_at')
+        .eq('user_id', userId)
+        .eq('type', 'cardio')
+        .ilike('label', `${activity} ·%`)
+        .order('created_at', { ascending: true })
       if (cancelled) return
       setEfforts(efRes.data || [])
-      setDistUnit(profRes.data?.distance_unit || 'km')
       setLoading(false)
     }
     load()

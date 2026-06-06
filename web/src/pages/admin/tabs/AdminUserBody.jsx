@@ -398,8 +398,8 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
                     <Weight className="h-3.5 w-3.5" />
                   </div>
                   <span className="text-sm text-muted-foreground flex-1 whitespace-nowrap">{fmtDateFull(e.created_at)}</span>
-                  <span className="text-sm font-bold tabular-nums font-mono">{e.weight}</span>
-                  <span className="text-xs text-muted-foreground w-6">{e.unit}</span>
+                  <span className="text-sm font-bold tabular-nums font-mono">{convertWeight(e.weight, e.unit, coachUnit)}</span>
+                  <span className="text-xs text-muted-foreground w-6">{coachUnit}</span>
                 </div>
               </SwipeDelete>
             ))}

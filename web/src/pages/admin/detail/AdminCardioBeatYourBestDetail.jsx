@@ -53,6 +53,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useAuth } from '../../../contexts/AuthContext'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
 import SwipeDelete from '../../../components/SwipeDelete'
@@ -214,38 +215,32 @@ function cardioCategoryPillLabel(activity) {
 //   onBack   (fn, optional)     — custom back handler. Defaults to returning to
 //                                  the client's detail page (activity tab).
 //
-// Self-contained: fetches the client's efforts for this activity + the client's
-// profile.distance_unit itself, so wiring is just
+// Self-contained: fetches the client's efforts for this activity. Distance unit
+// follows the COACH's profile (T093), so wiring is just
 // <AdminCardioBeatYourBestDetail userId activity />.
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AdminCardioBeatYourBestDetail({ userId, activity, onBack }) {
+  // T093: the coach views a client's cardio in the COACH's units, not the client's.
+  const { profile: coachProfile } = useAuth()
+  const distUnit = coachProfile?.distance_unit || 'km'
   const [efforts, setEfforts] = useState([])
-  const [distUnit, setDistUnit] = useState('km')
   const [loading, setLoading] = useState(true)
   const [infoOpen, setInfoOpen] = useState(false)
 
-  // ── Load efforts + profile distance unit ───────────────────────────────────
+  // ── Load efforts ────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
-      const [efRes, profRes] = await Promise.all([
-        supabase
-          .from('efforts')
-          .select('id, label, value, type, created_at')
-          .eq('user_id', userId)
-          .eq('type', 'cardio')
-          .ilike('label', `${activity} ·%`)
-          .order('created_at', { ascending: true }),
-        supabase
-          .from('profiles')
-          .select('distance_unit')
-          .eq('id', userId)
-          .maybeSingle(),
-      ])
+      const efRes = await supabase
+        .from('efforts')
+        .select('id, label, value, type, created_at')
+        .eq('user_id', userId)
+        .eq('type', 'cardio')
+        .ilike('label', `${activity} ·%`)
+        .order('created_at', { ascending: true })
       if (cancelled) return
       setEfforts(efRes.data || [])
-      setDistUnit(profRes.data?.distance_unit || 'km')
       setLoading(false)
     }
     load()

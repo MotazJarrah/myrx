@@ -44,6 +44,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useAuth } from '../../../contexts/AuthContext'
 import CueText from '../../../components/CueText'
 import TickerNumber from '../../../components/TickerNumber'
 import AnimateRise from '../../../components/AnimateRise'
@@ -707,41 +708,37 @@ function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) 
 //                                   returning to the client's detail page.
 //
 // Self-contained: fetches all four stroke variants' efforts (+ legacy bare
-// "Swimming · ...") in one query AND the client's profile.swim_unit.
+// "Swimming · ...") in one query. The swim unit (m / yd) follows the COACH's
+// profile.swim_unit, not the client's (T093).
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AdminCardioSwimmingDetail({ userId, activity, onBack }) {
+  // T093: the coach views a client's swim data in the COACH's swim unit (m / yd),
+  // not the client's. Everything that renders per-100m/yd reads `swimUnit` below.
+  const { profile: coachProfile } = useAuth()
+  const swimUnit = coachProfile?.swim_unit === 'yd' ? 'yd' : 'm'
   const [efforts, setEfforts] = useState([])
   const [loading, setLoading] = useState(true)
-  const [swimUnit, setSwimUnit] = useState('m')
 
-  // ── Load all swim efforts (across strokes + legacy) + profile.swim_unit ──────
+  // ── Load all swim efforts (across strokes + legacy) ──────────────────────────
   useEffect(() => {
     let cancelled = false
     async function load() {
       setLoading(true)
-      const [efRes, profRes] = await Promise.all([
-        supabase
-          .from('efforts')
-          .select('id, label, value, type, created_at')
-          .eq('user_id', userId)
-          .eq('type', 'cardio')
-          .or([
-            'label.ilike.Swimming [Freestyle] ·%',
-            'label.ilike.Swimming [Backstroke] ·%',
-            'label.ilike.Swimming [Breaststroke] ·%',
-            'label.ilike.Swimming [Butterfly] ·%',
-            'label.ilike.Swimming ·%',
-          ].join(','))
-          .order('created_at', { ascending: true }),
-        supabase
-          .from('profiles')
-          .select('swim_unit')
-          .eq('id', userId)
-          .maybeSingle(),
-      ])
+      const efRes = await supabase
+        .from('efforts')
+        .select('id, label, value, type, created_at')
+        .eq('user_id', userId)
+        .eq('type', 'cardio')
+        .or([
+          'label.ilike.Swimming [Freestyle] ·%',
+          'label.ilike.Swimming [Backstroke] ·%',
+          'label.ilike.Swimming [Breaststroke] ·%',
+          'label.ilike.Swimming [Butterfly] ·%',
+          'label.ilike.Swimming ·%',
+        ].join(','))
+        .order('created_at', { ascending: true })
       if (cancelled) return
       setEfforts(efRes.data || [])
-      setSwimUnit(profRes.data?.swim_unit === 'yd' ? 'yd' : 'm')
       setLoading(false)
     }
     load()
