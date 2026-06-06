@@ -329,7 +329,7 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
         ) : (
           <StatCard title="BMI">
             <p className="text-sm text-muted-foreground/60 leading-snug">
-              {!latestWeightKg ? 'Log a weigh-in first' : 'Add height in profile to calculate'}
+              {!latestWeightKg ? 'No weigh-in logged yet' : 'No height on file'}
             </p>
           </StatCard>
         )}
@@ -348,7 +348,7 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
         ) : (
           <StatCard title="Ideal Weight Range">
             <Target className="h-5 w-5 text-muted-foreground/30 mb-1" />
-            <p className="text-xs text-muted-foreground/60">Add height in profile</p>
+            <p className="text-xs text-muted-foreground/60">No height on file</p>
           </StatCard>
         )}
 
@@ -374,7 +374,7 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
         ) : (
           <StatCard title="Weight Trend">
             <p className="text-sm text-muted-foreground/60 leading-snug">
-              Log more weigh-ins to see the trend
+              Not enough weigh-ins for a trend yet
             </p>
           </StatCard>
         )}
