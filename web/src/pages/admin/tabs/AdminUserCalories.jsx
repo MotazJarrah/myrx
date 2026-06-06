@@ -5,6 +5,7 @@ import SwipeDelete from '../../../components/SwipeDelete'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { calcFullPlan } from '../../../lib/calorieFormulas'
 import MacroPlanEditor from '../../../components/MacroPlanEditor'
+import CalorieDashboard from '../../../components/CalorieDashboard'
 
 function fmtDate(iso) {
   const d = new Date(iso + 'T12:00:00')
@@ -262,7 +263,7 @@ function SubTabBtn({ active, onClick, children }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AdminUserCalories({ userId, existingPlan, profile, adminUserId, onPlanSaved, onSaved }) {
-  const [subTab,   setSubTab]   = useState('foodlog')
+  const [subTab,   setSubTab]   = useState('overview')
   const [entries,  setEntries]  = useState([])
   const [loading,  setLoading]  = useState(true)
 
@@ -332,10 +333,16 @@ export default function AdminUserCalories({ userId, existingPlan, profile, admin
 
       {/* Sub-tab bar */}
       <div className="flex gap-1 rounded-lg border border-border bg-muted/20 p-0.5 w-fit flex-wrap">
-        <SubTabBtn active={subTab === 'foodlog'} onClick={() => setSubTab('foodlog')}>Food Log</SubTabBtn>
-        <SubTabBtn active={subTab === 'intake'}  onClick={() => setSubTab('intake')}>Manual Logs</SubTabBtn>
-        <SubTabBtn active={subTab === 'plan'}    onClick={() => setSubTab('plan')}>Macro Plan</SubTabBtn>
+        <SubTabBtn active={subTab === 'overview'} onClick={() => setSubTab('overview')}>Overview</SubTabBtn>
+        <SubTabBtn active={subTab === 'foodlog'}  onClick={() => setSubTab('foodlog')}>Food Log</SubTabBtn>
+        <SubTabBtn active={subTab === 'intake'}   onClick={() => setSubTab('intake')}>Manual Logs</SubTabBtn>
+        <SubTabBtn active={subTab === 'plan'}     onClick={() => setSubTab('plan')}>Macro Plan</SubTabBtn>
       </div>
+
+      {/* Overview tab — read-only mirror of the athlete calorie dashboard */}
+      {subTab === 'overview' && (
+        <CalorieDashboard userId={userId} profile={profile} plan={existingPlan} />
+      )}
 
       {/* Food Log tab — reads from food_logs */}
       {subTab === 'foodlog' && (
