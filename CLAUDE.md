@@ -1680,6 +1680,10 @@ Qualification: a single effort must meet BOTH thresholds simultaneously (NOT cum
 
 Common GoRuck Sand Plate sizes (10 / 20 / 30 / 45 lb), Rogue Echo plate sizes (10 / 15 / 20 / 25 / 30 / 35 / 40 / 45 lb), and realistic stacked combinations. MAX LOAD and CONDITIONING zone math snap to ladder rungs so prescriptions correspond to plates the user can actually load.
 
+**Pack-weight soft safety cap (LOCKED — June 2026):** the log form (`cardio.tsx`, `isRuckMode`) shows a **soft amber warning** (never a hard block) the moment the entered pack exceeds **~1/3 of the user's bodyweight** — the common safe-load ceiling for sustained loaded carries. Copy: *"Heads up: N lb is X% of your bodyweight. Rucking guidance keeps loaded carries near a third of bodyweight, so build up to this gradually."* Bodyweight comes from `profile.current_weight`, converted to lb (pack is lb-locked). It does NOT cap the wheel — the user can still log a real heavy ruck (data integrity). Mobile-only (web end-user log form is frozen; the coach view is read-only).
+
+**Tiers stay ABSOLUTE (verify-first, June 2026):** a T088 audit claimed the tiers were mislabeled and should be bodyweight-relative — both refuted on inspection. Our tiers match the official GoRuck standard exactly (Light 20 / Tough 35 / Heavy 45 lb), which is **absolute** worldwide, so they are NOT scaled to bodyweight. The bodyweight relationship lives only in the soft safety cap above, as a separate guardrail.
+
 **Adaptation zones (LOCKED — mirror Carry's exactly):**
 
 | Zone | Weight target | Distance target |

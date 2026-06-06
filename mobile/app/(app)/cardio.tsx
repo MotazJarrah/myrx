@@ -19,7 +19,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { View, Text, Pressable, StyleSheet } from 'react-native'
 import { router } from 'expo-router'
-import { Activity, Timer, ChevronRight, Check } from 'lucide-react-native'
+import { Activity, Timer, ChevronRight, Check, AlertTriangle } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import { useMovements } from '../../src/hooks/useMovements'
@@ -256,6 +256,18 @@ export default function Cardio() {
   // packWeightValue is in pounds; default 0 = bodyweight rucking.
   const isRuckMode = isRuckingActivity(activity)
   const [packWeightValue, setPackWeightValue] = useState('0')
+
+  // Rucking soft safety cap — WARN (never block) when the pack exceeds ~1/3 of
+  // bodyweight, the common safe-load ceiling for sustained loaded carries. Tiers
+  // stay absolute (the GoRuck standard); this is a separate BW-relative guardrail.
+  // Pack is lb-locked, so convert the profile bodyweight to lb first.
+  const ruckBwRaw = (profile?.current_weight as number | null | undefined) ?? 0
+  const ruckBwLb  = ruckBwRaw > 0
+    ? ((profile?.weight_unit as string) === 'kg' ? ruckBwRaw / 0.453592 : ruckBwRaw)
+    : 0
+  const ruckPackLb  = Math.round(Number(packWeightValue) || 0)
+  const ruckOverCap = isRuckMode && ruckBwLb > 0 && ruckPackLb > ruckBwLb / 3
+  const ruckPctBw   = ruckBwLb > 0 ? Math.round((ruckPackLb / ruckBwLb) * 100) : 0
 
   // StairMill mode — duration-mode activity, but logs FLOORS alongside
   // TIME so the detail page can derive floors-per-minute (the rate anchor
@@ -1166,27 +1178,38 @@ export default function Cardio() {
               /* Rucking — show pack weight × distance as the headline metric
                  (the two axes the detail page tracks). Pace is a derived
                  read-only secondary chip. The user thinks in load + miles,
-                 not in min/mi pace. */
-              (Number(distValue) > 0 && effectiveTimeSecs > 0) ? (
-                <>
+                 not in min/mi pace. The soft safety warning shows as soon as the
+                 pack is over ~1/3 BW, independent of distance/time. */
+              <>
+                {ruckOverCap ? (
                   <ChipAmber>
-                    <Activity size={14} color={palette.amber[400]} />
-                    <Text style={s.chipLabel}>Ruck</Text>
-                    <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
-                      {Math.round(Number(packWeightValue) || 0)} lb × {parseFloat(Number(distValue).toFixed(2))} mi
+                    <AlertTriangle size={14} color={palette.amber[400]} />
+                    <Text style={[s.chipLabel, { flex: 1, lineHeight: 16 }]}>
+                      Heads up: {ruckPackLb} lb is {ruckPctBw}% of your bodyweight. Rucking guidance keeps loaded carries near a third of bodyweight, so build up to this gradually.
                     </Text>
                   </ChipAmber>
-                  {livePaceDisplay ? (
+                ) : null}
+                {(Number(distValue) > 0 && effectiveTimeSecs > 0) ? (
+                  <>
                     <ChipAmber>
-                      <Timer size={14} color={palette.amber[400]} />
-                      <Text style={s.chipLabel}>Pace</Text>
+                      <Activity size={14} color={palette.amber[400]} />
+                      <Text style={s.chipLabel}>Ruck</Text>
                       <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
-                        {livePaceDisplay}
+                        {Math.round(Number(packWeightValue) || 0)} lb × {parseFloat(Number(distValue).toFixed(2))} mi
                       </Text>
                     </ChipAmber>
-                  ) : null}
-                </>
-              ) : null
+                    {livePaceDisplay ? (
+                      <ChipAmber>
+                        <Timer size={14} color={palette.amber[400]} />
+                        <Text style={s.chipLabel}>Pace</Text>
+                        <Text style={[s.chipValue, { color: palette.amber[400], marginLeft: 'auto' }]}>
+                          {livePaceDisplay}
+                        </Text>
+                      </ChipAmber>
+                    ) : null}
+                  </>
+                ) : null}
+              </>
             ) : (
               livePaceDisplay ? (
                 <ChipAmber>
