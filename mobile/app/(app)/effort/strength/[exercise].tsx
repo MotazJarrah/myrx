@@ -1710,11 +1710,16 @@ const LEVERAGE_GATE = 30 // hold this many clean seconds at a variant, then prog
 
 // Variant ladders — only the families whose harder variants exist as separate
 // movements in the DB. Order = easiest -> hardest.
+// Bracket-named variants (T088 #5): the leverage families are now DB parent/child
+// families (parent "Planche Hold" + children "Planche Hold [Tuck/Straddle/Full]"),
+// rendered by the generic FamilyConsolidatedDetail. These ladders drive the
+// per-variant "ready for the next variant" hero hint inside each slot. Order =
+// easiest -> hardest.
 const LEVERAGE_LADDERS: ReadonlyArray<readonly string[]> = [
-  ['Planche Hold (Tuck)', 'Planche Hold (Straddle)', 'Planche Hold'],
-  ['Front Lever Hold (Tuck)', 'Front Lever Hold'],
-  ['Back Lever Hold (Tuck)', 'Back Lever Hold'],
-  ['Handstand Hold (Wall)', 'Handstand Hold (Freestanding)'],
+  ['Planche Hold [Tuck]', 'Planche Hold [Straddle]', 'Planche Hold [Full]'],
+  ['Front Lever Hold [Tuck]', 'Front Lever Hold [Full]'],
+  ['Back Lever Hold [Tuck]', 'Back Lever Hold [Full]'],
+  ['Handstand Hold [Wall]', 'Handstand Hold [Freestanding]'],
 ]
 function leverageLadderFor(name: string): readonly string[] | null {
   for (const l of LEVERAGE_LADDERS) if (l.includes(name)) return l
@@ -1723,7 +1728,7 @@ function leverageLadderFor(name: string): readonly string[] | null {
 // Short label for the ladder strip: the parenthetical ("Tuck"/"Straddle"/"Wall")
 // or "Full" for the no-parenthetical top variant.
 function leverageVariantLabel(name: string): string {
-  const m = name.match(/\(([^)]+)\)/)
+  const m = name.match(/\[([^\]]+)\]/)
   return m ? m[1] : 'Full'
 }
 
@@ -1788,7 +1793,7 @@ function LeverageHoldDetail({
         <Text style={s.h2}>Hold the position</Text>
         <Text style={s.tinyText}>A skill, not an endurance test — short clean holds, then a harder variant.</Text>
 
-        {ladder && (
+        {ladder && !hideHeader && (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
             {ladder.map((v, i) => {
               const isCurrent = v === exercise
@@ -6467,7 +6472,7 @@ function FamilyConsolidatedDetail({
   parent,
   variants,
 }: {
-  parent: { id: string; name: string; equipment?: string | null }
+  parent: { id: string; name: string; equipment?: string | null; strength_type?: string | null; hold_type?: string | null }
   variants: ReadonlyArray<{
     id: string
     name: string
@@ -6681,7 +6686,7 @@ function FamilyConsolidatedDetail({
 
         {/* Equipment badge — same chrome as standalone StrengthDetail */}
         <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
-          <Text style={s.carryTierBadgeText}>{equipmentPillLabel(parent.equipment ?? null)}</Text>
+          <Text style={s.carryTierBadgeText}>{parent.hold_type === 'leverage' ? 'SKILL' : equipmentPillLabel(parent.equipment ?? null)}</Text>
         </View>
 
         {/* ── Pill row — Sled Work clone ────────────────────────────── */}
