@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
+import { useAuth } from '../../../contexts/AuthContext'
 import {
   Droplet, GlassWater, Droplets, Coffee, Leaf, CupSoda, Milk,
 } from 'lucide-react'
@@ -143,8 +144,11 @@ export default function AdminUserHydration({ userId, profile }) {
   const [bwKg,    setBwKg]    = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // The athlete's display unit preference ('oz' default, or 'mL').
-  const fluidUnit = profile?.fluid_unit === 'mL' ? 'mL' : 'oz'
+  // T093: the coach views the client's hydration in the COACH's fluid unit (via
+  // useAuth), not the client's. The mL/kg target math still uses the client's
+  // actual bodyweight; only this display unit switches to the coach's.
+  const { profile: coachProfile } = useAuth()
+  const fluidUnit = coachProfile?.fluid_unit === 'mL' ? 'mL' : 'oz'
 
   // Window: today + 6 prior days (matches the mobile 7-day fetch).
   const sevenDaysAgo = useMemo(() => {
