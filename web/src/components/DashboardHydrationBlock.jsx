@@ -9,7 +9,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Droplet } from 'lucide-react'
-import { BarChart, Bar, YAxis, ReferenceLine, Cell, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, Cell, ResponsiveContainer } from 'recharts'
 import { SnapshotCard, SnapshotLoading, SnapshotEmpty, StatStrip } from './DashboardSnapshotShell'
 
 const ML_PER_OZ = 29.5735, LB_TO_KG = 0.45359237, ML_PER_CUP = 250, ML_PER_KG_TARGET = 35
@@ -97,8 +97,13 @@ export default function DashboardHydrationBlock({ userId, profile, onViewAll }) 
           <div className="flex-1 min-h-0 px-2 pt-3">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} margin={{ top: 4, right: 6, left: 6, bottom: 0 }}>
+                <XAxis dataKey="label" hide />
                 <YAxis hide domain={[0, yMax]} />
                 <ReferenceLine y={targetVal} stroke={CYAN} strokeDasharray="3 3" strokeOpacity={0.55} />
+                <Tooltip
+                  cursor={{ fill: 'hsl(var(--muted-foreground) / 0.12)' }}
+                  formatter={v => [`${v} ${fluidUnit}`, 'Intake']}
+                />
                 <Bar dataKey="value" radius={[3, 3, 0, 0]} isAnimationActive={false}>
                   {chartData.map(d => <Cell key={d.key} fill={d.value > 0 ? CYAN : CYAN_FAINT} />)}
                 </Bar>

@@ -469,3 +469,52 @@ input[type="range"].signup-slider:active::-moz-range-thumb {
 .animate-typing-dot {
   animation: typing-dot-bounce 1.2s ease-in-out infinite;
 }
+
+/* ── Modern scrollbars (app-wide) ──────────────────────────────────────
+   Replaces the chunky default OS scrollbar with a thin, theme-tinted one.
+   Firefox honors scrollbar-width/color; WebKit/Blink use the pseudo-elements.
+   The transparent border + padding-box clip makes the thumb read as a slim
+   pill with breathing room. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.22);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.42);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ── Recharts tooltip — force the dark theme everywhere ────────────────
+   Most charts set contentStyle (dark box) but NOT labelStyle/itemStyle, so
+   the label + item text rendered dark-on-dark (the Hydration "wrong colors"
+   report — actually shared by every chart). Styling the box + label + items
+   globally fixes all of them at once, and makes bare <Tooltip>s look right. */
+.recharts-default-tooltip {
+  background: hsl(var(--card)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35) !important;
+  padding: 6px 10px !important;
+}
+.recharts-tooltip-label {
+  color: hsl(var(--muted-foreground)) !important;
+  font-size: 11px !important;
+  margin-bottom: 2px !important;
+}
+.recharts-tooltip-item,
+.recharts-tooltip-item-name,
+.recharts-tooltip-item-value,
+.recharts-tooltip-item-separator {
+  color: hsl(var(--foreground)) !important;
+  font-size: 12px !important;
+  padding: 0 !important;
+}

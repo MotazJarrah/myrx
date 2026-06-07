@@ -7,7 +7,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Scale } from 'lucide-react'
-import { LineChart, Line, YAxis, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { SnapshotCard, SnapshotLoading, SnapshotEmpty, StatStrip } from './DashboardSnapshotShell'
 
 const LB_PER_KG = 2.2046226218
@@ -106,8 +106,14 @@ export default function DashboardBodyweightBlock({ userId, profile, onViewAll })
             {chartData.length >= 2 && (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 4, right: 6, left: 6, bottom: 0 }}>
+                  <XAxis dataKey="ts" hide />
                   <YAxis hide domain={domain} />
-                  <Line type="monotone" dataKey="weight" stroke="#34d399" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <Tooltip
+                    cursor={{ stroke: 'hsl(var(--muted-foreground) / 0.3)' }}
+                    labelFormatter={ts => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    formatter={v => [`${v} ${coachUnit}`, 'Weight']}
+                  />
+                  <Line type="monotone" dataKey="weight" stroke="#34d399" strokeWidth={2} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}

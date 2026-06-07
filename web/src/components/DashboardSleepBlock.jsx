@@ -7,7 +7,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { Moon } from 'lucide-react'
-import { LineChart, Line, YAxis, ReferenceLine, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts'
 import { SnapshotCard, SnapshotLoading, SnapshotEmpty, StatStrip } from './DashboardSnapshotShell'
 
 function estimateAge(birthdate) {
@@ -36,6 +36,24 @@ function fmtHoursMinutes(s) {
   if (h && m) return `${h}h ${m}m`
   if (h) return `${h}h`
   return `${m}m`
+}
+// Minutes after 6pm (so bedtimes that cross midnight stay monotonic).
+function minsAfter6pm(iso) {
+  const d = new Date(iso)
+  let m = d.getHours() * 60 + d.getMinutes() - 18 * 60
+  if (m < 0) m += 24 * 60
+  return m
+}
+// minutes-after-6pm -> "h:mm AM/PM" clock string.
+function fmtClock(minsAfter6) {
+  let ma = Math.round(minsAfter6)
+  ma = ((ma % 1440) + 1440) % 1440
+  const clock = (ma + 18 * 60) % 1440
+  let h = Math.floor(clock / 60)
+  const m = clock % 60
+  const period = h >= 12 ? 'PM' : 'AM'
+  h = h % 12 || 12
+  return `${h}:${String(m).padStart(2, '0')} ${period}`
 }
 
 export default function DashboardSleepBlock({ userId, profile, onViewAll }) {
@@ -78,10 +96,13 @@ export default function DashboardSleepBlock({ userId, profile, onViewAll }) {
     const latest = sessions[0]
     const last7 = sessions.slice(0, 7)
     const avg = last7.reduce((a, s) => a + s.duration_s, 0) / last7.length
+    const wakeMins = last7.filter(s => s.end_at).map(s => minsAfter6pm(s.end_at))
+    const avgWake = wakeMins.length ? wakeMins.reduce((a, b) => a + b, 0) / wakeMins.length : null
+    const bedtimeTarget = avgWake != null ? fmtClock(avgWake - targetHours * 60) : '—'
     return [
       { label: 'Last night', value: fmtHoursMinutes(latest.duration_s), unit: '', tint: 'text-indigo-400' },
       { label: '7-night avg', value: fmtHoursMinutes(avg), unit: '', tint: 'text-foreground' },
-      { label: 'Target', value: `${targetHours}h`, unit: '', tint: 'text-muted-foreground' },
+      { label: 'Bedtime target', value: bedtimeTarget, unit: '', tint: 'text-muted-foreground' },
     ]
   }, [sessions, targetHours])
 
@@ -97,9 +118,15 @@ export default function DashboardSleepBlock({ userId, profile, onViewAll }) {
             {chartData.length >= 2 && (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 4, right: 6, left: 6, bottom: 0 }}>
+                  <XAxis dataKey="ts" hide />
                   <YAxis hide domain={domain} />
                   <ReferenceLine y={targetHours} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" strokeWidth={1} />
-                  <Line type="monotone" dataKey="hours" stroke="#818cf8" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  <Tooltip
+                    cursor={{ stroke: 'hsl(var(--muted-foreground) / 0.3)' }}
+                    labelFormatter={ts => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    formatter={v => [`${v} h`, 'Sleep']}
+                  />
+                  <Line type="monotone" dataKey="hours" stroke="#818cf8" strokeWidth={2} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}

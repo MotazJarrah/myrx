@@ -28,11 +28,17 @@ function statusFor(cal, t) {
 }
 const DOT = { on: 'rgb(52,211,153)', near: 'rgb(251,191,36)', off: 'rgb(248,113,113)', logged: 'rgb(148,163,184)' }
 
+function fmtDayLabel(iso) {
+  return new Date(iso + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 // The line-chart-under-days, standalone (no tiles). Measures its own width so
-// the dots stay round (1:1, no preserveAspectRatio stretch).
+// the dots stay round (1:1, no preserveAspectRatio stretch). Hovering a dot
+// shows a floating date + kcal tooltip (matches the Recharts tooltip look).
 function CaloriesMiniGraph({ days, logs, target }) {
   const wrapRef = useRef(null)
   const [W, setW] = useState(0)
+  const [hover, setHover] = useState(null)
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
@@ -49,7 +55,7 @@ function CaloriesMiniGraph({ days, logs, target }) {
   const present = days.map(iso => logs[iso] ?? null).filter(c => c != null)
   if (present.length === 0) {
     return (
-      <div ref={wrapRef} className="h-[72px] flex items-center justify-center text-[11px] text-muted-foreground/50">
+      <div ref={wrapRef} className="w-full text-center text-[11px] text-muted-foreground/50">
         No intake logged in the last 14 days
       </div>
     )
@@ -60,14 +66,14 @@ function CaloriesMiniGraph({ days, logs, target }) {
   const span = (maxCal - minCal) || 200
   const toY = c => PADY + (1 - (c - minCal) / span) * innerH
   const pts = days
-    .map((iso, i) => ({ i, cal: logs[iso] ?? null }))
+    .map((iso, i) => ({ iso, i, cal: logs[iso] ?? null }))
     .filter(p => p.cal != null)
-    .map(p => ({ x: colCenter(p.i), y: toY(p.cal), st: statusFor(p.cal, target) }))
+    .map(p => ({ x: colCenter(p.i), y: toY(p.cal), st: statusFor(p.cal, target), iso: p.iso, cal: p.cal }))
   const targetY = target != null ? toY(target) : null
   const poly = pts.map(p => `${p.x},${p.y}`).join(' ')
 
   return (
-    <div ref={wrapRef} className="w-full">
+    <div ref={wrapRef} className="w-full relative">
       {W > 0 && (
         <svg width={W} height={H}>
           {targetY != null && (
@@ -76,8 +82,23 @@ function CaloriesMiniGraph({ days, logs, target }) {
           {pts.length > 1 && (
             <polyline points={poly} fill="none" stroke="hsl(var(--muted-foreground) / 0.30)" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
           )}
-          {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={4} fill={DOT[p.st]} />)}
+          {pts.map((p, i) => <circle key={`d${i}`} cx={p.x} cy={p.y} r={4} fill={DOT[p.st]} />)}
+          {pts.map((p, i) => (
+            <circle
+              key={`h${i}`} cx={p.x} cy={p.y} r={10} fill="transparent" style={{ cursor: 'pointer' }}
+              onMouseEnter={() => setHover(p)} onMouseLeave={() => setHover(null)}
+            />
+          ))}
         </svg>
+      )}
+      {hover && (
+        <div
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg border border-border bg-card px-2 py-1 shadow-md"
+          style={{ left: hover.x, top: hover.y - 6 }}
+        >
+          <div className="text-[10px] text-muted-foreground">{fmtDayLabel(hover.iso)}</div>
+          <div className="text-xs font-mono tabular-nums font-semibold text-foreground">{Math.round(hover.cal)} kcal</div>
+        </div>
       )}
     </div>
   )
@@ -106,27 +127,23 @@ export default function DashboardCaloriesBlock({ userId, profile, plan, onViewAl
     return () => { alive = false }
   }, [userId, days])
 
-  const target = useMemo(() => {
+  // Full plan (BMR/TDEE/target/energy) from the already-fetched calorie plan.
+  const result = useMemo(() => {
     if (!plan || !profile) return null
-    try { return calcFullPlan(profile, plan)?.dailyTarget ?? null } catch { return null }
+    try { return calcFullPlan(profile, plan) } catch { return null }
   }, [plan, profile])
+  const target = result?.dailyTarget ?? null
 
   const stats = useMemo(() => {
-    if (!logsByDay) return []
-    const todayCal = logsByDay[isoDay(new Date())] != null ? Math.round(logsByDay[isoDay(new Date())]) : null
-    const loggedVals = Object.values(logsByDay)
-    const avg = loggedVals.length ? Math.round(loggedVals.reduce((a, b) => a + b, 0) / loggedVals.length) : null
-    const out = [
-      { label: 'Today', value: todayCal, unit: 'kcal', tint: 'text-amber-400' },
-      { label: '14-day avg', value: avg, unit: 'kcal', tint: 'text-foreground' },
+    if (!result) return []
+    const eb = Math.round(result.energyAdj)
+    return [
+      { label: 'Daily target', value: result.dailyTarget, unit: 'kcal', tint: 'text-amber-400' },
+      { label: 'BMR', value: Math.round(result.bmr), unit: 'kcal', tint: 'text-foreground' },
+      { label: 'TDEE', value: Math.round(result.tdee), unit: 'kcal', tint: 'text-foreground' },
+      { label: 'Energy balance', value: `${eb > 0 ? '+' : ''}${eb}`, unit: 'kcal', tint: eb < 0 ? 'text-emerald-400' : eb > 0 ? 'text-amber-400' : 'text-foreground' },
     ]
-    if (target != null) {
-      const loggedDays = days.filter(iso => logsByDay[iso] != null)
-      const onTarget = loggedDays.filter(iso => statusFor(logsByDay[iso], target) === 'on').length
-      out.push({ label: 'On target', value: `${onTarget}/${loggedDays.length}`, unit: '', tint: 'text-emerald-400' })
-    }
-    return out
-  }, [logsByDay, target, days])
+  }, [result])
 
   const hasLogs = logsByDay && Object.keys(logsByDay).length > 0
 

@@ -7,7 +7,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { Heart } from 'lucide-react'
-import { LineChart, Line, YAxis, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { SnapshotCard, SnapshotLoading, SnapshotEmpty, StatStrip } from './DashboardSnapshotShell'
 
 function localDayKey(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.toISOString().slice(0, 10) }
@@ -48,20 +48,18 @@ export default function DashboardHeartBlock({ userId, onViewAll }) {
         day,
         resting: Math.min(...bpms),
         avg: Math.round(bpms.reduce((a, b) => a + b, 0) / bpms.length),
+        peak: Math.max(...bpms),
       }))
 
-    const latest = hr.length ? hr[hr.length - 1].bpm : null
-    const todayBpms = byDay.get(localDayKey(new Date()))
-    const restingToday = todayBpms ? Math.min(...todayBpms) : null
     const restings = chartData.map(d => d.resting)
     const restingAvg = restings.length ? Math.round(restings.reduce((a, b) => a + b, 0) / restings.length) : null
-    const resting = restingToday ?? restingAvg
+    const latestPeak = chartData.length ? chartData[chartData.length - 1].peak : null
     const todayStart = startOfTodayIso()
     const stepsToday = steps.filter(r => r.start_at >= todayStart).reduce((s, r) => s + (r.steps || 0), 0) || null
 
     const stats = [
-      { label: 'Latest', value: latest, unit: 'bpm', tint: 'text-red-400' },
-      { label: 'Resting', value: resting, unit: 'bpm', tint: 'text-emerald-400' },
+      { label: 'Avg resting', value: restingAvg, unit: 'bpm', tint: 'text-emerald-400' },
+      { label: 'Latest peak', value: latestPeak, unit: 'bpm', tint: 'text-red-400' },
       { label: 'Steps today', value: stepsToday != null ? stepsToday.toLocaleString() : null, unit: '', tint: 'text-amber-400' },
     ]
     return { chartData, stats, hasData }
@@ -87,9 +85,15 @@ export default function DashboardHeartBlock({ userId, onViewAll }) {
             {chartData.length >= 2 && (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 4, right: 6, left: 6, bottom: 0 }}>
+                  <XAxis dataKey="day" hide />
                   <YAxis hide domain={domain} />
-                  <Line type="monotone" dataKey="avg" stroke="#38bdf8" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
-                  <Line type="monotone" dataKey="resting" stroke="#34d399" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
+                  <Tooltip
+                    cursor={{ stroke: 'hsl(var(--muted-foreground) / 0.3)' }}
+                    labelFormatter={d => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    formatter={(v, n) => [`${v} bpm`, n === 'avg' ? 'Avg' : 'Resting']}
+                  />
+                  <Line type="monotone" dataKey="avg" name="avg" stroke="#38bdf8" strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
+                  <Line type="monotone" dataKey="resting" name="resting" stroke="#34d399" strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}
