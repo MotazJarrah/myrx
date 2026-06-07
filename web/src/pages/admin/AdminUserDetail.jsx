@@ -3,6 +3,7 @@ import { Link, useParams } from 'wouter'
 import TickerNumber from '../../components/TickerNumber'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
+import DashboardEffortsBlock from '../../components/DashboardEffortsBlock'
 import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
 import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign, Download, FileDown, Weight, Heart, Flame, Moon, Droplet } from 'lucide-react'
@@ -496,14 +497,13 @@ export default function AdminUserDetail() {
     const urlTab   = params.get('tab')
     const validTabs = ['dashboard', 'activity', 'body', 'heart', 'calories', 'sleep', 'hydration', 'billing', 'timeline']
     if (urlTab && validTabs.includes(urlTab)) return urlTab
-    // Legacy: old 'profile' tab → new 'dashboard'
-    const stored = localStorage.getItem(`admin-user-tab-${id}`)
-    if (stored === 'profile') return 'dashboard'
-    return stored || 'dashboard'
+    // T101: always reopen on the Dashboard tab — no longer restore the
+    // last-opened tab. An explicit ?tab= deep-link still wins (above).
+    return 'dashboard'
   })
 
   function handleTabChange(tabId) {
-    localStorage.setItem(`admin-user-tab-${id}`, tabId)
+    // T101: don't persist the last tab — reopening always lands on Dashboard.
     setActiveTab(tabId)
   }
 
@@ -1270,13 +1270,20 @@ export default function AdminUserDetail() {
           forms inline; those moved behind the gear icon May 26 2026
           so the top-level tabs are pure read-only dashboards. */}
       {activeTab === 'dashboard' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Efforts block (real) — strength + cardio combined, Free tier (always shown) */}
+          <DashboardEffortsBlock userId={id} onViewAll={() => handleTabChange('activity')} />
+
+          {/* Remaining domain blocks — placeholders for now, in tab order, tier-gated
+              (CoreRX: Bodyweight + Calories; FullRX: + Heart/Sleep/Hydration). Real
+              graph-snapshots land next. */}
           {[
-            { icon: Scale,    label: 'Bodyweight trend', tint: 'text-emerald-400' },
-            { icon: Apple,    label: 'Food intake',      tint: 'text-amber-400'   },
-            { icon: Dumbbell, label: 'Strength PRs',     tint: 'text-blue-400'    },
-            { icon: Activity, label: 'Cardio PRs',       tint: 'text-orange-400'  },
-          ].map(({ icon: Icon, label, tint }) => (
+            { show: tierRank >= TIER_RANK.corerx, icon: Scale,   label: 'Bodyweight', tint: 'text-emerald-400' },
+            { show: tierRank >= TIER_RANK.fullrx, icon: Heart,   label: 'Heart',      tint: 'text-red-400'     },
+            { show: tierRank >= TIER_RANK.corerx, icon: Apple,   label: 'Calories',   tint: 'text-amber-400'   },
+            { show: tierRank >= TIER_RANK.fullrx, icon: Moon,    label: 'Sleep',      tint: 'text-indigo-400'  },
+            { show: tierRank >= TIER_RANK.fullrx, icon: Droplet, label: 'Hydration',  tint: 'text-cyan-400'    },
+          ].filter(b => b.show).map(({ icon: Icon, label, tint }) => (
             <div key={label} className="rounded-xl border border-border bg-card p-5 min-h-[200px] flex flex-col items-center justify-center text-center gap-2">
               <Icon className={`h-8 w-8 ${tint} opacity-50`} />
               <p className="text-sm font-semibold text-foreground">{label}</p>
