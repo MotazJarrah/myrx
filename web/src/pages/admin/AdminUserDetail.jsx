@@ -4,6 +4,11 @@ import TickerNumber from '../../components/TickerNumber'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import DashboardEffortsBlock from '../../components/DashboardEffortsBlock'
+import DashboardBodyweightBlock from '../../components/DashboardBodyweightBlock'
+import DashboardHeartBlock from '../../components/DashboardHeartBlock'
+import DashboardCaloriesBlock from '../../components/DashboardCaloriesBlock'
+import DashboardSleepBlock from '../../components/DashboardSleepBlock'
+import DashboardHydrationBlock from '../../components/DashboardHydrationBlock'
 import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
 import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign, Download, FileDown, Weight, Heart, Flame, Moon, Droplet } from 'lucide-react'
@@ -1270,26 +1275,27 @@ export default function AdminUserDetail() {
           forms inline; those moved behind the gear icon May 26 2026
           so the top-level tabs are pure read-only dashboards. */}
       {activeTab === 'dashboard' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Efforts block (real) — strength + cardio combined, Free tier (always shown) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          {/* Snapshot blocks in nav order, tier-gated (CoreRX: Bodyweight +
+              Calories; FullRX: + Heart/Sleep/Hydration). Each = main graph + a
+              few quick stats; "View all ->" deep-links to the full tab. */}
           <DashboardEffortsBlock userId={id} onViewAll={() => handleTabChange('activity')} />
 
-          {/* Remaining domain blocks — placeholders for now, in tab order, tier-gated
-              (CoreRX: Bodyweight + Calories; FullRX: + Heart/Sleep/Hydration). Real
-              graph-snapshots land next. */}
-          {[
-            { show: tierRank >= TIER_RANK.corerx, icon: Scale,   label: 'Bodyweight', tint: 'text-emerald-400' },
-            { show: tierRank >= TIER_RANK.fullrx, icon: Heart,   label: 'Heart',      tint: 'text-red-400'     },
-            { show: tierRank >= TIER_RANK.corerx, icon: Apple,   label: 'Calories',   tint: 'text-amber-400'   },
-            { show: tierRank >= TIER_RANK.fullrx, icon: Moon,    label: 'Sleep',      tint: 'text-indigo-400'  },
-            { show: tierRank >= TIER_RANK.fullrx, icon: Droplet, label: 'Hydration',  tint: 'text-cyan-400'    },
-          ].filter(b => b.show).map(({ icon: Icon, label, tint }) => (
-            <div key={label} className="rounded-xl border border-border bg-card p-5 min-h-[200px] flex flex-col items-center justify-center text-center gap-2">
-              <Icon className={`h-8 w-8 ${tint} opacity-50`} />
-              <p className="text-sm font-semibold text-foreground">{label}</p>
-              <p className="text-xs text-muted-foreground">Snapshot coming soon</p>
-            </div>
-          ))}
+          {tierRank >= TIER_RANK.corerx && (
+            <DashboardBodyweightBlock userId={id} profile={profile} onViewAll={() => handleTabChange('body')} />
+          )}
+          {tierRank >= TIER_RANK.fullrx && (
+            <DashboardHeartBlock userId={id} onViewAll={() => handleTabChange('heart')} />
+          )}
+          {tierRank >= TIER_RANK.corerx && (
+            <DashboardCaloriesBlock userId={id} profile={profile} plan={existingPlan} onViewAll={() => handleTabChange('calories')} />
+          )}
+          {tierRank >= TIER_RANK.fullrx && (
+            <DashboardSleepBlock userId={id} profile={profile} onViewAll={() => handleTabChange('sleep')} />
+          )}
+          {tierRank >= TIER_RANK.fullrx && (
+            <DashboardHydrationBlock userId={id} profile={profile} onViewAll={() => handleTabChange('hydration')} />
+          )}
         </div>
       )}
 
