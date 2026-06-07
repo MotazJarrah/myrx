@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { Apple } from 'lucide-react'
+import { Apple, TrendingDown, TrendingUp } from 'lucide-react'
 import { calcFullPlan } from '../lib/calorieFormulas'
 import { SnapshotCard, SnapshotLoading, SnapshotEmpty, StatStrip } from './DashboardSnapshotShell'
 
@@ -137,11 +137,12 @@ export default function DashboardCaloriesBlock({ userId, profile, plan, onViewAl
   const stats = useMemo(() => {
     if (!result) return []
     const eb = Math.round(result.energyAdj)
+    const isLoss = eb < 0 // mobile: deficit -> emerald + down arrow, surplus -> blue + up arrow
     return [
       { label: 'Daily target', value: result.dailyTarget, unit: 'kcal', tint: 'text-amber-400' },
       { label: 'BMR', value: Math.round(result.bmr), unit: 'kcal', tint: 'text-foreground' },
       { label: 'TDEE', value: Math.round(result.tdee), unit: 'kcal', tint: 'text-foreground' },
-      { label: 'Energy balance', value: `${eb > 0 ? '+' : ''}${eb}`, unit: 'kcal', tint: eb < 0 ? 'text-emerald-400' : eb > 0 ? 'text-amber-400' : 'text-foreground' },
+      { label: 'Energy balance', value: `${eb > 0 ? '+' : ''}${eb}`, unit: 'kcal', tint: isLoss ? 'text-emerald-400' : 'text-blue-400', icon: isLoss ? TrendingDown : TrendingUp },
     ]
   }, [result])
 

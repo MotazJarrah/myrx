@@ -44,17 +44,21 @@ export function StatStrip({ stats }) {
       className="grid gap-px bg-border border-t border-border mt-auto"
       style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}
     >
-      {stats.map((s, i) => (
-        <div key={i} className="bg-card px-2 py-2.5 text-center">
-          <div className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{s.label}</div>
-          <div className="mt-0.5 text-sm font-mono tabular-nums font-semibold leading-none">
-            <span className={s.tint || 'text-foreground'}>{s.value ?? '—'}</span>
-            {s.value != null && s.unit ? (
-              <span className="text-[10px] text-muted-foreground ml-0.5">{s.unit}</span>
-            ) : null}
+      {stats.map((s, i) => {
+        const Icon = s.icon
+        return (
+          <div key={i} className="bg-card px-2 py-2.5 text-center">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{s.label}</div>
+            <div className="mt-0.5 flex items-center justify-center gap-0.5 text-sm font-mono tabular-nums font-semibold leading-none">
+              {Icon ? <Icon className={`h-3.5 w-3.5 shrink-0 ${s.tint || 'text-foreground'}`} /> : null}
+              <span className={s.tint || 'text-foreground'}>{s.value ?? '—'}</span>
+              {s.value != null && s.unit ? (
+                <span className="text-[10px] text-muted-foreground ml-0.5">{s.unit}</span>
+              ) : null}
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
