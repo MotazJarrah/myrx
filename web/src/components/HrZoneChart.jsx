@@ -1,32 +1,52 @@
-// Web SVG port of the mobile HrRangeChart (Skia). Per day it draws a resting
-// dot (emerald), an average dot (sky), and a vertical peak-zone gradient band
-// (yellow->red by HR zone) from 50% HRmax up to that day's peak. Hovering a day
-// shows a floating resting/avg/peak readout. Used in the Heart dashboard block
-// (compact) and the Heart detail page (full, with grid + axis + legend).
+// Web SVG port of the mobile HrRangeChart (Skia). Per day it draws a resting dot
+// (emerald), an avg dot (sky), and a vertical peak-zone gradient band from 50%
+// HRmax up to that day's peak. The band's COLOURS are proportional to time spent
+// in each zone (buildTimeInZoneStops) — ported 1:1 from mobile — falling back to
+// an even HRmax->40% gradient (incl below-Z1 grey) when a day has no zone data.
+// Hovering a day shows a resting/avg/peak readout. Used compact in the Heart
+// dashboard block and full (grid + axis + legend) on the Heart detail page.
 //
-// data: [{ day: 'YYYY-MM-DD', resting: number|null, avg: number|null, peak: number|null }]
-//       oldest -> newest. hrMax = 220 - age (caller computes from birthdate).
+// data: [{ day:'YYYY-MM-DD', resting, avg, peak, timeInZone }] oldest -> newest,
+// from web/src/lib/heartDaily.js (shared with the detail page so they match).
 
 import { useState, useEffect, useRef, useId } from 'react'
 
 const COLOR_RESTING = '#34d399'  // emerald-400
 const COLOR_AVG = '#38bdf8'      // sky-400
 const COLOR_PEAK = '#f87171'     // red-400 (tooltip peak value)
-// Gradient zones, top -> bottom (z5 hardest at the top, z1 at the bottom).
-const ZONES = [
-  { color: '#dc2626' }, // z5  90-100%
-  { color: '#ea580c' }, // z4  80-90%
-  { color: '#fb923c' }, // z3  70-80%
-  { color: '#fbbf24' }, // z2  60-70%
-  { color: '#facc15' }, // z1  50-60%
-]
+const ZONE = { z1: '#facc15', z2: '#fbbf24', z3: '#fb923c', z4: '#ea580c', z5: '#dc2626', belowZ1: '#64748b' }
 const LEGEND = [
-  ['Z1', 0.50, 0.60, '#facc15'],
-  ['Z2', 0.60, 0.70, '#fbbf24'],
-  ['Z3', 0.70, 0.80, '#fb923c'],
-  ['Z4', 0.80, 0.90, '#ea580c'],
-  ['Z5', 0.90, 1.00, '#dc2626'],
+  ['Z1', 0.50, 0.60, ZONE.z1],
+  ['Z2', 0.60, 0.70, ZONE.z2],
+  ['Z3', 0.70, 0.80, ZONE.z3],
+  ['Z4', 0.80, 0.90, ZONE.z4],
+  ['Z5', 0.90, 1.00, ZONE.z5],
 ]
+
+// Gradient stops proportional to time-in-zone (Z5 at top -> Z1 at bottom); two
+// stops per slice = hard segment edges. Mirrors mobile buildTimeInZoneStops.
+function buildTimeInZoneStops(t) {
+  const total = t.z1 + t.z2 + t.z3 + t.z4 + t.z5
+  if (total <= 0) return null
+  const order = [['z5', t.z5], ['z4', t.z4], ['z3', t.z3], ['z2', t.z2], ['z1', t.z1]]
+  const colors = [], positions = []
+  let cum = 0
+  for (const [id, time] of order) {
+    if (time <= 0) continue
+    colors.push(ZONE[id], ZONE[id])
+    positions.push(cum / total, (cum + time) / total)
+    cum += time
+  }
+  return { colors, positions }
+}
+// Even 6-segment fallback (Z5 -> belowZ1), used when a day has no zone data.
+function buildFallbackStops() {
+  const SEG = 1 / 6
+  const segs = [ZONE.z5, ZONE.z4, ZONE.z3, ZONE.z2, ZONE.z1, ZONE.belowZ1]
+  const colors = [], positions = []
+  segs.forEach((c, i) => { colors.push(c, c); positions.push(i * SEG + 0.001, (i + 1) * SEG - 0.001) })
+  return { colors, positions }
+}
 
 function niceTicks(min, max, n) {
   const step = (max - min) / n
@@ -34,14 +54,8 @@ function niceTicks(min, max, n) {
   for (let i = 0; i <= n; i++) out.push(Math.round(min + step * i))
   return [...new Set(out)]
 }
-function fmtAxis(day) {
-  const d = new Date(day + 'T00:00:00')
-  return `${d.getMonth() + 1}/${d.getDate()}`
-}
-function fmtDay(day) {
-  const d = new Date(day + 'T00:00:00')
-  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
-}
+function fmtAxis(day) { const d = new Date(day + 'T00:00:00'); return `${d.getMonth() + 1}/${d.getDate()}` }
+function fmtDay(day) { return new Date(day + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) }
 
 export default function HrZoneChart({ data, hrMax, height, compact = false }) {
   const wrapRef = useRef(null)
@@ -60,8 +74,6 @@ export default function HrZoneChart({ data, hrMax, height, compact = false }) {
   }, [])
 
   const H = height ?? measuredH
-  const fillParent = height == null
-
   const PADDING_TOP = 12
   const PADDING_BOTTOM = compact ? 8 : 26
   const PADDING_RIGHT = 12
@@ -79,7 +91,7 @@ export default function HrZoneChart({ data, hrMax, height, compact = false }) {
   const vals = []
   for (const d of days) for (const v of [d.resting, d.avg, d.peakLow, d.peakHigh]) if (v != null) vals.push(v)
 
-  const wrapClass = fillParent ? 'w-full h-full relative' : 'w-full relative'
+  const wrapClass = height == null ? 'w-full h-full relative' : 'w-full relative'
   if (W === 0 || H === 0 || vals.length === 0 || days.length === 0) {
     return <div ref={wrapRef} className={wrapClass} style={height != null ? { height } : undefined} />
   }
@@ -95,22 +107,29 @@ export default function HrZoneChart({ data, hrMax, height, compact = false }) {
   const yScale = y => PADDING_TOP + plotH - ((y - yMin) / (yMax - yMin)) * plotH
   const ticks = niceTicks(yMin, yMax, compact ? 3 : 4)
 
-  const gTop = yScale(hrMax)
-  const gBot = yScale(hrMax * 0.5)
+  // Per-band gradient: time-in-zone proportional (span = the band) else even
+  // fallback (span = HRmax -> 40% HRmax in chart coords; the band clips it).
+  const bands = days.map((d, i) => {
+    if (d.peakHigh == null || d.peakLow == null) return null
+    const top = yScale(d.peakHigh), bottom = yScale(d.peakLow)
+    const tz = d.timeInZone
+    const hasTz = tz && (tz.z1 + tz.z2 + tz.z3 + tz.z4 + tz.z5 + tz.belowZ1) > 0
+    let stops = hasTz ? buildTimeInZoneStops(tz) : null
+    let gy1, gy2
+    if (stops) { gy1 = top; gy2 = bottom }
+    else { stops = buildFallbackStops(); gy1 = yScale(hrMax); gy2 = yScale(hrMax * 0.40) }
+    return { i, id: `${gradId}-${i}`, x: xCenter(i) - BAND_WIDTH / 2, top, height: Math.max(2, bottom - top), stops, gy1, gy2 }
+  })
 
   return (
     <div ref={wrapRef} className={wrapClass} style={height != null ? { height } : undefined}>
       <svg width={W} height={H}>
         <defs>
-          <linearGradient id={gradId} gradientUnits="userSpaceOnUse" x1="0" y1={gTop} x2="0" y2={gBot}>
-            {ZONES.flatMap((z, i) => {
-              const a = i / ZONES.length, b = (i + 1) / ZONES.length
-              return [
-                <stop key={`${i}a`} offset={a} stopColor={z.color} />,
-                <stop key={`${i}b`} offset={b} stopColor={z.color} />,
-              ]
-            })}
-          </linearGradient>
+          {bands.filter(Boolean).map(b => (
+            <linearGradient key={b.id} id={b.id} gradientUnits="userSpaceOnUse" x1="0" y1={b.gy1} x2="0" y2={b.gy2}>
+              {b.stops.positions.map((p, j) => <stop key={j} offset={p} stopColor={b.stops.colors[j]} />)}
+            </linearGradient>
+          ))}
         </defs>
 
         {!compact && ticks.map(t => (
@@ -123,12 +142,10 @@ export default function HrZoneChart({ data, hrMax, height, compact = false }) {
         {days.map((d, i) => {
           const cx = xCenter(i)
           const colW = plotW / n
+          const b = bands[i]
           return (
             <g key={d.day}>
-              {d.peakHigh != null && d.peakLow != null && (() => {
-                const top = yScale(d.peakHigh), bottom = yScale(d.peakLow)
-                return <rect x={cx - BAND_WIDTH / 2} y={top} width={BAND_WIDTH} height={Math.max(2, bottom - top)} rx={3} ry={3} fill={`url(#${gradId})`} opacity={active === i ? 1 : 0.9} />
-              })()}
+              {b && <rect x={b.x} y={b.top} width={BAND_WIDTH} height={b.height} rx={3} ry={3} fill={`url(#${b.id})`} opacity={active === i ? 1 : 0.9} />}
               {d.resting != null && <circle cx={cx} cy={yScale(d.resting)} r={DOT_R + (active === i ? 1 : 0)} fill={COLOR_RESTING} stroke="hsl(var(--card))" strokeWidth={1.5} />}
               {d.avg != null && <circle cx={cx} cy={yScale(d.avg)} r={DOT_R + (active === i ? 1 : 0)} fill={COLOR_AVG} stroke="hsl(var(--card))" strokeWidth={1.5} />}
               {!compact && <text x={cx} y={H - 6} textAnchor="middle" fontSize={10} className={active === i ? 'fill-foreground' : 'fill-muted-foreground'}>{fmtAxis(d.day)}</text>}
@@ -141,7 +158,9 @@ export default function HrZoneChart({ data, hrMax, height, compact = false }) {
       {active != null && days[active] && (() => {
         const d = days[active]
         const cx = xCenter(active)
-        const topY = Math.min(...[d.peakHigh, d.avg, d.resting].filter(v => v != null).map(yScale))
+        const candidates = [d.peakHigh, d.avg, d.resting].filter(v => v != null)
+        if (!candidates.length) return null
+        const topY = Math.min(...candidates.map(yScale))
         return (
           <div
             className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg border border-border bg-card px-2 py-1 shadow-md"

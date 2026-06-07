@@ -29,6 +29,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { Heart, Activity, TrendingUp, Footprints } from 'lucide-react'
 import HrZoneChart from '../../../components/HrZoneChart'
+import { summariseHeartDays } from '../../../lib/heartDaily'
 
 // ── Day / time helpers ──────────────────────────────────────────────────────
 
@@ -228,7 +229,7 @@ export default function AdminUserHeart({ userId, profile }) {
         .order('start_at', { ascending: true }),
       supabase
         .from('wearable_workouts')
-        .select('id, exercise_type, start_at, end_at, duration_s, distance_m, calories_kcal, avg_bpm, max_bpm, min_bpm, steps')
+        .select('id, exercise_type, start_at, end_at, duration_s, distance_m, calories_kcal, avg_bpm, max_bpm, min_bpm, steps, raw_meta')
         .eq('user_id', userId)
         .gte('start_at', since)
         .order('start_at', { ascending: false }),
@@ -281,16 +282,11 @@ export default function AdminUserHeart({ userId, profile }) {
   const bands = useMemo(() => bandsForUser(age, gender), [age, gender])
   const classify = (v) => (v != null ? classifyResting(v, bands).color : PALETTE.slate400)
 
-  // Chart series — resting low + daily avg + daily peak per day.
+  // Chart series — shared with the dashboard Heart block (same resting/avg/peak
+  // + time-in-zone), so both surfaces (and mobile) render identical bands.
   const chartData = useMemo(
-    () => dailyFull.map(d => ({
-      day: d.day,
-      label: fmtHistoryDate(d.day),
-      resting: d.resting,
-      avg: d.avg,
-      peak: d.peakHigh != null ? Math.max(d.max ?? 0, d.peakHigh) || null : (d.max ?? null),
-    })),
-    [dailyFull],
+    () => summariseHeartDays(hrSamples, workouts, hrMax),
+    [hrSamples, workouts, hrMax],
   )
 
   const hasAnyData = hrSamples.length > 0 || stepRows.length > 0

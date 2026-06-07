@@ -38,7 +38,7 @@ export default function DashboardHeartBlock({ userId, profile, onViewAll }) {
     Promise.all([
       supabase.from('hr_samples').select('measured_at, bpm, workout_id').eq('user_id', userId).gte('measured_at', since).order('measured_at', { ascending: true }),
       supabase.from('step_samples').select('start_at, steps').eq('user_id', userId).gte('start_at', since).order('start_at', { ascending: true }),
-      supabase.from('wearable_workouts').select('start_at, max_bpm').eq('user_id', userId).gte('start_at', since),
+      supabase.from('wearable_workouts').select('start_at, max_bpm, min_bpm, avg_bpm, duration_s, raw_meta').eq('user_id', userId).gte('start_at', since),
     ]).then(([hrRes, stepRes, woRes]) => {
       if (!alive) return
       setState({ hr: hrRes.data || [], steps: stepRes.data || [], workouts: woRes.data || [] })
@@ -51,7 +51,7 @@ export default function DashboardHeartBlock({ userId, profile, onViewAll }) {
     const { hr, steps, workouts } = state
     const hasData = hr.length > 0 || steps.length > 0
 
-    const chartData = summariseHeartDays(hr, workouts)
+    const chartData = summariseHeartDays(hr, workouts, hrMax)
 
     const restings = chartData.map(d => d.resting).filter(v => v != null)
     const restingAvg = restings.length ? Math.round(restings.reduce((a, b) => a + b, 0) / restings.length) : null
@@ -65,7 +65,7 @@ export default function DashboardHeartBlock({ userId, profile, onViewAll }) {
       { label: 'Steps today', value: stepsToday != null ? stepsToday.toLocaleString() : null, unit: '', tint: 'text-amber-400' },
     ]
     return { chartData, stats, hasData }
-  }, [state])
+  }, [state, hrMax])
 
   return (
     <SnapshotCard icon={Heart} iconTint="text-red-400" title="Heart" onViewAll={onViewAll}>
