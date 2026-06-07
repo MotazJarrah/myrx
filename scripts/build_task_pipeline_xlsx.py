@@ -633,6 +633,18 @@ TASKS = [
      "FIXED 2026-06-06: applied migration water_logs_admin_coach_rls (saved to supabase/migrations/20260606_water_logs_admin_coach_rls.sql) -- added 'Admin full access on water_logs' (FOR ALL, is_admin()) + 'Coaches see roster water_logs' (FOR SELECT, user_id IN roster), mirroring food_logs. Verified both policies present via pg_policies. Server-side only -- no frontend redeploy; the admin Hydration tab loads the client's water_logs on refresh. CLAUDE.md admin-RLS note updated (water_logs fixed + flagged that sleep_sessions still needs the coach roster policy before the coach-portal Sleep reflection).",
      "supabase/migrations/20260606_water_logs_admin_coach_rls.sql; water_logs RLS policies; CLAUDE.md admin-RLS note",
      "2026-06-06"),
+
+    ("T095", "PREREQUISITE for coach-portal reflection: 'Coaches see roster' RLS on EVERY per-user table", "Coach/Admin", "DB (Supabase RLS)", "Open",
+     "Surfaced by T094 (the water_logs Hydration empty-data bug). Before we build/reflect ANY coach client-data view (CoachClientDetail + its tabs), EVERY per-user table that view reads MUST have BOTH the 'Admin full access' (is_admin()) AND 'Coaches see roster' (user_id IN (SELECT id FROM profiles WHERE coach_id=auth.uid())) RLS policies -- otherwise the coach view SILENTLY shows EMPTY data (RLS-filtered to zero rows), no error. THIS IS REQUIRED FOR ALL PAGES, not one. Known status: efforts / bodyweight / food_logs / hr_samples / step_samples / wearable_workouts = both policies present; water_logs = FIXED (T094); sleep_sessions = admin works via an older 'Superusers select all' SELECT policy BUT LACKS the coach roster policy; calorie_plans / rom_records / profiles / any others the coach reads = NOT YET AUDITED.",
+     "OPEN -- deferred until the coach-portal reflection (admin view finishes first per the admin-first strategy). When tackling coach-side: enumerate every table CoachClientDetail + tabs query, check pg_policies, add the missing admin + coach-roster policies in one migration mirroring food_logs. Tracked here + flagged in CLAUDE.md (admin-RLS 'Going forward' note) so ANY session doing coach work sees it.",
+     "supabase/migrations/ (new); CLAUDE.md admin-RLS note; CoachClientDetail.jsx + coach tabs",
+     "2026-06-06"),
+
+    ("T096", "Billing page -- revise prices (individual + coach), wire Stripe (sandbox), define how it all works", "Billing", "Web + Stripe + Supabase", "In progress",
+     "User 2026-06-06 kicked off the billing build -- a big multi-decision effort, driven one question at a time (complex-rebuild rule). Three headline asks: (1) revise the current set prices for BOTH the individual (B2C) and coach tiers; (2) get them applied correctly on Stripe + ready, kept in SANDBOX/test mode for now; (3) define + reflect on the billing page how it all works end-to-end. Sub-decisions to capture as made: per-tier price points (individual monthly / annual / lifetime; coach monthly / annual), free-tier limits, trial length, annual-discount framing (CLAUDE.md current: coach annual = 17% off FIRST YEAR only, renews full from yr2), Stripe product/price setup, billing-page UI (BillingView + Pricing/CoachPricing pages).",
+     "IN PROGRESS 2026-06-06 -- step 1 = research the CURRENT prices + Stripe wiring state, then a one-question-at-a-time decision flow, then implementation (revise prices -> Stripe sandbox products/prices -> billing page).",
+     "web Pricing.jsx / CoachPricing.jsx / CoachPricing.jsx / BillingView / AccountSettings billing; workers (stripe); supabase edge fns + coach_subscriptions/billing_events; CLAUDE.md revenue model + launch Stripe steps",
+     "2026-06-06"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
