@@ -2,8 +2,8 @@
 // Dashboard tab. Answers "what were the last moves done + when", since the
 // Efforts domain (strength + cardio, dozens of movements) has no single graph.
 //
-// Shows the last 10 DISTINCT moves (most-recent occurrence of each), sorted
-// EARLIEST -> LATEST, in a fixed-height scroll. Each row is clickable and routes
+// Shows the last 10 DISTINCT moves (most-recent occurrence of each), MOST-RECENT
+// FIRST, in a scroll that shows ~4 at a time. Each row is clickable and routes
 // to that move's detail page, exactly like the Efforts tab does
 // (/<basePath>/<userId>/effort/<type>/<navName>). navName collapses a trailing
 // [Variant] so consolidated families (Swimming [Freestyle], Sled Work [Push],
@@ -16,17 +16,17 @@ import { Dumbbell, ChevronRight } from 'lucide-react'
 
 function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
 
+// Date AND how-many-days-ago together, e.g. "Apr 30 · 38 days ago".
 function fmtWhen(iso) {
   const d = new Date(iso)
   const now = new Date()
   const days = Math.round((startOfDay(now) - startOfDay(d)) / 86400000)
-  if (days <= 0) return 'today'
-  if (days === 1) return 'yesterday'
-  if (days < 7) return `${days} days ago`
   const sameYear = d.getFullYear() === now.getFullYear()
-  return d.toLocaleDateString(undefined, sameYear
+  const datePart = d.toLocaleDateString(undefined, sameYear
     ? { month: 'short', day: 'numeric' }
     : { month: 'short', day: 'numeric', year: 'numeric' })
+  const agoPart = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`
+  return `${datePart} · ${agoPart}`
 }
 
 // Strip a trailing " [Variant]" so consolidated families route to their base.
@@ -61,8 +61,7 @@ export default function DashboardEffortsBlock({ userId, basePath = '/admin/user'
           out.push({ name: nav, type: e.type, ts: e.created_at })
           if (out.length >= 10) break
         }
-        out.reverse() // earliest -> latest
-        setMoves(out)
+        setMoves(out) // most-recent move first (descending by last-done)
       })
     return () => { alive = false }
   }, [userId])
@@ -72,7 +71,7 @@ export default function DashboardEffortsBlock({ userId, basePath = '/admin/user'
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
           <Dumbbell className="h-4 w-4 text-blue-400" />
-          <h3 className="text-sm font-semibold">Recent training</h3>
+          <h3 className="text-sm font-semibold">Recent efforts</h3>
         </div>
         {onViewAll && (
           <button
@@ -90,7 +89,7 @@ export default function DashboardEffortsBlock({ userId, basePath = '/admin/user'
       ) : moves.length === 0 ? (
         <div className="py-10 text-center text-xs text-muted-foreground">No efforts logged yet.</div>
       ) : (
-        <div className="max-h-[240px] overflow-y-auto divide-y divide-border">
+        <div className="max-h-[168px] overflow-y-auto divide-y divide-border">
           {moves.map((m, i) => (
             <button
               key={`${m.type}-${m.name}-${i}`}
