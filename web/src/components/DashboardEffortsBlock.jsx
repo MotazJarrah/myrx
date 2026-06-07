@@ -3,7 +3,7 @@
 // Efforts domain (strength + cardio, dozens of movements) has no single graph.
 //
 // Shows the last 10 DISTINCT moves (most-recent occurrence of each), MOST-RECENT
-// FIRST, in a scroll that shows ~4 at a time. Each row is clickable and routes
+// FIRST, in a scroll that shows ~5 at a time. Each row is clickable and routes
 // to that move's detail page, exactly like the Efforts tab does
 // (/<basePath>/<userId>/effort/<type>/<navName>). navName collapses a trailing
 // [Variant] so consolidated families (Swimming [Freestyle], Sled Work [Push],
@@ -89,7 +89,7 @@ export default function DashboardEffortsBlock({ userId, basePath = '/admin/user'
       ) : moves.length === 0 ? (
         <div className="py-10 text-center text-xs text-muted-foreground">No efforts logged yet.</div>
       ) : (
-        <div className="max-h-[168px] overflow-y-auto divide-y divide-border">
+        <div className="max-h-[208px] overflow-y-auto divide-y divide-border">
           {moves.map((m, i) => (
             <button
               key={`${m.type}-${m.name}-${i}`}
