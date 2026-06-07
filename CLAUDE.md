@@ -2226,7 +2226,7 @@ Both audiences use the same client-facing app. The coach version is the admin ov
 
 **Stream A — Coach subscription (B2B2C).** Coaches pay a monthly subscription for the admin portal. Their clients get the full client app at NO cost as long as the coach's subscription is active. The coach gets every client's data, chat, suggestion threads, progress dashboards, and the ability to message and program for the whole roster. This is the differentiator vs. Strong / Hevy / Strava — none of those sell a coach overlay.
 
-**Stream B — App Store / Google Play tier (B2C direct).** Free download with a limited free tier. Full features unlocked by EITHER a recurring subscription (monthly) OR a one-time lifetime purchase. No coach involved — the app itself plays the coaching role through the "next step" framing built into every domain.
+**Stream B — App Store / Google Play tier (B2C direct).** Free download with a limited free tier. Full features unlocked by a recurring **monthly subscription** (annual option = 17% off; the old one-time/lifetime model is retired, locked 2026-06-06). No coach involved — the app itself plays the coaching role through the "next step" framing built into every domain.
 
 ### Why so many domains? (the question that nearly tripped us up)
 A coach helps clients with strength, cardio, mobility, body composition, nutrition, recovery, AND the habits that hold the whole program together — not just one of those. The B2B2C arm means the app must support what a coach actually does day-to-day, or the coach can't deliver their full service through MyRX. **Breadth is table stakes for the coach segment, not bloat.**
@@ -2356,41 +2356,41 @@ The role model is shifting from today's two-tier (admin → end user) to a three
     - **Schema design implications**: the `profiles.id` becomes a STABLE long-term identifier independent of auth.users.id. A new column `profiles.auth_user_id` references auth.users for the current sign-in mapping. On resurrection, only `auth_user_id` changes — all foreign keys on logs, efforts, bodyweight, etc. continue to reference the original `profiles.id`.
     - **Privacy + legal considerations**: this is COMPATIBLE with GDPR / CCPA when properly scoped — we honor erasure requests by hashing the PII + dropping the credential_history's email/phone columns for that user. The pseudonymous activity data can stay for legitimate-interest purposes (anonymized fitness research, aggregate platform analytics). Specifics will need a privacy-lawyer review before launch but the architecture supports it.
 
-18. **Billing model — locked.**
-    - **Coaches pay; their clients NEVER pay.** A client linked to an active coach has full feature access for free. The coach's subscription IS the client's access.
-    - **Coach subscriptions are recurring monthly / annual**, paid via Stripe Checkout on the website (never inside the mobile app — no Apple/Google involvement). **Annual = 17% off first year ONLY; renews at full annual rate (monthly × 12) from year 2 onward.** Coach signup copy MUST explicitly say "first year" so the year-2 renewal price isn't a surprise. Pre-renewal email reminder + dashboard banner are part of Phase 9 launch readiness.
-    - **Public users (unlinked) pay one-time per tier.** Upgrading is a single payment that grants lifetime access at that tier. No recurring billing for B2C clients. Three tiers: Free / CoreRX / FullRX. Once they buy CoreRX or FullRX, they own it forever.
-    - **Free trial for coaches: 14 days.** Coach signs up via web, enters payment info, gets 14 days of full functionality at the tier they selected. Auto-converts to paid on day 15 unless they cancel. After conversion, follow Stripe's default Smart Retries (4 retry attempts over ~3 weeks) for failed payments. Lapse / soft-grace / hard-grace timeline per Q4 lock.
-    - **Payment processor for direct billing: Stripe.** Coach subscriptions + B2C web-purchased one-time tiers both run on Stripe. Square is NOT the path forward — Stripe's subscription + dunning + tax + webhook ecosystem is meaningfully better for SaaS, and the cost is equivalent (~2.9 % + $0.30 / transaction).
-    - **B2C in-app purchases use Apple IAP / Google Play Billing.** Mandatory per Apple Guideline 3.1.1 and Google Play Billing policy — any in-app feature unlock MUST use the platform processor. One-time non-consumable purchases work the same as subscriptions for this rule. **Apply for Apple App Store Small Business Program** at launch so revenue under $1M/year drops Apple's cut from 30 % to 15 %. Google Play has an analogous tier.
+18. **Billing model — locked (pricing model finalized 2026-06-06: EVERYTHING is a recurring subscription; the old one-time / lifetime B2C model is RETIRED).**
+    - **Coaches pay; their clients NEVER pay.** A client linked to an active coach gets **full FullRX access** for free — the coach's subscription IS the client's access. **Every coach tier grants FullRX to the coach AND all their linked athletes; coach tiers differ only by client cap.**
+    - **Coach subscriptions are recurring monthly / annual**, paid via Stripe Checkout on the website (never inside the mobile app — no Apple/Google involvement). **Annual = recurring 17% off ("2 months free"), every year — it renews at the same discounted annual price (NOT first-year-only; there is no year-2 jump).**
+    - **Public (athlete / B2C) users pay a recurring MONTHLY subscription per tier.** 14-day free trial; annual option = recurring 17% off. Three tiers: Free / CoreRX / FullRX. The earlier "pay once, own it forever" lifetime model is retired (locked 2026-06-06).
+    - **Free trial: 14 days** for coaches AND individuals. Sign up, enter payment, get 14 days of full functionality, auto-converts on day 15 unless cancelled. After conversion, Stripe Smart Retries (4 attempts over ~3 weeks) for failed payments. Lapse / soft-grace / hard-grace timeline per Q4 lock.
+    - **Payment processor for direct billing: Stripe.** Coach + B2C web-purchased subscriptions both run on Stripe (~2.9% + $0.30 / transaction). Square is NOT the path forward — Stripe's subscription + dunning + tax + webhook ecosystem is meaningfully better for SaaS.
+    - **B2C in-app subscriptions use Apple IAP / Google Play Billing** (auto-renewable subscriptions). Mandatory per Apple Guideline 3.1.1 and Google Play Billing policy — any in-app feature unlock MUST use the platform processor. **Apply for Apple App Store Small Business Program** at launch so revenue under $1M/year drops Apple's cut from 30 % to 15 %. Google Play has an analogous tier.
     - **Acquisition-channel-aware hybrid for B2C** (LOCKED — pattern 3 from Q9 discussion). In-app upgrade button uses IAP (Apple/Google take 15 %). Same upgrade is available on website via Stripe (we keep ~97 %). **Same price on both surfaces** — no in-app promotion of the cheaper web path, no compliance risk with Apple. Marketing (email, social ads, blog, organic search) pushes users to the website where they can convert via Stripe. Most early volume goes through IAP (App Store discoverability); blended cut comes down as the marketing engine matures and more conversions happen on web. Expected blended Apple cut after year 1: ~8-12 % of B2C revenue.
 
-19. **Coach tier prices — locked (revised May 25 2026).**
-    Annual prices reflect 17% off year 1 only; year-2 renewal = monthly × 12 (shown in parentheses).
-    | Tier | Client cap | Monthly | Annual (year 1) | Annual renewal (year 2+) |
-    |---|---|---|---|---|
-    | Coach Starter | 10 | $19 / mo | $189 / yr | $228 / yr |
-    | Coach Pro | 25 | $39 / mo | $389 / yr | $468 / yr |
-    | Coach Elite | 26+ (truly unlimited) | $99 / mo | $989 / yr | $1,188 / yr |
+19. **Coach tier prices — LOCKED FINAL (2026-06-06).**
+    Monthly subscription, 14-day free trial. Annual = recurring 17% off ("2 months free"), every year (NOT first-year-only — it renews at the same discounted annual, no year-2 jump). **Every coach tier grants full FullRX access to the coach AND all their linked athletes; tiers differ only by client cap.**
+    | Tier | Client cap | Monthly | Annual (17% off, recurring) |
+    |---|---|---|---|
+    | Coach Starter | 10 | $19 / mo | $189 / yr |
+    | Coach Pro | 25 | $39 / mo | $389 / yr |
+    | Coach Elite | 26+ (truly unlimited) | $99 / mo | $989 / yr |
 
     Notes:
     - Top tier was named "Coach Unlimited" in an earlier draft; renamed to **Coach Elite** May 25 2026. Code references use `elite` as the tier id.
     - Top-tier cap lowered from 50+ to 26+ — coaches at this volume are the agency / high-volume segment, not the typical solo coach.
     - **Client count = total clients linked to the coach (not active-only).** Coaches can SUSPEND a client to retain their data while freeing the slot (suspended client loses app access, is gently prompted to switch to a free or paid B2C tier). Reactivation requires the coach to be under their tier cap (or to upgrade). If a suspended client switches to self-coached, they unlink fully and disappear from the coach's roster. **Implementation of the suspend mechanism is its own discussion thread after the v1 pricing UI lands** — covers the suspend button UI on the coach side, the gentle prompt on the client side, the slot-reclamation logic, and the auto-unlink-on-self-coach-switch flow.
 
-20. **Public (B2C) tier prices — locked (revised May 25 2026).** All one-time payments, lifetime access at that tier once purchased.
-    | Tier | Pages unlocked | One-time price |
-    |---|---|---|
-    | Free | Strength + Cardio | $0 |
-    | CoreRX | Free + Bodyweight + Calories | $39 (one-time) |
-    | FullRX | CoreRX + Heart + Hydration + Sleep | $59 (one-time) |
+20. **Public (B2C / athlete) tier prices — LOCKED FINAL (2026-06-06).** Recurring MONTHLY subscription with a 14-day free trial; annual option = recurring 17% off ("2 months free"). The earlier one-time / lifetime model is RETIRED.
+    | Tier | Pages unlocked (cumulative) | Monthly | Annual (17% off) |
+    |---|---|---|---|
+    | Free | Strength + Cardio | $0 | — |
+    | CoreRX | Free + Bodyweight + Calories/Food | $4.99 / mo | $49.99 / yr |
+    | FullRX | CoreRX + Heart + Hydration + Sleep + every future feature | $6.99 / mo | $69.99 / yr |
 
     Notes:
-    - Middle tier was named "SemiRX" in an earlier draft; renamed to **CoreRX** May 25 2026 — reads as "the essential prescription" instead of "half a prescription". Code references use `corerx` as the tier id.
-    - Free is genuinely usable (not a trial) — drives adoption and exposes upgrade prompts.
+    - Code tier ids: `free` / `corerx` / `fullrx` (the middle tier's earlier-draft name is fully retired — `corerx` is the only id).
+    - Free is genuinely usable (not a trial) — drives adoption + exposes upgrade prompts. Everyone also gets a 14-day FullRX trial on signup before landing on their chosen tier.
     - CoreRX adds the two most-asked-for features (body composition tracking + calorie/macro coaching).
-    - FullRX adds the wellness layer (HR / hydration / sleep) — appeals to power users / wearable owners.
-    - Hydration and Sleep are NEW pages to build as part of FullRX (Sleep already has a design spec — see Sleep page section above; Hydration is net-new design + build).
+    - FullRX adds the wellness layer (Heart / Hydration / Sleep) — appeals to power users / wearable owners, and is the $2-more no-brainer over CoreRX.
+    - Heart, Hydration, and Sleep are all built (they're the FullRX wellness pages).
     - Ads: discussion deferred to a separate phase. Free tier currently has no ads listed in this lock.
 
 Open items still to discuss / track outside this thread:
@@ -2528,10 +2528,10 @@ The single source of truth for what needs to be done when we flip from "ready to
 **Apple App Store:**
 
 14. **Apple Developer Program enrollment** complete and current ($99/yr).
-15. **App Store Connect IAP products created** in production (not just sandbox):
-    - `corerx_unlock` (non-consumable, $39 USD)
-    - `fullrx_unlock` (non-consumable, $59 USD)
-    Status: "Ready to Submit". Localize for at least English. Pricing applied to all relevant territories.
+15. **App Store Connect IAP products created** in production (not just sandbox) — **auto-renewable subscriptions** (the old one-time non-consumables are retired):
+    - `corerx_monthly` ($4.99 / mo) + `corerx_annual` ($49.99 / yr)
+    - `fullrx_monthly` ($6.99 / mo) + `fullrx_annual` ($69.99 / yr)
+    All with a 14-day free trial (introductory offer). Status: "Ready to Submit". Localize for at least English. Pricing applied to all relevant territories.
 16. **Apple App Store Small Business Program** application submitted and APPROVED (drops Apple cut from 30 % to 15 % when annual revenue is under $1M). Approval is automatic if you qualify — apply early, takes a day or two.
 17. **App Store metadata complete**: app name "MyRX", subtitle, description, keywords, screenshots (6.7-inch iPhone + 13-inch iPad), app preview videos (optional but helps conversion), age rating questionnaire complete, support URL, marketing URL, privacy policy URL.
 18. **App Review Information** filled in App Store Connect: demo account credentials so Apple reviewers can test paid features (create a comp'd `fullrx` user just for review), contact info, reviewer notes ("MyRX is a fitness coaching platform. Use the demo account at the link below to test all paid features. Coaches sign up at myrxfit.com/coach/signup — not in-app").
@@ -2541,10 +2541,10 @@ The single source of truth for what needs to be done when we flip from "ready to
 **Google Play Store:**
 
 21. **Google Play Developer Account** active ($25 one-time).
-22. **Google Play Console IAP products created**:
-    - `corerx_unlock` ($39 USD)
-    - `fullrx_unlock` ($59 USD)
-    Status: "Active". Match Apple's product IDs so the mobile code uses one constant set.
+22. **Google Play Console subscription products created** (auto-renewable):
+    - `corerx_monthly` ($4.99 / mo) + `corerx_annual` ($49.99 / yr)
+    - `fullrx_monthly` ($6.99 / mo) + `fullrx_annual` ($69.99 / yr)
+    All with a 14-day free trial. Status: "Active". Match Apple's product IDs so the mobile code uses one constant set.
 23. **Production track release configured** in Play Console (Production → Create new release). APK / AAB uploaded, signed with the production keystore.
 24. **Production keystore SHA-256 fingerprint added** to `web/public/.well-known/assetlinks.json` (Android App Links — required for magic-link sign-in deeplinks to work on the production install). Deploy web after updating this file.
 25. **Store listing complete**: title, short description, full description, screenshots (phone + tablet), feature graphic (1024 x 500), app icon, content rating questionnaire, target audience + content, data safety form (matches Privacy Policy disclosures).
@@ -2732,7 +2732,7 @@ Currently `mobile/app.json` line 65-70 declares `expo-notifications`. Android si
 ### 8. In-app purchases (iOS StoreKit, mirrors Play Billing)
 Pre-launch checklist items 14-20 already cover App Store Connect IAP — extending here for completeness.
 - [ ] Choose IAP wrapper: `react-native-iap` (cross-platform) or RevenueCat (managed). RevenueCat recommended for receipt validation + cross-platform entitlement sync.
-- [ ] Register IAP products in App Store Connect matching Google Play product IDs: `corerx_unlock` ($39), `fullrx_unlock` ($59). Same IDs so client code uses one constant set.
+- [ ] Register subscription products in App Store Connect matching Google Play product IDs: `corerx_monthly` ($4.99/mo) + `corerx_annual` ($49.99/yr), `fullrx_monthly` ($6.99/mo) + `fullrx_annual` ($69.99/yr), all with a 14-day trial. Same IDs so client code uses one constant set.
 - [ ] Subscription products (if monthly tier ships): register in App Store Connect with same lookup keys as Stripe (`coach_starter_monthly` etc.).
 - [ ] Sandbox test accounts created in App Store Connect for App Review testing.
 - [ ] Edge function: receipt validation endpoint (calls Apple's `verifyReceipt` / App Store Server API). Mirror what'll eventually exist for Google Play Developer API.
@@ -2859,7 +2859,7 @@ Anonymization NEVER touches these tables. They retain their `user_id` linkage fo
 | `activity_events` | Per-user audit log — every meaningful event for the account |
 | `coach_subscriptions` | Stripe customer + subscription IDs for tax reconciliation |
 | `billing_events` | Immutable per-event Stripe billing history (invoices, charges, refunds, disputes) — required for tax + accounting compliance |
-| `b2c_purchases` | One-time athlete purchases — same compliance reason |
+| `b2c_purchases` | Athlete B2C subscription purchases — same compliance reason |
 
 **The `billing_events` table is NEVER deleted from, by any caller, including admin.** Even when admin clicks Delete on a user, the trigger preserves the billing rows by virtue of `user_id` being a FK with `ON DELETE SET NULL` (we never hard-delete auth.users anyway — anonymization bans + scrubs the row instead). If a billing row is genuinely wrong, we issue a corrective Stripe event (refund, credit note) which creates a NEW `billing_events` row — never modify or delete existing ones.
 
