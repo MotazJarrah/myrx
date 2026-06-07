@@ -1,16 +1,17 @@
 // Heart snapshot block for the client-detail Dashboard tab.
 // Main graph = the mobile HrRangeChart zone-band design (per day: resting dot,
-// avg dot, peak-zone gradient band) via the shared HrZoneChart. Quick stats =
-// avg resting, latest peak, steps today. Wearable-sourced; shows a "no data
-// synced" empty state. Click-through opens the full Heart tab.
+// avg dot, peak-zone gradient band) via the shared HrZoneChart. Data comes from
+// the shared summariseHeartDays helper (hr_samples + wearable_workouts) so the
+// chart is IDENTICAL to the Heart detail page. Quick stats = avg resting, latest
+// peak, steps today. Click-through opens the full Heart tab.
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { Heart } from 'lucide-react'
 import HrZoneChart from './HrZoneChart'
+import { summariseHeartDays } from '../lib/heartDaily'
 import { SnapshotCard, SnapshotLoading, SnapshotEmpty, StatStrip } from './DashboardSnapshotShell'
 
-function localDayKey(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.toISOString().slice(0, 10) }
 function nDaysAgoIso(n) { const x = new Date(); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - (n - 1)); return x.toISOString() }
 function startOfTodayIso() { const x = new Date(); x.setHours(0, 0, 0, 0); return x.toISOString() }
 // HRmax = 220 - age (caller's birthdate); fallbacks mirror the mobile heart page.
@@ -27,7 +28,7 @@ function estimateHrMax(birthdate) {
 }
 
 export default function DashboardHeartBlock({ userId, profile, onViewAll }) {
-  const [state, setState] = useState(null) // { hr: [], steps: [] }
+  const [state, setState] = useState(null) // { hr, steps, workouts }
   const hrMax = estimateHrMax(profile?.birthdate)
 
   useEffect(() => {
@@ -35,36 +36,24 @@ export default function DashboardHeartBlock({ userId, profile, onViewAll }) {
     let alive = true
     const since = nDaysAgoIso(7)
     Promise.all([
-      supabase.from('hr_samples').select('measured_at, bpm').eq('user_id', userId).gte('measured_at', since).order('measured_at', { ascending: true }),
+      supabase.from('hr_samples').select('measured_at, bpm, workout_id').eq('user_id', userId).gte('measured_at', since).order('measured_at', { ascending: true }),
       supabase.from('step_samples').select('start_at, steps').eq('user_id', userId).gte('start_at', since).order('start_at', { ascending: true }),
-    ]).then(([hrRes, stepRes]) => {
+      supabase.from('wearable_workouts').select('start_at, max_bpm').eq('user_id', userId).gte('start_at', since),
+    ]).then(([hrRes, stepRes, woRes]) => {
       if (!alive) return
-      setState({ hr: hrRes.data || [], steps: stepRes.data || [] })
+      setState({ hr: hrRes.data || [], steps: stepRes.data || [], workouts: woRes.data || [] })
     })
     return () => { alive = false }
   }, [userId])
 
   const { chartData, stats, hasData } = useMemo(() => {
     if (!state) return { chartData: [], stats: [], hasData: false }
-    const { hr, steps } = state
+    const { hr, steps, workouts } = state
     const hasData = hr.length > 0 || steps.length > 0
 
-    const byDay = new Map()
-    for (const s of hr) {
-      const k = localDayKey(s.measured_at)
-      if (!byDay.has(k)) byDay.set(k, [])
-      byDay.get(k).push(s.bpm)
-    }
-    const chartData = [...byDay.entries()]
-      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-      .map(([day, bpms]) => ({
-        day,
-        resting: Math.min(...bpms),
-        avg: Math.round(bpms.reduce((a, b) => a + b, 0) / bpms.length),
-        peak: Math.max(...bpms),
-      }))
+    const chartData = summariseHeartDays(hr, workouts)
 
-    const restings = chartData.map(d => d.resting)
+    const restings = chartData.map(d => d.resting).filter(v => v != null)
     const restingAvg = restings.length ? Math.round(restings.reduce((a, b) => a + b, 0) / restings.length) : null
     const latestPeak = chartData.length ? chartData[chartData.length - 1].peak : null
     const todayStart = startOfTodayIso()
