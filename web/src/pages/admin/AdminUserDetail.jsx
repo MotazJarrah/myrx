@@ -186,9 +186,20 @@ function SnapshotBadge({ children, color, muted }) {
     cyan:    'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
-    <span className={`flex items-center justify-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium text-center leading-tight w-[48%] min-h-[2.25rem] ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
       {children}
     </span>
+  )
+}
+
+// Small labeled cluster for the profile-card controls — a tiny uppercase caption
+// over its control(s), so status vs. action reads at a glance.
+function ControlGroup({ title, children }) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</div>
+      <div className="flex flex-wrap items-center gap-1">{children}</div>
+    </div>
   )
 }
 
@@ -880,7 +891,7 @@ export default function AdminUserDetail() {
 
       {/* ── Profile summary card ── */}
       <div className="rounded-xl border border-border bg-card p-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base font-bold text-primary">
             {profile.avatar_url
               ? <img src={profile.avatar_url} alt={profile.full_name} className="h-11 w-11 rounded-full object-cover" />
@@ -893,170 +904,109 @@ export default function AdminUserDetail() {
             <p className="text-xs text-muted-foreground truncate">{profile.email}</p>
           </div>
 
-          {/* Right-side action column — restructured May 26 2026 into 3
-              priority-ordered visual rows (was previously one long stack
-              of unrelated chips). Per the locked layout:
-                Row 1 = status pills (read-only badges)
-                Row 2 = relationship toggles (chat + plan ownership)
-                Row 3 = account actions (active + delete + settings)
-              Visual separation between rows makes the hierarchy obvious. */}
-          <div className="flex flex-col items-end gap-2 shrink-0">
-
-            {/* Row 1 — Status pills (read-only badges).
-                Only render when the relevant signal exists. */}
-            {(existingPlan || existingPlan?.goal_reached) && (
-              <div className="flex flex-wrap items-center justify-end gap-1">
-                {existingPlan && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
-                    <Check className="h-3 w-3" /> Intake Plan
-                  </span>
-                )}
-                {existingPlan?.goal_reached && (
-                  <span className="inline-flex items-center rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[11px] font-medium text-blue-400">
-                    🎯 Goal
-                  </span>
-                )}
-              </div>
+          {/* Right-side controls — a settings gear (top-right) over labeled
+              control groups (Account / Coaching / Plan / Messaging) so status
+              vs. action reads at a glance. Account-level Delete now lives inside
+              the settings drawer (mobile parity). Hidden on anonymized accounts
+              — nothing left to act on; the "deleted" banner below covers it. */}
+          <div className="flex flex-col items-end gap-3 shrink-0">
+            {!profile.anonymized_at && (
+              <button
+                onClick={() => setSettingsOpen(true)}
+                title="Client account settings"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <SettingsIcon className="h-4 w-4" />
+              </button>
             )}
 
-            {/* Row 2 — Relationship toggles. Chat on/off + plan ownership
-                (Self-managed vs Coach-managed, relabeled May 26 2026 from
-                the misleading "Admin-coached").
-                Hidden on anonymized accounts — the relationships no longer
-                exist (chat scrubbed of identity, plan ownership moot when
-                profile is wiped). Only the Deleted pill below remains. */}
             {!profile.anonymized_at && (() => {
-              // Chat v3 (May 30 2026, Phase 3): when admin IS the coach for
-              // this athlete, chat is UNCONDITIONAL — no toggle, mirrors the
-              // coach-side rule that coach<->client chat is always on. For
-              // every other case (self-managed athlete, athlete coached by
-              // someone else, coach profile), admin can flip chat on/off
-              // per-client via admin_chat_enabled. The Message pill shows
-              // whenever admin has any active chat path with this user.
+              // Chat path: when admin IS the coach, chat is unconditional
+              // (no toggle); otherwise admin flips it per-client.
               const isAdminTheCoach = profile.coach_id === adminUser?.id
               const adminCanChat = isAdminTheCoach || profile.admin_chat_enabled === true
               return (
-                <div className="flex flex-wrap items-center justify-end gap-1">
-                  {!isAdminTheCoach && (
+                <div className="grid grid-cols-2 gap-x-5 gap-y-3 text-left">
+                  {/* ACCOUNT — active / suspended */}
+                  <ControlGroup title="Account">
                     <button
-                      onClick={toggleChat}
-                      disabled={togglingChat}
-                      title={profile.admin_chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
+                      onClick={toggleActive}
+                      disabled={togglingActive}
+                      title={profile.deactivated_at
+                        ? 'Reactivate this account — restores sign-in'
+                        : 'Suspend this account — blocks sign-in (data preserved)'}
                       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                        profile.admin_chat_enabled
-                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                          : 'border-border text-muted-foreground hover:border-border hover:text-muted-foreground'
-                      } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        profile.deactivated_at
+                          ? 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400 hover:bg-zinc-500/20'
+                          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                      } ${togglingActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                     >
-                      <MessageCircle className="h-3 w-3" />
-                      {profile.admin_chat_enabled ? 'Chat on' : 'Chat off'}
+                      <Power className="h-3 w-3" />
+                      {profile.deactivated_at ? 'Suspended' : 'Active'}
                     </button>
-                  )}
+                  </ControlGroup>
 
-                  {adminCanChat && (
-                    <Link href={`/admin/messages?userId=${profile.id}`}>
-                      <a
-                        title="Open chat with this user and start typing"
-                        className="inline-flex items-center gap-1 rounded-full bg-primary/15 border border-primary/40 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
+                  {/* COACHING — Self / Coach / Admin-managed + tier */}
+                  <ControlGroup title="Coaching">
+                    <AthleteCoachingChip
+                      athleteProfile={profile}
+                      adminUserId={adminUser?.id}
+                      onProfileUpdated={updates =>
+                        setProfile(prev => prev ? { ...prev, ...updates } : prev)
+                      }
+                    />
+                  </ControlGroup>
+
+                  {/* PLAN — macro plan set/not set + goal reached */}
+                  <ControlGroup title="Plan">
+                    {existingPlan ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                        <Check className="h-3 w-3" /> Macro plan set
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                        No macro plan
+                      </span>
+                    )}
+                    {existingPlan?.goal_reached && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[11px] font-medium text-blue-400">
+                        🎯 Goal reached
+                      </span>
+                    )}
+                  </ControlGroup>
+
+                  {/* MESSAGING — chat toggle + message */}
+                  <ControlGroup title="Messaging">
+                    {!isAdminTheCoach && (
+                      <button
+                        onClick={toggleChat}
+                        disabled={togglingChat}
+                        title={profile.admin_chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
+                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                          profile.admin_chat_enabled
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+                            : 'border-border text-muted-foreground hover:text-foreground'
+                        } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                       >
                         <MessageCircle className="h-3 w-3" />
-                        {profile.is_coach ? 'Message coach' : 'Message athlete'}
-                      </a>
-                    </Link>
-                  )}
-
-                {/* Coaching chip — interactive 3-state switcher (Self /
-                    Coach / Admin-managed) + B2C tier picker. Replaces the
-                    legacy is_self_coached toggle on May 29 2026. Hidden
-                    automatically on coach + admin profiles via internal
-                    guards. Writes flow through admin_set_athlete_coaching
-                    RPC; athlete-side banner fires via the trg_clear_coach_ack
-                    trigger + realtime profile sub. */}
-                <AthleteCoachingChip
-                  athleteProfile={profile}
-                  adminUserId={adminUser?.id}
-                  onProfileUpdated={updates =>
-                    setProfile(prev => prev ? { ...prev, ...updates } : prev)
-                  }
-                />
-              </div>
+                        {profile.admin_chat_enabled ? 'Chat on' : 'Chat off'}
+                      </button>
+                    )}
+                    {adminCanChat && (
+                      <Link href={`/admin/messages?userId=${profile.id}`}>
+                        <a
+                          title="Open chat with this user and start typing"
+                          className="inline-flex items-center gap-1 rounded-full bg-primary/15 border border-primary/40 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
+                        >
+                          <MessageCircle className="h-3 w-3" />
+                          {profile.is_coach ? 'Message coach' : 'Message athlete'}
+                        </a>
+                      </Link>
+                    )}
+                  </ControlGroup>
+                </div>
               )
             })()}
-
-            {/* Row 3 — Account actions (Active/Inactive + Settings + Delete).
-                Less prominent than the relationship toggles — these are
-                serious account-level operations, not casual flips.
-                On anonymized accounts only the terminal "Deleted" pill
-                renders — Active toggle is meaningless (account is banned
-                in auth.users until 2099) and Settings has nothing to edit
-                (PII is scrubbed). Showing them would imply the admin can
-                still act on the account, which they can't. */}
-            <div className="flex flex-wrap items-center justify-end gap-1">
-              {!profile.anonymized_at && (
-                <>
-                  <button
-                    onClick={toggleActive}
-                    disabled={togglingActive}
-                    title={profile.deactivated_at
-                      ? 'Reactivate this account — restores sign-in'
-                      : 'Deactivate this account — blocks sign-in (data preserved)'}
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                      profile.deactivated_at
-                        ? 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400 hover:bg-zinc-500/20'
-                        : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                    } ${togglingActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
-                    <Power className="h-3 w-3" />
-                    {profile.deactivated_at ? 'Inactive' : 'Active'}
-                  </button>
-
-                  <button
-                    onClick={() => setSettingsOpen(true)}
-                    title="Open this client's account settings"
-                    className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors border-border text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
-                  >
-                    <SettingsIcon className="h-3 w-3" />
-                    Settings
-                  </button>
-                </>
-              )}
-
-              {/* Three states for the Delete pill:
-                  - Anonymized → grey "Deleted" badge, no action (terminal state).
-                  - Scheduled (in 30-day grace) → amber "Cancel deletion" button.
-                  - Active → red "Delete" button that opens the schedule modal.
-                  See CLAUDE.md "account deletion lifecycle" section for the flow. */}
-              {profile.anonymized_at ? (
-                <span
-                  title={'Account deleted on ' + new Date(profile.anonymized_at).toLocaleDateString()}
-                  className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium bg-zinc-500/10 border-zinc-500/30 text-zinc-400"
-                >
-                  <Trash2 className="h-3 w-3" />
-                  Deleted
-                </span>
-              ) : profile.scheduled_for_deletion_at ? (
-                <button
-                  onClick={doCancelDeletion}
-                  disabled={deleting}
-                  title={'Scheduled for deletion on ' + new Date(profile.scheduled_for_deletion_at).toLocaleDateString() + ' — click to cancel'}
-                  className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20 cursor-pointer disabled:opacity-50"
-                >
-                  {deleting
-                    ? <><Loader2 className="h-3 w-3 animate-spin" /> Cancelling…</>
-                    : <><X className="h-3 w-3" /> Cancel deletion</>}
-                </button>
-              ) : (
-                <button
-                  onClick={() => { setDeleteOpen(true); setDeleteConfirm(''); setDeleteError('') }}
-                  disabled={deleting}
-                  title="Schedule this account for deletion (30-day grace period)"
-                  className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors bg-destructive/10 border-destructive/30 text-destructive hover:bg-destructive/20 cursor-pointer"
-                >
-                  <Trash2 className="h-3 w-3" />
-                  Delete
-                </button>
-              )}
-            </div>
           </div>
         </div>
 
@@ -1150,7 +1100,7 @@ export default function AdminUserDetail() {
             value is null. Rendered whenever the snapshot has loaded so the
             tier-appropriate empty states appear even with no signal. */}
         {snapshot && (
-          <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {/* Strength PRs — FREE. Last 30 days; "no recent strength PRs" when none. */}
             {tierRank >= TIER_RANK.free && snapshot.strengthPRsThisMonth != null && (
               snapshot.strengthPRsThisMonth > 0 ? (
@@ -1370,6 +1320,26 @@ export default function AdminUserDetail() {
         clientProfile={profile}
         viewerRole="admin"
         onProfileSaved={updated => setProfile(prev => ({ ...prev, ...updated }))}
+        dangerZone={profile?.anonymized_at ? null : (
+          profile?.scheduled_for_deletion_at ? (
+            <button
+              onClick={() => { setSettingsOpen(false); doCancelDeletion() }}
+              disabled={deleting}
+              title="Cancel the scheduled deletion for this account"
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400 hover:bg-amber-500/20 cursor-pointer disabled:opacity-50"
+            >
+              <X className="h-3.5 w-3.5" /> Cancel scheduled deletion
+            </button>
+          ) : (
+            <button
+              onClick={() => { setSettingsOpen(false); setDeleteOpen(true); setDeleteConfirm(''); setDeleteError('') }}
+              title="Schedule this account for deletion (30-day grace period)"
+              className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/20 cursor-pointer"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete account
+            </button>
+          )
+        )}
       />
 
 

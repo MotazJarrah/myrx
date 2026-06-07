@@ -39,6 +39,7 @@ export default function ClientSettingsDrawer({
   clientProfile,
   viewerRole = 'admin',
   onProfileSaved,
+  dangerZone,        // optional node rendered under a "Danger zone" heading (e.g. Delete)
 }) {
   // Close on Esc — standard drawer affordance.
   useEffect(() => {
@@ -107,6 +108,16 @@ export default function ClientSettingsDrawer({
           ) : (
             <div className="py-16 text-center text-sm text-muted-foreground">
               Loading client profile…
+            </div>
+          )}
+
+          {/* Danger zone — destructive account actions (Delete) live here now,
+              out of the everyday profile-card flow. The action itself is owned
+              by the parent and passed in as a node. */}
+          {dangerZone && (
+            <div className="mt-6 border-t border-border pt-5">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-destructive">Danger zone</h3>
+              {dangerZone}
             </div>
           )}
         </div>
