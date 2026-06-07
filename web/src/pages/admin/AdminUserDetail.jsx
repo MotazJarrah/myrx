@@ -186,7 +186,7 @@ function SnapshotBadge({ children, color, muted }) {
     cyan:    'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
+    <span className={`flex flex-1 min-w-[110px] items-center justify-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium leading-none ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
       {children}
     </span>
   )
@@ -305,6 +305,10 @@ function ActivityFeed({ userId, clientName, clientEmail }) {
       case 'account:deletion_scheduled':   return { icon: Clock,         color: 'text-amber-400',   label: `Deletion scheduled · grace ends ${d.grace_ends_at ? new Date(d.grace_ends_at).toLocaleDateString() : '—'}${d.admin_initiated ? ' (admin)' : ''}` }
       case 'account:deletion_cancelled':   return { icon: X,             color: 'text-emerald-400', label: `Deletion cancelled${d.admin_initiated ? ' (admin)' : ''}` }
       case 'account:deleted':              return { icon: Trash2,        color: 'text-zinc-400',    label: `Account anonymized${d.orphaned_athlete_count ? ` · released ${d.orphaned_athlete_count} athlete${d.orphaned_athlete_count === 1 ? '' : 's'}` : ''}` }
+      case 'account:activated':            return { icon: Power,         color: 'text-emerald-400', label: `Account reactivated${d.admin_initiated ? ' (admin)' : ''}` }
+      case 'account:deactivated':          return { icon: Power,         color: 'text-zinc-400',    label: `Account suspended${d.admin_initiated ? ' (admin)' : ''}` }
+      case 'chat:enabled':                 return { icon: MessageCircle, color: 'text-emerald-400', label: `Chat enabled${d.admin_initiated ? ' (admin)' : ''}` }
+      case 'chat:disabled':                return { icon: MessageCircle, color: 'text-muted-foreground', label: `Chat disabled${d.admin_initiated ? ' (admin)' : ''}` }
       case 'chat:exported_transcript':     return { icon: MessageCircle, color: 'text-blue-400',    label: `Chat transcript exported · ${d.message_count ?? '?'} messages · "${d.reason || ''}"` }
       // billing:* — written by the trg_billing_event_to_activity trigger
       // on every billing_events insert. d carries amount_cents, currency,
@@ -747,7 +751,15 @@ export default function AdminUserDetail() {
       .from('profiles')
       .update({ admin_chat_enabled: newVal })
       .eq('id', id)
-    if (!error) setProfile(prev => ({ ...prev, admin_chat_enabled: newVal }))
+    if (!error) {
+      setProfile(prev => ({ ...prev, admin_chat_enabled: newVal }))
+      // Log to the client's activity feed (best-effort — never block the toggle).
+      supabase.rpc('log_admin_activity', {
+        p_user_id: id,
+        p_event_type: newVal ? 'chat:enabled' : 'chat:disabled',
+        p_event_data: { admin_initiated: true },
+      }).then(() => {}, () => {})
+    }
     setTogglingChat(false)
   }
 
@@ -781,6 +793,14 @@ export default function AdminUserDetail() {
         ...prev,
         deactivated_at: wasDeactivated ? null : new Date().toISOString(),
       }))
+      // Log to the client's activity feed — the activate/suspend path goes
+      // through the edge fn and (unlike delete + coaching) didn't record an
+      // event. Best-effort: never surface a log failure as an action error.
+      supabase.rpc('log_admin_activity', {
+        p_user_id: id,
+        p_event_type: wasDeactivated ? 'account:activated' : 'account:deactivated',
+        p_event_data: { admin_initiated: true },
+      }).then(() => {}, () => {})
     } catch (err) {
       setActiveError(err?.message || 'Failed to update status.')
     } finally {
@@ -898,17 +918,19 @@ export default function AdminUserDetail() {
             <p className="text-xs text-muted-foreground truncate">{profile.email}</p>
 
             {!profile.anonymized_at && (
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
-                {/* Account status — click to toggle active/suspended */}
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px]">
+                {/* Account status — bordered pill so it reads as a clickable toggle */}
                 <button
                   onClick={toggleActive}
                   disabled={togglingActive}
                   title={profile.deactivated_at ? 'Reactivate this account — restores sign-in' : 'Suspend this account — blocks sign-in (data preserved)'}
-                  className={`-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 font-medium transition-colors hover:bg-accent ${togglingActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  className={`inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 font-medium transition-colors hover:bg-accent ${togglingActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                   <span className={`h-1.5 w-1.5 rounded-full ${profile.deactivated_at ? 'bg-zinc-400' : 'bg-emerald-400'}`} />
                   {profile.deactivated_at ? 'Suspended' : 'Active'}
                 </button>
+
+                <span className="text-border">·</span>
 
                 {/* Coaching mode — interactive dropdown */}
                 <AthleteCoachingChip
@@ -917,26 +939,35 @@ export default function AdminUserDetail() {
                   onProfileUpdated={updates => setProfile(prev => prev ? { ...prev, ...updates } : prev)}
                 />
 
-                {/* Plan + goal — informative */}
-                <span className="text-muted-foreground">
-                  {existingPlan
-                    ? <span className="text-emerald-400">Macro plan set</span>
-                    : 'No macro plan'}
-                  {existingPlan?.goal_reached && <> · <span className="text-blue-400">Goal reached</span></>}
+                <span className="text-border">·</span>
+
+                {/* Plan status — informative */}
+                <span className={existingPlan ? 'text-emerald-400' : 'text-muted-foreground'}>
+                  {existingPlan ? 'Macro plan set' : 'No macro plan'}
                 </span>
 
-                {/* Chat-enable toggle — only when admin isn't this client's coach
-                    (coach↔client chat is always on, no toggle). */}
+                {existingPlan?.goal_reached && (
+                  <>
+                    <span className="text-border">·</span>
+                    <span className="text-blue-400">Macro plan goal reached</span>
+                  </>
+                )}
+
+                {/* Chat-enable toggle — bordered pill; only when admin isn't this
+                    client's coach (coach↔client chat is always on, no toggle). */}
                 {profile.coach_id !== adminUser?.id && (
-                  <button
-                    onClick={toggleChat}
-                    disabled={togglingChat}
-                    title={profile.admin_chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
-                    className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium transition-colors hover:bg-accent ${profile.admin_chat_enabled ? 'text-emerald-400' : 'text-muted-foreground'} ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                  >
-                    <MessageCircle className="h-3 w-3" />
-                    {profile.admin_chat_enabled ? 'Chat on' : 'Chat off'}
-                  </button>
+                  <>
+                    <span className="text-border">·</span>
+                    <button
+                      onClick={toggleChat}
+                      disabled={togglingChat}
+                      title={profile.admin_chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
+                      className={`inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 font-medium transition-colors hover:bg-accent ${profile.admin_chat_enabled ? 'text-emerald-400' : 'text-muted-foreground'} ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <MessageCircle className="h-3 w-3" />
+                      {profile.admin_chat_enabled ? 'Chat on' : 'Chat off'}
+                    </button>
+                  </>
                 )}
               </div>
             )}
