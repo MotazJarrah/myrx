@@ -941,17 +941,10 @@ export default function AdminUserDetail() {
 
                 <span className="text-border">·</span>
 
-                {/* Plan status — informative */}
-                <span className={existingPlan ? 'text-emerald-400' : 'text-muted-foreground'}>
-                  {existingPlan ? 'Macro plan set' : 'No macro plan'}
+                {/* Plan status — one mutually-exclusive state: reached / set / not set */}
+                <span className={existingPlan?.goal_reached ? 'text-blue-400' : existingPlan ? 'text-emerald-400' : 'text-muted-foreground'}>
+                  {existingPlan?.goal_reached ? 'Macro plan goal reached' : existingPlan ? 'Macro plan set' : 'No macro plan'}
                 </span>
-
-                {existingPlan?.goal_reached && (
-                  <>
-                    <span className="text-border">·</span>
-                    <span className="text-blue-400">Macro plan goal reached</span>
-                  </>
-                )}
 
                 {/* Chat-enable toggle — bordered pill; only when admin isn't this
                     client's coach (coach↔client chat is always on, no toggle). */}
