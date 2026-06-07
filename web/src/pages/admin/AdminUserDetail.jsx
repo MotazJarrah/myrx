@@ -1285,7 +1285,7 @@ export default function AdminUserDetail() {
             <DashboardBodyweightBlock userId={id} profile={profile} onViewAll={() => handleTabChange('body')} />
           )}
           {tierRank >= TIER_RANK.fullrx && (
-            <DashboardHeartBlock userId={id} onViewAll={() => handleTabChange('heart')} />
+            <DashboardHeartBlock userId={id} profile={profile} onViewAll={() => handleTabChange('heart')} />
           )}
           {tierRank >= TIER_RANK.corerx && (
             <DashboardCaloriesBlock userId={id} profile={profile} plan={existingPlan} onViewAll={() => handleTabChange('calories')} />

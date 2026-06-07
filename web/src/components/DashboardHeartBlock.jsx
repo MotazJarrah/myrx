@@ -1,21 +1,34 @@
 // Heart snapshot block for the client-detail Dashboard tab.
-// Main graph = per-day resting (emerald) + avg (sky) HR over the last 7 days.
-// Quick stats = latest HR, resting (today's low / 7-day avg), steps today.
-// Wearable-sourced; shows a "no data synced" empty state. Click-through opens the
-// full Heart tab. Mirrors AdminUserHeart's data sources (hr_samples, step_samples).
+// Main graph = the mobile HrRangeChart zone-band design (per day: resting dot,
+// avg dot, peak-zone gradient band) via the shared HrZoneChart. Quick stats =
+// avg resting, latest peak, steps today. Wearable-sourced; shows a "no data
+// synced" empty state. Click-through opens the full Heart tab.
 
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { Heart } from 'lucide-react'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import HrZoneChart from './HrZoneChart'
 import { SnapshotCard, SnapshotLoading, SnapshotEmpty, StatStrip } from './DashboardSnapshotShell'
 
 function localDayKey(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.toISOString().slice(0, 10) }
 function nDaysAgoIso(n) { const x = new Date(); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - (n - 1)); return x.toISOString() }
 function startOfTodayIso() { const x = new Date(); x.setHours(0, 0, 0, 0); return x.toISOString() }
+// HRmax = 220 - age (caller's birthdate); fallbacks mirror the mobile heart page.
+function estimateHrMax(birthdate) {
+  if (!birthdate) return 180
+  const b = new Date(birthdate)
+  if (isNaN(b)) return 180
+  const t = new Date()
+  let age = t.getFullYear() - b.getFullYear()
+  const md = t.getMonth() - b.getMonth()
+  if (md < 0 || (md === 0 && t.getDate() < b.getDate())) age--
+  if (age < 10 || age > 100) return 180
+  return 220 - age
+}
 
-export default function DashboardHeartBlock({ userId, onViewAll }) {
+export default function DashboardHeartBlock({ userId, profile, onViewAll }) {
   const [state, setState] = useState(null) // { hr: [], steps: [] }
+  const hrMax = estimateHrMax(profile?.birthdate)
 
   useEffect(() => {
     if (!userId) return
@@ -65,14 +78,6 @@ export default function DashboardHeartBlock({ userId, onViewAll }) {
     return { chartData, stats, hasData }
   }, [state])
 
-  const domain = useMemo(() => {
-    if (chartData.length < 2) return ['auto', 'auto']
-    const vals = chartData.flatMap(d => [d.resting, d.avg]).filter(v => v != null)
-    const min = Math.min(...vals), max = Math.max(...vals)
-    const pad = (max - min) * 0.15 || 5
-    return [Math.floor(min - pad), Math.ceil(max + pad)]
-  }, [chartData])
-
   return (
     <SnapshotCard icon={Heart} iconTint="text-red-400" title="Heart" onViewAll={onViewAll}>
       {state === null ? (
@@ -81,22 +86,8 @@ export default function DashboardHeartBlock({ userId, onViewAll }) {
         <SnapshotEmpty>No heart-rate data synced in the last 7 days.</SnapshotEmpty>
       ) : (
         <>
-          <div className="flex-1 min-h-0 px-2 pt-3">
-            {chartData.length >= 2 && (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 4, right: 6, left: 6, bottom: 0 }}>
-                  <XAxis dataKey="day" hide />
-                  <YAxis hide domain={domain} />
-                  <Tooltip
-                    cursor={{ stroke: 'hsl(var(--muted-foreground) / 0.3)' }}
-                    labelFormatter={d => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                    formatter={(v, n) => [`${v} bpm`, n === 'avg' ? 'Avg' : 'Resting']}
-                  />
-                  <Line type="monotone" dataKey="avg" name="avg" stroke="#38bdf8" strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
-                  <Line type="monotone" dataKey="resting" name="resting" stroke="#34d399" strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            )}
+          <div className="flex-1 min-h-0 px-2 pt-3 pb-1">
+            {chartData.length >= 1 && <HrZoneChart data={chartData} hrMax={hrMax} compact />}
           </div>
           <StatStrip stats={stats} />
         </>

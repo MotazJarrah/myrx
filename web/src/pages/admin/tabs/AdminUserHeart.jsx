@@ -28,7 +28,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { Heart, Activity, TrendingUp, Footprints } from 'lucide-react'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import HrZoneChart from '../../../components/HrZoneChart'
 
 // ── Day / time helpers ──────────────────────────────────────────────────────
 
@@ -364,7 +364,7 @@ export default function AdminUserHeart({ userId, profile }) {
       )}
 
       {/* ── 7-day HR chart ─────────────────────────────────────────────────── */}
-      {chartData.length > 0 && <HrRangeChart data={chartData} />}
+      {chartData.length > 0 && <HrRangeChart data={chartData} hrMax={hrMax} />}
 
       {/* ── Daily history — Low / Avg / Peak per day ───────────────────────── */}
       {daily.length > 0 && (
@@ -547,99 +547,16 @@ function RestingAssessment({ bpm, bands }) {
   )
 }
 
-// ── HrRangeChart — resting low + daily avg + daily peak over 7 days ──────────
+// ── HrRangeChart — mobile zone-band design (resting + avg dots, peak-zone band) ──
 
-function HrRangeChart({ data }) {
-  // Only plot if at least one day has any HR value.
+function HrRangeChart({ data, hrMax }) {
   const hasValues = data.some(d => d.resting != null || d.avg != null || d.peak != null)
   if (!hasValues) return null
-
-  const all = data.flatMap(d => [d.resting, d.avg, d.peak]).filter(v => v != null)
-  const minV = Math.min(...all)
-  const maxV = Math.max(...all)
-  const pad = (maxV - minV) * 0.15 || 5
-
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <p className="text-sm font-semibold text-foreground mb-3">Heart rate — last 7 days</p>
-      <ResponsiveContainer width="100%" height={160}>
-        <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-          <XAxis
-            dataKey="label"
-            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-            tickLine={false}
-            axisLine={false}
-            interval="preserveStartEnd"
-          />
-          <YAxis
-            domain={[Math.floor(minV - pad), Math.ceil(maxV + pad)]}
-            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-            tickLine={false}
-            axisLine={false}
-            tickCount={4}
-          />
-          <Tooltip
-            contentStyle={{
-              background: 'hsl(var(--card))',
-              border: '1px solid hsl(var(--border))',
-              borderRadius: '8px',
-              fontSize: 12,
-            }}
-            formatter={(v, name) => [`${v} bpm`, name]}
-          />
-          <Line
-            type="monotone"
-            dataKey="peak"
-            name="Peak"
-            stroke={PALETTE.red400}
-            strokeWidth={2}
-            dot={{ r: 2.5, fill: PALETTE.red400, strokeWidth: 0 }}
-            activeDot={{ r: 5 }}
-            connectNulls
-            isAnimationActive
-            animationDuration={900}
-          />
-          <Line
-            type="monotone"
-            dataKey="avg"
-            name="Avg"
-            stroke={PALETTE.sky400}
-            strokeWidth={2}
-            dot={{ r: 2.5, fill: PALETTE.sky400, strokeWidth: 0 }}
-            activeDot={{ r: 5 }}
-            connectNulls
-            isAnimationActive
-            animationDuration={900}
-          />
-          <Line
-            type="monotone"
-            dataKey="resting"
-            name="Resting"
-            stroke={PALETTE.emerald400}
-            strokeWidth={2}
-            dot={{ r: 2.5, fill: PALETTE.emerald400, strokeWidth: 0 }}
-            activeDot={{ r: 5 }}
-            connectNulls
-            isAnimationActive
-            animationDuration={900}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-      {/* Legend */}
-      <div className="mt-2 flex items-center justify-center gap-4">
-        <LegendDot color={PALETTE.emerald400} label="Resting" />
-        <LegendDot color={PALETTE.sky400} label="Avg" />
-        <LegendDot color={PALETTE.red400} label="Peak" />
-      </div>
+      <HrZoneChart data={data} hrMax={hrMax} height={240} />
     </div>
   )
 }
 
-function LegendDot({ color, label }) {
-  return (
-    <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-      <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-      {label}
-    </span>
-  )
-}
