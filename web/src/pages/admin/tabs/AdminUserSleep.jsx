@@ -26,7 +26,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { Moon, Clock, BedDouble, Activity, Brain, Watch } from 'lucide-react'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
+import SleepClock from '../../../components/SleepClock'
+import SleepConsistencyChart from '../../../components/SleepConsistencyChart'
 
 // ── Time-based classifiers (copied from mobile/app/(app)/sleep.tsx) ───────────
 
@@ -141,78 +142,6 @@ const STATUS_STYLE = {
 const DEEP_TARGET_S = 90 * 60
 const REM_TARGET_S  = 90 * 60
 
-function fmtDateShort(iso) {
-  return new Date(iso).toLocaleDateString(undefined, { weekday: 'short' })
-}
-
-// ── Duration trend chart (mirrors AdminUserBody's BodyweightChart) ────────────
-
-function DurationChart({ nights, targetHours }) {
-  if (nights.length < 2) return null
-
-  // nights arrive newest-first; chart wants oldest → newest.
-  const data = [...nights]
-    .sort((a, b) => new Date(a.start_at) - new Date(b.start_at))
-    .map(s => ({ ts: s.start_at, hours: Math.round((s.duration_s / 3600) * 10) / 10 }))
-
-  const vals = data.map(d => d.hours)
-  const minH = Math.min(...vals, targetHours)
-  const maxH = Math.max(...vals, targetHours)
-  const pad  = (maxH - minH) * 0.15 || 1
-
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <p className="text-xs font-semibold text-muted-foreground mb-3">Sleep duration over time (h)</p>
-      <ResponsiveContainer width="100%" height={140}>
-        <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-          <XAxis
-            dataKey="ts"
-            tickFormatter={fmtDateShort}
-            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-            tickLine={false}
-            axisLine={false}
-            interval="preserveStartEnd"
-          />
-          <YAxis
-            domain={[minH - pad, maxH + pad]}
-            tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
-            tickLine={false}
-            axisLine={false}
-            tickCount={4}
-          />
-          <Tooltip
-            contentStyle={{
-              background: 'hsl(var(--card))',
-              border: '1px solid hsl(var(--border))',
-              borderRadius: '8px',
-              fontSize: 12,
-            }}
-            labelFormatter={fmtDateShort}
-            formatter={(v) => [`${v} h`, 'Slept']}
-          />
-          <ReferenceLine
-            y={targetHours}
-            stroke="hsl(var(--muted-foreground))"
-            strokeDasharray="3 3"
-            strokeWidth={1}
-          />
-          <Line
-            type="monotone"
-            dataKey="hours"
-            stroke="#818cf8" /* indigo-400 — sleep accent */
-            strokeWidth={2}
-            dot={{ r: 3, fill: '#818cf8', strokeWidth: 0 }}
-            activeDot={{ r: 5 }}
-            isAnimationActive={true}
-            animationDuration={900}
-            animationEasing="ease-in-out"
-          />
-        </LineChart>
-      </ResponsiveContainer>
-      <p className="mt-2 text-[11px] text-muted-foreground">Dashed line = age-based target ({fmtHoursOnly(targetHours)}).</p>
-    </div>
-  )
-}
 
 // ── One dimension row (read-only mirror of mobile DimensionRow) ───────────────
 
@@ -399,8 +328,24 @@ export default function AdminUserSleep({ userId, profile }) {
         </div>
       </div>
 
-      {/* Duration trend chart */}
-      {last7.length >= 2 && <DurationChart nights={last7} targetHours={targetHours} />}
+      {/* Sleep schedule — clock + 7-night consistency (mirrors the mobile graphs) */}
+      {last7.length >= 1 && sleepAvg && (
+        <div className="rounded-xl border border-border bg-card p-4">
+          <p className="text-sm font-semibold text-foreground mb-3">Sleep schedule — last 7 nights</p>
+          <div className="flex flex-col items-center gap-4 lg:flex-row lg:items-center lg:justify-center">
+            <SleepClock nights={last7} size={240} />
+            <div className="w-full lg:flex-1 lg:min-w-0">
+              <SleepConsistencyChart
+                nights={last7}
+                targetBedMin={sleepAvg.targetBedMin}
+                targetWakeMin={sleepAvg.avgWakeMin}
+                avgBedMin={sleepAvg.avgBedMin}
+                height={190}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sleep Targets — duration + bedtime */}
       <div className="rounded-xl border border-border bg-card p-4">
