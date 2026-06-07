@@ -178,8 +178,10 @@ export default function AdminEffortDetail() {
   // Read-only coach mirrors; each self-fetches its data + keeps per-effort delete.
   const WEIGHTED_STANDARD_EQUIP = ['barbell', 'dumbbell', 'kettlebell', 'machine', 'strongman']
   function goBack() {
-    localStorage.setItem(`admin-user-tab-${userId}`, 'activity')
-    navigate(`/admin/user/${userId}`)
+    // Back from a move-detail page returns to the Efforts (activity) tab, never
+    // the Dashboard. ?tab= is honored on mount; the old localStorage last-tab
+    // restore was dropped in T101, so we steer via the URL param now.
+    navigate(`/admin/user/${userId}?tab=activity`)
   }
   if (kind === 'strength') {
     // Sled Work consolidated — no movement row under the base name.
@@ -286,10 +288,7 @@ export default function AdminEffortDetail() {
 
       {/* Back */}
       <button
-        onClick={() => {
-          localStorage.setItem(`admin-user-tab-${userId}`, 'activity')
-          navigate(`/admin/user/${userId}`)
-        }}
+        onClick={goBack}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
         <ArrowLeft className="h-4 w-4" /> Back to Client

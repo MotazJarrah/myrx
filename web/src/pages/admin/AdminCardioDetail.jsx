@@ -40,8 +40,10 @@ export default function AdminCardioDetail() {
   const activity = decodeURIComponent(slug || '')
 
   function onBack() {
-    localStorage.setItem(`admin-user-tab-${userId}`, 'activity')
-    navigate(`/admin/user/${userId}`)
+    // Back from a move-detail page returns to the Efforts (activity) tab, never
+    // the Dashboard. ?tab= is honored on mount; the old localStorage last-tab
+    // restore was dropped in T101, so we steer via the URL param now.
+    navigate(`/admin/user/${userId}?tab=activity`)
   }
 
   const cat = categorizeActivity(activity)
