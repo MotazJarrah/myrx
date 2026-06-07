@@ -83,17 +83,17 @@ export default function DashboardHeartBlock({ userId, onViewAll }) {
         <SnapshotEmpty>No heart-rate data synced in the last 7 days.</SnapshotEmpty>
       ) : (
         <>
-          {chartData.length >= 2 && (
-            <div className="px-2 pt-3">
-              <ResponsiveContainer width="100%" height={110}>
+          <div className="flex-1 min-h-0 px-2 pt-3">
+            {chartData.length >= 2 && (
+              <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 4, right: 6, left: 6, bottom: 0 }}>
                   <YAxis hide domain={domain} />
                   <Line type="monotone" dataKey="avg" stroke="#38bdf8" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
                   <Line type="monotone" dataKey="resting" stroke="#34d399" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
-            </div>
-          )}
+            )}
+          </div>
           <StatStrip stats={stats} />
         </>
       )}

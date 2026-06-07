@@ -67,7 +67,7 @@ export default function DashboardEffortsBlock({ userId, basePath = '/admin/user'
   }, [userId])
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden flex flex-col">
+    <div className="rounded-xl border border-border bg-card overflow-hidden flex flex-col h-[260px]">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
           <Dumbbell className="h-4 w-4 text-blue-400" />
@@ -85,11 +85,11 @@ export default function DashboardEffortsBlock({ userId, basePath = '/admin/user'
       </div>
 
       {moves === null ? (
-        <div className="py-10 text-center text-xs text-muted-foreground">Loading…</div>
+        <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading…</div>
       ) : moves.length === 0 ? (
-        <div className="py-10 text-center text-xs text-muted-foreground">No efforts logged yet.</div>
+        <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">No efforts logged yet.</div>
       ) : (
-        <div className="max-h-[208px] overflow-y-auto divide-y divide-border">
+        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-border">
           {moves.map((m, i) => (
             <button
               key={`${m.type}-${m.name}-${i}`}

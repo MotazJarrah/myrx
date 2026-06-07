@@ -93,17 +93,17 @@ export default function DashboardSleepBlock({ userId, profile, onViewAll }) {
         <SnapshotEmpty>No sleep data yet.</SnapshotEmpty>
       ) : (
         <>
-          {chartData.length >= 2 && (
-            <div className="px-2 pt-3">
-              <ResponsiveContainer width="100%" height={110}>
+          <div className="flex-1 min-h-0 px-2 pt-3">
+            {chartData.length >= 2 && (
+              <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 4, right: 6, left: 6, bottom: 0 }}>
                   <YAxis hide domain={domain} />
                   <ReferenceLine y={targetHours} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" strokeWidth={1} />
                   <Line type="monotone" dataKey="hours" stroke="#818cf8" strokeWidth={2} dot={false} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
-            </div>
-          )}
+            )}
+          </div>
           <StatStrip stats={stats} />
         </>
       )}

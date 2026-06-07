@@ -138,7 +138,7 @@ export default function DashboardCaloriesBlock({ userId, profile, plan, onViewAl
         <SnapshotEmpty>No food logged in the last 14 days.</SnapshotEmpty>
       ) : (
         <>
-          <div className="px-3 pt-3 pb-1">
+          <div className="flex-1 min-h-0 px-3 flex items-center">
             <CaloriesMiniGraph days={days} logs={logsByDay} target={target} />
           </div>
           <StatStrip stats={stats} />

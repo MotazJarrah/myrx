@@ -94,8 +94,8 @@ export default function DashboardHydrationBlock({ userId, profile, onViewAll }) 
         <SnapshotEmpty>No water logged in the last 7 days.</SnapshotEmpty>
       ) : (
         <>
-          <div className="px-2 pt-3">
-            <ResponsiveContainer width="100%" height={110}>
+          <div className="flex-1 min-h-0 px-2 pt-3">
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} margin={{ top: 4, right: 6, left: 6, bottom: 0 }}>
                 <YAxis hide domain={[0, yMax]} />
                 <ReferenceLine y={targetVal} stroke={CYAN} strokeDasharray="3 3" strokeOpacity={0.55} />

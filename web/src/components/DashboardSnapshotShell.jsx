@@ -5,7 +5,7 @@
 
 export function SnapshotCard({ icon: Icon, iconTint = 'text-muted-foreground', title, onViewAll, children }) {
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden flex flex-col">
+    <div className="rounded-xl border border-border bg-card overflow-hidden flex flex-col h-[260px]">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div className="flex items-center gap-2">
           {Icon && <Icon className={`h-4 w-4 ${iconTint}`} />}
@@ -27,11 +27,11 @@ export function SnapshotCard({ icon: Icon, iconTint = 'text-muted-foreground', t
 }
 
 export function SnapshotLoading() {
-  return <div className="py-10 text-center text-xs text-muted-foreground">Loading…</div>
+  return <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground">Loading…</div>
 }
 
 export function SnapshotEmpty({ children = 'No data yet.' }) {
-  return <div className="py-10 text-center text-xs text-muted-foreground">{children}</div>
+  return <div className="flex-1 flex items-center justify-center px-4 text-center text-xs text-muted-foreground">{children}</div>
 }
 
 // A horizontal row of compact stat cells under the chart.
