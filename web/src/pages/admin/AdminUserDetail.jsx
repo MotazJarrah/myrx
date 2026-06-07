@@ -192,17 +192,6 @@ function SnapshotBadge({ children, color, muted }) {
   )
 }
 
-// Small labeled cluster for the profile-card controls — a tiny uppercase caption
-// over its control(s), so status vs. action reads at a glance.
-function ControlGroup({ title, children }) {
-  return (
-    <div className="min-w-0">
-      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</div>
-      <div className="flex flex-wrap items-center gap-1">{children}</div>
-    </div>
-  )
-}
-
 // ── Tab config ────────────────────────────────────────────────────────────────
 
 // Tab structure locked May 26 2026 — "Profile" was misleading (the page
@@ -892,6 +881,7 @@ export default function AdminUserDetail() {
       {/* ── Profile summary card ── */}
       <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex items-start gap-3">
+          {/* Avatar */}
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base font-bold text-primary">
             {profile.avatar_url
               ? <img src={profile.avatar_url} alt={profile.full_name} className="h-11 w-11 rounded-full object-cover" />
@@ -899,115 +889,83 @@ export default function AdminUserDetail() {
             }
           </div>
 
+          {/* Identity + inline status line. Status items are self-describing
+              (no captions): the colored dot + "Active" reads as account status,
+              the coaching dropdown shows the management mode, plan + goal are
+              informative text. Interactive items have a hover affordance. */}
           <div className="flex-1 min-w-0">
             <h1 className="text-base font-bold tracking-tight truncate">{profile.full_name || '—'}</h1>
             <p className="text-xs text-muted-foreground truncate">{profile.email}</p>
+
+            {!profile.anonymized_at && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+                {/* Account status — click to toggle active/suspended */}
+                <button
+                  onClick={toggleActive}
+                  disabled={togglingActive}
+                  title={profile.deactivated_at ? 'Reactivate this account — restores sign-in' : 'Suspend this account — blocks sign-in (data preserved)'}
+                  className={`-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 font-medium transition-colors hover:bg-accent ${togglingActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${profile.deactivated_at ? 'bg-zinc-400' : 'bg-emerald-400'}`} />
+                  {profile.deactivated_at ? 'Suspended' : 'Active'}
+                </button>
+
+                {/* Coaching mode — interactive dropdown */}
+                <AthleteCoachingChip
+                  athleteProfile={profile}
+                  adminUserId={adminUser?.id}
+                  onProfileUpdated={updates => setProfile(prev => prev ? { ...prev, ...updates } : prev)}
+                />
+
+                {/* Plan + goal — informative */}
+                <span className="text-muted-foreground">
+                  {existingPlan
+                    ? <span className="text-emerald-400">Macro plan set</span>
+                    : 'No macro plan'}
+                  {existingPlan?.goal_reached && <> · <span className="text-blue-400">Goal reached</span></>}
+                </span>
+
+                {/* Chat-enable toggle — only when admin isn't this client's coach
+                    (coach↔client chat is always on, no toggle). */}
+                {profile.coach_id !== adminUser?.id && (
+                  <button
+                    onClick={toggleChat}
+                    disabled={togglingChat}
+                    title={profile.admin_chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
+                    className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium transition-colors hover:bg-accent ${profile.admin_chat_enabled ? 'text-emerald-400' : 'text-muted-foreground'} ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <MessageCircle className="h-3 w-3" />
+                    {profile.admin_chat_enabled ? 'Chat on' : 'Chat off'}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Right-side controls — a settings gear (top-right) over labeled
-              control groups (Account / Coaching / Plan / Messaging) so status
-              vs. action reads at a glance. Account-level Delete now lives inside
-              the settings drawer (mobile parity). Hidden on anonymized accounts
-              — nothing left to act on; the "deleted" banner below covers it. */}
-          <div className="flex flex-col items-end gap-3 shrink-0">
-            {!profile.anonymized_at && (
+          {/* Action cluster — only things that DO/OPEN something: a primary
+              Message button + the Settings gear. Delete lives inside settings. */}
+          {!profile.anonymized_at && (
+            <div className="flex items-center gap-2 shrink-0">
+              {(profile.coach_id === adminUser?.id || profile.admin_chat_enabled === true) && (
+                <Link href={`/admin/messages?userId=${profile.id}`}>
+                  <a
+                    title="Open chat with this client"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    Message
+                  </a>
+                </Link>
+              )}
               <button
                 onClick={() => setSettingsOpen(true)}
                 title="Client account settings"
-                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
               >
                 <SettingsIcon className="h-4 w-4" />
               </button>
-            )}
-
-            {!profile.anonymized_at && (() => {
-              // Chat path: when admin IS the coach, chat is unconditional
-              // (no toggle); otherwise admin flips it per-client.
-              const isAdminTheCoach = profile.coach_id === adminUser?.id
-              const adminCanChat = isAdminTheCoach || profile.admin_chat_enabled === true
-              return (
-                <div className="grid grid-cols-2 gap-x-5 gap-y-3 text-left">
-                  {/* ACCOUNT — active / suspended */}
-                  <ControlGroup title="Account">
-                    <button
-                      onClick={toggleActive}
-                      disabled={togglingActive}
-                      title={profile.deactivated_at
-                        ? 'Reactivate this account — restores sign-in'
-                        : 'Suspend this account — blocks sign-in (data preserved)'}
-                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                        profile.deactivated_at
-                          ? 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400 hover:bg-zinc-500/20'
-                          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                      } ${togglingActive ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                    >
-                      <Power className="h-3 w-3" />
-                      {profile.deactivated_at ? 'Suspended' : 'Active'}
-                    </button>
-                  </ControlGroup>
-
-                  {/* COACHING — Self / Coach / Admin-managed + tier */}
-                  <ControlGroup title="Coaching">
-                    <AthleteCoachingChip
-                      athleteProfile={profile}
-                      adminUserId={adminUser?.id}
-                      onProfileUpdated={updates =>
-                        setProfile(prev => prev ? { ...prev, ...updates } : prev)
-                      }
-                    />
-                  </ControlGroup>
-
-                  {/* PLAN — macro plan set/not set + goal reached */}
-                  <ControlGroup title="Plan">
-                    {existingPlan ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
-                        <Check className="h-3 w-3" /> Macro plan set
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                        No macro plan
-                      </span>
-                    )}
-                    {existingPlan?.goal_reached && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[11px] font-medium text-blue-400">
-                        🎯 Goal reached
-                      </span>
-                    )}
-                  </ControlGroup>
-
-                  {/* MESSAGING — chat toggle + message */}
-                  <ControlGroup title="Messaging">
-                    {!isAdminTheCoach && (
-                      <button
-                        onClick={toggleChat}
-                        disabled={togglingChat}
-                        title={profile.admin_chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
-                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
-                          profile.admin_chat_enabled
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-                            : 'border-border text-muted-foreground hover:text-foreground'
-                        } ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                      >
-                        <MessageCircle className="h-3 w-3" />
-                        {profile.admin_chat_enabled ? 'Chat on' : 'Chat off'}
-                      </button>
-                    )}
-                    {adminCanChat && (
-                      <Link href={`/admin/messages?userId=${profile.id}`}>
-                        <a
-                          title="Open chat with this user and start typing"
-                          className="inline-flex items-center gap-1 rounded-full bg-primary/15 border border-primary/40 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
-                        >
-                          <MessageCircle className="h-3 w-3" />
-                          {profile.is_coach ? 'Message coach' : 'Message athlete'}
-                        </a>
-                      </Link>
-                    )}
-                  </ControlGroup>
-                </div>
-              )
-            })()}
-          </div>
+            </div>
+          )}
         </div>
 
         {activeError && (
