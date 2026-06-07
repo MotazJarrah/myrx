@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { Loader2 } from 'lucide-react'
+import CalorieTrendGraph, { statusFor } from './CalorieTrendGraph'
 
 // ── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -33,15 +34,6 @@ function buildDayWindow() {
   return days
 }
 
-function statusFor(actual, target) {
-  if (!actual)  return 'empty'
-  if (!target)  return 'logged'
-  const ratio = actual / target
-  if (ratio >= 0.92 && ratio <= 1.08) return 'on-target'
-  if (ratio >= 0.80 && ratio <= 1.20) return 'near-target'
-  return 'off-target'
-}
-
 const STATUS_DOT = {
   'on-target':   'bg-emerald-400',
   'near-target': 'bg-amber-400',
@@ -50,122 +42,12 @@ const STATUS_DOT = {
   'empty':       'bg-transparent',
 }
 
-// Per-status fill colours for the graph (RGBA for SVG)
-const STATUS_GRAPH = {
-  'on-target':   { fill: 'rgba(52,211,153,0.12)',  dot: 'rgb(52,211,153)'  },
-  'near-target': { fill: 'rgba(251,191,36,0.12)',  dot: 'rgb(251,191,36)'  },
-  'off-target':  { fill: 'rgba(248,113,113,0.12)', dot: 'rgb(248,113,113)' },
-  'logged':      { fill: 'rgba(148,163,184,0.10)', dot: 'rgb(148,163,184)' },
-  'empty':       { fill: 'transparent',             dot: 'transparent'      },
-}
-
-// ── Mini trend graph (the line chart UNDER the day tiles) ──────────────────────
-
-function CalorieGraph({ days, logs, dailyTarget }) {
-  // Measure the real pixel width so the SVG renders 1:1 (round dots, no
-  // preserveAspectRatio stretch) AND so the X columns line up exactly with the
-  // tile row above (both are N equal columns separated by GAP px).
-  const wrapRef = useRef(null)
-  const [W, setW] = useState(0)
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el) return
-    const measure = () => setW(el.clientWidth || 0)
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
-  const H      = 72
-  const PADY   = 12
-  const innerH = H - PADY * 2
-  const N      = days.length
-  const GAP    = 6   // must match the tile row's gap-1.5 (0.375rem = 6px)
-  const colW   = W > 0 ? (W - GAP * (N - 1)) / N : 0
-  const colCenter = (i) => i * (colW + GAP) + colW / 2
-
-  const points = days
-    .map((d, i) => {
-      const log = logs[d.iso]
-      if (!log) return null
-      return { idx: i, iso: d.iso, cal: log.calories, status: statusFor(log.calories, dailyTarget) }
-    })
-    .filter(Boolean)
-
-  const allCal = points.map(p => p.cal)
-  const minCal = Math.min(...allCal, dailyTarget ?? Infinity)
-  const maxCal = Math.max(...allCal, dailyTarget ?? 0)
-  const span   = maxCal - minCal || 200
-  const toY    = (cal) => PADY + (1 - (cal - minCal) / span) * innerH
-  const targetY = dailyTarget != null ? toY(dailyTarget) : null
-  const polyline = points.map(p => `${colCenter(p.idx)},${toY(p.cal)}`).join(' ')
-
-  return (
-    <div ref={wrapRef} className="w-full">
-      {points.length === 0 ? (
-        <div className="h-[72px] flex items-center justify-center">
-          <p className="text-[11px] text-muted-foreground/40">No intake logged in the last 14 days</p>
-        </div>
-      ) : W > 0 ? (
-        <svg width={W} height={H} className="block" aria-hidden="true">
-          {/* Per-day status-coloured vertical bands */}
-          {points.map(p => {
-            const { fill } = STATUS_GRAPH[p.status] ?? STATUS_GRAPH.logged
-            const y = toY(p.cal)
-            return (
-              <rect
-                key={p.iso}
-                x={colCenter(p.idx) - colW / 2}
-                y={y}
-                width={colW}
-                height={H - PADY - y}
-                fill={fill}
-                rx="3"
-              />
-            )
-          })}
-
-          {/* Target dashed line */}
-          {targetY != null && (
-            <line
-              x1={colW / 2} y1={targetY}
-              x2={W - colW / 2} y2={targetY}
-              stroke="hsl(var(--muted-foreground) / 0.2)"
-              strokeWidth="1"
-              strokeDasharray="3 3"
-            />
-          )}
-
-          {/* Connecting line */}
-          {points.length > 1 && (
-            <polyline
-              points={polyline}
-              fill="none"
-              stroke="hsl(var(--muted-foreground) / 0.30)"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-          )}
-
-          {/* Dots — coloured by status */}
-          {points.map(p => {
-            const { dot } = STATUS_GRAPH[p.status] ?? STATUS_GRAPH.logged
-            return <circle key={p.iso} cx={colCenter(p.idx)} cy={toY(p.cal)} r="4" fill={dot} />
-          })}
-        </svg>
-      ) : (
-        <div className="h-[72px]" />
-      )}
-    </div>
-  )
-}
-
 // ── Component (read-only — coach review of a client's intake) ───────────────────
 // Props:
 //   userId       — whose food_logs to read (the client being viewed)
 //   dailyTarget  — kcal target (number | null) — drives the status colours + line
+// The trend graph under the tiles is the shared <CalorieTrendGraph>, the same
+// component the dashboard Calories block renders, so the two can't drift.
 
 export default function CalorieStrip({ userId, dailyTarget }) {
   const [logs, setLogs]       = useState({})   // { [iso]: { calories } }
@@ -240,14 +122,14 @@ export default function CalorieStrip({ userId, dailyTarget }) {
         })}
       </div>
 
-      {/* Trend graph — the line chart under the days */}
+      {/* Trend graph — the line chart under the days (shared with the dashboard) */}
       {loading ? (
         <div className="text-center text-xs text-muted-foreground py-2">
           <Loader2 className="inline h-3 w-3 animate-spin mr-1" /> Loading…
         </div>
       ) : (
         <div className="pt-1">
-          <CalorieGraph days={days} logs={logs} dailyTarget={dailyTarget} />
+          <CalorieTrendGraph days={days} logs={logs} dailyTarget={dailyTarget} />
         </div>
       )}
     </div>
