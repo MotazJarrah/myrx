@@ -669,6 +669,12 @@ TASKS = [
      "OPEN -- quick sweep: audit AdminUserActivity.jsx against T086 (remove attribution footers / motivational lines / how-to-log instructions / feature help-text subtitles; keep data + prescription cue + opt-in info pills), then build + deploy.",
      "web/src/pages/admin/tabs/AdminUserActivity.jsx",
      "2026-06-07"),
+
+    ("T101", "Client-detail view must reopen on the Dashboard tab, not the last-opened tab", "Coach/Admin", "Web", "Open",
+     "User 2026-06-07: open a client -> view a tab (e.g. Bodyweight) -> leave the client -> re-enter, and it reopens on the LAST tab (persisted, e.g. localStorage 'admin-user-tab-{id}' in AdminUserDetail). User wants it to ALWAYS reopen on the Dashboard tab. Fix: initialise activeTab='dashboard' on mount / stop restoring the persisted last-tab (AdminUserDetail + mirror in CoachClientDetail).",
+     "OPEN -- bundle with the dashboard-rollup build.",
+     "web AdminUserDetail.jsx (activeTab init + localStorage admin-user-tab-{id}); CoachClientDetail.jsx",
+     "2026-06-07"),
 ]
 
 # ─────────── build ──────────────────────────────────────────────────────────────
