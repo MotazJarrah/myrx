@@ -90,7 +90,7 @@ Two streams, both built on the same product:
 
 **Stream A — Coach subscription (B2B2C).** Coaches pay a monthly subscription for the admin portal. Their clients get the full client app at no cost as long as the coach's subscription is active. The coach gets every client's data, chat, progress dashboards, and the ability to message and program for the whole roster. This is our category-defining differentiator: no other consumer fitness app sells a coach overlay this complete.
 
-**Stream B — App Store / Google Play (B2C direct).** Free download with a limited free tier. Full features unlocked by either a recurring subscription (monthly) or a one-time lifetime purchase. No coach involved — the app itself plays the coaching role through the "next step" framing built into every domain.
+**Stream B — App Store / Google Play (B2C direct).** Free download with a limited free tier. Full features unlocked by a recurring subscription — monthly, or annual at 17% off (two months free). A 14-day free trial fronts the paid tiers. No coach involved — the app itself plays the coaching role through the "next step" framing built into every domain.
 
 Both streams reinforce each other. The B2C tier proves the coaching framework works without a human in the loop. The B2B2C tier proves coaches will pay for what the product enables them to do at scale. Together they form a defensible position no single-audience competitor can attack from one side without losing the other.
 

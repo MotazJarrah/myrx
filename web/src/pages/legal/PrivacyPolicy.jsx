@@ -211,7 +211,7 @@ export default function PrivacyPolicy() {
       </ul>
       <p><strong>Communications &amp; payments</strong></p>
       <ul>
-        <li><strong>Stripe, Inc.</strong> — payment processing for web-sold subscriptions and one-time purchases (United States)</li>
+        <li><strong>Stripe, Inc.</strong> — payment processing for web-sold subscriptions (United States)</li>
         <li><strong>Twilio Inc.</strong> — SMS verification codes via Twilio Verify (United States)</li>
         <li><strong>Resend</strong> and/or <strong>SendGrid</strong> — transactional email delivery used by our authentication provider (United States)</li>
       </ul>

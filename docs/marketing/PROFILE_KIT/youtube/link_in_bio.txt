@@ -15,7 +15,7 @@ Order matters. The first link is the primary CTA, displayed largest.
 1. myrxfit.com
    Display title: Get the app
    → The athlete-side conversion surface. Free tier covers strength,
-     cardio, mobility; CoreRX and FullRX one-time upgrades sit
+     cardio, mobility; CoreRX and FullRX subscription upgrades sit
      behind one CTA. Mobile-first landing that detects platform and
      serves the right store link.
 

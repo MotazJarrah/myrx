@@ -7,7 +7,7 @@
 
 ## Position statement
 
-MyRX is the calm coach who explains the mechanism and names the next step — a B2B2C fitness coaching platform where the algorithm picks the next weight, pace, or macro target, and the coach oversees rather than programs from scratch. Two audiences buy: independent coaches who pay $19-$99/mo to run their roster on MyRX (B2B2C), and self-coached athletes who pay one-time for CoreRX ($39) or FullRX ($59) (B2C direct). The voice differentiator — acknowledge state, explain mechanism, name realistic next step — sits in the unoccupied quadrant between loud-science RP, quiet-academic Stronger by Science, operational-SaaS Trainerize, and community-celebration Strava. No competitor speaks this way, and the 3-pillar structure mirrors the algorithm's own output, which is the moat.
+MyRX is the calm coach who explains the mechanism and names the next step — a B2B2C fitness coaching platform where the algorithm picks the next weight, pace, or macro target, and the coach oversees rather than programs from scratch. Two audiences buy: independent coaches who pay $19-$99/mo to run their roster on MyRX (B2B2C), and self-coached athletes who subscribe to CoreRX ($4.99/mo) or FullRX ($6.99/mo) (B2C direct). The voice differentiator — acknowledge state, explain mechanism, name realistic next step — sits in the unoccupied quadrant between loud-science RP, quiet-academic Stronger by Science, operational-SaaS Trainerize, and community-celebration Strava. No competitor speaks this way, and the 3-pillar structure mirrors the algorithm's own output, which is the moat.
 
 ---
 
@@ -36,7 +36,7 @@ These four reach BOTH audiences, fit a 1-2 person team's time budget, and transl
 - **Audience target:** Both. Athletes search "how to fix my bench plateau"; coaches search "how to scale to 30 clients without burnout." YouTube indexes both.
 - **Content pillar fit:** Long-form is where the mechanism explanation has room to breathe at the depth that builds trust. The 3-pillar shape becomes the video shape: open with the current state the viewer is in, walk through the mechanism, end on the concrete next step. Shorts repurpose the same 60-90 second mechanism explainer that runs on TikTok and Reels.
 - **Time investment:** 15-20 hours/week. 1 long-form/week + 3-4 Shorts/week (Shorts are repurposed verticals, not net-new production).
-- **Why for MyRX:** YouTube is the only platform where reach compounds for years. A video ranking for "polarized training pace zones" pulls coach and athlete traffic forever. Chapters with keyword-rich titles get indexed as Google Key Moments — discovery beyond the platform. The trust the format builds is the trust a coach needs before paying $39-$99/mo, and the trust an athlete needs before buying FullRX.
+- **Why for MyRX:** YouTube is the only platform where reach compounds for years. A video ranking for "polarized training pace zones" pulls coach and athlete traffic forever. Chapters with keyword-rich titles get indexed as Google Key Moments — discovery beyond the platform. The trust the format builds is the trust a coach needs before paying $19-$99/mo, and the trust an athlete needs before subscribing to FullRX.
 - **Cadence:** Long-form Thu/Fri (weekend distribution). Shorts daily-ish (Tue-Thu strongest).
 
 ### 4. X (Twitter) — Motaz personal account

@@ -426,7 +426,7 @@ Six pillars. Four to six templates per pillar. Each template includes a real, re
 
 > Slide 1: Self-coached or coached. Same app. Different surface.
 >
-> Slide 2: Self-coached. You set your own parameters — calorie pace, macro split, fat level. The algorithm picks next weight, next pace, next macro target. You follow. Best for athletes who know what they want and can read a prescription. Free or one-time upgrade to CoreRX or FullRX.
+> Slide 2: Self-coached. You set your own parameters — calorie pace, macro split, fat level. The algorithm picks next weight, next pace, next macro target. You follow. Best for athletes who know what they want and can read a prescription. Free, or upgrade to CoreRX or FullRX.
 >
 > Slide 3: Coached. Same prescriptions. Same algorithm. Plus a coach has the oversight view — sees your roster status, your weight trend, your sleep score, your macro adherence. Adjusts your parameters when you stall. Messages you. Best for athletes who hit plateaus and can't tell what to change. Free as long as your coach's subscription is active.
 >

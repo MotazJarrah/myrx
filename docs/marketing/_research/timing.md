@@ -1,6 +1,6 @@
 # Posting cadence + timing — 2026 research
 
-Research date: 2026-05-29. Audience: fitness coaching B2B2C (coaches subscribing $19-99/mo) and B2C (athletes, one-time $39-59). Team size: 1-2 people. Position: calm-coach voice (between RP/SBS/Trainerize/Strava).
+Research date: 2026-05-29. Audience: fitness coaching B2B2C (coaches subscribing $19-99/mo) and B2C (athletes subscribing $4.99-6.99/mo). Team size: 1-2 people. Position: calm-coach voice (between RP/SBS/Trainerize/Strava).
 
 ---
 
@@ -25,7 +25,7 @@ Total weekly output: ~15-18 pieces. Sustainable for a 1-2 person team if Reels a
 
 **Best times:** Tue-Thu 10-11am audience local time. Secondary window 12-2pm for B2B SaaS (lunch-break scroll). Tuesday strongest single day for tech/software vertical.
 
-**ROI for fitness coaches (B2B2C):** Worth the time if coach subscription is the primary revenue. LinkedIn lead CPL runs 28% below Google Ads and converts at ~2x rate, but only for deal sizes >$5,000 and sales cycles >30 days. Our coach tiers ($228-1,188/yr) sit at the lower edge of that band — LinkedIn works, but needs to be founder-led and content-first (not outreach-spam). Personal profiles get 8x the engagement and 561% more reach than identical content on company pages.
+**ROI for fitness coaches (B2B2C):** Worth the time if coach subscription is the primary revenue. LinkedIn lead CPL runs 28% below Google Ads and converts at ~2x rate, but only for deal sizes >$5,000 and sales cycles >30 days. Our coach tiers ($189-989/yr) sit at the lower edge of that band — LinkedIn works, but needs to be founder-led and content-first (not outreach-spam). Personal profiles get 8x the engagement and 561% more reach than identical content on company pages.
 
 **Decision:** Founder account (Motaz) is the primary LinkedIn surface. Brand page exists as receipt-of-existence — drops 1-2 posts/wk mirroring the founder's best.
 

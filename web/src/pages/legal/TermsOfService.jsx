@@ -176,8 +176,9 @@ export default function TermsOfService() {
           billing period without pro-rated refund.
         </li>
         <li>
-          Athlete one-time unlocks (CoreRX, FullRX) carry a 14-day
-          money-back guarantee from the date of purchase.
+          Athlete subscriptions (CoreRX, FullRX) include a 14-day free trial
+          and carry a 14-day money-back guarantee from the date of the first
+          charge.
         </li>
         <li>
           Purchases made through the Apple App Store or Google Play

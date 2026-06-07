@@ -14,7 +14,7 @@ export default function RefundPolicy() {
       <p>
         <strong>Short version.</strong> Free trials are free — cancel before
         day 15, no charge. Coach subscriptions cancel forward (no mid-period
-        refund) except where law requires otherwise. Athlete one-time unlocks
+        refund) except where law requires otherwise. Athlete subscriptions
         (CoreRX / FullRX) come with a 14-day money-back guarantee. App Store
         and Google Play purchases are refunded by Apple / Google, not by us.
       </p>
@@ -74,23 +74,25 @@ export default function RefundPolicy() {
         prepaid amount.
       </p>
 
-      <h2>2. Athlete one-time unlocks (CoreRX, FullRX)</h2>
+      <h2>2. Athlete subscriptions (CoreRX, FullRX)</h2>
       <p>
-        Athlete-tier purchases (CoreRX at $39, FullRX at $59) are one-time
-        unlocks, not subscriptions. They come with a{' '}
-        <strong>14-day money-back guarantee</strong> from the date of purchase
-        — no questions asked. Request a refund by emailing{' '}
+        Athlete tiers (CoreRX at $4.99/month or $49.99/year, FullRX at
+        $6.99/month or $69.99/year) are recurring subscriptions with a 14-day
+        free trial. They come with a{' '}
+        <strong>14-day money-back guarantee</strong> from the date of the first
+        charge — no questions asked. Request a refund by emailing{' '}
         <a href="mailto:support@myrxfit.com">support@myrxfit.com</a>; we
         process the refund within 5 business days.
       </p>
       <p>
-        After 14 days, the unlock is yours permanently and refunds are not
-        available except where required by law.
+        After 14 days, cancellation stops future charges and you keep access
+        through the end of the current billing period; we do not issue
+        pro-rated refunds for partial periods except where required by law.
       </p>
       <p>
-        Upgrading from CoreRX to FullRX is treated as a separate purchase: the
-        14-day window starts at the date of the upgrade charge, not the date
-        of the original CoreRX purchase.
+        Upgrading from CoreRX to FullRX takes effect immediately and billing is
+        pro-rated for the remainder of the current period; the 14-day
+        money-back window is not restarted by an upgrade.
       </p>
 
       <h2>3. Purchases made through the App Store or Google Play</h2>
@@ -170,7 +172,7 @@ export default function RefundPolicy() {
           email address on the account.
         </li>
         <li>
-          For athlete one-time unlocks purchased on the web, email{' '}
+          For athlete subscriptions purchased on the web, email{' '}
           <a href="mailto:support@myrxfit.com">support@myrxfit.com</a> from
           the email address on the account.
         </li>

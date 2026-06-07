@@ -91,12 +91,12 @@ Replaced with `#liftingcoach` — same coach-targeted audience, no banned root w
 1. myrxfit.com
    Display title: Get the app
    → The athlete-side conversion surface. Free tier covers strength,
-     cardio, mobility; CoreRX and FullRX one-time upgrades sit
+     cardio, mobility; CoreRX and FullRX subscription upgrades sit
      behind one CTA. Mobile-first landing that detects platform and
      serves the right store link.
 ```
 
-Replaced with "one-time upgrades" — accurate (CoreRX and FullRX are one-time purchases per the pricing lock), no banned root word.
+Replaced with "subscription upgrades" — accurate (CoreRX and FullRX are recurring monthly/annual subscriptions per the pricing lock), no banned root word.
 
 ---
 
@@ -151,4 +151,4 @@ Every other file that lit up the banned-phrase sweep was inside one of these leg
 
 ## 200-word summary of biggest patterns fixed
 
-The two live violations came from the same failure mode: voice rules getting bent for what looked like a pragmatic reason — reach (the `#fitnessjourney` hashtag) and brevity (`CoreRX and FullRX unlocks`). In both cases the docs had a footnote or quick gloss rationalizing the exception. That's the actual risk pattern. The brand-voice lock works only when it's absolute; the first "this one's a discovery hack" exception teaches future writers that the rules bend if the reason is good. The fixes replaced both with on-voice equivalents that lose nothing — `#liftingcoach` reaches the same coach audience as `#fitnessjourney`, and "one-time upgrades" describes the CoreRX / FullRX purchases more accurately than "unlocks" (which implies a tier-gated reveal). Everything else in the folder was already disciplined. The banned-phrase grep produced ~85 hits across `VOICE_CHEAT_SHEET.md`, `POST_TEMPLATES.md`, `_research/competitive_voice.md`, and the PROFILE_KIT READMEs — every single one was inside a banned-phrase list, an anti-pattern example, a contrast block, or a voice-audit block. Naming the rule isn't breaking it. The marketing folder ships with the voice locked.
+The two live violations came from the same failure mode: voice rules getting bent for what looked like a pragmatic reason — reach (the `#fitnessjourney` hashtag) and brevity (`CoreRX and FullRX unlocks`). In both cases the docs had a footnote or quick gloss rationalizing the exception. That's the actual risk pattern. The brand-voice lock works only when it's absolute; the first "this one's a discovery hack" exception teaches future writers that the rules bend if the reason is good. The fixes replaced both with on-voice equivalents that lose nothing — `#liftingcoach` reaches the same coach audience as `#fitnessjourney`, and "subscription upgrades" describes the CoreRX / FullRX tiers more accurately than "unlocks" (which implies a tier-gated reveal). Everything else in the folder was already disciplined. The banned-phrase grep produced ~85 hits across `VOICE_CHEAT_SHEET.md`, `POST_TEMPLATES.md`, `_research/competitive_voice.md`, and the PROFILE_KIT READMEs — every single one was inside a banned-phrase list, an anti-pattern example, a contrast block, or a voice-audit block. Naming the rule isn't breaking it. The marketing folder ships with the voice locked.

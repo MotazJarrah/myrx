@@ -47,17 +47,16 @@ export default function CoachAgreement() {
         roster at one time:
       </p>
       <ul>
-        <li><strong>Starter</strong> — up to 10 Clients, $19/month or $189 for the first year.</li>
-        <li><strong>Pro</strong> — up to 25 Clients, $39/month or $389 for the first year.</li>
-        <li><strong>Elite</strong> — unlimited Clients, $99/month or $989 for the first year.</li>
+        <li><strong>Starter</strong> — up to 10 Clients, $19/month or $189/year.</li>
+        <li><strong>Pro</strong> — up to 25 Clients, $39/month or $389/year.</li>
+        <li><strong>Elite</strong> — unlimited Clients, $99/month or $989/year.</li>
       </ul>
       <p>
-        Annual prices reflect a first-year promotional discount of approximately
-        17 % (roughly two months free). At renewal, annual subscriptions renew at
-        the full annual rate of the then-current monthly price multiplied by
-        twelve (e.g., $228, $468, $1,188 for Starter, Pro, Elite respectively
-        at current pricing). Renewal pricing is disclosed at the time of
-        checkout on every annual price quote.
+        Annual prices reflect a recurring discount of approximately 17 %
+        (roughly two months free) versus paying monthly. The annual discount
+        applies every year — annual subscriptions renew at the same discounted
+        annual rate, not at an increased rate. Renewal pricing is disclosed at
+        the time of checkout on every annual price quote.
       </p>
 
       <h3>3.2 Free trial</h3>

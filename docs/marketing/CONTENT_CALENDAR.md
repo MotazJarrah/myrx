@@ -509,7 +509,7 @@ X: 0–2 inline tags only; relevance over count.
 - **Pillar:** (c) Athlete progress
 - **Topic:** A self-coached athlete's first 30 days on MyRX
 - **Format:** Carousel (8 slides)
-- **Caption preview:** The athlete bought CoreRX, set a 10 lb fat-loss goal, and let the algorithm pick the calorie target. Thirty days later — 7 lb down, training volume up, no coach involved. The product was the coach.
+- **Caption preview:** The athlete subscribed to CoreRX, set a 10 lb fat-loss goal, and let the algorithm pick the calorie target. Thirty days later — 7 lb down, training volume up, no coach involved. The product was the coach.
 - **Hashtags (3):** `#onlinecoaching` `#nutritioncoach` `#nextstepcoaching`
 
 ### Instagram (carousel, 7 PM ET)

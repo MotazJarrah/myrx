@@ -43,7 +43,7 @@ In this video, I walk through the four systems the platform runs:
 
 4. The coach overlay — how a coach oversees the prescription without programming from scratch.
 
-The free tier covers strength, cardio, and mobility. CoreRX adds bodyweight and calories for a one-time $39. FullRX adds heart rate, hydration, and sleep for $59 one-time. Coaches subscribe; their athletes train free.
+The free tier covers strength, cardio, and mobility. CoreRX adds bodyweight and calories for $4.99/mo (or $49.99/yr). FullRX adds heart rate, hydration, and sleep for $6.99/mo (or $69.99/yr). Coaches subscribe; their athletes train free.
 
 Chapters below. Each timestamp lands on one of the four systems.
 
