@@ -639,7 +639,7 @@ function SecurityTab({ profile, user, targetUserId = null, viewerRole = 'self' }
           editing-client (admin doesn't have the client's password, and
           updateUser operates on the JWT-session user). Replaced in
           admin mode by support actions below. */}
-      {!isAdminMode && (
+      {!isTargetMode && (
         <div className="space-y-2">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Change password</p>
           <div className="rounded-xl border border-border bg-card/40 p-4 space-y-3">
@@ -694,7 +694,7 @@ function SecurityTab({ profile, user, targetUserId = null, viewerRole = 'self' }
         </div>
       )}
 
-      {!isAdminMode && (
+      {!isTargetMode && (
         <>
           <button
             type="submit"
@@ -728,18 +728,20 @@ function AdminSupportActions({ profile }) {
   async function sendPasswordReset() {
     if (!profile?.email) return
     setPwState('sending')
-    await supabase.auth.resetPasswordForEmail(profile.email)
-    setPwState('sent')
+    // Check the result — Supabase can rate-limit or reject. Showing "Sent ✓"
+    // on a failed send would lie to the admin about an email that never went.
+    const { error } = await supabase.auth.resetPasswordForEmail(profile.email)
+    setPwState(error ? 'error' : 'sent')
     setTimeout(() => setPwState('idle'), 4000)
   }
 
   async function sendEmailChange() {
     if (!profile?.email) return
     setEmailState('sending')
-    await supabase.auth.resetPasswordForEmail(profile.email, {
+    const { error } = await supabase.auth.resetPasswordForEmail(profile.email, {
       redirectTo: `${window.location.origin}/auth?mode=update-email`,
     })
-    setEmailState('sent')
+    setEmailState(error ? 'error' : 'sent')
     setTimeout(() => setEmailState('idle'), 4000)
   }
 
@@ -818,6 +820,7 @@ function SupportActionRow({ icon: Icon, title, description, buttonLabel, onClick
       >
         {state === 'sending' ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</>
         : state === 'sent'   ? <><Check   className="h-3.5 w-3.5 text-emerald-400" /> Sent</>
+        : state === 'error'  ? <><AlertCircle className="h-3.5 w-3.5 text-destructive" /> Failed — try again</>
         : buttonLabel}
       </button>
     </div>
@@ -1119,8 +1122,15 @@ function TargetAccountTab({ profile, targetUserId, onSaved }) {
 //   • Security tab hides Change-password (auth-bound); shows admin support actions
 
 export default function AccountSettings({ profile, user, targetUserId = null, viewerRole = 'self', onProfileSaved }) {
-  const [activeTab, setActiveTab] = usePersistedState('myrx:settings_tab', 'account', { clearOnUnmount: true })
   const isTargetMode = !!targetUserId
+  // Namespace the persisted-tab key so the client-settings drawer (target
+  // mode) doesn't share — and on close, wipe — the admin's OWN /admin/profile
+  // tab choice. They're never mounted together, so independent keys are safe.
+  const [activeTab, setActiveTab] = usePersistedState(
+    isTargetMode ? 'myrx:settings_tab:client' : 'myrx:settings_tab',
+    'account',
+    { clearOnUnmount: true },
+  )
 
   // Tab visibility — About hidden in target/admin modes (legal docs are
   // for the user themselves, not for an admin viewing the user).
