@@ -473,48 +473,52 @@ export default function CoachClientDetail() {
               </div>
             )}
 
-            <div className="flex flex-wrap items-center justify-end gap-1">
-              {/* Message athlete pill — deep-links to /coach/messages with this
-                  client pre-selected and the composer focused. Coach-client
-                  chat is unconditional under the v3 chat model (locked May 30
-                  2026), so this pill is always shown — no chat-on/off toggle
-                  exists on the coach side anymore. */}
-              <Link href={`/coach/messages?clientId=${client.id}`}>
-                <a
-                  title="Open chat with this client and start typing"
-                  className="inline-flex items-center gap-1 rounded-full bg-primary/15 border border-primary/40 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/25 transition-colors cursor-pointer"
-                >
-                  <MessageCircle className="h-3 w-3" />
-                  Message athlete
-                </a>
-              </Link>
-
+            {/* Action buttons mirror the ADMIN client-detail header's button
+                shape (rounded-lg · px-2.5 py-1.5 · text-xs · h-3.5 icons) rather
+                than the old tiny pills. Order: secondary "Manage macros", then
+                the primary filled "Message athlete", then the destructive
+                "Remove" right beside Message (same shape, red). The admin's
+                status-control pills (tier / coach-assignment / Active / chat)
+                stay admin-only — coaches don't get those. (Jun 8 2026.) */}
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 onClick={toggleManaged}
                 disabled={togglingMgmt}
                 title={isCoachManaged
                   ? 'You manage this client\'s macro plan. Click to hand it back.'
                   : 'Click to take over this client\'s macro plan.'}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
                   isCoachManaged
                     ? 'bg-primary/15 border-primary/40 text-primary hover:bg-primary/25'
                     : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground'
                 } ${togglingMgmt ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
               >
-                <UserCog className="h-3 w-3" />
+                <UserCog className="h-3.5 w-3.5 shrink-0" />
                 {isCoachManaged ? 'Managing macros' : 'Manage macros'}
               </button>
 
-              {/* Remove from roster — coach-initiated unlink (T120). Destructive:
-                  opens a type-REMOVE confirmation. Drops the athlete to their own
-                  plan immediately + notifies them. */}
+              {/* Message athlete — deep-links to /coach/messages with this client
+                  pre-selected. Same filled-primary button as the admin header. */}
+              <Link href={`/coach/messages?clientId=${client.id}`}>
+                <a
+                  title="Open chat with this client and start typing"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                >
+                  <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                  Message athlete
+                </a>
+              </Link>
+
+              {/* Remove from roster — coach-initiated unlink (T120). Same button
+                  shape as Message, right beside it, in destructive red. Opens a
+                  type-REMOVE confirmation. */}
               <button
                 onClick={() => { setRemoveText(''); setRemoveError(''); setRemoveOpen(true) }}
                 disabled={removing}
                 title="Remove this athlete from your roster"
-                className={`inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/20 transition-colors ${removing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                className={`inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20 transition-colors ${removing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
               >
-                <UserMinus className="h-3 w-3" />
+                <UserMinus className="h-3.5 w-3.5 shrink-0" />
                 Remove
               </button>
             </div>
