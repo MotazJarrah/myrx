@@ -764,13 +764,18 @@ function SecurityTab({ profile, user, targetUserId = null, viewerRole = 'self' }
 
 // ── AdminSupportActions — Security-tab admin replacement ────────────────
 // When viewerRole='admin' on AccountSettings, the Change-password section
-// is replaced with these support actions. Send password reset + Send
-// email-change link work today (Supabase auth API). Disable biometric +
-// Sign out everywhere need new edge functions — stubbed for now.
+// is replaced with these support actions, all live:
+//   • Send password reset / email-change link — Supabase auth API.
+//   • Disable fingerprint on all devices — sets profiles.biometric_disabled_at;
+//     the mobile app clears its on-device biometric + lock on next launch.
+//   • Sign out everywhere — admin_revoke_user_sessions RPC (SECURITY DEFINER,
+//     is_admin()-gated) deletes the client's auth.sessions rows.
 
 function AdminSupportActions({ profile }) {
   const [pwState,    setPwState]    = useState('idle')
   const [emailState, setEmailState] = useState('idle')
+  const [bioState,   setBioState]   = useState('idle')
+  const [sessState,  setSessState]  = useState('idle')
 
   async function sendPasswordReset() {
     if (!profile?.email) return
@@ -790,6 +795,29 @@ function AdminSupportActions({ profile }) {
     })
     setEmailState(error ? 'error' : 'sent')
     setTimeout(() => setEmailState('idle'), 4000)
+  }
+
+  // Disable fingerprint on all devices — sets a server flag; the mobile app
+  // clears its on-device biometric + app lock on next launch (Phase 5).
+  async function disableBiometric() {
+    if (!profile?.id) return
+    setBioState('sending')
+    const { error } = await supabase
+      .from('profiles')
+      .update({ biometric_disabled_at: new Date().toISOString() })
+      .eq('id', profile.id)
+    setBioState(error ? 'error' : 'sent')
+    setTimeout(() => setBioState('idle'), 4000)
+  }
+
+  // Sign out everywhere — revokes all the client's sessions (refresh tokens
+  // die now; access tokens expire within ~1h) via a SECURITY DEFINER RPC.
+  async function signOutEverywhere() {
+    if (!profile?.id) return
+    setSessState('sending')
+    const { error } = await supabase.rpc('admin_revoke_user_sessions', { p_user_id: profile.id })
+    setSessState(error ? 'error' : 'sent')
+    setTimeout(() => setSessState('idle'), 4000)
   }
 
   return (
@@ -818,20 +846,24 @@ function AdminSupportActions({ profile }) {
 
       <SupportActionRow
         icon={Shield}
-        title="Disable biometric on all devices"
-        description="Revokes any saved fingerprint/face credentials on every device the client uses. They'll need to re-enroll from Settings → Security on their phone."
-        buttonLabel="Coming soon"
-        onClick={() => {}}
-        disabled
+        title="Disable fingerprint on all devices"
+        description="Clears the saved fingerprint / face sign-in on every device the client uses. They'll need to re-enable it from Settings → Security on their phone."
+        buttonLabel="Disable fingerprint"
+        successLabel="Done"
+        onClick={disableBiometric}
+        state={bioState}
+        disabled={!profile?.id}
       />
 
       <SupportActionRow
         icon={Lock}
         title="Sign out everywhere"
-        description="Invalidates all active sessions across web and mobile. The client will need to sign in again."
-        buttonLabel="Coming soon"
-        onClick={() => {}}
-        disabled
+        description="Ends all the client's active sessions on web and mobile — they'll need to sign in again. Active app sessions drop within the hour."
+        buttonLabel="Sign out everywhere"
+        successLabel="Done"
+        onClick={signOutEverywhere}
+        state={sessState}
+        disabled={!profile?.id}
       />
 
       <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 flex items-start gap-2">
@@ -847,7 +879,7 @@ function AdminSupportActions({ profile }) {
   )
 }
 
-function SupportActionRow({ icon: Icon, title, description, buttonLabel, onClick, state, disabled }) {
+function SupportActionRow({ icon: Icon, title, description, buttonLabel, successLabel = 'Sent', onClick, state, disabled }) {
   return (
     <div className="rounded-xl border border-border bg-card/40 p-4">
       <div className="flex items-start gap-3">
@@ -866,7 +898,7 @@ function SupportActionRow({ icon: Icon, title, description, buttonLabel, onClick
         className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {state === 'sending' ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</>
-        : state === 'sent'   ? <><Check   className="h-3.5 w-3.5 text-emerald-400" /> Sent</>
+        : state === 'sent'   ? <><Check   className="h-3.5 w-3.5 text-emerald-400" /> {successLabel}</>
         : state === 'error'  ? <><AlertCircle className="h-3.5 w-3.5 text-destructive" /> Failed — try again</>
         : buttonLabel}
       </button>
