@@ -62,7 +62,7 @@ export default function DashboardCaloriesBlock({ userId, profile, plan, onViewAl
     const eb = Math.round(result.energyAdj)
     const isLoss = eb < 0 // mobile: deficit -> emerald + down arrow, surplus -> blue + up arrow
     return [
-      { label: 'Daily target', value: result.dailyTarget, unit: 'kcal', tint: 'text-amber-400' },
+      { label: 'Daily target', value: result.dailyTarget, unit: 'kcal', tint: 'text-red-400' },
       { label: 'BMR', value: Math.round(result.bmr), unit: 'kcal', tint: 'text-foreground' },
       { label: 'TDEE', value: Math.round(result.tdee), unit: 'kcal', tint: 'text-foreground' },
       { label: 'Energy balance', value: `${eb > 0 ? '+' : ''}${eb}`, unit: 'kcal', tint: isLoss ? 'text-emerald-400' : 'text-blue-400', icon: isLoss ? TrendingDown : TrendingUp },
@@ -72,7 +72,7 @@ export default function DashboardCaloriesBlock({ userId, profile, plan, onViewAl
   const hasLogs = logsByDay && Object.keys(logsByDay).length > 0
 
   return (
-    <SnapshotCard icon={Apple} iconTint="text-amber-400" title="Calories" onViewAll={onViewAll}>
+    <SnapshotCard icon={Apple} iconTint="text-red-400" title="Calories" onViewAll={onViewAll}>
       {logsByDay === null ? (
         <SnapshotLoading />
       ) : !hasLogs ? (
