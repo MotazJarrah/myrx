@@ -22,7 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native'
 import { Link } from 'expo-router'
 import {
-  Flame, Clock, TrendingDown, TrendingUp, Utensils,
+  Apple, Clock, TrendingDown, TrendingUp, Utensils,
   X, Plus, UtensilsCrossed, ChevronRight, Pencil,
 } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
@@ -280,7 +280,7 @@ function PendingView({ onSetupPlan }: { onSetupPlan?: () => void }) {
     return (
       <View style={s.pendingWrap}>
         <View style={s.pendingIcon}>
-          <Flame size={32} color={palette.amber[400]} />
+          <Apple size={32} color={palette.amber[400]} />
         </View>
         <View style={{ alignItems: 'center', gap: 4 }}>
           <Text style={s.pendingTitle}>Set up your plan</Text>
@@ -684,7 +684,7 @@ export default function Calories() {
             <AnimateRise>
               <View style={s.heroCard}>
                 <View style={s.heroLabel}>
-                  <Flame size={16} color={palette.red[400]} />
+                  <Apple size={16} color={palette.red[400]} />
                   <Text style={s.heroLabelText}>Daily calorie target</Text>
                 </View>
                 <View style={s.heroBig}>
@@ -1430,7 +1430,7 @@ function CurrentWeightGoal({
   //   • OR start ≈ goal (degenerate plan that isn't maintenance —
   //     maintenance is caught above)
   // Two distinct UI branches inside this fallback:
-  //   • canEditPlanHere → PendingView-style empty state (amber Flame
+  //   • canEditPlanHere → PendingView-style empty state (amber Apple
   //     icon + title + helper + lime CTA) — same chrome as the
   //     first-time "Set up your plan" surface so the user sees a
   //     familiar, inviting prompt instead of a dull text block.
@@ -1444,7 +1444,7 @@ function CurrentWeightGoal({
           {canEditPlanHere ? (
             <View style={s.noGoalEmpty}>
               <View style={s.pendingIcon}>
-                <Flame size={32} color={palette.amber[400]} />
+                <Apple size={32} color={palette.amber[400]} />
               </View>
               <View style={{ alignItems: 'center', gap: 4 }}>
                 <Text style={s.pendingTitle}>Set a new plan</Text>

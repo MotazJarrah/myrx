@@ -3,7 +3,7 @@ import { Link, useLocation } from 'wouter'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import {
-  Dumbbell, Activity, Weight, Flame, History,
+  Dumbbell, Activity, Weight, Apple, History,
   LayoutDashboard, LogOut, ShieldCheck,
   Lightbulb, Heart,
 } from 'lucide-react'
@@ -15,7 +15,7 @@ const links = [
   { href: '/cardio',    label: 'Cardio',    icon: Activity },
   { href: '/bodyweight',label: 'Bodyweight',icon: Weight },
   { href: '/heart',     label: 'Heart',     icon: Heart },
-  { href: '/calories',  label: 'Calories',  icon: Flame },
+  { href: '/calories',  label: 'Calories',  icon: Apple },
   { href: '/history',   label: 'History',   icon: History },
 ]
 

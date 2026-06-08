@@ -24,7 +24,7 @@ import {
 import { Image } from 'expo-image'
 import { router } from 'expo-router'
 import {
-  Dumbbell, Activity, Weight, Flame, Heart, Moon, Droplet,
+  Dumbbell, Activity, Weight, Apple, Heart, Moon, Droplet,
   User, Settings as SettingsIcon,
 } from 'lucide-react-native'
 import { parsePhoneNumberFromString } from 'libphonenumber-js'
@@ -355,7 +355,7 @@ function ActivityRow({ item, onDelete }: { item: AnyItem; onDelete: () => void }
       <DeleteAction onDelete={onDelete} style={d.rowOuter} bg={colors.background}>
         <View style={d.rowInner}>
           <View style={[d.iconBox, { backgroundColor: withAlpha(palette.red[500], 0.10) }]}>
-            <Flame size={14} color={palette.red[400]} />
+            <Apple size={14} color={palette.red[400]} />
           </View>
           <View style={d.rowText}>
             <Text style={d.rowLabel} numberOfLines={1}>Intake · {item.calories} kcal</Text>
@@ -900,7 +900,7 @@ export default function Dashboard() {
             <View style={[d.statChip, d.statChipRed]}>
               {foodStreak > 0 ? (
                 <>
-                  <Flame size={12} color={palette.red[400]} style={d.statChipIcon} />
+                  <Apple size={12} color={palette.red[400]} style={d.statChipIcon} />
                   <View style={d.statChipNum}>
                     <TickerNumber value={foodStreak} fontSize={11} color={palette.red[400]} fontWeight="700" />
                   </View>
@@ -910,7 +910,7 @@ export default function Dashboard() {
                 </>
               ) : (
                 <>
-                  <Flame size={12} color={colors.mutedForeground} style={d.statChipIcon} />
+                  <Apple size={12} color={colors.mutedForeground} style={d.statChipIcon} />
                   <Text style={[d.statChipText, { color: colors.mutedForeground }]}>no recent food</Text>
                 </>
               )}

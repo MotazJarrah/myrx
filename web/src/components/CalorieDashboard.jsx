@@ -23,7 +23,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { calcFullPlan, calcPerMeal, calcAge, ACTIVITY_FACTORS } from '../lib/calorieFormulas'
-import { Flame, TrendingDown, TrendingUp, Utensils, X, UtensilsCrossed } from 'lucide-react'
+import { Apple, TrendingDown, TrendingUp, Utensils, X, UtensilsCrossed } from 'lucide-react'
 import CalorieStrip from './CalorieStrip'
 import TickerNumber from './TickerNumber'
 
@@ -287,7 +287,7 @@ export default function CalorieDashboard({ userId, profile, plan }) {
           <TodayIntakeCard entries={todayEntries} dailyTarget={null} macroTargets={null} />
           <div className="rounded-2xl border border-border bg-card p-5">
             <div className="flex items-center gap-2 mb-1">
-              <Flame className="h-4 w-4 text-amber-400" />
+              <Apple className="h-4 w-4 text-amber-400" />
               <h2 className="text-sm font-semibold">No intake plan yet</h2>
             </div>
             <p className="text-sm text-muted-foreground">
@@ -315,7 +315,7 @@ export default function CalorieDashboard({ userId, profile, plan }) {
           {/* Daily target hero */}
           <div className="animate-rise rounded-2xl border border-border bg-card p-6 text-center space-y-3">
             <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-              <Flame className="h-4 w-4 text-red-400" />
+              <Apple className="h-4 w-4 text-red-400" />
               Daily calorie target
             </div>
             <div className="text-6xl font-bold tabular-nums text-red-400">
