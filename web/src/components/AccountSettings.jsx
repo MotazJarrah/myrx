@@ -28,11 +28,12 @@
  * primary-on-active) so the visual feels native to the admin chrome.
  */
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Link } from 'wouter'
 import {
   AlertCircle, Check, Loader2, Lock, Sun, Moon, ExternalLink,
   Shield, Sliders, User, Info, Eye, EyeOff, Clock,
+  Camera, Trash2, Send,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
@@ -41,6 +42,7 @@ import { ProfileTab } from '../pages/EditProfile'
 import { friendlyAuthMessage } from '../lib/authErrors'
 import { usePersistedState } from '../hooks/usePersistedState'
 import BodyCompPicker from './BodyCompPicker'
+import AvatarCropper from './AvatarCropper'
 
 // LocalStorage key shared with EditProfile.jsx / ChatDrawer.jsx so the
 // preference persists across the same browser regardless of which
@@ -982,6 +984,19 @@ function TargetAccountTab({ profile, targetUserId, onSaved }) {
     profile?.current_weight != null ? String(profile.current_weight) : ''
   )
 
+  // Avatar — admin sets/replaces/removes the client's profile photo.
+  const [avatarUrl,  setAvatarUrl]  = useState(profile?.avatar_url || '')
+  const [cropFile,   setCropFile]   = useState(null)   // raw picked File → cropper
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const [avatarErr,  setAvatarErr]  = useState('')
+  const fileInputRef = useRef(null)
+
+  // Phone — admin changes the number + texts the client a code; the client
+  // enters it in their app to verify. phoneVerified/phoneChanged drive the badge.
+  const [phoneCode, setPhoneCode] = useState('idle')   // idle|sending|sent|error
+  const phoneVerified = !!profile?.phone_verified_at
+  const phoneChanged  = phone.trim() !== (profile?.phone || '')
+
   const weightUnit = profile?.weight_unit || 'lb'
   const heightUnit = profile?.height_unit || 'imperial'
   const initialH   = heightToDisplay(profile?.current_height, heightUnit)
@@ -1018,6 +1033,9 @@ function TargetAccountTab({ profile, targetUserId, onSaved }) {
         current_weight: newWeight,
         current_height: getStoredHeight(),
       }
+      // Changing the number invalidates verification — the client re-verifies
+      // the new number from their own device (admin sends them the code).
+      if (phone.trim() !== (profile?.phone || '')) updates.phone_verified_at = null
       const { error: err } = await supabase
         .from('profiles')
         .update(updates)
@@ -1048,11 +1066,89 @@ function TargetAccountTab({ profile, targetUserId, onSaved }) {
     }
   }
 
+  // Avatar — upload the cropped 512² blob to the CLIENT's folder. The
+  // "Admins can ... any avatar" storage policy authorises writing another
+  // user's folder; useAuth.uploadAvatar is self-bound, so we write directly.
+  async function applyAvatar(blob) {
+    setAvatarBusy(true); setAvatarErr('')
+    try {
+      const path = `${targetUserId}/avatar`
+      const { error: upErr } = await supabase.storage.from('avatars')
+        .upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+      if (upErr) throw upErr
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+      const url = `${data.publicUrl}?t=${Date.now()}`
+      const { error: dbErr } = await supabase.from('profiles').update({ avatar_url: url }).eq('id', targetUserId)
+      if (dbErr) throw dbErr
+      setAvatarUrl(url); setCropFile(null); onSaved?.({ avatar_url: url })
+    } catch (e) {
+      setAvatarErr(e.message || 'Could not update photo.')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
+  async function removeAvatar() {
+    setAvatarBusy(true); setAvatarErr('')
+    try {
+      const { error } = await supabase.from('profiles').update({ avatar_url: null }).eq('id', targetUserId)
+      if (error) throw error
+      setAvatarUrl(''); onSaved?.({ avatar_url: null })
+    } catch (e) {
+      setAvatarErr(e.message || 'Could not remove photo.')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
+
+  // Send an OTP to the (typed) number via Twilio Verify. The client enters
+  // it in their own app's "verify phone" flow — admin can't complete it for them.
+  async function sendPhoneCode() {
+    const p = phone.trim()
+    if (!/^\+[1-9]\d{6,14}$/.test(p)) { setPhoneCode('error'); setTimeout(() => setPhoneCode('idle'), 4000); return }
+    setPhoneCode('sending')
+    const { data, error } = await supabase.functions.invoke('send-phone-otp', { body: { phone: p } })
+    setPhoneCode(error || data?.error ? 'error' : 'sent')
+    setTimeout(() => setPhoneCode('idle'), 4000)
+  }
+
   const inputCls  = 'w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
   const suffixCls = 'shrink-0 rounded-md border border-border bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground'
 
   return (
     <form onSubmit={handleSave} className="space-y-5">
+      {/* Profile photo — pick → crop (512²) → upload to the client's folder */}
+      <div>
+        <label className="block text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-widest">Profile photo</label>
+        {cropFile ? (
+          <AvatarCropper file={cropFile} onApply={applyAvatar} onCancel={() => setCropFile(null)} />
+        ) : (
+          <div className="flex items-center gap-4">
+            <div className="h-16 w-16 shrink-0 overflow-hidden rounded-full bg-muted/40 flex items-center justify-center">
+              {avatarUrl
+                ? <img src={avatarUrl} alt="" className="h-16 w-16 object-cover" />
+                : <User className="h-7 w-7 text-muted-foreground/50" />}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={avatarBusy}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-semibold hover:bg-accent transition-colors disabled:opacity-50">
+                {avatarBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+                {avatarUrl ? 'Change' : 'Upload'}
+              </button>
+              {avatarUrl && (
+                <button type="button" onClick={removeAvatar} disabled={avatarBusy}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50">
+                  <Trash2 className="h-3.5 w-3.5" /> Remove
+                </button>
+              )}
+            </div>
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) setCropFile(f); e.target.value = '' }} />
+          </div>
+        )}
+        {avatarErr && <p className="mt-1.5 text-[11px] text-destructive">{avatarErr}</p>}
+      </div>
+
       <div>
         <label className="block text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-widest">Full name</label>
         <input type="text" value={fullName} onChange={e => setFullName(e.target.value)} className={inputCls} />
@@ -1081,8 +1177,24 @@ function TargetAccountTab({ profile, targetUserId, onSaved }) {
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-widest">Phone</label>
-        <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555 000 0000" className={inputCls} />
+        <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-widest">
+          Phone
+          {phone.trim() && (phoneVerified && !phoneChanged
+            ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 normal-case tracking-normal"><Check className="h-3 w-3" /> Verified</span>
+            : <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-400 normal-case tracking-normal">Not verified</span>)}
+        </label>
+        <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+15550000000" className={inputCls} />
+        <button type="button" onClick={sendPhoneCode}
+          disabled={phoneCode === 'sending' || phoneCode === 'sent' || !phone.trim()}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-semibold hover:bg-accent transition-colors disabled:opacity-50">
+          {phoneCode === 'sending' ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sending…</>
+          : phoneCode === 'sent'   ? <><Check className="h-3.5 w-3.5 text-emerald-400" /> Code sent</>
+          : phoneCode === 'error'  ? <><AlertCircle className="h-3.5 w-3.5 text-destructive" /> Failed — check number</>
+          : <><Send className="h-3.5 w-3.5" /> Send code to client</>}
+        </button>
+        <p className="mt-1.5 text-[11px] text-muted-foreground/70 leading-relaxed">
+          Use international format (e.g. +15550000000). Save the number first, then send the code — the client enters it in their app to verify.
+        </p>
       </div>
 
       <div>
