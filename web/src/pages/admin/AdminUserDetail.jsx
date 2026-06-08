@@ -332,11 +332,22 @@ function ActivityFeed({ userId, clientName, clientEmail }) {
       // label can show provenance without dumping the full body into
       // the feed.
       case 'chat:message_edited':          return { icon: Pencil,        color: 'text-amber-400',   label: `Message edited${d.sender_role === 'athlete' ? ' (athlete message)' : d.sender_role === 'coach_or_admin' ? ' (coach/admin message)' : ''}${d.new_body_excerpt ? ` — "${d.new_body_excerpt}"` : ''}` }
-      case 'training:efforts_insert':      return { icon: Dumbbell,      color: 'text-blue-400',    label: `Logged ${d.type || 'effort'}: ${d.label || ''}${d.value ? ` (${d.value})` : ''}` }
-      case 'training:bodyweight_insert':   return { icon: Scale,         color: 'text-purple-400',  label: `Logged weight: ${d.weight ?? '?'} ${d.unit || ''}` }
+      // Training rows use each domain's CANONICAL app-wide color so the feed
+      // matches every other surface (dashboard snapshot blocks + the Efforts
+      // Strength|Cardio filter pills): strength=blue, cardio=amber,
+      // bodyweight=emerald(green), calories=amber. A wearable workout is a
+      // cardio session, so it's amber too (not emerald — emerald is reserved
+      // for bodyweight). efforts splits on d.type so a cardio effort reads
+      // amber + Activity icon and a strength effort reads blue + Dumbbell,
+      // exactly like the AdminUserActivity pills.
+      case 'training:efforts_insert': {
+        const isCardio = d.type === 'cardio'
+        return { icon: isCardio ? Activity : Dumbbell, color: isCardio ? 'text-amber-400' : 'text-blue-400', label: `Logged ${d.type || 'effort'}: ${d.label || ''}${d.value ? ` (${d.value})` : ''}` }
+      }
+      case 'training:bodyweight_insert':   return { icon: Scale,         color: 'text-emerald-400', label: `Logged weight: ${d.weight ?? '?'} ${d.unit || ''}` }
       case 'training:food_logs_insert':    return { icon: Apple,         color: 'text-amber-400',   label: `Logged food: ${d.food_name || ''}${d.brand_name ? ` (${d.brand_name})` : ''} · ${d.calories ?? '?'} kcal${d.meal_slot ? ` · ${d.meal_slot}` : ''}` }
       case 'training:calorie_plans_insert':return { icon: Apple,         color: 'text-amber-400',   label: 'Calorie plan updated' }
-      case 'training:wearable_workouts_insert': return { icon: Activity, color: 'text-emerald-400', label: `Synced wearable workout: ${d.exercise_type || '?'}${d.duration_s ? ` · ${Math.round(d.duration_s/60)} min` : ''}${d.platform ? ` · ${d.platform}` : ''}` }
+      case 'training:wearable_workouts_insert': return { icon: Activity, color: 'text-amber-400',   label: `Synced wearable workout: ${d.exercise_type || '?'}${d.duration_s ? ` · ${Math.round(d.duration_s/60)} min` : ''}${d.platform ? ` · ${d.platform}` : ''}` }
       default:                             return { icon: Info, color: 'text-muted-foreground', label: t }
     }
   }

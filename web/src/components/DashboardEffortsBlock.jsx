@@ -97,7 +97,7 @@ export default function DashboardEffortsBlock({ userId, basePath = '/admin/user'
               onClick={() => navigate(`${basePath}/${userId}/effort/${m.type}/${encodeURIComponent(m.name)}`)}
               className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-accent/30 transition-colors"
             >
-              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${m.type === 'cardio' ? 'bg-orange-400' : 'bg-blue-400'}`} />
+              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${m.type === 'cardio' ? 'bg-amber-400' : 'bg-blue-400'}`} />
               <span className="flex-1 min-w-0 truncate text-sm">{m.name}</span>
               <span className="text-[11px] text-muted-foreground shrink-0 tabular-nums">{fmtWhen(m.ts)}</span>
               <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
