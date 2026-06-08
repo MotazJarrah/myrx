@@ -9,9 +9,11 @@
  *                    height. Reuses the existing ProfileTab from
  *                    EditProfile.jsx for 1:1 parity with the end-user
  *                    /profile page.
- *   • Preferences  — display units (weight / height / distance / swim) +
- *                    theme + Enter-to-send. Skips body composition and
- *                    meal layout — those are end-user training surfaces.
+ *   • Preferences  — display units (weight / height / distance / fluid) +
+ *                    date format + body composition (silhouette picker) +
+ *                    theme + Enter-to-send. Swim unit follows distance
+ *                    (no standalone toggle, matching the client app).
+ *                    Meal layout still pending (extract from EditProfile).
  *   • Security     — change password. Mobile additionally has biometric
  *                    and lock-app toggles, but those are mobile-only.
  *   • About        — legal docs + app version + support email. Identical
@@ -38,6 +40,7 @@ import { useTheme } from '../contexts/ThemeContext'
 import { ProfileTab } from '../pages/EditProfile'
 import { friendlyAuthMessage } from '../lib/authErrors'
 import { usePersistedState } from '../hooks/usePersistedState'
+import BodyCompPicker from './BodyCompPicker'
 
 // LocalStorage key shared with EditProfile.jsx / ChatDrawer.jsx so the
 // preference persists across the same browser regardless of which
@@ -108,7 +111,8 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
   const [weightUnit,   setWeightUnit]   = useState(profile?.weight_unit    || 'lb')
   const [heightUnit,   setHeightUnit]   = useState(profile?.height_unit    || 'imperial')
   const [distanceUnit, setDistanceUnit] = useState(profile?.distance_unit  || 'mi')
-  const [swimUnit,     setSwimUnit]     = useState(profile?.swim_unit      || 'm')
+  const [fluidUnit,    setFluidUnit]    = useState(profile?.fluid_unit     || 'oz')
+  const [dateFormat,   setDateFormat]   = useState(profile?.date_format    || 'mdy')
 
   // ── Body stats state ──────────────────────────────────────────────────────
   // Mirror the mobile PreferencesTab's body-stats card. Heights split into
@@ -120,6 +124,7 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
   const [heightFt, setHeightFt] = useState(initialH.ft)
   const [heightIn, setHeightIn] = useState(initialH.inPart)
   const [heightCm, setHeightCm] = useState(initialH.cm)
+  const [bodyFatBand, setBodyFatBand] = useState(profile?.body_fat_band || 'average')
 
   // ── Per-device preference ─────────────────────────────────────────────────
   const [enterToSend, setEnterToSend] = useState(() => localStorage.getItem(ENTER_KEY) !== 'false')
@@ -187,7 +192,12 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
           weight_unit:    weightUnit,
           height_unit:    heightUnit,
           distance_unit:  distanceUnit,
-          swim_unit:      swimUnit,
+          // Swim unit follows distance (mi→yd, km→m) — the client app dropped
+          // the standalone swim toggle May 2026; we mirror that here.
+          swim_unit:      distanceUnit === 'mi' ? 'yd' : 'm',
+          fluid_unit:     fluidUnit,
+          date_format:    dateFormat,
+          body_fat_band:  bodyFatBand,
           current_weight: newWeight,
           current_height: newHeight,
         })
@@ -273,12 +283,22 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
           onChange={setDistanceUnit}
         />
         <UnitRow
-          label="Swim distance"
-          left={{  value: 'yd', label: 'yd',     sub: 'Yards'        }}
-          right={{ value: 'm',  label: 'm',      sub: 'Meters'       }}
-          active={swimUnit}
-          onChange={setSwimUnit}
+          label="Fluid"
+          left={{  value: 'oz', label: 'oz',     sub: 'Ounces'       }}
+          right={{ value: 'mL', label: 'mL',     sub: 'Millilitres'  }}
+          active={fluidUnit}
+          onChange={setFluidUnit}
         />
+      </div>
+
+      {/* Date format — not an imperial/metric pair, so it sits in its own
+          section. Mirrors the client app's MM/DD vs DD/MM segmented control. */}
+      <div className="space-y-3">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Date format</p>
+        <div className="grid grid-cols-2 gap-2">
+          <UnitCard opt={{ label: 'MM / DD', sub: 'Month first' }} active={dateFormat === 'mdy'} onClick={() => setDateFormat('mdy')} />
+          <UnitCard opt={{ label: 'DD / MM', sub: 'Day first'   }} active={dateFormat === 'dmy'} onClick={() => setDateFormat('dmy')} />
+        </div>
       </div>
 
       {/* Body stats — current weight + current height. Body composition
@@ -349,10 +369,15 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
             )}
           </div>
 
-          <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
-            Body composition (lean / normal / overweight) is set from the MyRX mobile app for now —
-            the silhouette picker only lives there. The Calories wizard picks up the value either way.
-          </p>
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1.5">Body composition</label>
+            <BodyCompPicker
+              value={bodyFatBand}
+              onChange={setBodyFatBand}
+              gender={profile?.gender}
+              footnote="The Calories plan uses this to estimate body-fat-aware targets."
+            />
+          </div>
         </div>
       </div>
 
