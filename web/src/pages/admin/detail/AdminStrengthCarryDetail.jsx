@@ -232,7 +232,7 @@ function MiniChart({ data, label, best, unit, stroke, caption }) {
           {label}
         </span>
       </div>
-      {data.length >= 2 ? (
+      {data.length >= 1 ? (
         <ResponsiveContainer width="100%" height={150}>
           <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
             <XAxis

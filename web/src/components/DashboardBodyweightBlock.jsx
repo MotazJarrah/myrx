@@ -103,7 +103,7 @@ export default function DashboardBodyweightBlock({ userId, profile, onViewAll })
       ) : (
         <>
           <div className="flex-1 min-h-0 px-2 pt-3">
-            {chartData.length >= 2 && (
+            {chartData.length >= 1 && (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 4, right: 6, left: 6, bottom: 0 }}>
                   <XAxis dataKey="ts" hide />
@@ -113,7 +113,7 @@ export default function DashboardBodyweightBlock({ userId, profile, onViewAll })
                     labelFormatter={ts => new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                     formatter={v => [`${v} ${coachUnit}`, 'Weight']}
                   />
-                  <Line type="monotone" dataKey="weight" stroke="#34d399" strokeWidth={2} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
+                  <Line type="monotone" dataKey="weight" stroke="#34d399" strokeWidth={2} dot={chartData.length === 1 ? { r: 4, fill: '#34d399', strokeWidth: 0 } : false} activeDot={{ r: 4 }} isAnimationActive={false} />
                 </LineChart>
               </ResponsiveContainer>
             )}

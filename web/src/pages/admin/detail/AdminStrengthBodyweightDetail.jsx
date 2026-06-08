@@ -1097,7 +1097,7 @@ export default function AdminStrengthBodyweightDetail({ userId, exercise, onBack
               <p className="mb-3 text-xs font-semibold text-muted-foreground">
                 {chartIsE1RM ? 'Est. 1RM over time' : 'Max attempts over time'}
               </p>
-              {chartData.length >= 2 ? (
+              {chartData.length >= 1 ? (
                 <ResponsiveContainer width="100%" height={160}>
                   <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
                     <XAxis

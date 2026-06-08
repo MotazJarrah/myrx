@@ -103,7 +103,10 @@ function RMGrid({ oneRM, unit }) {
 
 export default function AdminEffortDetail() {
   const { userId, kind, slug } = useParams()
-  const [, navigate] = useLocation()
+  const [routePath, navigate] = useLocation()
+  // Back-link is portal-aware: under /coach/client/... return to the coach view,
+  // else the admin view — lets this one detail component serve both portals.
+  const detailBase = routePath.startsWith('/coach/') ? '/coach/client' : '/admin/user'
   const exercise = decodeURIComponent(slug || '')
 
   const [entries,  setEntries]  = useState([])
@@ -181,7 +184,7 @@ export default function AdminEffortDetail() {
     // Back from a move-detail page returns to the Efforts (activity) tab, never
     // the Dashboard. ?tab= is honored on mount; the old localStorage last-tab
     // restore was dropped in T101, so we steer via the URL param now.
-    navigate(`/admin/user/${userId}?tab=activity`)
+    navigate(`${detailBase}/${userId}?tab=activity`)
   }
   if (kind === 'strength') {
     // Sled Work consolidated — no movement row under the base name.
@@ -316,7 +319,7 @@ export default function AdminEffortDetail() {
       )}
 
       {/* Chart */}
-      {!loading && chartData.length >= 2 && (
+      {!loading && chartData.length >= 1 && (
         <div className="rounded-xl border border-border bg-card p-4">
           <p className="text-xs font-semibold text-muted-foreground mb-3">{chartLabel} over time</p>
           <ResponsiveContainer width="100%" height={160}>

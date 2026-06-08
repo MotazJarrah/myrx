@@ -23,11 +23,11 @@
  *   note           — explanatory line under the list (parent-supplied voice)
  */
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { X as XIcon, Plus, Check, Loader2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { DEFAULT_SLOTS, EXTRA_PRESETS, ANCHOR_IDS } from './FoodLogDrawer'
+import { DEFAULT_SLOTS, EXTRA_PRESETS, ANCHOR_IDS } from '../lib/mealSlots'
 
 export default function MealLayoutEditor({ profile, effectiveUserId, onSaved, refreshOnSave = false, note }) {
   const { refreshProfile } = useAuth()
@@ -38,6 +38,19 @@ export default function MealLayoutEditor({ profile, effectiveUserId, onSaved, re
   const [showCustomSlot, setShowCustomSlot] = useState(false)
   const [slotSaving,     setSlotSaving]     = useState(false)
   const [slotSaved,      setSlotSaved]      = useState(false)
+
+  // ── Live sync (T111) — when the saved layout changes externally (the other
+  // side saves a different set of slots), re-seed the editor so the change is
+  // reflected. Compares by slot-id sequence so a no-op realtime echo of our own
+  // save doesn't clobber an in-progress edit the user hasn't saved yet.
+  const lastSlotsRef = useRef(profile?.meal_slots_default ?? DEFAULT_SLOTS)
+  useEffect(() => {
+    const incoming = profile?.meal_slots_default ?? DEFAULT_SLOTS
+    const prevIds  = JSON.stringify((lastSlotsRef.current ?? DEFAULT_SLOTS).map(s => s.id))
+    const nextIds  = JSON.stringify(incoming.map(s => s.id))
+    if (prevIds !== nextIds) setMealSlots(incoming)
+    lastSlotsRef.current = incoming
+  }, [profile?.meal_slots_default])
 
   const existingSlotIds  = new Set(mealSlots.map(s => s.id))
   const availablePresets = EXTRA_PRESETS.filter(p => !existingSlotIds.has(p.id))

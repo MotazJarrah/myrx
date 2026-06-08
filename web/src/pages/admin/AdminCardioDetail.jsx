@@ -36,14 +36,17 @@ const BEAT_YOUR_BEST = ['cycling', 'stationary_bike', 'elliptical']
 
 export default function AdminCardioDetail() {
   const { userId, slug } = useParams()
-  const [, navigate] = useLocation()
+  const [routePath, navigate] = useLocation()
+  // Portal-aware back-link (see AdminEffortDetail): /coach/client under the coach
+  // portal, /admin/user under admin.
+  const detailBase = routePath.startsWith('/coach/') ? '/coach/client' : '/admin/user'
   const activity = decodeURIComponent(slug || '')
 
   function onBack() {
     // Back from a move-detail page returns to the Efforts (activity) tab, never
     // the Dashboard. ?tab= is honored on mount; the old localStorage last-tab
     // restore was dropped in T101, so we steer via the URL param now.
-    navigate(`/admin/user/${userId}?tab=activity`)
+    navigate(`${detailBase}/${userId}?tab=activity`)
   }
 
   const cat = categorizeActivity(activity)

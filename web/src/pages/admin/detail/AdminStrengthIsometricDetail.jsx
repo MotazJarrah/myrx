@@ -374,7 +374,7 @@ export default function AdminStrengthIsometricDetail({ userId, exercise, onBack 
           {chartData.length >= 1 && (
             <AnimateRise delay={250} className="rounded-xl border border-border bg-card p-4">
               <p className="mb-3 text-xs font-semibold text-muted-foreground">Hold time over time</p>
-              {chartData.length >= 2 ? (
+              {chartData.length >= 1 ? (
                 <ResponsiveContainer width="100%" height={160}>
                   <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
                     <XAxis

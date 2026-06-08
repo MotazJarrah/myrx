@@ -91,16 +91,6 @@ const NOOP_SCOPE = {
  * no-ops so the chart still renders + works (just without the cross-
  * card dismiss feature).
  */
-export function useChartTooltipScope() {
+function useChartTooltipScope() {
   return useContext(Ctx) ?? NOOP_SCOPE
-}
-
-/**
- * Charts call this with their own dismiss function. Registers on mount,
- * unregisters on unmount. Memoise the dismiss callback with useCallback
- * to avoid re-registering every render.
- */
-export function useRegisterChartDismiss(dismiss) {
-  const { register } = useChartTooltipScope()
-  useEffect(() => register(dismiss), [register, dismiss])
 }

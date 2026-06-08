@@ -98,14 +98,6 @@ export const COUNTRIES = [
 ]
 
 /**
- * Look up a country by ISO code (e.g. 'US'). Returns undefined when
- * the code isn't in our curated list.
- */
-export function findCountry(code) {
-  return COUNTRIES.find(c => c.code === code)
-}
-
-/**
  * Match a phone number's leading dial code against the country list and
  * return the longest-matching country. Returns the default ('US') when
  * nothing matches.

@@ -605,7 +605,7 @@ function MoveCard({ move, onClick }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function AdminUserActivity({ userId, onEffortSaved }) {
+export default function AdminUserActivity({ userId, onEffortSaved, basePath = '/admin/user' }) {
   const [, navigate]  = useLocation()
   const [efforts,  setEfforts]  = useState([])
   const [loading,  setLoading]  = useState(true)
@@ -1014,7 +1014,7 @@ export default function AdminUserActivity({ userId, onEffortSaved }) {
     // Navigate to the BASE / consolidated route. The admin detail dispatchers
     // (AdminEffortDetail / AdminCardioDetail) recognise "Sled Work",
     // "Swimming", and bodyweight base names and self-fetch every variant.
-    navigate(`/admin/user/${userId}/effort/${move.type}/${encodeURIComponent(move.navName)}`)
+    navigate(`${basePath}/${userId}/effort/${move.type}/${encodeURIComponent(move.navName)}`)
   }
 
   return (

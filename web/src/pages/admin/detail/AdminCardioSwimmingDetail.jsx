@@ -604,7 +604,7 @@ function SwimStrokeBody({ strokeEfforts, swimUnit, onDelete, emptyStateLabel }) 
           <p className="mb-3 text-xs font-semibold text-muted-foreground">
             Pace per 100{swimUnit === 'yd' ? 'yd' : 'm'} over time
           </p>
-          {chartData.length >= 2 ? (
+          {chartData.length >= 1 ? (
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={chartData} margin={{ top: 4, right: 8, left: -8, bottom: 0 }}>
                 <XAxis

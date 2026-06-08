@@ -28,7 +28,7 @@
  * primary-on-active) so the visual feels native to the admin chrome.
  */
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Link } from 'wouter'
 import {
   AlertCircle, Check, Loader2, Lock, Sun, Moon, ExternalLink,
@@ -135,6 +135,32 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
   const [saving, setSaving] = useState(false)
   const [saved,  setSaved]  = useState(false)
   const [error,  setError]  = useState('')
+
+  // ── Live sync (T111) ──────────────────────────────────────────────────────
+  // When the profile prop changes via realtime (the user's other device, or an
+  // admin editing this client), re-derive ONLY the fields that actually changed
+  // externally — so toggles visibly flip while any in-progress edits the user
+  // hasn't saved to OTHER fields are preserved. First run just snapshots.
+  const lastSyncRef = useRef(null)
+  useEffect(() => {
+    if (!profile) return
+    const prev = lastSyncRef.current
+    if (prev === null) { lastSyncRef.current = profile; return }
+    if (profile.weight_unit    !== prev.weight_unit)    setWeightUnit(profile.weight_unit    || 'lb')
+    if (profile.height_unit    !== prev.height_unit)    setHeightUnit(profile.height_unit    || 'imperial')
+    if (profile.distance_unit  !== prev.distance_unit)  setDistanceUnit(profile.distance_unit || 'mi')
+    if (profile.fluid_unit     !== prev.fluid_unit)     setFluidUnit(profile.fluid_unit     || 'oz')
+    if (profile.date_format    !== prev.date_format)    setDateFormat(profile.date_format    || 'mdy')
+    if (profile.body_fat_band  !== prev.body_fat_band)  setBodyFatBand(profile.body_fat_band || 'average')
+    if (profile.current_weight !== prev.current_weight) {
+      setCurrentWeight(profile.current_weight != null ? String(profile.current_weight) : '')
+    }
+    if (profile.current_height !== prev.current_height || profile.height_unit !== prev.height_unit) {
+      const h = heightToDisplay(profile.current_height, profile.height_unit || 'imperial')
+      setHeightFt(h.ft); setHeightIn(h.inPart); setHeightCm(h.cm)
+    }
+    lastSyncRef.current = profile
+  }, [profile])
 
   // Convert weight when the unit toggles so the displayed value stays
   // roughly equivalent in real terms — matches mobile's behaviour.
@@ -557,6 +583,22 @@ function SecurityTab({ profile, user, targetUserId = null, viewerRole = 'self' }
   const [shareLastSeen,  setShareLastSeen]  = useState(profile?.share_last_seen     ?? true)
   const [shareSaving,    setShareSaving]    = useState(null)  // 'online' | 'last_seen' | null
   const [shareError,     setShareError]     = useState('')
+
+  // ── Live sync (T111) — reflect external changes to the privacy toggles so
+  // they visibly flip when the other side saves. First run just snapshots.
+  const lastShareRef = useRef(null)
+  useEffect(() => {
+    if (!profile) return
+    const prev = lastShareRef.current
+    if (prev === null) { lastShareRef.current = profile; return }
+    if ((profile.share_online_status ?? true) !== (prev.share_online_status ?? true)) {
+      setShareOnline(profile.share_online_status ?? true)
+    }
+    if ((profile.share_last_seen ?? true) !== (prev.share_last_seen ?? true)) {
+      setShareLastSeen(profile.share_last_seen ?? true)
+    }
+    lastShareRef.current = profile
+  }, [profile])
 
   async function toggleShareOnline() {
     if (shareSaving) return
@@ -1105,6 +1147,31 @@ function TargetAccountTab({ profile, targetUserId, onSaved }) {
   const [saved,  setSaved]  = useState(false)
   const [error,  setError]  = useState('')
 
+  // ── Live sync (T111) — if the client edits their own profile on mobile
+  // while admin has this drawer open, reflect the changed fields here without
+  // clobbering the admin's in-progress edits to OTHER fields. First run snapshots.
+  // (phoneVerified / phoneChanged are derived from `profile` each render, so
+  // they're already live and need no effect.)
+  const lastSyncRef = useRef(null)
+  useEffect(() => {
+    if (!profile) return
+    const prev = lastSyncRef.current
+    if (prev === null) { lastSyncRef.current = profile; return }
+    if (profile.full_name  !== prev.full_name)  setFullName(profile.full_name || '')
+    if (profile.gender     !== prev.gender)     setGender(profile.gender || '')
+    if (profile.birthdate  !== prev.birthdate)  setBirthdate(profile.birthdate || '')
+    if (profile.phone      !== prev.phone)      setPhone(profile.phone || '')
+    if (profile.avatar_url !== prev.avatar_url) setAvatarUrl(profile.avatar_url || '')
+    if (profile.current_weight !== prev.current_weight) {
+      setCurrentWeight(profile.current_weight != null ? String(profile.current_weight) : '')
+    }
+    if (profile.current_height !== prev.current_height) {
+      const h = heightToDisplay(profile.current_height, profile.height_unit || 'imperial')
+      setHeightFt(h.ft); setHeightIn(h.inPart); setHeightCm(h.cm)
+    }
+    lastSyncRef.current = profile
+  }, [profile])
+
   function getStoredHeight() {
     if (heightUnit === 'imperial') {
       const ft  = parseFloat(heightFt) || 0
@@ -1355,16 +1422,27 @@ function TargetAccountTab({ profile, targetUserId, onSaved }) {
 //   • Preferences tab saves to target id; hides per-device sections (theme + enter-to-send)
 //   • Security tab hides Change-password (auth-bound); shows admin support actions
 
-export default function AccountSettings({ profile, user, targetUserId = null, viewerRole = 'self', onProfileSaved }) {
+export default function AccountSettings({ profile, user, targetUserId = null, viewerRole = 'self', onProfileSaved, dangerZone = null }) {
   const isTargetMode = !!targetUserId
-  // Namespace the persisted-tab key so the client-settings drawer (target
-  // mode) doesn't share — and on close, wipe — the admin's OWN /admin/profile
-  // tab choice. They're never mounted together, so independent keys are safe.
-  const [activeTab, setActiveTab] = usePersistedState(
-    isTargetMode ? 'myrx:settings_tab:client' : 'myrx:settings_tab',
+  // Tab state, mode-dependent:
+  //  • Self mode (admin's / coach's OWN profile): persist the active tab so an
+  //    accidental reload (bfcache evict on browser↔desktop-app switch) restores
+  //    it. The key is cleared on real unmount (nav away / sign-out).
+  //  • Target mode (admin editing a CLIENT via ClientSettingsDrawer): NO
+  //    persistence — the drawer must ALWAYS reopen on the Account tab (where the
+  //    destructive Delete now lives). The drawer unmounts on close, so a plain
+  //    useState resets to 'account' on every reopen. We still call
+  //    usePersistedState unconditionally (rules of hooks) but point it at a
+  //    throwaway key so it can neither restore the last client tab nor clobber
+  //    the self-mode key.
+  const [persistedTab, setPersistedTab] = usePersistedState(
+    isTargetMode ? 'myrx:settings_tab:__drawer_unused' : 'myrx:settings_tab',
     'account',
     { clearOnUnmount: true },
   )
+  const [drawerTab, setDrawerTab] = useState('account')
+  const activeTab    = isTargetMode ? drawerTab    : persistedTab
+  const setActiveTab = isTargetMode ? setDrawerTab : setPersistedTab
 
   // Tab visibility — About hidden in target/admin modes (legal docs are
   // for the user themselves, not for an admin viewing the user).
@@ -1408,6 +1486,18 @@ export default function AccountSettings({ profile, user, targetUserId = null, vi
         )}
         {activeTab === 'about' && viewerRole === 'self' && <AboutTab profile={profile} />}
       </div>
+
+      {/* Danger zone — destructive account actions (e.g. Delete account). Lives
+          ONLY on the Account tab, as its own card below the form, so it can't
+          be reached from Preferences / Security. The action node is owned by
+          the caller (ClientSettingsDrawer) and passed in via the dangerZone
+          prop; self-mode callers don't pass it, so it never renders there. */}
+      {activeTab === 'account' && dangerZone && (
+        <div className="rounded-xl border border-destructive/20 bg-card p-5">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-destructive">Danger zone</h3>
+          {dangerZone}
+        </div>
+      )}
     </div>
   )
 }

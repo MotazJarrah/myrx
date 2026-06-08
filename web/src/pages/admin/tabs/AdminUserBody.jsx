@@ -77,7 +77,7 @@ function StatCard({ title, children, className = '' }) {
 // ── Progress chart (emerald, mirrors the athlete page) ──────────────────────────
 
 function BodyweightChart({ entries, displayUnit }) {
-  if (entries.length < 2) return null
+  if (entries.length < 1) return null
 
   // displayUnit = the COACH's weight unit (Push 3 — the coach views the client's
   // data in their own units). Every point is converted to it, so the line stays
@@ -381,7 +381,7 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
       </div>
 
       {/* Chart */}
-      {!loading && entries.length >= 2 && <BodyweightChart entries={entries} displayUnit={coachUnit} />}
+      {!loading && entries.length >= 1 && <BodyweightChart entries={entries} displayUnit={coachUnit} />}
 
       {/* List */}
       {loading ? (

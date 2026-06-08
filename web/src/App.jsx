@@ -423,6 +423,10 @@ function RootRoute() {
 function CoachPortalRoute()        { return <CoachProtectedLayout><CoachDashboard    /></CoachProtectedLayout> }
 function CoachClientsRoute()       { return <CoachProtectedLayout><CoachClients      /></CoachProtectedLayout> }
 function CoachClientDetailRoute()  { return <CoachProtectedLayout><CoachClientDetail /></CoachProtectedLayout> }
+// Coach effort-detail routes reuse the admin detail components — they're
+// portal-aware (back-link derives /coach/client vs /admin/user from the URL).
+function CoachEffortDetailRoute()  { return <CoachProtectedLayout><AdminEffortDetail /></CoachProtectedLayout> }
+function CoachCardioDetailRoute()  { return <CoachProtectedLayout><AdminCardioDetail /></CoachProtectedLayout> }
 function CoachInviteRoute()        { return <CoachProtectedLayout><CoachInvite       /></CoachProtectedLayout> }
 function CoachMessagesRoute()      { return <CoachProtectedLayout><CoachMessages     /></CoachProtectedLayout> }
 function CoachBriefingRoute()      { return <CoachProtectedLayout><CoachBriefing     /></CoachProtectedLayout> }
@@ -492,6 +496,9 @@ function AppRoutes() {
         <Route path="/coach/portal"      component={CoachPortalRoute} />
         <Route path="/coach/clients"     component={CoachClientsRoute} />
         <Route path="/coach/client/:id"  component={CoachClientDetailRoute} />
+        {/* cardio route MUST precede the generic :kind route so 'cardio' matches here */}
+        <Route path="/coach/client/:userId/effort/cardio/:slug" component={CoachCardioDetailRoute} />
+        <Route path="/coach/client/:userId/effort/:kind/:slug"  component={CoachEffortDetailRoute} />
         <Route path="/coach/invite"      component={CoachInviteRoute} />
         <Route path="/coach/messages"    component={CoachMessagesRoute} />
         <Route path="/coach/briefing"    component={CoachBriefingRoute} />

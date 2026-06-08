@@ -37,7 +37,7 @@
  */
 
 const STORAGE_KEY = 'myrx.cookies.consent'
-export const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 1
 const EVENT_NAME = 'myrx:cookieConsentChange'
 
 export const CATEGORIES = ['necessary', 'functional', 'analytics', 'marketing']
@@ -103,35 +103,6 @@ export function getConsent() {
 }
 
 /**
- * Return the raw stored wrapper { version, decidedAt, prefs }, or null
- * if no consent is stored. Useful for the "you decided on X date" UX.
- */
-export function getConsentMeta() {
-  if (!isBrowser()) return null
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed || parsed.version !== SCHEMA_VERSION) return null
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-/**
- * Is the given category granted? Always true for 'necessary'. Returns
- * false if the user hasn't decided yet (safest default — never fire a
- * tracker without an explicit yes).
- */
-export function hasConsent(category) {
-  if (category === 'necessary') return true
-  const c = getConsent()
-  if (!c) return false
-  return !!c[category]
-}
-
-/**
  * Persist a new set of preferences. Always forces `necessary: true`.
  * Dispatches a `myrx:cookieConsentChange` window event so any already-
  * loaded code can react (turn analytics on/off, etc.).
@@ -186,16 +157,4 @@ export function getInitialPrefs() {
     base.marketing = false
   }
   return base
-}
-
-/**
- * Subscribe to consent changes. Returns an unsubscribe function. Use
- * this in any module that ships a tracker to react in real time when
- * the user toggles consent (e.g. tear down analytics if they revoke).
- */
-export function onConsentChange(handler) {
-  if (!isBrowser()) return () => {}
-  const listener = (e) => handler(e.detail)
-  window.addEventListener(EVENT_NAME, listener)
-  return () => window.removeEventListener(EVENT_NAME, listener)
 }

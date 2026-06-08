@@ -273,6 +273,26 @@ function AccountTab({ profile, user }: { profile: any; user: any }) {
   const [error,   setError]   = useState('')
   const [saved,   setSaved]   = useState(false)
 
+  // ── Live sync (T111) — reflect external changes to the simple display fields
+  // (admin editing this client, or the user's other device) without clobbering
+  // in-progress edits to OTHER fields. Phone keeps its own country-split +
+  // verify flow and email its own change flow, so both are left out; avatar
+  // only re-seeds when the user isn't mid pick / crop / remove. First run just
+  // snapshots so the initial useState values aren't disturbed.
+  const lastSyncRef = useRef<any>(null)
+  useEffect(() => {
+    if (!profile) return
+    const prev = lastSyncRef.current
+    if (prev === null) { lastSyncRef.current = profile; return }
+    if (profile.full_name !== prev.full_name) setFullName(profile.full_name ?? '')
+    if (profile.gender    !== prev.gender)    setGender(profile.gender ?? '')
+    if (profile.birthdate !== prev.birthdate) setBirthdate(profile.birthdate ?? '')
+    if (profile.avatar_url !== prev.avatar_url && !avatarLocalUri && !removeAvatar && !cropUri) {
+      setAvatarPreview(profile.avatar_url ?? null)
+    }
+    lastSyncRef.current = profile
+  }, [profile])
+
   // ── Email + phone change/verify state ────────────────────────────────────
   // Both email and phone are presented as locked + verified-badge by default.
   // Users opt into a mini-flow via Edit / Verify buttons. While editing, the
@@ -1311,6 +1331,32 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
   const [error,   setError]   = useState('')
   const [saved,   setSaved]   = useState(false)
 
+  // ── Live sync (T111) — reflect external changes (admin editing this client,
+  // or the user's other device) field-by-field so toggles visibly flip while
+  // in-progress edits to OTHER fields are preserved. Meal slots sync separately
+  // below; the share* flags are derived from `profile` each render; device-local
+  // enterToSend is excluded. First run just snapshots.
+  const lastSyncRef = useRef<any>(null)
+  useEffect(() => {
+    if (!profile) return
+    const prev = lastSyncRef.current
+    if (prev === null) { lastSyncRef.current = profile; return }
+    if (profile.weight_unit    !== prev.weight_unit)    setWeightUnit(profile.weight_unit    ?? 'lb')
+    if (profile.height_unit    !== prev.height_unit)    setHeightUnit(profile.height_unit    ?? 'imperial')
+    if (profile.distance_unit  !== prev.distance_unit)  setDistanceUnit(profile.distance_unit ?? 'km')
+    if (profile.date_format    !== prev.date_format)    setDateFormat((profile.date_format as 'mdy' | 'dmy') ?? 'mdy')
+    if (profile.fluid_unit     !== prev.fluid_unit)     setFluidUnit(profile.fluid_unit     ?? 'oz')
+    if (profile.body_fat_band  !== prev.body_fat_band)  setBodyFatBand((profile.body_fat_band as BodyFatBand | null) ?? null)
+    if (profile.current_weight !== prev.current_weight) {
+      setCurrentWeight(profile.current_weight != null ? String(profile.current_weight) : '')
+    }
+    if (profile.current_height !== prev.current_height || profile.height_unit !== prev.height_unit) {
+      const h = heightToDisplay(profile.current_height, profile.height_unit ?? 'imperial')
+      setHeightFt(h.ft); setHeightIn(h.inches); setHeightCm(h.cm)
+    }
+    lastSyncRef.current = profile
+  }, [profile])
+
   // ── Chat preferences state ────────────────────────────────────────────────
   // Privacy flags live on `profiles` (server-side, so the coach admin panel
   // can read them). enterToSend lives in AsyncStorage (purely a UX shortcut
@@ -1355,11 +1401,20 @@ function PreferencesTab({ profile, user }: { profile: any; user: any }) {
   const [showCustomSlot, setShowCustomSlot] = useState(false)
 
   // Sync mealSlots when the profile's saved layout changes externally —
-  // e.g. user saved a layout from Calories → AuthContext refreshes profile
-  // → settings tab shows the new layout instantly. Without this,
-  // useState-with-initialiser only fires once on mount.
+  // e.g. user saved a layout from Calories, or an admin edited it on the web
+  // client-settings mirror → AuthContext realtime refreshes profile → this tab
+  // shows the new layout instantly. Compares by slot-id sequence (T111) so a
+  // no-op realtime echo (a fresh profile object carrying the SAME layout) does
+  // NOT clobber an in-progress edit the user hasn't saved yet — the previous
+  // unconditional re-seed wiped unsaved slot edits whenever realtime fired for
+  // any unrelated field.
+  const lastMealRef = useRef<MealSlot[] | null>(profile?.meal_slots_default ?? null)
   useEffect(() => {
-    setMealSlots((profile?.meal_slots_default as MealSlot[] | null) ?? DEFAULT_SLOTS)
+    const incoming = (profile?.meal_slots_default as MealSlot[] | null) ?? DEFAULT_SLOTS
+    const prevIds  = JSON.stringify((lastMealRef.current ?? DEFAULT_SLOTS).map(s => s.id))
+    const nextIds  = JSON.stringify(incoming.map(s => s.id))
+    if (prevIds !== nextIds) setMealSlots(incoming)
+    lastMealRef.current = incoming
   }, [profile?.meal_slots_default])
 
   const existingSlotIds  = useMemo(() => new Set(mealSlots.map(s => s.id)), [mealSlots])
@@ -1901,6 +1956,24 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
 
   const [shareOnline,   setShareOnline]   = useState<boolean>(profile?.share_online_status ?? true)
   const [shareLastSeen, setShareLastSeen] = useState<boolean>(profile?.share_last_seen     ?? true)
+
+  // ── Live sync (T111) — reflect external changes to the privacy toggles so
+  // they visibly flip when the admin (or the user's other device) saves.
+  // Device-local biometric / app-lock state is NOT profile-driven, so it's
+  // excluded. First run just snapshots.
+  const lastShareRef = useRef<any>(null)
+  useEffect(() => {
+    if (!profile) return
+    const prev = lastShareRef.current
+    if (prev === null) { lastShareRef.current = profile; return }
+    if ((profile.share_online_status ?? true) !== (prev.share_online_status ?? true)) {
+      setShareOnline(profile.share_online_status ?? true)
+    }
+    if ((profile.share_last_seen ?? true) !== (prev.share_last_seen ?? true)) {
+      setShareLastSeen(profile.share_last_seen ?? true)
+    }
+    lastShareRef.current = profile
+  }, [profile])
 
   // Save-on-tap for the share-coach toggles — no Save button on this tab.
   // Each toggle fires an immediate UPDATE to the profile row.

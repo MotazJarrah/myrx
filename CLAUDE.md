@@ -3458,7 +3458,7 @@ mobile/
 │   │                                   # RadialNav  ← bottom-nav replacement (Pattern 8, May 24 2026)
 │   ├── lib/
 │   │   ├── supabase.ts                 # client (AsyncStorage-backed session)
-│   │   ├── profile.ts                  # isProfileComplete() — mirrors web/src/lib/profile.js
+│   │   ├── profile.ts                  # isProfileComplete() — the live copy (web/src/lib/profile.js was removed Jun 2026)
 │   │   ├── effortTags.ts               # TAG_STYLES + getEffortTags
 │   │   ├── cache.ts                    # AsyncStorage-backed dataCache + sync in-memory shadow
 │   │   ├── formulas.ts                 # estimate1RM, projectAllRMs, projectPaces, etc.
@@ -5111,27 +5111,32 @@ src/pages/admin/AdminFoodLibrary.jsx — Food library CRUD for admin-managed ('m
                                        UPC is a text input on the form — entering one
                                        classifies the row as 'branded'; leaving it blank
                                        classifies it as 'generic' (universal data_type rule).
-                                       NOTE: a previous iteration of this page had a Scan
-                                       button that opened BarcodeScanner + auto-populated
-                                       the form from OpenFoodFacts. That wiring has been
-                                       removed from this file but the BarcodeScanner.jsx
-                                       component and /api/off-search proxy still exist —
-                                       Phase D of the food-rebuild plan re-attaches them.
-                                       Until then, admin must type UPCs by hand.
+                                       Barcode scan IS wired (verified Jun 2026 — the older
+                                       "scan removed, type UPCs by hand" note was stale): a
+                                       "Scan barcode" button in the Add panel, shown ONLY on
+                                       touch devices via window.matchMedia('(pointer: coarse)')
+                                       (phone camera — a laptop webcam isn't a useful scanning
+                                       surface), which is why it appears on phone Chrome but not
+                                       desktop. It opens <BarcodeScanner> (components/
+                                       BarcodeScanner.jsx); on a read, handleBarcodeScan looks
+                                       the UPC up in food_library first, else fetches
+                                       /api/off-search (the OpenFoodFacts proxy Pages Function)
+                                       and pre-fills the Add panel, running the data through
+                                       foodFilters.js (enrichFood / getFilterReason).
+                                       This page does NOT use lib/foodLibrary.js — that's the
+                                       separate (now-unused) food-LOG search engine.
 src/pages/admin/tabs/              — AdminUserProfile, AdminUserActivity,
                                       AdminUserBody, AdminUserCalories
 ```
 
 ### Calorie / Food logging components
 ```
-src/components/FoodLogDrawer.jsx   — Bottom-sheet food logger (max-h 92dvh).
-                                     Three views: 'log' | 'search' | 'portion'.
-                                     USDA search → portion picker → Supabase insert.
-                                     Props: userId, day, onClose, onEntriesChange.
-                                     CalorieStrip.jsx was deleted May 28 2026 as
-                                     part of the web-orphan cleanup — athlete-web
-                                     pages were removed earlier so the strip had
-                                     no consumers left.
+FoodLogDrawer.jsx was deleted Jun 2026 — the web bottom-sheet food logger had
+no consumers (food logging is mobile-only; the athlete-web pages were removed
+earlier). Its only live content — the meal-slot DATA exports (DEFAULT_SLOTS /
+ANCHOR_IDS / EXTRA_PRESETS, imported by the admin/coach MealLayoutEditor) — was
+moved to src/lib/mealSlots.js. CalorieStrip.jsx was deleted earlier (May 28
+2026) in the same kind of web-orphan cleanup.
 ```
 
 ### Lib
@@ -5139,15 +5144,32 @@ src/components/FoodLogDrawer.jsx   — Bottom-sheet food logger (max-h 92dvh).
 src/lib/supabase.js         — Supabase client
 src/lib/calorieFormulas.js  — calcFullPlan, toKg, etc.
 src/lib/cache.js            — dataCache (simple in-memory cache for admin feed)
-src/lib/foodLibrary.js      — Unified food search: fans out to Cloudflare Worker (USDA/D1)
-                              AND Supabase food_library (custom 'myrx' foods).
-                              searchFoods(query, limit), getFoodPortions(food),
-                              calcMacros(per100g, grams).
-                              UPC detection: 3+ digit-only queries trigger UPC mode —
-                              partial prefix match (LIKE digits%) as user types,
-                              exact match at 12+ digits.
-                              Custom myrx results always appear first in merged results.
+(src/lib/foodLibrary.js was deleted Jun 2026 — it was the food-LOG search engine
+ for the deleted FoodLogDrawer; nothing on web imported it. The admin Food Library
+ page's barcode scanner uses BarcodeScanner.jsx + /api/off-search + foodFilters.js,
+ NOT this. Restore from git if a future food feature needs the USDA/D1 worker search.)
 ```
+
+> Web dead-code cleanup batch (Jun 2026) — knip-driven + build-verified. Removed:
+>   • Dead files: App.css, lib/planPresets.js (BodyCompPicker carries its own bands
+>     since the T110 rewrite), lib/profile.js (the web athlete ProtectedLayout that
+>     gated on isProfileComplete is gone — mobile src/lib/profile.ts is the live
+>     copy now), components/FoodLogDrawer.jsx (its only live content, the meal-slot
+>     data exports, moved to lib/mealSlots.js), lib/foodLibrary.js (the food-LOG
+>     search engine — only the dead FoodLogDrawer used it; the admin Food Library
+>     scanner uses BarcodeScanner + /api/off-search + foodFilters, a separate path).
+>   • EditProfile.jsx: the unrouted SettingsTab + default export + their private
+>     helpers (UnitCard/TabBtn/heightToDisplay) + orphaned imports. Only the live
+>     ProfileTab named export remains (imported by AccountSettings).
+>   • ~18 unused lib exports deleted + ~8 used-only-internally symbols un-exported
+>     across authErrors / calorieFormulas / chartTooltipScope / cookieConsent /
+>     countries / foodFilters / formulas / imageUtils / movements / serverError.
+>   • package.json: dropped unused deps clsx, tslib, sharp; added the
+>     previously-unlisted libphonenumber-js (used by ProfileTab's phone field).
+>   • KEPT despite knip flagging them (NOT dead — do not remove): functions/api/
+>     off-search.js + public/sw.js (runtime-invoked, never imported);
+>     src/hooks/useIsPhone.js (locked May 27 2026 as the REQUIRED route-gate hook —
+>     unused now but mandated going forward).
 
 > Web-orphan cleanup batch (May 28 2026) deleted these formerly-mentioned web
 > files. None are referenced by the live app anymore:
@@ -5168,13 +5190,19 @@ src/lib/foodLibrary.js      — Unified food search: fans out to Cloudflare Work
 ### `profiles`
 Extends `auth.users`. Key columns:
 - `id` (uuid, PK = auth user id)
-- `full_name`, `email`, `phone`, `birthdate`, `gender`
+- `full_name`, `phone`, `birthdate`, `gender`
+- **`email` is NOT a column on `profiles`** — it lives on `auth.users`. End-user reads get it from the auth session (`user.email`); the admin mirror gets it via `get_user_for_admin` (which hydrates email from `auth.users`). This is why AdminUserDetail's realtime merge does `setProfile(prev => ({ ...prev, ...payload.new }))` — the realtime `profiles` row carries no email, so the spread keeps the RPC-hydrated `prev.email`.
 - `avatar_url` (text)
 - `weight_unit` ('lb'|'kg'), `height_unit` ('imperial'|'metric'), `distance_unit` ('mi'|'km')
+- `fluid_unit` ('oz'|'mL'), `swim_unit` ('yd'|'m'), `date_format` ('mdy'|'dmy') — preference columns NOT in the `upsert_profile` RPC; written via a direct `profiles` update batch
+- `body_fat_band` ('lean'|'average'|'high'), `meal_slots_default` (jsonb)
 - `current_weight`, `current_height`
+- `share_online_status` (bool, default true), `share_last_seen` (bool, default true) — chat privacy ACLs
+- `phone_verified_at` (timestamptz), `biometric_disabled_at` (timestamptz) — admin remote-security actions
 - `is_superuser` (bool) — admin flag
 - `chat_enabled` (bool, default false) — admin-controlled per client; gates chat UI
 - `created_at`
+- **Settings realtime (T111, locked Jun 2026):** changes to any settings column reflect LIVE on every open settings surface, both directions. Web AuthContext (`profile-self-${id}`) + mobile AuthContext (`profile-self-${id}`) subscribe to the user's OWN row; AdminUserDetail subscribes to the viewed CLIENT's row. The tab components (web `AccountSettings` Preferences/Security/TargetAccount + `MealLayoutEditor`; mobile `settings.tsx` Account/Preferences/Security) each carry a diff-based `useEffect([profile])` that re-derives ONLY the fields that changed externally (compared against a `useRef` snapshot) so toggles visibly flip without clobbering in-progress local edits to other fields.
 
 ### `efforts`
 - `id`, `user_id`, `label`, `type` ('strength'|'cardio'), `value`, `created_at`

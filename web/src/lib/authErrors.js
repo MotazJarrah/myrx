@@ -171,8 +171,3 @@ export function friendlyAuthMessage(error, fallback) {
   const mapped = mapAuthError(error)
   return mapped?.message || fallback || 'Something went wrong. Try again.'
 }
-
-export function isBannedError(error) {
-  if (!error) return false
-  return resolveKey(error) === 'user_banned'
-}

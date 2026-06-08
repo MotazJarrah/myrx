@@ -44,54 +44,6 @@ function loadImage(file) {
 }
 
 /**
- * Downscale an image File/Blob to fit within `maxDim` × `maxDim`,
- * preserving aspect ratio, and re-encode as JPEG at the given quality.
- *
- * Returns a Blob of the encoded JPEG. The caller can pass this Blob
- * directly to supabase.storage.upload() — no extension juggling, just
- * set contentType: 'image/jpeg'.
- *
- * Defaults are tuned for profile avatars (512 px is plenty for a 64×64
- * UI avatar even on retina; 0.85 quality is the sweet spot where JPEG
- * artifacts are invisible to the human eye but file size collapses).
- *
- * Images smaller than maxDim are not enlarged — we just re-encode them.
- */
-export async function downscaleImage(file, opts = {}) {
-  const { maxDim = 512, quality = 0.85, mimeType = 'image/jpeg' } = opts
-  const img = await loadImage(file)
-
-  // Math.min(1, ...) prevents upscaling a small source: a 100×100
-  // input stays 100×100 rather than blurring up to 512×512.
-  const ratio = Math.min(1, maxDim / Math.max(img.width, img.height))
-  const w = Math.max(1, Math.round(img.width * ratio))
-  const h = Math.max(1, Math.round(img.height * ratio))
-
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Your browser cannot process images here.')
-
-  // White fill before drawImage so JPEG (which has no alpha channel)
-  // doesn't render transparent PNGs as black. Harmless for opaque
-  // sources — they just paint over the white.
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, w, h)
-  ctx.drawImage(img, 0, 0, w, h)
-
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => blob
-        ? resolve(blob)
-        : reject(new Error('Could not encode that image.')),
-      mimeType,
-      quality,
-    )
-  })
-}
-
-/**
  * Crop a region out of an image File/Blob and re-encode the result as a
  * `size × size` JPEG. Used by the avatar cropper so the user's chosen
  * focal area (face, etc.) is what lands in storage — not the center

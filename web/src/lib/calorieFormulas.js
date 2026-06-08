@@ -13,7 +13,7 @@ export const ACTIVITY_FACTORS = {
   5: { label: 'Extremely Active',   description: 'Very heavy exercise, physical job, or training 2× daily', value: 1.9  },
 }
 
-export const ENERGY_BALANCE_TYPES = {
+const ENERGY_BALANCE_TYPES = {
   1: { label: 'Easy Fat Loss',        goal: 'loss', adjustment: -250 },
   2: { label: 'Moderate Fat Loss',    goal: 'loss', adjustment: -500 },
   3: { label: 'High Fat Loss',        goal: 'loss', adjustment: -800 },
@@ -22,7 +22,7 @@ export const ENERGY_BALANCE_TYPES = {
   6: { label: 'High Muscle Gain',     goal: 'gain', adjustment:  500 },
 }
 
-export const PROTEIN_LEVELS = {
+const PROTEIN_LEVELS = {
   1: { label: 'Low',    gPerKg: 1.6 },
   2: { label: 'Medium', gPerKg: 2.0 },
   3: { label: 'High',   gPerKg: 2.4 },
@@ -32,7 +32,7 @@ export const PROTEIN_LEVELS = {
 // scale. Levels 4-5 were added May 23 2026 to support the Keto diet
 // preset in the mobile self-coached wizard (Keto needs ~70% of calories
 // from fat). Admin slider on web still picks from 1-3.
-export const FAT_LEVELS = {
+const FAT_LEVELS = {
   1: { label: 'Low',       pctOfCals: 0.10 },
   2: { label: 'Medium',    pctOfCals: 0.20 },
   3: { label: 'High',      pctOfCals: 0.30 },
@@ -46,7 +46,7 @@ export function toKg(weight, unit) {
   return unit === 'lb' ? weight * 0.453592 : weight
 }
 
-export function toCm(height, heightUnit) {
+function toCm(height, heightUnit) {
   // imperial: stored as total inches; metric: stored as cm
   return heightUnit === 'metric' ? height : height * 2.54
 }
@@ -91,7 +91,7 @@ export function calcDailyTarget(tdee, energyBalanceTypeKey) {
  * Macro split in grams + calories + %.
  * Protein based on GOAL weight; fats as % of total; carbs = remainder.
  */
-export function calcMacros(dailyTargetCals, goalWeightKg, proteinLevelKey, fatLevelKey) {
+function calcMacros(dailyTargetCals, goalWeightKg, proteinLevelKey, fatLevelKey) {
   const proteinG    = PROTEIN_LEVELS[proteinLevelKey].gPerKg * goalWeightKg
   const proteinCals = proteinG * 4
 

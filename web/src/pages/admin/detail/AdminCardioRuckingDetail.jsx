@@ -512,7 +512,7 @@ export default function AdminCardioRuckingDetail({
                   → NOT reversed. Replaces the two stacked weight + distance
                   charts so a distance-only PR still reads as progress. */}
               <p className="mb-2 mt-4 text-xs text-muted-foreground">Total work (pack weight × distance)</p>
-              {workloadChartData.length >= 2 ? (
+              {workloadChartData.length >= 1 ? (
                 <ResponsiveContainer width="100%" height={150}>
                   <LineChart data={workloadChartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
                     <XAxis

@@ -156,28 +156,6 @@ export async function humanizeServerErrorAsync(err, fallback) {
 }
 
 /**
- * Sync humanizer — for use after the body has already been read OR
- * when the error has no body (RPC errors, plain network failures).
- *
- * Accepts an optional explicit `bodyError` string (the second arg) to
- * let callers that already awaited the edge function body pass it in
- * directly without re-awaiting.
- *
- * @param {unknown} err — caught error or error-like value.
- * @param {string|null} [bodyError] — explicit body.error string if
- *   already awaited.
- * @param {string} [fallback] — optional fallback override.
- * @returns {string}
- */
-export function humanizeServerError(err, bodyError, fallback) {
-  if (!err && !bodyError) return fallback || ''
-  if (typeof bodyError === 'string' && bodyError.trim()) return bodyError.trim()
-  const matched = matchGenericPattern(err?.message)
-  if (matched) return matched
-  return fallback || DEFAULT_FALLBACK
-}
-
-/**
  * Convenience helper for the common case: pass the raw `data` and
  * `error` you got back from `supabase.functions.invoke` and we'll do
  * the right thing.

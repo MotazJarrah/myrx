@@ -104,22 +104,16 @@ export default function ClientSettingsDrawer({
               targetUserId={clientUserId}
               viewerRole={viewerRole}
               onProfileSaved={onProfileSaved}
+              dangerZone={dangerZone}
             />
           ) : (
             <div className="py-16 text-center text-sm text-muted-foreground">
               Loading client profile…
             </div>
           )}
-
-          {/* Danger zone — destructive account actions (Delete) live here now,
-              out of the everyday profile-card flow. The action itself is owned
-              by the parent and passed in as a node. */}
-          {dangerZone && (
-            <div className="mt-6 border-t border-border pt-5">
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-destructive">Danger zone</h3>
-              {dangerZone}
-            </div>
-          )}
+          {/* Danger zone is rendered INSIDE AccountSettings now (Account tab
+              only) — see the dangerZone prop above. It used to live here at the
+              bottom of the drawer, where it showed on every tab. */}
         </div>
       </div>
     </div>

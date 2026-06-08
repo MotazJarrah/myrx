@@ -23,19 +23,29 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'wouter'
+import { Link, useParams, useLocation } from 'wouter'
 import {
-  ArrowLeft, UserCog, Sparkles, AlertCircle, Info, Check, MessageCircle,
-  Activity, Scale, Apple, Dumbbell, Weight, Heart, Moon, Droplet,
+  ArrowLeft, UserCog, AlertCircle, Check, MessageCircle,
+  Activity, Apple, Dumbbell, Weight, Heart, Moon, Droplet,
+  UserMinus, AlertTriangle, Loader2, X,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { toKg } from '../../lib/calorieFormulas'
 import TickerNumber from '../../components/TickerNumber'
-import MacroPlanEditor from '../../components/MacroPlanEditor'
 
 import AdminUserActivity  from '../admin/tabs/AdminUserActivity'
 import AdminUserBody      from '../admin/tabs/AdminUserBody'
+import AdminUserCalories  from '../admin/tabs/AdminUserCalories'
+import AdminUserHeart     from '../admin/tabs/AdminUserHeart'
+import AdminUserSleep     from '../admin/tabs/AdminUserSleep'
+import AdminUserHydration from '../admin/tabs/AdminUserHydration'
+import DashboardEffortsBlock    from '../../components/DashboardEffortsBlock'
+import DashboardBodyweightBlock from '../../components/DashboardBodyweightBlock'
+import DashboardHeartBlock      from '../../components/DashboardHeartBlock'
+import DashboardCaloriesBlock   from '../../components/DashboardCaloriesBlock'
+import DashboardSleepBlock      from '../../components/DashboardSleepBlock'
+import DashboardHydrationBlock  from '../../components/DashboardHydrationBlock'
 
 // ── Helpers (mirror admin's; eventually extract to a shared lib) ─────────────
 
@@ -143,13 +153,17 @@ const TABS = [
   { id: 'dashboard', label: 'Dashboard'  },
   { id: 'activity',  label: 'Efforts'    },
   { id: 'body',      label: 'Bodyweight' },
+  { id: 'heart',     label: 'Heart'      },
   { id: 'calories',  label: 'Calories'   },
+  { id: 'sleep',     label: 'Sleep'      },
+  { id: 'hydration', label: 'Hydration'  },
 ]
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
 export default function CoachClientDetail() {
   const { id } = useParams()
+  const [, navigate] = useLocation()
   const { user: coachUser, profile: coachProfile } = useAuth()
 
   const [client,        setClient]        = useState(null)
@@ -161,10 +175,16 @@ export default function CoachClientDetail() {
   const [togglingMgmt,  setTogglingMgmt]  = useState(false)
   const [mgmtError,     setMgmtError]     = useState('')
 
+  // ── Remove-from-roster (T120 coach-initiated unlink) ────────────────────
+  const [removeOpen,    setRemoveOpen]    = useState(false)
+  const [removeText,    setRemoveText]    = useState('')
+  const [removing,      setRemoving]      = useState(false)
+  const [removeError,   setRemoveError]   = useState('')
+
   const [activeTab,     setActiveTab]     = useState(() => {
     const params  = new URLSearchParams(window.location.search)
     const urlTab  = params.get('tab')
-    const valid   = ['dashboard', 'activity', 'body', 'calories']
+    const valid   = ['dashboard', 'activity', 'body', 'heart', 'calories', 'sleep', 'hydration']
     if (urlTab && valid.includes(urlTab)) return urlTab
     return localStorage.getItem(`coach-client-tab-${id}`) || 'dashboard'
   })
@@ -319,6 +339,27 @@ export default function CoachClientDetail() {
     setTogglingMgmt(false)
   }
 
+  // Remove this athlete from the coach's roster. The RPC nulls coach_id (which
+  // immediately drops the athlete to their own b2c tier via resolveTier, flips
+  // is_self_coached on via trigger, fires their CoachChangeBanner via trigger,
+  // and hands macro ownership back). Ownership is enforced server-side, so a
+  // coach can only ever remove their own client. On success we leave the page
+  // — the athlete is no longer on this coach's roster, so the detail view would
+  // RLS-fail on the next refetch.
+  async function handleRemove() {
+    if (removing || removeText !== 'REMOVE' || !client) return
+    setRemoving(true)
+    setRemoveError('')
+    const { error: rpcErr } = await supabase.rpc('coach_remove_athlete', { p_user_id: client.id })
+    if (rpcErr) {
+      setRemoveError(rpcErr.message || 'Could not remove this athlete. Please try again.')
+      setRemoving(false)
+      return
+    }
+    // Bounce back to the roster — the row will already be gone on the fresh fetch.
+    navigate('/coach/clients')
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -365,6 +406,19 @@ export default function CoachClientDetail() {
           <ArrowLeft className="h-4 w-4" /> Back to clients
         </a>
       </Link>
+
+      {/* Remove-from-roster confirmation (type-REMOVE gate) */}
+      {removeOpen && (
+        <RemoveFromRosterModal
+          athleteName={client.full_name}
+          removeText={removeText}
+          setRemoveText={setRemoveText}
+          onCancel={() => { setRemoveOpen(false); setRemoveText(''); setRemoveError('') }}
+          onConfirm={handleRemove}
+          busy={removing}
+          error={removeError}
+        />
+      )}
 
       {/* Tab bar — mirrors admin (4 tabs — no Timeline for coach) */}
       <div className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1">
@@ -449,6 +503,19 @@ export default function CoachClientDetail() {
               >
                 <UserCog className="h-3 w-3" />
                 {isCoachManaged ? 'Managing macros' : 'Manage macros'}
+              </button>
+
+              {/* Remove from roster — coach-initiated unlink (T120). Destructive:
+                  opens a type-REMOVE confirmation. Drops the athlete to their own
+                  plan immediately + notifies them. */}
+              <button
+                onClick={() => { setRemoveText(''); setRemoveError(''); setRemoveOpen(true) }}
+                disabled={removing}
+                title="Remove this athlete from your roster"
+                className={`inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/20 transition-colors ${removing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <UserMinus className="h-3 w-3" />
+                Remove
               </button>
             </div>
           </div>
@@ -603,27 +670,36 @@ export default function CoachClientDetail() {
 
       {/* ── Tab content ── */}
 
-      {/* Dashboard — 2×2 grid of placeholder cards (same as admin) */}
+      {/* Dashboard — the 6 domain snapshot blocks, mirroring the admin client
+          Dashboard (nav order, tier-gated: CoreRX = Bodyweight + Calories,
+          FullRX = + Heart/Sleep/Hydration). Each = main graph + quick stats +
+          "View all ->" that switches to the full tab. Coach passes `client` as
+          the profile (admin passes `profile`). */}
       {activeTab === 'dashboard' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {[
-            { icon: Scale,    label: 'Bodyweight trend', tint: 'text-emerald-400' },
-            { icon: Apple,    label: 'Food intake',      tint: 'text-amber-400'   },
-            { icon: Dumbbell, label: 'Strength PRs',     tint: 'text-blue-400'    },
-            { icon: Activity, label: 'Cardio PRs',       tint: 'text-orange-400'  },
-          ].map(({ icon: Icon, label, tint }) => (
-            <div key={label} className="rounded-xl border border-border bg-card p-5 min-h-[200px] flex flex-col items-center justify-center text-center gap-2">
-              <Icon className={`h-8 w-8 ${tint} opacity-50`} />
-              <p className="text-sm font-semibold text-foreground">{label}</p>
-              <p className="text-xs text-muted-foreground">Snapshot coming soon</p>
-            </div>
-          ))}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          <DashboardEffortsBlock userId={id} basePath="/coach/client" onViewAll={() => handleTabChange('activity')} />
+          {tierRank >= TIER_RANK.corerx && (
+            <DashboardBodyweightBlock userId={id} profile={client} onViewAll={() => handleTabChange('body')} />
+          )}
+          {tierRank >= TIER_RANK.fullrx && (
+            <DashboardHeartBlock userId={id} profile={client} onViewAll={() => handleTabChange('heart')} />
+          )}
+          {tierRank >= TIER_RANK.corerx && (
+            <DashboardCaloriesBlock userId={id} profile={client} plan={existingPlan} onViewAll={() => handleTabChange('calories')} />
+          )}
+          {tierRank >= TIER_RANK.fullrx && (
+            <DashboardSleepBlock userId={id} profile={client} onViewAll={() => handleTabChange('sleep')} />
+          )}
+          {tierRank >= TIER_RANK.fullrx && (
+            <DashboardHydrationBlock userId={id} profile={client} onViewAll={() => handleTabChange('hydration')} />
+          )}
         </div>
       )}
 
       {activeTab === 'activity' && (
         <AdminUserActivity
           userId={id}
+          basePath="/coach/client"
           onEffortSaved={() => setSnapshotKey(k => k + 1)}
         />
       )}
@@ -635,46 +711,108 @@ export default function CoachClientDetail() {
         />
       )}
 
-      {/* Calories tab — coach-specific. If they're managing macros, show
-          the MacroPlanEditor. Otherwise, info card explaining the client
-          owns it via the mobile wizard. Coach can't edit until they
-          toggle "Manage macros" ON in the action column above. */}
-      {activeTab === 'calories' && (
-        <div>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-base font-semibold">Macro Plan</h2>
-            {isCoachManaged && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/30 px-2 py-0.5 text-[11px] font-medium text-primary">
-                <Sparkles className="h-3 w-3" /> You manage this
-              </span>
-            )}
-          </div>
-
-          {!isCoachManaged ? (
-            <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-5">
-              <div className="flex items-start gap-3">
-                <Info className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-blue-400">This client manages their own macro plan</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    They set their plan up from the mobile app and edit it themselves. To take over and write a plan
-                    for them, tap the <span className="font-semibold text-foreground">Manage macros</span> chip above. They can still see what
-                    you set, but you become the source of truth until you hand it back.
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <MacroPlanEditor
-              profile={client}
-              user={{ id: client.id, email: null }}
-              existingPlan={existingPlan}
-              onPlanSaved={setExistingPlan}
-              savedBy={coachUser?.id}
-            />
-          )}
-        </div>
+      {activeTab === 'heart' && (
+        <AdminUserHeart userId={id} profile={client} />
       )}
+
+      {/* Calories — full mirror of the admin tab: read-only Overview dashboard +
+          Food Log review + Macro Plan editor. The coach's "Manage macros" header
+          toggle still sets macros_managed_by_coach (the source-of-truth flag the
+          client app reads); savedBy = the coach so plan edits attribute to them. */}
+      {activeTab === 'calories' && (
+        <AdminUserCalories
+          userId={id}
+          existingPlan={existingPlan}
+          profile={client}
+          adminUserId={coachUser?.id}
+          onPlanSaved={updated => setExistingPlan(updated)}
+        />
+      )}
+
+      {activeTab === 'sleep' && (
+        <AdminUserSleep userId={id} profile={client} />
+      )}
+
+      {activeTab === 'hydration' && (
+        <AdminUserHydration userId={id} profile={client} />
+      )}
+    </div>
+  )
+}
+
+// ── Remove-from-roster confirmation (type-REMOVE gate) ───────────────────────
+// Mirrors the admin AthleteCoachingChip's destructive SWITCH dialog: a typed
+// token (REMOVE) arms the destructive button. Coach-initiated unlink is
+// reversible (the athlete keeps all their data and can be re-invited), so the
+// gate is about preventing accidental removal, not guarding an irreversible op.
+function RemoveFromRosterModal({
+  athleteName, removeText, setRemoveText, onCancel, onConfirm, busy, error,
+}) {
+  const name = athleteName || 'this athlete'
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-md bg-card border border-border rounded-lg shadow-xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h3 className="text-sm font-semibold text-foreground">Remove {name} from your roster</h3>
+          <button
+            onClick={onCancel}
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/30"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-4 space-y-3">
+          <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30">
+            <AlertTriangle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-foreground leading-relaxed space-y-1.5">
+              <p>{name} will be removed from your roster right away. They&apos;ll lose the full access your coaching provides and drop to their own plan immediately.</p>
+              <p>They keep <span className="font-medium">all their data and history</span>, take over their own macro plan, and see a notice that their coach changed. You can re-invite them anytime.</p>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">
+              Type <span className="font-mono font-bold text-foreground">REMOVE</span> to confirm
+            </label>
+            <input
+              autoFocus
+              type="text"
+              value={removeText}
+              onChange={e => setRemoveText(e.target.value)}
+              placeholder="REMOVE"
+              className="w-full px-3 py-2 text-sm bg-input border border-border rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-destructive"
+            />
+          </div>
+          {error && (
+            <div className="flex items-center gap-1 text-xs text-destructive">
+              <AlertTriangle className="h-3 w-3" />
+              {error}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={onCancel}
+              disabled={busy}
+              className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              disabled={removeText !== 'REMOVE' || busy}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {busy && <Loader2 className="h-3 w-3 animate-spin" />}
+              Remove from roster
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
