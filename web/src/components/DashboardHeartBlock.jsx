@@ -68,7 +68,7 @@ export default function DashboardHeartBlock({ userId, profile, onViewAll }) {
   }, [state, hrMax])
 
   return (
-    <SnapshotCard icon={Heart} iconTint="text-red-400" title="Heart" onViewAll={onViewAll}>
+    <SnapshotCard icon={Heart} iconTint="text-fuchsia-400" title="Heart" onViewAll={onViewAll}>
       {state === null ? (
         <SnapshotLoading />
       ) : !hasData ? (
