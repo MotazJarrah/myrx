@@ -280,28 +280,27 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
         />
         <UnitRow
           label="Distance"
-          left={{  value: 'mi', label: 'mi',     sub: 'Miles'        }}
-          right={{ value: 'km', label: 'km',     sub: 'Kilometres'   }}
+          left={{  value: 'mi', label: 'mi · yd', sub: 'Miles & yards' }}
+          right={{ value: 'km', label: 'km · m',  sub: 'Km & metres'   }}
           active={distanceUnit}
           onChange={setDistanceUnit}
         />
         <UnitRow
           label="Fluid"
-          left={{  value: 'oz', label: 'oz',     sub: 'Ounces'       }}
-          right={{ value: 'mL', label: 'mL',     sub: 'Millilitres'  }}
+          left={{  value: 'oz', label: 'oz', sub: 'Fluid ounces' }}
+          right={{ value: 'mL', label: 'mL', sub: 'Millilitres'  }}
           active={fluidUnit}
           onChange={setFluidUnit}
         />
-      </div>
-
-      {/* Date format — not an imperial/metric pair, so it sits in its own
-          section. Mirrors the client app's MM/DD vs DD/MM segmented control. */}
-      <div className="space-y-3">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Date format</p>
-        <div className="grid grid-cols-2 gap-2">
-          <UnitCard opt={{ label: 'MM / DD', sub: 'Month first' }} active={dateFormat === 'mdy'} onClick={() => setDateFormat('mdy')} />
-          <UnitCard opt={{ label: 'DD / MM', sub: 'Day first'   }} active={dateFormat === 'dmy'} onClick={() => setDateFormat('dmy')} />
-        </div>
+        {/* Date format sits in the same Imperial|Metric grid as the client app
+            (MM/DD = Imperial, DD/MM = Metric) — not a separate section. */}
+        <UnitRow
+          label="Date format"
+          left={{  value: 'mdy', label: 'MM/DD', sub: 'Imperial' }}
+          right={{ value: 'dmy', label: 'DD/MM', sub: 'Metric'   }}
+          active={dateFormat}
+          onChange={setDateFormat}
+        />
       </div>
 
       {/* Body stats — current weight + current height. Body composition
@@ -374,11 +373,12 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
 
           <div>
             <label className="block text-xs text-muted-foreground mb-1.5">Body composition</label>
+            {/* No footnote — matches the client app (it omits it inside Body
+                stats since the context is already clear). */}
             <BodyCompPicker
               value={bodyFatBand}
               onChange={setBodyFatBand}
               gender={profile?.gender}
-              footnote="The Calories plan uses this to estimate body-fat-aware targets."
             />
           </div>
         </div>
