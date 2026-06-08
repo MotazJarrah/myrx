@@ -1,46 +1,56 @@
 /**
  * BodyCompPicker — web port of mobile/src/components/BodyCompPicker.tsx.
  *
- * 3-band body fat self-report via gender-aware silhouettes. Output is a
+ * 3-band body-fat self-report via gender-aware silhouettes. Output is a
  * BodyFatBand string ('lean' | 'average' | 'high') persisted on
  * profiles.body_fat_band.
  *
- * Silhouette PNGs were copied from mobile/assets/bodycomp/ to
- * web/public/ on May 25 2026 — same files served, same proportions.
- * tintColor here is achieved via CSS mask-image (white silhouette
- * tinted to the lime primary on hover/select).
+ * Kept in LOCKSTEP with the mobile bands (label / range / description) — the
+ * source of truth is mobile BODY_FAT_BAND_INFO in src/lib/planPresets.ts.
+ * Male and female BF% scales differ by ~7 points; non-binary / null all use
+ * the female ("else") set, per the uniform "male / else = female" rule.
  *
- * Gender rule (matches mobile): only `gender === 'male'` shows the
- * male silhouettes; everyone else (`female`, `non-binary`, null) sees
- * the female set. Keeps the BMR / TDEE consistent — per the locked
- * "male / else=female" rule across all calc surfaces.
+ * Silhouette PNGs live in web/public/ (copied from mobile/assets/bodycomp/);
+ * tinted to the lime primary on select via CSS filter.
+ *
+ * Props:
+ *   value, onChange, gender    — selection + handler + gender bucket
+ *   showFootnote (default true) — show the "change later from Profile →
+ *                                 Preferences → Body stats" line. Pass false
+ *                                 when this picker IS the settings editor.
+ *   compact (web-only)          — shrinks the silhouettes for the dense
+ *                                 macro-plan form; also hides the subtitle /
+ *                                 per-card description / footnote so the
+ *                                 wizard layout stays tight.
  */
 
-const FEMALE_BANDS = [
-  { id: 'lean',    label: 'Lean',    sub: '≤ 20%', src: '/female-lean.png'    },
-  { id: 'average', label: 'Average', sub: '20–30%', src: '/female-average.png' },
-  { id: 'high',    label: 'High',    sub: '> 30%', src: '/female-high.png'    },
-]
-
 const MALE_BANDS = [
-  { id: 'lean',    label: 'Lean',    sub: '≤ 12%', src: '/male-lean.png'    },
-  { id: 'average', label: 'Average', sub: '12–22%', src: '/male-average.png' },
-  { id: 'high',    label: 'High',    sub: '> 22%', src: '/male-high.png'    },
+  { id: 'lean',    label: 'Lean',    range: '≤14% BF',  desc: 'Visible muscle definition, flat / cut midsection',    src: '/male-lean.png'    },
+  { id: 'average', label: 'Average', range: '15–24% BF', desc: 'Soft midsection, no visible abs, normal proportions', src: '/male-average.png' },
+  { id: 'high',    label: 'High',    range: '≥25% BF',  desc: 'Visible central adiposity, rounded waist',            src: '/male-high.png'    },
 ]
 
-export default function BodyCompPicker({ value, onChange, gender, footnote, compact = false }) {
+const FEMALE_BANDS = [
+  { id: 'lean',    label: 'Lean',    range: '≤20% BF',  desc: 'Athletic, visible muscle tone',           src: '/female-lean.png'    },
+  { id: 'average', label: 'Average', range: '21–30% BF', desc: 'Healthy normal, no visible abs',           src: '/female-average.png' },
+  { id: 'high',    label: 'High',    range: '≥31% BF',  desc: 'Visible central adiposity, rounded shape', src: '/female-high.png'    },
+]
+
+export default function BodyCompPicker({ value, onChange, gender, showFootnote = true, compact = false }) {
   const bands = gender === 'male' ? MALE_BANDS : FEMALE_BANDS
 
-  // Compact mode (used inside the macro-plan editor form) shrinks the
-  // silhouettes from 128px → 64px and drops the padding so the picker
-  // doesn't dominate the form. Standalone mode (Preferences page,
-  // dedicated body-comp surfaces) keeps the original large display.
-  const imgCls = compact ? 'h-16 w-auto' : 'h-32 w-auto'
-  const cardCls = compact ? 'py-2.5 px-2 gap-1.5' : 'py-4 px-3 gap-2'
+  const imgCls   = compact ? 'h-16 w-auto' : 'h-32 w-auto'
+  const cardCls  = compact ? 'py-2.5 px-2 gap-1' : 'py-4 px-3 gap-1'
   const labelCls = compact ? 'text-xs' : 'text-sm'
 
   return (
     <div className="space-y-3">
+      {!compact && (
+        <p className="text-[13px] text-muted-foreground leading-snug">
+          Pick the silhouette that most closely matches your current body.
+        </p>
+      )}
+
       <div className="grid grid-cols-3 gap-2">
         {bands.map(band => {
           const selected = value === band.id
@@ -66,16 +76,20 @@ export default function BodyCompPicker({ value, onChange, gender, footnote, comp
                 }}
                 draggable={false}
               />
-              <div className="text-center">
-                <p className={`${labelCls} font-semibold ${selected ? 'text-primary' : 'text-foreground'}`}>{band.label}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">{band.sub}</p>
-              </div>
+              <p className={`${labelCls} font-semibold ${selected ? 'text-primary' : 'text-foreground'}`}>{band.label}</p>
+              <p className="text-[10px] text-muted-foreground font-mono tabular-nums">{band.range}</p>
+              {!compact && (
+                <p className="text-[10px] text-muted-foreground text-center leading-tight mt-1">{band.desc}</p>
+              )}
             </button>
           )
         })}
       </div>
-      {footnote && (
-        <p className="text-[11px] text-muted-foreground/70 leading-relaxed">{footnote}</p>
+
+      {showFootnote && !compact && (
+        <p className="text-[11px] text-muted-foreground/70 text-center leading-relaxed">
+          You can change this later from Profile → Preferences → Body stats.
+        </p>
       )}
     </div>
   )

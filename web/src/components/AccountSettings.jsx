@@ -379,6 +379,7 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
               value={bodyFatBand}
               onChange={setBodyFatBand}
               gender={profile?.gender}
+              showFootnote={false}
             />
           </div>
         </div>
