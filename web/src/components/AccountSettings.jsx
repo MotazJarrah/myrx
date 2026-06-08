@@ -43,6 +43,7 @@ import { friendlyAuthMessage } from '../lib/authErrors'
 import { usePersistedState } from '../hooks/usePersistedState'
 import BodyCompPicker from './BodyCompPicker'
 import AvatarCropper from './AvatarCropper'
+import MealLayoutEditor from './MealLayoutEditor'
 
 // LocalStorage key shared with EditProfile.jsx / ChatDrawer.jsx so the
 // preference persists across the same browser regardless of which
@@ -381,6 +382,25 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
             />
           </div>
         </div>
+      </div>
+
+      {/* Meal layout — default meal slots for new days. Shared editor (same
+          one the end-user /profile Settings uses). Writes to the effective
+          user (the client in target mode). It has its own Save button, so it
+          sits outside the page-level "Save preferences" submit below. */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Meal layout</p>
+          <p className="text-[11px] text-muted-foreground">Default for new days</p>
+        </div>
+        <MealLayoutEditor
+          profile={profile}
+          effectiveUserId={effectiveUserId}
+          refreshOnSave={!isTargetMode}
+          note={isTargetMode
+            ? "Removing a custom slot only removes it from the client's default layout — past food entries logged under that slot are preserved."
+            : 'Removing a custom slot only removes it from your default layout — past food entries logged under that slot are preserved and will still appear when you view those days.'}
+        />
       </div>
 
       {/* Appearance + Chat sections — both are PER-DEVICE preferences
