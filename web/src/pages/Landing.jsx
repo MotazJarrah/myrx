@@ -1,6 +1,6 @@
 import { Link } from 'wouter'
 import { useTheme } from '../contexts/ThemeContext'
-import { Dumbbell, Activity, Weight, Flame, ArrowRight, Zap, LineChart, Lock } from 'lucide-react'
+import { Dumbbell, Activity, Weight, Apple, ArrowRight, Zap, LineChart, Lock } from 'lucide-react'
 
 function Logo() {
   const { theme } = useTheme()
@@ -14,7 +14,7 @@ const features = [
   { icon: Dumbbell,   title: 'Strength projection',  desc: '1RM through 10RM from any set. Choose bench, squat, deadlift, or define your own lift.' },
   { icon: Activity,   title: 'Pace engine',           desc: 'Row, run, cycle, swim. Projects every standard distance with tuned fatigue coefficients.' },
   { icon: Weight,     title: 'Bodyweight progress',   desc: 'Pull-ups, dips, push-ups. Track reps, set progression goals, visualise gains.' },
-  { icon: Flame,      title: 'Calorie lab',           desc: 'MET-based calorie estimates across 20+ activities. Calibrated to your bodyweight.' },
+  { icon: Apple,      title: 'Calorie lab',           desc: 'MET-based calorie estimates across 20+ activities. Calibrated to your bodyweight.' },
   { icon: LineChart,  title: 'Progress graphs',       desc: 'Your history plotted, your best efforts flagged, your trends visible in one glance.' },
   { icon: Lock,       title: 'Private by design',     desc: 'Accounts are secured with bcrypt-hashed passwords and HTTP-only session cookies.' },
 ]

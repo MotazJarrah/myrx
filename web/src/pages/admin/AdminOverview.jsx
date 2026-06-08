@@ -3,7 +3,7 @@ import { Link, useLocation } from 'wouter'
 import { supabase } from '../../lib/supabase'
 import {
   Users, Dumbbell, Activity,
-  Flame, Weight, ChevronRight, TrendingUp,
+  Apple, Weight, ChevronRight, TrendingUp,
 } from 'lucide-react'
 import TickerNumber from '../../components/TickerNumber'
 import { dataCache } from '../../lib/cache'
@@ -213,7 +213,7 @@ export default function AdminOverview() {
   function FeedIcon({ kind, type }) {
     if (kind === 'effort')  return type === 'strength' ? <Dumbbell className="h-3.5 w-3.5" /> : <Activity className="h-3.5 w-3.5" />
     if (kind === 'weighin') return <Weight  className="h-3.5 w-3.5" />
-    if (kind === 'calorie') return <Flame   className="h-3.5 w-3.5" />
+    if (kind === 'calorie') return <Apple   className="h-3.5 w-3.5" />
     return null
   }
 
@@ -235,7 +235,7 @@ export default function AdminOverview() {
     { label: 'Total Clients',    value: users.length,          sub: 'all enrolled',                  icon: Users,    color: 'text-primary',    bg: 'bg-primary/10',    href: '/admin/clients' },
     { label: 'Strength PRs',     value: stats.strengthPRs,     sub: 'new 1RM highs · 7 days',        icon: Dumbbell, color: 'text-blue-400',   bg: 'bg-blue-500/10',   href: '/admin/clients' },
     { label: 'Cardio PRs',       value: stats.cardioPRs,       sub: 'best pace · 7 days',            icon: Activity, color: 'text-amber-400',  bg: 'bg-amber-500/10',  href: '/admin/clients' },
-    { label: 'Nutrition Active', value: stats.nutritionActive,  sub: 'logged ≥3 days this week',     icon: Flame,    color: 'text-red-400',    bg: 'bg-red-500/10',    href: '/admin/nutrition' },
+    { label: 'Nutrition Active', value: stats.nutritionActive,  sub: 'logged ≥3 days this week',     icon: Apple,    color: 'text-red-400',    bg: 'bg-red-500/10',    href: '/admin/nutrition' },
     { label: 'Weigh-ins',        value: stats.weighIns,         sub: 'logged bodyweight · 7 days',   icon: TrendingUp, color: 'text-emerald-400', bg: 'bg-emerald-500/10', href: '/admin/progress' },
   ]
 

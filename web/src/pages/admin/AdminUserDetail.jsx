@@ -11,7 +11,7 @@ import DashboardSleepBlock from '../../components/DashboardSleepBlock'
 import DashboardHydrationBlock from '../../components/DashboardHydrationBlock'
 import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
-import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign, Download, FileDown, Weight, Heart, Flame, Moon, Droplet } from 'lucide-react'
+import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign, Download, FileDown, Weight, Heart, Moon, Droplet } from 'lucide-react'
 
 import AdminUserActivity  from './tabs/AdminUserActivity'
 import AdminUserBody      from './tabs/AdminUserBody'
@@ -1165,12 +1165,12 @@ export default function AdminUserDetail() {
             {tierRank >= TIER_RANK.corerx && snapshot.foodStreak != null && (
               snapshot.foodStreak > 0 ? (
                 <SnapshotBadge color="red">
-                  <Flame className="h-3 w-3 shrink-0 text-red-400" />
+                  <Apple className="h-3 w-3 shrink-0 text-red-400" />
                   <TickerNumber value={snapshot.foodStreak} /> food day{snapshot.foodStreak !== 1 ? 's' : ''} · 14d
                 </SnapshotBadge>
               ) : (
                 <SnapshotBadge color="red" muted>
-                  <Flame className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <Apple className="h-3 w-3 shrink-0 text-muted-foreground" />
                   no recent food
                 </SnapshotBadge>
               )

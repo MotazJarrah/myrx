@@ -82,7 +82,7 @@ import Animated, {
 } from 'react-native-reanimated'
 import Svg, { Line } from 'react-native-svg'
 import {
-  LayoutDashboard, Dumbbell, Activity, Weight, Flame,
+  LayoutDashboard, Dumbbell, Activity, Weight, Apple,
   Heart, Moon, Droplet, Lock, X as XIcon,
 } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
@@ -233,7 +233,7 @@ const NAV_BY_HREF: Record<string, NavItem> = {
   '/(app)/cardio':     { href: '/(app)/cardio',     label: 'Cardio',     Icon: Activity,        tier: 'free'   },
   '/(app)/bodyweight': { href: '/(app)/bodyweight', label: 'Bodyweight', Icon: Weight,          tier: 'corerx' },
   '/(app)/heart':      { href: '/(app)/heart',      label: 'Heart',      Icon: Heart,           tier: 'corerx' },
-  '/(app)/calories':   { href: '/(app)/calories',   label: 'Calories',   Icon: Flame,           tier: 'corerx' },
+  '/(app)/calories':   { href: '/(app)/calories',   label: 'Calories',   Icon: Apple,           tier: 'corerx' },
   '/(app)/sleep':      { href: '/(app)/sleep',      label: 'Sleep',      Icon: Moon,            tier: 'fullrx' },
   '/(app)/hydration':  { href: '/(app)/hydration',  label: 'Hydration',  Icon: Droplet,         tier: 'fullrx' },
 }

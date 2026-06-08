@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'wouter'
 import { supabase } from '../../lib/supabase'
-import { Dumbbell, Weight, Flame, Activity, Filter } from 'lucide-react'
+import { Dumbbell, Weight, Apple, Activity, Filter } from 'lucide-react'
 import { dataCache } from '../../lib/cache'
 
 function formatDate(ts) {
@@ -24,7 +24,7 @@ const KIND_META = {
   strength: { label: 'Strength',   icon: Dumbbell,  iconCls: 'bg-blue-500/10 text-blue-400',    chip: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
   cardio:   { label: 'Cardio',     icon: Activity,  iconCls: 'bg-amber-500/10 text-amber-400',   chip: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
   weighin:  { label: 'Weigh-in',   icon: Weight,    iconCls: 'bg-emerald-500/10 text-emerald-400', chip: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-  calorie:  { label: 'Calories',   icon: Flame,     iconCls: 'bg-red-500/10 text-red-400',       chip: 'bg-red-500/10 text-red-400 border-red-500/20' },
+  calorie:  { label: 'Calories',   icon: Apple,     iconCls: 'bg-red-500/10 text-red-400',       chip: 'bg-red-500/10 text-red-400 border-red-500/20' },
 }
 
 function itemKind(item) {

@@ -26,7 +26,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'wouter'
 import {
   ArrowLeft, UserCog, Sparkles, AlertCircle, Info, Check, MessageCircle,
-  Activity, Scale, Apple, Dumbbell, Weight, Heart, Flame, Moon, Droplet,
+  Activity, Scale, Apple, Dumbbell, Weight, Heart, Moon, Droplet,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
@@ -557,12 +557,12 @@ export default function CoachClientDetail() {
             {tierRank >= TIER_RANK.corerx && snapshot.foodStreak != null && (
               snapshot.foodStreak > 0 ? (
                 <SnapshotBadge color="red">
-                  <Flame className="h-3 w-3 shrink-0 text-red-400" />
+                  <Apple className="h-3 w-3 shrink-0 text-red-400" />
                   <TickerNumber value={snapshot.foodStreak} /> food day{snapshot.foodStreak !== 1 ? 's' : ''} · 14d
                 </SnapshotBadge>
               ) : (
                 <SnapshotBadge color="red" muted>
-                  <Flame className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  <Apple className="h-3 w-3 shrink-0 text-muted-foreground" />
                   no recent food
                 </SnapshotBadge>
               )
