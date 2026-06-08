@@ -12,7 +12,7 @@
  * Authenticated guard: redirects unauthenticated users to /(auth)/sign-in.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator, Image,
 } from 'react-native'
@@ -24,6 +24,7 @@ import {
 import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import { uniqueChannelName } from '../../src/lib/realtime'
+import { syncRecent as samsungSyncRecent, syncSleepRecent } from '../../src/lib/integrations/samsungHealth'
 import ChatHub from '../../src/components/ChatHub'
 import SuggestionSheet from '../../src/components/SuggestionSheet'
 import { BiometricLockGate } from '../../src/components/BiometricLockGate'
@@ -168,6 +169,24 @@ export default function AppShellLayout() {
 
     return () => { mounted = false; supabase.removeChannel(channel) }
   }, [user, chatEnabled])
+
+  // App-start wearable sync (Jun 8 2026). On entering the authed shell (app
+  // launch / sign-in) kick off a ONE-SHOT background sync of the signed-in
+  // user's connected wearables, so Heart/Sleep already show fresh data the
+  // first time they're opened instead of only syncing on tab focus. Both calls
+  // no-op for users with no integration row (the per-account bleed guard in
+  // samsungHealth.syncRecent / syncSleepRecent) and on iOS (no native module).
+  // Fire-and-forget — never blocks the UI, errors swallowed. The per-page
+  // useFocusEffect syncs on Heart/Sleep STAY in place so data still refreshes
+  // if the watch pushes new readings AFTER launch. Ref-guarded so it runs once
+  // per authed-shell mount (i.e. once per app session), not on every re-render.
+  const didStartupSyncRef = useRef(false)
+  useEffect(() => {
+    if (!user?.id || didStartupSyncRef.current) return
+    didStartupSyncRef.current = true
+    samsungSyncRecent(7).catch(() => { /* best effort */ })
+    syncSleepRecent(30).catch(() => { /* best effort */ })
+  }, [user?.id])
 
   // Show the spinner ONLY during the initial load (no profile yet).
   // Subsequent profile refreshes (e.g. after `refreshProfile()` post-save)

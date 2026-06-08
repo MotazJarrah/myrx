@@ -31,13 +31,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link } from 'wouter'
 import {
-  AlertCircle, Check, Loader2, Lock, Sun, Moon, ExternalLink,
+  AlertCircle, Check, Loader2, Lock, ExternalLink,
   Shield, Sliders, User, Info, Eye, EyeOff, Clock,
   Camera, Trash2, Send,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { useTheme } from '../contexts/ThemeContext'
 import { ProfileTab } from '../pages/EditProfile'
 import { friendlyAuthMessage } from '../lib/authErrors'
 import { usePersistedState } from '../hooks/usePersistedState'
@@ -89,7 +88,7 @@ function TabButton({ active, onClick, children, Icon }) {
 //      actually log their own meals. Out of scope for the
 //      shared-with-admin/coach version per the "necessary intersection"
 //      brief.
-//   4. Appearance — theme toggle (dark / light). Web-only addition.
+//   4. (Appearance/theme toggle removed Jun 8 2026 — app is dark-only everywhere.)
 //   5. Chat — Enter-to-send (matches mobile exactly).
 //
 // All five sections persist via the single Save button at the bottom —
@@ -108,7 +107,6 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
   const showPerDevice   = viewerRole === 'self'
 
   const { refreshProfile } = useAuth()
-  const { theme, toggle }  = useTheme()
 
   // ── Unit state ────────────────────────────────────────────────────────────
   const [weightUnit,   setWeightUnit]   = useState(profile?.weight_unit    || 'lb')
@@ -430,29 +428,13 @@ function PreferencesTab({ profile, user, targetUserId = null, viewerRole = 'self
         />
       </div>
 
-      {/* Appearance + Chat sections — both are PER-DEVICE preferences
-          (theme via ThemeContext localStorage; Enter-to-send via
-          ENTER_KEY localStorage). They make sense for self-editing
-          only — when an admin/coach is viewing a CLIENT's preferences,
-          toggling these would change the ADMIN's own browser settings,
-          not the client's. Hidden in target mode for that reason. */}
+      {/* Chat section — per-device preference (Enter-to-send via ENTER_KEY
+          localStorage). Self-editing only — when an admin/coach views a
+          CLIENT's preferences, toggling it would change the ADMIN's own
+          browser, not the client's. Hidden in target mode for that reason.
+          (Appearance/theme toggle removed Jun 8 2026 — app is dark-only.) */}
       {showPerDevice && (
         <>
-          <div className="space-y-2">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Appearance</p>
-            <button
-              type="button"
-              onClick={toggle}
-              className="flex w-full items-center justify-between rounded-xl border border-border bg-card/40 hover:bg-accent/40 px-4 py-3 transition-colors"
-            >
-              <div className="text-left">
-                <div className="text-sm font-semibold text-foreground">{theme === 'dark' ? 'Dark mode' : 'Light mode'}</div>
-                <div className="text-xs text-muted-foreground mt-0.5">Click to switch</div>
-              </div>
-              {theme === 'dark' ? <Moon className="h-4 w-4 text-muted-foreground" /> : <Sun className="h-4 w-4 text-muted-foreground" />}
-            </button>
-          </div>
-
           <div className="space-y-2">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Chat</p>
             <button
@@ -1085,6 +1067,7 @@ function AboutTab({ profile }) {
             <span className="font-mono">v{APP_VERSION}</span>
           </div>
           <div className="text-[11px] text-muted-foreground/70">
+            MyRX is operated by Northern Princess LLC, Michigan, USA.<br />
             © {new Date().getFullYear()} Northern Princess LLC. All rights reserved.
           </div>
         </div>

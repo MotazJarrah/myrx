@@ -1,18 +1,22 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect } from 'react'
 
-const ThemeContext = createContext(null)
+// Theme switching was removed (Jun 8 2026). The app is dark-only across every
+// surface (web + mobile) for consistency — mobile has no light palette, so
+// rather than ship light mode on one surface and not the other, light/dark was
+// dropped entirely. This provider now just locks the document to dark and clears
+// any stale 'light' preference left in localStorage from before the toggle
+// existed. `useTheme()` still returns { theme: 'dark' } so the handful of
+// read-only consumers (Landing, Navbar, legal/marketing logo variants) keep
+// working unchanged.
+const ThemeContext = createContext({ theme: 'dark' })
 
 export function ThemeProvider({ children }) {
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark')
-
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark')
-    localStorage.setItem('theme', theme)
-  }, [theme])
+    document.documentElement.classList.add('dark')
+    try { localStorage.removeItem('theme') } catch { /* ignore */ }
+  }, [])
 
-  const toggle = () => setTheme(t => t === 'dark' ? 'light' : 'dark')
-
-  return <ThemeContext.Provider value={{ theme, toggle }}>{children}</ThemeContext.Provider>
+  return <ThemeContext.Provider value={{ theme: 'dark' }}>{children}</ThemeContext.Provider>
 }
 
-export const useTheme = () => useContext(ThemeContext)
+export const useTheme = () => useContext(ThemeContext) ?? { theme: 'dark' }

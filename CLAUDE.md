@@ -2176,7 +2176,7 @@ Offsets from Maglischo's training-zone tables. Same shape as Daniels' running of
 
 When `activity === 'Swimming'`:
 - **Distance wheel**: INTEGER mode (step 25, min 0, max 5000) — not the decimal-km wheel. Pool distances always come in whole numbers.
-- **Unit column**: locked chip showing `m` or `yd` (pulled from `profile.swim_unit`) — not the km/mi toggle. User sets the unit once in Settings; toggling per-log would be friction.
+- **Unit column**: locked chip showing `m` or `yd` (pulled from `profile.swim_unit`, which is DERIVED from the Distance preference — see the swim_unit note below) — not the km/mi toggle. Fixed per-user; toggling per-log would be friction.
 - **Time wheel**: stays `mm:ss` (max 99:00).
 - **Save label format**: `Swimming · 1500 m in 25:00` (or `· 1640 yd in 25:00`). Old `· 1.5 km in 25:00` labels still parse via `parseEffortLabel` for back-compat.
 - **Storage**: `value` column stores pace in seconds-per-km regardless of input unit (uniform storage across all pace-mode activities). Detail page divides by 10 for per-100m display.
@@ -2185,7 +2185,7 @@ When `activity === 'Swimming'`:
 
 - Type: `text NOT NULL DEFAULT 'm'`
 - CHECK constraint: `swim_unit IN ('m', 'yd')`
-- Settings UI: Profile page > Settings tab > "Swim distance" unit card row (separate from "Distance" — a user can run miles outdoors and swim meters indoors).
+- Settings UI: **NO dedicated swim-unit card.** `swim_unit` is DERIVED from the single Distance preference on BOTH mobile and web (`mi` → `yd`, `km` → `m`): mobile `settings.tsx` writes `swim_unit: distanceUnit === 'mi' ? 'yd' : 'm'` in the prefs save batch (see the `// Swim unit follows the single Distance preference now` comment), and web `AccountSettings.jsx` does the same. An earlier design had a separate "Swim distance" card; it was consolidated into the one Distance toggle — the column is still written, just computed, not user-picked. Tradeoff: a user can't set swim units independently of run/ride distance, accepted for a simpler units card. (Corrected 2026-06-08 — the doc previously claimed a separate card that no longer exists.)
 
 **Swimming-specific helpers in `[activity].tsx`:**
 

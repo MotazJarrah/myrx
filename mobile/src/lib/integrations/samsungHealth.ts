@@ -233,9 +233,26 @@ export async function requestConnect(): Promise<ConnectResult> {
 export async function getStatus(): Promise<ConnectionStatus> {
   const permissions = await permissionStatus()
 
+  // Scope to the SIGNED-IN user explicitly (T125, Jun 8 2026). The
+  // user_integrations table has a "Coaches see roster integrations" RLS SELECT
+  // policy so a coach can read a client's integration status in the coach
+  // portal. Without an explicit user_id filter, this maybeSingle() would, for a
+  // coach/admin, return a ROSTER MEMBER's samsung_health row — surfacing
+  // "Connected · synced N ago" on the coach's OWN Settings/Heart/Sleep for a
+  // watch that's actually the client's (and on a shared device, the native
+  // permission check passes too). Filtering by auth.uid() keeps "my connection"
+  // strictly mine. (maybeSingle without the filter could even throw once >1
+  // roster client has a row.)
+  const { data: userData } = await supabase.auth.getUser()
+  const userId = userData?.user?.id
+  if (!userId) {
+    return { connected: false, permissions, connectedAt: null, lastSyncedAt: null }
+  }
+
   const { data: row } = await supabase
     .from('user_integrations')
     .select('connected_at, last_synced_at, status')
+    .eq('user_id', userId)
     .eq('platform', 'samsung_health')
     .maybeSingle()
 

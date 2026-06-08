@@ -275,7 +275,25 @@ function MacroLegend({ color, label }: { color: string; label: string }) {
 // Same card chrome for both — the empty-state shape is consistent; only
 // the messaging + CTA changes based on who owns the plan.
 
-function PendingView({ onSetupPlan }: { onSetupPlan?: () => void }) {
+function PendingView({ onSetupPlan, webManaged }: { onSetupPlan?: () => void; webManaged?: boolean }) {
+  // Staff (admin/coach) own their plan from the WEB portal — they have no
+  // coach, so neither the athlete "set up" CTA nor the "waiting for your coach"
+  // copy fits. Point them to the web Macro Plan tab instead. (T126, Jun 8 2026.)
+  if (webManaged) {
+    return (
+      <View style={s.pendingWrap}>
+        <View style={s.pendingIcon}>
+          <Apple size={32} color={palette.amber[400]} />
+        </View>
+        <View style={{ alignItems: 'center', gap: 4 }}>
+          <Text style={s.pendingTitle}>Manage your plan on the web</Text>
+          <Text style={s.pendingMsg}>
+            Set up your calorie + macro plan from the Macro Plan tab in your web portal. It'll show here once it's set.
+          </Text>
+        </View>
+      </View>
+    )
+  }
   if (onSetupPlan) {
     return (
       <View style={s.pendingWrap}>
@@ -350,7 +368,12 @@ export default function Calories() {
   // pointed back to the web admin panel. Mirror of web Calories.jsx
   // (May 23 2026 lock).
   const isAdmin         = profile?.is_superuser === true
-  const canEditPlanHere = isSelfCoached && !isAdmin
+  const isCoach         = profile?.is_coach === true
+  // Admins AND coaches manage their own macro plan from the WEB portal only
+  // (they're their own client) — neither can edit it here on mobile. Real
+  // self-coached athletes still get inline mobile editing. (T126, Jun 8 2026.)
+  const isStaff         = isAdmin || isCoach
+  const canEditPlanHere = isSelfCoached && !isStaff
 
   // Current weight in kg — sourced from latest bodyweight log if present,
   // else from profile.current_weight (which is stored in profile.weight_unit).
@@ -621,6 +644,7 @@ export default function Calories() {
             {!plan && (
               <View style={[s.cardLg, { padding: 0 }]}>
                 <PendingView
+                  webManaged={isStaff}
                   onSetupPlan={
                     // Self-coached non-admin users get the CTA. Admin-
                     // coached clients fall through to "Your plan is on its
@@ -1456,10 +1480,18 @@ function CurrentWeightGoal({
                 <Text style={s.pendingCTAText}>Set up my plan</Text>
               </Pressable>
             </View>
-          ) : (
+          ) : (profile?.is_superuser === true || profile?.is_coach === true) ? (
+            // Staff (admin/coach) own their plan from web — no "0.0 goal" and
+            // no coach. Point them to where they CAN set a goal weight. (T126.)
             <Text style={s.timelineMsg}>
-              Your coach hasn't locked in a phase starting weight yet. Once they do, your progress toward{' '}
-              <Text style={s.timelineMsgEmph}>{fromKg(goalKg ?? 0, pUnit).toFixed(1)} {pUnit}</Text> will appear here.
+              Set a goal weight in the Macro Plan tab on your web portal to track your progress here.
+            </Text>
+          ) : (
+            // Real coached athlete: their coach hasn't set a GOAL weight yet
+            // (note: the starting weight may already exist — it's the goal
+            // that's missing). No bogus "0.0" — just say progress will appear.
+            <Text style={s.timelineMsg}>
+              Your coach hasn't set a goal weight for this phase yet. Once they do, your progress will appear here.
             </Text>
           )}
         </View>

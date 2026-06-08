@@ -1178,18 +1178,22 @@ function AccountTab({ profile, user }: { profile: any; user: any }) {
           bottom of the Account tab as the final entry. Tapping opens a
           confirmation modal that requires typing "DELETE" (case-insensitive)
           before the schedule_account_deletion RPC fires. Mirrors the admin
-          "Schedule deletion" flow but scoped to self. */}
-      <View style={s.deleteRow}>
-        <Pressable
-          onPress={openDeleteModal}
-          style={({ pressed }) => [s.deleteBtn, pressed && s.deleteBtnPressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Delete account"
-        >
-          <Trash2 size={16} color={colors.destructive} />
-          <Text style={s.deleteBtnText}>Delete account</Text>
-        </Pressable>
-      </View>
+          "Schedule deletion" flow but scoped to self. HIDDEN for admins
+          (superusers) — they own the platform and never self-delete here,
+          matching the web admin portal (Jun 8 2026). */}
+      {profile?.is_superuser !== true && (
+        <View style={s.deleteRow}>
+          <Pressable
+            onPress={openDeleteModal}
+            style={({ pressed }) => [s.deleteBtn, pressed && s.deleteBtnPressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Delete account"
+          >
+            <Trash2 size={16} color={colors.destructive} />
+            <Text style={s.deleteBtnText}>Delete account</Text>
+          </Pressable>
+        </View>
+      )}
 
       {/* Delete-account confirmation modal */}
       <Modal
@@ -1948,12 +1952,6 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
     isBiometricAvailable, isBiometricEnabled, enableBiometric, disableBiometric,
   } = useAuth()
 
-  // Admins don't have a coach of their own (they ARE the coach), so the two
-  // share-with-coach toggles are meaningless when an admin views their own
-  // settings. Hidden in that case. Mirrors web's EditProfile.jsx isAdmin
-  // branch and AdminUserProfile.jsx isOwnProfile prop.
-  const isAdmin = profile?.is_superuser === true
-
   const [shareOnline,   setShareOnline]   = useState<boolean>(profile?.share_online_status ?? true)
   const [shareLastSeen, setShareLastSeen] = useState<boolean>(profile?.share_last_seen     ?? true)
 
@@ -2143,37 +2141,35 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
   return (
     <View style={s.formGap}>
 
-      {/* Chat privacy — only for end-users (admins ARE the coach). The
-          two toggles below control what the coach sees in the chat panel
-          — online status (live activity dot) and last-seen timestamp.
-          Both default to ON. */}
-      {!isAdmin && (
-        <AnimateRise delay={0} style={s.chatCard}>
-          <Text style={[s.cardLabel, s.chatCardLabel]}>Chat privacy</Text>
-          <Pressable onPress={toggleShareOnline} style={s.chatRowBtn}>
-            <View style={s.chatRowText}>
-              <Text style={s.chatRowTitle}>Share online status</Text>
-              <Text style={s.chatRowSub}>
-                When on, your coach will see when you're active in the chat session.
-              </Text>
-            </View>
-            <View style={[s.togglePill, shareOnline ? s.togglePillOn : s.togglePillOff]}>
-              <View style={[s.toggleThumb, shareOnline ? s.toggleThumbOn : s.toggleThumbOff]} />
-            </View>
-          </Pressable>
-          <Pressable onPress={toggleShareLastSeen} style={s.chatRowBtn}>
-            <View style={s.chatRowText}>
-              <Text style={s.chatRowTitle}>Share last seen</Text>
-              <Text style={s.chatRowSub}>
-                When on, your coach can see when you were last active in the chat session.
-              </Text>
-            </View>
-            <View style={[s.togglePill, shareLastSeen ? s.togglePillOn : s.togglePillOff]}>
-              <View style={[s.toggleThumb, shareLastSeen ? s.toggleThumbOn : s.toggleThumbOff]} />
-            </View>
-          </Pressable>
-        </AnimateRise>
-      )}
+      {/* Chat privacy — controls whether the people you chat with can see
+          your presence (your coach if you're an athlete; your clients if
+          you're a coach/admin). Shown to everyone now (Jun 8 2026 — was
+          hidden for admins, but admins chat with clients too). Default ON. */}
+      <AnimateRise delay={0} style={s.chatCard}>
+        <Text style={[s.cardLabel, s.chatCardLabel]}>Chat privacy</Text>
+        <Pressable onPress={toggleShareOnline} style={s.chatRowBtn}>
+          <View style={s.chatRowText}>
+            <Text style={s.chatRowTitle}>Share online status</Text>
+            <Text style={s.chatRowSub}>
+              When on, people you chat with can see when you're active in the chat session.
+            </Text>
+          </View>
+          <View style={[s.togglePill, shareOnline ? s.togglePillOn : s.togglePillOff]}>
+            <View style={[s.toggleThumb, shareOnline ? s.toggleThumbOn : s.toggleThumbOff]} />
+          </View>
+        </Pressable>
+        <Pressable onPress={toggleShareLastSeen} style={s.chatRowBtn}>
+          <View style={s.chatRowText}>
+            <Text style={s.chatRowTitle}>Share last seen</Text>
+            <Text style={s.chatRowSub}>
+              When on, people you chat with can see when you were last active in the chat session.
+            </Text>
+          </View>
+          <View style={[s.togglePill, shareLastSeen ? s.togglePillOn : s.togglePillOff]}>
+            <View style={[s.toggleThumb, shareLastSeen ? s.toggleThumbOn : s.toggleThumbOff]} />
+          </View>
+        </Pressable>
+      </AnimateRise>
 
       {/* Biometric sign-in + lock — only shown when device supports it */}
       {bioAvailable ? (
@@ -2963,7 +2959,7 @@ interface SettingsTabDef {
 // ships), then About. Pattern 4 default landing = slot 0 = Account.
 // Billing added May 28 2026 to mirror the web coach Settings → Billing
 // tab so admin viewing this surface sees consistent data across roles.
-const SETTINGS_TABS: readonly SettingsTabDef[] = [
+const ALL_SETTINGS_TABS: readonly SettingsTabDef[] = [
   { key: 'account',     label: 'Account'     },
   { key: 'preferences', label: 'Preferences' },
   { key: 'security',    label: 'Security'    },
@@ -2974,6 +2970,16 @@ const SETTINGS_TABS: readonly SettingsTabDef[] = [
 
 export default function EditProfile() {
   const { user, profile } = useAuth()
+  // Billing is hidden for admins on mobile: they carry no athlete/coach
+  // subscription, so the transaction-history tab is empty + irrelevant for them
+  // (matches the web admin portal, which omits Billing). Athletes + coaches keep
+  // it. This local SETTINGS_TABS shadows the module-level ALL_SETTINGS_TABS so the
+  // whole pager below (deep-link validation, swipe bounds, indices, render) uses
+  // the role-filtered list with no other changes. (Jun 8 2026)
+  const isAdmin = profile?.is_superuser === true
+  const SETTINGS_TABS: readonly SettingsTabDef[] = isAdmin
+    ? ALL_SETTINGS_TABS.filter(t => t.key !== 'billing')
+    : ALL_SETTINGS_TABS
   // Optional `?tab=billing` (or any other SettingsTabKey) deep-link — used
   // by the RadialNav upgrade modal's "Open Billing" CTA so a tap on a
   // locked tier icon lands the user directly on the upgrade tab instead
