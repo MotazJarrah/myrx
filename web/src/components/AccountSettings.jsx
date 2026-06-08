@@ -765,7 +765,11 @@ function SecurityTab({ profile, user, targetUserId = null, viewerRole = 'self' }
 // ── AdminSupportActions — Security-tab admin replacement ────────────────
 // When viewerRole='admin' on AccountSettings, the Change-password section
 // is replaced with these support actions, all live:
-//   • Send password reset / email-change link — Supabase auth API.
+//   • Send password reset — recovery email (Supabase auth API; lands on the
+//     /auth/confirm recovery form).
+//   • Change account email — admin types the new address; applies immediately
+//     via the admin-user-management edge fn (no client-confirm link exists for
+//     an admin to trigger, and the client is mobile-only).
 //   • Disable fingerprint on all devices — sets profiles.biometric_disabled_at;
 //     the mobile app clears its on-device biometric + lock on next launch.
 //   • Sign out everywhere — admin_revoke_user_sessions RPC (SECURITY DEFINER,
@@ -774,6 +778,7 @@ function SecurityTab({ profile, user, targetUserId = null, viewerRole = 'self' }
 function AdminSupportActions({ profile }) {
   const [pwState,    setPwState]    = useState('idle')
   const [emailState, setEmailState] = useState('idle')
+  const [newEmail,   setNewEmail]   = useState('')
   const [bioState,   setBioState]   = useState('idle')
   const [sessState,  setSessState]  = useState('idle')
 
@@ -787,14 +792,23 @@ function AdminSupportActions({ profile }) {
     setTimeout(() => setPwState('idle'), 4000)
   }
 
-  async function sendEmailChange() {
-    if (!profile?.email) return
+  // Change the client's account email. There's no admin-triggered "client
+  // confirms via link" path in GoTrue (the only confirm flow is the
+  // user-initiated updateUser the client runs themselves), and the client is
+  // mobile-only — so the admin sets it directly via the superuser-gated
+  // admin-user-management edge fn (auth.admin.updateUserById, applies now).
+  async function changeEmail() {
+    const next = newEmail.trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) {
+      setEmailState('error'); setTimeout(() => setEmailState('idle'), 4000); return
+    }
     setEmailState('sending')
-    const { error } = await supabase.auth.resetPasswordForEmail(profile.email, {
-      redirectTo: `${window.location.origin}/auth?mode=update-email`,
+    const { data, error } = await supabase.functions.invoke('admin-user-management', {
+      body: { action: 'change_email', target_user_id: profile?.id, new_email: next },
     })
-    setEmailState(error ? 'error' : 'sent')
-    setTimeout(() => setEmailState('idle'), 4000)
+    if (error || data?.error) { setEmailState('error'); setTimeout(() => setEmailState('idle'), 4000); return }
+    setEmailState('sent')
+    setTimeout(() => { setEmailState('idle'); setNewEmail('') }, 3000)
   }
 
   // Disable fingerprint on all devices — sets a server flag; the mobile app
@@ -834,15 +848,45 @@ function AdminSupportActions({ profile }) {
         disabled={!profile?.email}
       />
 
-      <SupportActionRow
-        icon={ExternalLink}
-        title="Send email-change link"
-        description="Sends a one-time link the client uses to change the email address on their account."
-        buttonLabel="Send change link"
-        onClick={sendEmailChange}
-        state={emailState}
-        disabled={!profile?.email}
-      />
+      {/* Change account email — inline (admin types the new address; applies
+          immediately). The client is mobile-only and GoTrue has no
+          admin-triggered "client confirms via link" flow, so this is a direct
+          superuser change rather than a self-confirm link. */}
+      <div className="rounded-xl border border-border bg-card/40 p-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted/40">
+            <ExternalLink className="h-4 w-4 text-muted-foreground" />
+          </div>
+          <div className="flex-1 min-w-0 space-y-1">
+            <p className="text-sm font-semibold text-foreground">Change account email</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Updates the client's sign-in email immediately. Current:{' '}
+              <span className="text-foreground break-all">{profile?.email || '—'}</span>
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 flex gap-2">
+          <input
+            type="email"
+            value={newEmail}
+            onChange={e => setNewEmail(e.target.value)}
+            placeholder="new@email.com"
+            autoComplete="off"
+            className="flex-1 min-w-0 rounded-md border border-border bg-input/30 px-3 py-2 text-xs text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors"
+          />
+          <button
+            type="button"
+            onClick={changeEmail}
+            disabled={emailState === 'sending' || emailState === 'sent' || !newEmail.trim()}
+            className="shrink-0 inline-flex items-center justify-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {emailState === 'sending' ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Updating…</>
+            : emailState === 'sent'   ? <><Check className="h-3.5 w-3.5 text-emerald-400" /> Updated</>
+            : emailState === 'error'  ? <><AlertCircle className="h-3.5 w-3.5 text-destructive" /> Failed</>
+            : 'Update email'}
+          </button>
+        </div>
+      </div>
 
       <SupportActionRow
         icon={Shield}
@@ -1209,7 +1253,7 @@ function TargetAccountTab({ profile, targetUserId, onSaved }) {
       <div>
         <label className="block text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-widest">Email</label>
         <input type="email" value={profile?.email || ''} disabled className={inputCls + ' opacity-50 cursor-not-allowed'} />
-        <p className="mt-1 text-[11px] text-muted-foreground/70">To change, use the Security tab's "Send email-change link" button.</p>
+        <p className="mt-1 text-[11px] text-muted-foreground/70">To change, use the Security tab's "Change account email" field.</p>
       </div>
 
       <div>
