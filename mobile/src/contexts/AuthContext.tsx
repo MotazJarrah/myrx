@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store'
 import * as LocalAuthentication from 'expo-local-authentication'
 import { supabase } from '../lib/supabase'
 import { uniqueChannelName } from '../lib/realtime'
-import { recordAuthSuccess, clearAuthState } from '../lib/lockState'
+import { recordAuthSuccess, clearAuthState, setLockEnabled } from '../lib/lockState'
 import { mapAuthError, isBannedError } from '../lib/authErrors'
 import type { User } from '@supabase/supabase-js'
 
@@ -22,6 +22,34 @@ const BIO_PASSWORD_KEY = 'myrx.bio.password'
 // don't carry passwords across the sign-in handoff). Cleared on
 // signOut, on biometric enroll, and at journey end.
 const BIO_PENDING_PASSWORD_KEY = 'myrx.bio.pending'
+
+// When biometric was enrolled on THIS device (ISO). Compared against
+// profiles.biometric_disabled_at so an admin's "Disable fingerprint on all
+// devices" only clears enrolments OLDER than the admin action — a device that
+// re-enrols afterward keeps working.
+const BIO_ENROLLED_AT_KEY = 'myrx.bio.enrolledAt'
+
+// Honor an admin's remote "Disable fingerprint on all devices" action. If the
+// profile's biometric_disabled_at is newer than this device's enrol timestamp
+// (or we hold creds but have no enrol record), wipe the on-device biometric
+// sign-in + app lock. Idempotent + best-effort; safe to call on every profile
+// load (once cleared, the no-creds early-return makes it a no-op).
+async function honorRemoteBiometricDisable(profile: any): Promise<void> {
+  try {
+    const disabledAt = profile?.biometric_disabled_at
+    if (!disabledAt) return
+    const email = await SecureStore.getItemAsync(BIO_EMAIL_KEY)
+    if (!email) return  // no biometric on this device — nothing to clear
+    const enrolledStr = await SecureStore.getItemAsync(BIO_ENROLLED_AT_KEY)
+    const enrolledAt  = enrolledStr ? Date.parse(enrolledStr) : 0
+    if (Date.parse(disabledAt) <= enrolledAt) return  // re-enrolled after the admin action
+    await SecureStore.deleteItemAsync(BIO_EMAIL_KEY)
+    await SecureStore.deleteItemAsync(BIO_PASSWORD_KEY)
+    await SecureStore.deleteItemAsync(BIO_ENROLLED_AT_KEY)
+    try { await SecureStore.deleteItemAsync(BIO_PENDING_PASSWORD_KEY) } catch { /* best-effort */ }
+    await setLockEnabled(false)
+  } catch { /* best-effort */ }
+}
 
 // How often the foreground heartbeat updates `profiles.last_seen_at`. Set to
 // 60 s — long enough to be cheap, short enough that the green-dot indicator
@@ -254,6 +282,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single()
       if (error && error.code !== 'PGRST116') throw error
       setProfile(data ?? null)
+      // Honor an admin's remote fingerprint-disable. Fire-and-forget so it
+      // doesn't delay profileLoading; clears on-device biometric + lock when
+      // the admin's timestamp is newer than this device's enrol.
+      if (data) honorRemoteBiometricDisable(data)
     } catch (err) {
       console.error('Profile fetch error:', err)
     } finally {
@@ -652,6 +684,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!result.success) return { error: { message: 'Biometric confirmation cancelled.' } }
       await SecureStore.setItemAsync(BIO_EMAIL_KEY,    email)
       await SecureStore.setItemAsync(BIO_PASSWORD_KEY, password)
+      // Stamp the enrol time so a later admin "disable fingerprint" only
+      // clears this device if its action is newer than this enrolment.
+      await SecureStore.setItemAsync(BIO_ENROLLED_AT_KEY, new Date().toISOString())
       // Clear the transient pending-password cache — we just promoted
       // it to the permanent BIO_PASSWORD_KEY so it's no longer needed.
       try { await SecureStore.deleteItemAsync(BIO_PENDING_PASSWORD_KEY) } catch { /* best-effort */ }
@@ -664,6 +699,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const disableBiometric = useCallback(async () => {
     await SecureStore.deleteItemAsync(BIO_EMAIL_KEY)
     await SecureStore.deleteItemAsync(BIO_PASSWORD_KEY)
+    await SecureStore.deleteItemAsync(BIO_ENROLLED_AT_KEY)
   }, [])
 
   const signInWithBiometric = useCallback(async () => {
