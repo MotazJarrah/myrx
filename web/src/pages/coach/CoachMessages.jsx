@@ -575,6 +575,7 @@ export default function CoachMessages() {
       const match = users.find(u => u.id === target)
       if (match) {
         setSelectedId(target)
+        setShowList(false)   // mobile: reveal the transcript panel, not the list (desktop shows both)
         // Focus composer after the right-pane mounts.
         setTimeout(() => inputRef.current?.focus(), 200)
       }
@@ -605,14 +606,22 @@ export default function CoachMessages() {
     }
   }, [selectedId, messages]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Scroll-to-bottom rule (locked May 28 2026) ─────────────────────────
-  //   • New message sent or received → scroll (`messages` dep).
-  //   • Conversation switched → scroll (`selectedId` dep).
+  // ── Scroll-to-bottom rule (locked May 28 2026, refined Jun 7 2026) ──────
+  //   • Conversation OPENED or SWITCHED (`selectedId` changed) → jump
+  //     INSTANTLY to the latest message (`behavior: 'auto'`). A smooth
+  //     animation here scrolls the whole transcript top→bottom on open,
+  //     which reads as a jarring "where am I" scroll. Instant lands the
+  //     coach on the newest bubble immediately.
+  //   • New message while the SAME conversation is open (`messages` changed,
+  //     `selectedId` same) → smooth scroll so the incoming bubble glides in.
   //   • Typing starts/stops → do NOT scroll. Coach's reading position is
   //     sacred. Typing bubble is rendered OUTSIDE this scroll container
   //     (above the input bar) so it's always visible without interfering.
+  const prevSelectedRef = useRef(null)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const switched = prevSelectedRef.current !== selectedId
+    prevSelectedRef.current = selectedId
+    bottomRef.current?.scrollIntoView({ behavior: switched ? 'auto' : 'smooth' })
   }, [messages, selectedId])
 
   // Auto-focus the message input when the coach opens a conversation, so
