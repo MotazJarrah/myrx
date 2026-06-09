@@ -11,8 +11,8 @@ v1
 - link bodyweight bmi to lean factor
 
 v2
-- homescreen badge
 - customer support and ticketing tool
+- client invite tool should ask if coach wants to send a self managed or coach managed macro invite
 
 
 v3

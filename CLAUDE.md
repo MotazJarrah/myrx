@@ -59,6 +59,8 @@ MyRX/
 
 **Deploy is direct-upload, not Git-integrated.** Cloudflare Pages does NOT watch GitHub. `git push` is for source-of-truth only; deploys happen exclusively via `wrangler pages deploy web/dist` (see Deployment section).
 
+**Always commit `docs/User Stories.txt` (MANDATORY).** Whenever it shows as modified, INCLUDE it in the commit — it's the versioned backup of the product's user stories, and the user wants a recoverable copy in git in case it's ever deleted locally by mistake. Do NOT exclude it from staging the way other unrelated stray working-tree changes are excluded.
+
 ---
 
 ## Working Relationship
