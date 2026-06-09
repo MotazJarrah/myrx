@@ -951,10 +951,34 @@ TASKS = [
      "web/src/lib/nutritionOverview.js (new); web/src/components/NutritionOverviewList.jsx (new); web/src/pages/admin/AdminNutrition.jsx (refactored to shared); web/src/pages/coach/CoachNutrition.jsx (new); web/src/App.jsx (route); web/src/pages/coach/CoachShell.jsx (nav)",
      "2026-06-09"),
 
-    ("T146", "Messages scoping -- admin Messages shows conversation panes for people NOT linked to the viewer; scope to coach_id = viewer (admin + coach)", "Coaching", "Web", "Pending",
+    ("T146", "Messages scoping -- admin Messages shows conversation panes for people NOT linked to the viewer; scope to coach_id = viewer (admin + coach)", "Coaching", "Web", "Reverted",
      "User 2026-06-09: the admin Messages page shows conversation panes for self-coached people not linked to the admin (Lu Xu, Samer, Youssef in the screenshot have panes despite coach_id=null). Same all-clients scoping bug as Weight Goal (T136) / Nutrition (T138). The user also wants ALL these scoping resolutions reflected on the COACH portal, not just admin.",
-     "NEXT: audit AdminMessages messageable-users / conversation-list filter (CLAUDE.md notes a coach_id filter was added but self-coached people still appear -- likely the list shows anyone with admin_chat_enabled or any message history regardless of linkage). Scope the conversation list to coach_id = viewer. Verify + fix CoachMessages the same way.",
-     "web/src/pages/admin/AdminMessages.jsx; web/src/pages/coach/CoachMessages.jsx",
+     "REVERTED 2026-06-09. The code change (scoping AdminMessages directUsers to coach_id-only) was WRONG -- it tore out the INTENTIONAL admin_chat_enabled support-channel feature without asking. The user flagged it: the non-linked people showing (Lu Xu, Samer Ismael) simply had admin_chat_enabled=TRUE and the user hadn't noticed it was on. NO CODE FIX NEEDED -- AdminMessages' `coach_id === admin OR admin_chat_enabled === true` is working as designed (CoachMessages is roster-only and was always correct). Reverted AdminMessages to original; live back to index-Dvs98TBP.js (== committed ed2ee2f, so AdminMessages now matches the commit, no diff). RESOLUTION = DATA: switch admin_chat_enabled OFF for the non-linked users (Lu Xu, Samer) -- the user is handling that toggle. LESSON (reinforced): when an issue could be a data/config state, REPORT the finding and let the user decide before changing deliberate logic.",
+     "web/src/pages/admin/AdminMessages.jsx (change reverted -- no net diff); resolution is data (admin_chat_enabled toggle), not code",
+     "2026-06-09"),
+
+    ("T147", "Admin chat toggle -- admin can switch chat on/off per client INCLUDING linked/managed clients (admin-only, not coaches)", "Admin", "Web", "Done",
+     "User 2026-06-09 (after the T146 revert): the admin_chat_enabled toggle is a wanted ADMIN feature -- the admin must be able to turn chat on/off for ANY client, including linked/managed ones. Today linked clients (coach_id=admin) ALWAYS appear in AdminMessages via `coach_id === admin OR admin_chat_enabled`, so the admin can't switch a linked client's chat OFF. Coaches do NOT get this toggle.",
+     "DONE + deployed (web live index-DRgrREzo.js). User decided (emphatically): admin_chat_enabled is ALWAYS off by default and FORCED off on EVERY coaching-state change; only the admin's explicit click turns it on. ROOT FINDING: the toggle was hidden for the admin's own coached clients (AdminUserDetail gated it on coach_id !== admin), and directUsers force-showed linked clients regardless. FIXES: (DB) migration t147 extends the coach-change trigger to set admin_chat_enabled=false on INSERT + any coach_id change (link/unlink/switch), enforces column default false, and one-time resets every row to false (clean slate); (UI) the 'Chat on/off' pill now shows for EVERY client; the detail Message button + AdminMessages directUsers key on admin_chat_enabled ALONE; AthleteCoachingChip optimistically flips the pill off on a mode switch. Admin-only -- coaches' Messages stay roster-scoped (no toggle). Net: chat is off until the admin turns it on per client; it never auto-enables. Placement (user, Jun 9): the Chat on/off pill sits right AFTER the Active pill (order: Active . Chat . coaching-mode . plan status).",
+     "supabase migration t147_admin_chat_always_off_on_state_change; web/src/pages/admin/AdminUserDetail.jsx (toggle always shown + Message-button gate + chip optimistic reset); web/src/pages/admin/AdminMessages.jsx (directUsers = admin_chat_enabled only)",
+     "2026-06-09"),
+
+    ("T148", "Chat view -- add a button inside the conversation that opens the client's detail page (admin + coach)", "Coaching", "Web", "Done",
+     "User 2026-06-09: inside the chat conversation pane, add a button that navigates to the client's user-detail page -- for BOTH admin (AdminMessages -> /admin/user/:id) and coach (CoachMessages -> /coach/client/:id).",
+     "DONE + deployed (web live index-DRgrREzo.js). Added an 'Open client detail' button (ExternalLink icon) at the right end of the conversation header (next to the client name/last-seen) in BOTH AdminMessages (-> /admin/user/:id) and CoachMessages (-> /coach/client/:id). wouter Link; one tap to the client's detail page.",
+     "web/src/pages/admin/AdminMessages.jsx (header button + Link/ExternalLink import); web/src/pages/coach/CoachMessages.jsx (header button + Link/ExternalLink import)",
+     "2026-06-09"),
+
+    ("T149", "Admin portal -- use the MyRX wordmark IMAGE in the sidebar header instead of the 'MyRX Admin' TEXT (brand rule)", "Admin", "Web", "Done",
+     "User 2026-06-09: the admin portal sidebar renders 'MyRX Admin' as TEXT; the brand rule (CLAUDE.md) is never render the brand name as JSX text -- always use the wordmark image asset. CoachShell already does this right (wordmark image + 'Coach' sub-label).",
+     "DONE + deployed (web live index-CtBOVJhW.js). Replaced AdminShell's ShieldCheck-icon + 'MyRX Admin' text with the no-slogan wordmark image (/myrx-wordmark-dark.png?v=6-final, 22px) + a lime 'Admin' sub-label, mirroring CoachShell's Logo. Removed the now-unused ShieldCheck import. One wordmark per page preserved.",
+     "web/src/pages/admin/AdminShell.jsx",
+     "2026-06-09"),
+
+    ("T150", "Coach portal -- show the coach's TIER next to 'Coach' in the sidebar header (Coach Starter / Pro / Elite)", "Coach", "Web", "Done",
+     "User 2026-06-09: on the coach portal, next to the wordmark where it says 'Coach', append the coach's subscription tier so it reads 'Coach Elite' / 'Coach Starter' / 'Coach Pro'.",
+     "DONE + deployed (web live index-CtBOVJhW.js). CoachShell's Logo sub-label now reads 'Coach {Tier}' -- maps profile.coach_subscription_tier (modern values starter/pro/elite, verified Test Coach=elite) via COACH_TIER_LABEL to Starter/Pro/Elite (capitalize fallback for any other value); plain 'Coach' when no tier. Logo reads the tier via useAuth.",
+     "web/src/pages/coach/CoachShell.jsx",
      "2026-06-09"),
 ]
 

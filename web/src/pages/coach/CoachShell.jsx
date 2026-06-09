@@ -39,11 +39,18 @@ const NAV = [
   { href: '/coach/adjustments', label: 'Suggested Adjustments', icon: Sparkles },
 ]
 
+// Coach subscription tier → display label for the "Coach {Tier}" sub-label.
+const COACH_TIER_LABEL = { starter: 'Starter', pro: 'Pro', elite: 'Elite' }
+
 function Logo() {
   // Real wordmark per brand book ("Never render the brand name as JSX text").
   // myrx-wordmark-dark.png = Logo Clean White (light text for dark surface).
-  // "Coach" stays as a lime sub-label since we don't have a "MyRX Coach"
-  // combined variant.
+  // The lime sub-label reads "Coach {Tier}" — the coach's own subscription
+  // tier (Starter / Pro / Elite) appended to "Coach" (user req Jun 9 2026).
+  // Falls back to plain "Coach" if the tier isn't set yet.
+  const { profile } = useAuth()
+  const raw   = profile?.coach_subscription_tier
+  const tier  = raw ? (COACH_TIER_LABEL[raw] || (raw.charAt(0).toUpperCase() + raw.slice(1))) : null
   return (
     <div className="flex items-center gap-2">
       <img
@@ -53,7 +60,7 @@ function Logo() {
         style={{ height: '22px' }}
       />
       <span className="text-base font-semibold tracking-tight text-primary">
-        Coach
+        {tier ? `Coach ${tier}` : 'Coach'}
       </span>
     </div>
   )

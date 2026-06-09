@@ -37,10 +37,11 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { Link } from 'wouter'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { hydrateEmails } from '../../lib/hydrateEmails'
-import { MessageCircle, Send, ArrowLeft, Pencil } from 'lucide-react'
+import { MessageCircle, Send, ArrowLeft, Pencil, ExternalLink } from 'lucide-react'
 import SwipeDelete from '../../components/SwipeDelete'
 
 const ENTER_KEY = 'myrx_enter_to_send'
@@ -877,6 +878,15 @@ export default function CoachMessages() {
                       </p>
                     )}
                   </div>
+                  {/* T148 — open this client's detail page from the chat header. */}
+                  <Link href={`/coach/client/${selectedUser.id}`}>
+                    <a
+                      title="Open client detail"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </a>
+                  </Link>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-2">

@@ -41,9 +41,10 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { Link } from 'wouter'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
-import { MessageCircle, Lightbulb, Send, ArrowLeft, Pencil } from 'lucide-react'
+import { MessageCircle, Lightbulb, Send, ArrowLeft, Pencil, ExternalLink } from 'lucide-react'
 import SwipeDelete from '../../components/SwipeDelete'
 
 const ENTER_KEY = 'myrx_enter_to_send'
@@ -492,6 +493,15 @@ function MessagesTab({
                   </p>
                 )}
               </div>
+              {/* T148 — open this client's detail page from the chat header. */}
+              <Link href={`/admin/user/${selectedUser.id}`}>
+                <a
+                  title="Open client detail"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              </Link>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
@@ -704,24 +714,22 @@ export default function AdminMessages() {
   const now = useNow()
   const presenceChannelRef = useRef(null)
 
-  // Admin's MESSAGEABLE users — passed to Messages tab. Includes:
-  //   (a) Admin-LINKED athletes (coach_id = the signed-in admin's id).
-  //       Mirrors the coach rule: "linked athletes always appear in the
-  //       coach's messages window". Always shown regardless of toggle.
-  //   (b) Anyone where admin_chat_enabled = true. Admin can flip this on
-  //       for coaches, other-coach athletes, self-coached users, etc. to
-  //       open a support channel.
+  // Admin's MESSAGEABLE users — passed to the Messages tab. Driven by the
+  // admin's per-client chat toggle ALONE (admin_chat_enabled). A client appears
+  // here only when the admin has explicitly turned chat ON for them — linked,
+  // managed, or not. (T147, Jun 9 2026.)
   //
-  // Self-coached users (coach_id = null) NO LONGER appear automatically —
-  // they only show up if the admin explicitly enables chat with them.
-  // Locked May 30 2026 (Option A split): keys off admin_chat_enabled
-  // (admin-controlled) instead of chat_enabled (coach<->athlete only).
+  // admin_chat_enabled is OFF by default and is FORCED off on any
+  // coaching-state change (link / unlink / switch) by a DB trigger, so a
+  // freshly-linked or just-switched client never auto-appears — the admin
+  // opts in per client via the "Chat on/off" pill on the client detail page.
+  // Coaches are unaffected: their Messages window is roster-scoped (coach_id),
+  // with no toggle. (Replaces the earlier `coach_id === admin OR
+  // admin_chat_enabled` rule, which force-showed linked clients regardless of
+  // the toggle.)
   const directUsers = useMemo(
-    () => allUsers.filter(u =>
-      u.coach_id === adminUser?.id ||
-      u.admin_chat_enabled === true
-    ),
-    [allUsers, adminUser?.id]
+    () => allUsers.filter(u => u.admin_chat_enabled === true),
+    [allUsers]
   )
 
   useEffect(() => {

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'wouter'
 import { useAuth } from '../../contexts/AuthContext'
 import {
-  Users, LogOut, X, Menu, ShieldCheck,
+  Users, LogOut, X, Menu,
   LayoutDashboard, TrendingUp, Utensils,
   MessageCircle, BookOpen, Settings, FileDown,
 } from 'lucide-react'
@@ -29,13 +29,20 @@ const NAV = [
 ]
 
 function Logo() {
+  // Real wordmark per brand book ("Never render the brand name as JSX text").
+  // myrx-wordmark-dark.png = Logo Clean White (light text for dark surface).
+  // "Admin" stays as a lime sub-label (no combined "MyRX Admin" variant).
+  // Mirrors CoachShell's Logo.
   return (
     <div className="flex items-center gap-2">
-      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
-        <ShieldCheck className="h-4 w-4 text-primary-foreground" />
-      </div>
-      <span className="text-base font-bold tracking-tight">
-        MyRX <span className="text-primary">Admin</span>
+      <img
+        src="/myrx-wordmark-dark.png?v=6-final"
+        alt="MyRX"
+        className="h-5 w-auto"
+        style={{ height: '22px' }}
+      />
+      <span className="text-base font-semibold tracking-tight text-primary">
+        Admin
       </span>
     </div>
   )

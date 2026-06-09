@@ -968,7 +968,7 @@ export default function AdminUserDetail() {
               width so the top row stays clean. */}
           {!profile.anonymized_at && (
             <div className="flex items-center gap-2 shrink-0">
-              {(profile.coach_id === adminUser?.id || profile.admin_chat_enabled === true) && (
+              {profile.admin_chat_enabled === true && (
                 <Link href={`/admin/messages?userId=${profile.id}`}>
                   <a
                     title="Open chat with this client"
@@ -1009,11 +1009,35 @@ export default function AdminUserDetail() {
 
             <span className="text-border">·</span>
 
+            {/* Chat-enable toggle (T147) — placed right after the Active pill.
+                Shown for EVERY client (linked, managed, or not).
+                admin_chat_enabled is ALWAYS off until the admin turns it on
+                here, and resets to off on any coaching-state change (DB
+                trigger). The Messages list keys off this flag alone. Admin-only
+                (coaches have no toggle). */}
+            <button
+              onClick={toggleChat}
+              disabled={togglingChat}
+              title={profile.admin_chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
+              className={`inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 font-medium transition-colors hover:bg-accent ${profile.admin_chat_enabled ? 'text-emerald-400' : 'text-muted-foreground'} ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <MessageCircle className="h-3 w-3" />
+              {profile.admin_chat_enabled ? 'Chat on' : 'Chat off'}
+            </button>
+
+            <span className="text-border">·</span>
+
             {/* Coaching mode — interactive dropdown */}
             <AthleteCoachingChip
               athleteProfile={profile}
               adminUserId={adminUser?.id}
-              onProfileUpdated={updates => setProfile(prev => prev ? { ...prev, ...updates } : prev)}
+              onProfileUpdated={updates => setProfile(prev => prev ? {
+                ...prev, ...updates,
+                // T147: any coaching-state change forces admin chat off (a DB
+                // trigger does this server-side). Mirror it locally so the
+                // "Chat on/off" pill flips to off immediately on a mode switch.
+                ...('coach_id' in updates ? { admin_chat_enabled: false } : {}),
+              } : prev)}
             />
 
             <span className="text-border">·</span>
@@ -1023,23 +1047,6 @@ export default function AdminUserDetail() {
             <span className={existingPlan?.goal_reached ? 'text-blue-400' : existingPlan ? 'text-emerald-400' : 'text-muted-foreground'}>
               {existingPlan?.goal_reached ? 'Macro plan setting — goal reached' : existingPlan ? 'Macro plan setting saved' : 'No macro plan setting'}
             </span>
-
-            {/* Chat-enable toggle — bordered pill; only when admin isn't this
-                client's coach (coach↔client chat is always on, no toggle). */}
-            {profile.coach_id !== adminUser?.id && (
-              <>
-                <span className="text-border">·</span>
-                <button
-                  onClick={toggleChat}
-                  disabled={togglingChat}
-                  title={profile.admin_chat_enabled ? 'Disable chat for this client' : 'Enable chat for this client'}
-                  className={`inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 font-medium transition-colors hover:bg-accent ${profile.admin_chat_enabled ? 'text-emerald-400' : 'text-muted-foreground'} ${togglingChat ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                >
-                  <MessageCircle className="h-3 w-3" />
-                  {profile.admin_chat_enabled ? 'Chat on' : 'Chat off'}
-                </button>
-              </>
-            )}
           </div>
         )}
 
