@@ -32,6 +32,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { toKg } from '../../lib/calorieFormulas'
+import { parse1RM, parseCardioBest, exerciseKey } from '../../lib/effortPR'
 import TickerNumber from '../../components/TickerNumber'
 
 import AdminUserActivity  from '../admin/tabs/AdminUserActivity'
@@ -61,27 +62,6 @@ function getInitials(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
-function parse1RM(v) {
-  const m = v?.match(/Est\. 1RM (\d+(?:\.\d+)?)/)
-  return m ? parseFloat(m[1]) : null
-}
-
-function parseCardioBest(v) {
-  if (!v) return null
-  const isPace = /\/(km|mi|500m|100m)\b/.test(v)
-  if (isPace) {
-    const m = v.match(/(\d+):(\d+)/)
-    if (!m) return null
-    return { val: parseInt(m[1], 10) * 60 + parseInt(m[2], 10), lowerBetter: true }
-  }
-  const m = v.match(/(\d+(?:\.\d+)?)/)
-  return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
-}
-
-function exerciseKey(label) {
-  if (!label) return ''
-  return label.split(' · ')[0]
-}
 
 // Counts DISTINCT food_logs.log_date values in the caller's 14-day
 // fetch window — matches the chip's "X days logged in last 14 days"
@@ -230,6 +210,21 @@ export default function CoachClientDetail() {
       setLoading(false)
     }
     load()
+  }, [id])
+
+  // ── Live profile sync — mirror AdminUserDetail (T152). A coach edit, the
+  // client editing themselves on mobile, or a cron change updates the profiles
+  // row; without this the coach's view goes stale until a manual refresh.
+  // Filtered by id so only THIS client's updates arrive; merge into setClient so
+  // hydrated fields (e.g. email) survive — Realtime carries only literal columns.
+  useEffect(() => {
+    if (!id) return
+    const channel = supabase
+      .channel(`coach-client-detail-${id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${id}` },
+        payload => { const next = payload.new; if (next) setClient(prev => (prev ? { ...prev, ...next } : next)) })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
   }, [id])
 
   // ── Load snapshot (chip data — mirrors AdminUserDetail) ─────────────────
@@ -404,6 +399,9 @@ export default function CoachClientDetail() {
   }
 
   const age = calcAge(client.birthdate)
+  // Mirror AdminUserDetail's missing-data warning (T152) — the macro plan calc
+  // needs these four; show an amber banner below the identity strip when absent.
+  const missingData = !client.current_weight || !client.current_height || !age || !client.gender
   const displayWeight = client.current_weight
     ? `${convertWeightForViewer(client.current_weight, client.weight_unit, coachProfile?.weight_unit || 'lb')} ${coachProfile?.weight_unit || 'lb'}`
     : '—'
@@ -559,6 +557,13 @@ export default function CoachClientDetail() {
             </span>
           ))}
         </div>
+
+        {missingData && (
+          <div className="mt-2.5 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+            <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>Profile incomplete — plan calculation needs gender, birthdate, weight, and height.</span>
+          </div>
+        )}
 
         {/* Stat chips — mirrors the mobile Dashboard stat-pill block exactly
             (locked May 24 2026, re-mirrored Jun 3 2026 with tier ordering,
@@ -724,6 +729,7 @@ export default function CoachClientDetail() {
       {activeTab === 'body' && (
         <AdminUserBody
           userId={id}
+          profile={client}
           onSaved={() => setSnapshotKey(k => k + 1)}
         />
       )}

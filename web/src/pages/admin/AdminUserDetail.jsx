@@ -11,6 +11,7 @@ import DashboardSleepBlock from '../../components/DashboardSleepBlock'
 import DashboardHydrationBlock from '../../components/DashboardHydrationBlock'
 import { dataCache } from '../../lib/cache'
 import { toKg } from '../../lib/calorieFormulas'
+import { parse1RM, parseCardioBest, exerciseKey } from '../../lib/effortPR'
 import { ArrowLeft, User, Check, CheckCircle2, XCircle, Info, MessageCircle, Power, Trash2, AlertTriangle, Loader2, X, Settings as SettingsIcon, Activity, Scale, Apple, Dumbbell, Clock, Pencil, CreditCard, DollarSign, Download, FileDown, Weight, Heart, Moon, Droplet } from 'lucide-react'
 
 import AdminUserActivity  from './tabs/AdminUserActivity'
@@ -57,47 +58,11 @@ function getInitials(name) {
 
 // ── Snapshot helpers ──────────────────────────────────────────────────────────
 
-// Strength 1RM parser — matches mobile/app/(app)/dashboard.tsx parseEffort1RM
-// exactly (regex + return shape). Used for "Strength PRs this month" chip.
-function parse1RM(v) {
-  const m = v?.match(/Est\. 1RM (\d+(?:\.\d+)?)/)
-  return m ? parseFloat(m[1]) : null
-}
-
-// Cardio direction-aware best parser — mirrors mobile dashboard's
-// parseCardioBest exactly. Returns { val, lowerBetter } so callers can
-// pick the right min/max direction per activity.
-//   • Pace activities (e.g. "5:30/km", "1:55/500m"): lower is better
-//   • Speed / rate / distance activities: higher is better
-// The `\b` after the unit alternation prevents "/min" (cal/min,
-// floors/min) from being misread as pace via "/mi" substring.
-function parseCardioBest(v) {
-  if (!v) return null
-  const isPace = /\/(km|mi|500m|100m)\b/.test(v)
-  if (isPace) {
-    const m = v.match(/(\d+):(\d+)/)
-    if (!m) return null
-    return { val: parseInt(m[1], 10) * 60 + parseInt(m[2], 10), lowerBetter: true }
-  }
-  const m = v.match(/(\d+(?:\.\d+)?)/)
-  return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
-}
-
 // Legacy parsePace — kept for the few remaining callers (hasPR helper);
 // new code should use parseCardioBest. Will retire when hasPR is removed.
 function parsePace(v) {
   const m = v?.match(/^(\d+):(\d{2})\/km$/)
   return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : null
-}
-
-// Mirrors mobile's grouping convention. Labels look like
-// "Push Up · Barbell" or "Running · 5K" — mobile groups by the EXERCISE
-// name (before " · "), so all variants of an exercise count as one
-// for the "PRs this month" chip. Web was grouping by the full label,
-// which inflated counts. Matches mobile dashboard.tsx::computeStrengthPRsThisMonth.
-function exerciseKey(label) {
-  if (!label) return ''
-  return label.split(' · ')[0]
 }
 
 function hasPR(efforts, parseVal, higherIsBetter, weekAgoISO) {

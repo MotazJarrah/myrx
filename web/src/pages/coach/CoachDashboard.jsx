@@ -27,33 +27,13 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { hydrateEmails } from '../../lib/hydrateEmails'
 import { loadWeightGoalRows } from '../../lib/weightGoalProgress'
+import { parse1RM, parseCardioBest, exerciseKey } from '../../lib/effortPR'
 import {
   Users, AlertCircle, MailQuestion, Clock, UserPlus, ChevronRight,
   Target, TrendingUp, Trophy, Dumbbell,
 } from 'lucide-react'
 import TickerNumber from '../../components/TickerNumber'
 import AnimateRise from '../../components/AnimateRise'
-
-// ── Effort-PR parsing (mirrors CoachClientDetail's snapshot logic) ──────────
-function parse1RM(v) {
-  const m = v?.match(/Est\. 1RM (\d+(?:\.\d+)?)/)
-  return m ? parseFloat(m[1]) : null
-}
-function parseCardioBest(v) {
-  if (!v) return null
-  const isPace = /\/(km|mi|500m|100m)\b/.test(v)
-  if (isPace) {
-    const m = v.match(/(\d+):(\d+)/)
-    if (!m) return null
-    return { val: parseInt(m[1], 10) * 60 + parseInt(m[2], 10), lowerBetter: true }
-  }
-  const m = v.match(/(\d+(?:\.\d+)?)/)
-  return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
-}
-function exerciseKey(label) {
-  if (!label) return ''
-  return label.split(' · ')[0]
-}
 
 // ── Time formatters ─────────────────────────────────────────────────────────
 function formatRelative(ts) {
