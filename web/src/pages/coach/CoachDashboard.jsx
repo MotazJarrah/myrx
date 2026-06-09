@@ -1,28 +1,24 @@
 /**
  * Coach Dashboard — the /coach/portal landing page.
  *
- * Mirror of AdminOverview.jsx's layout (stat tiles + recently-linked
- * clients + pending invites + needs-attention) but scoped to the
- * CALLING coach's roster only (profiles where coach_id = auth.uid()).
+ * Roster-scoped to the calling coach (profiles where coach_id = auth.uid()).
+ * Redesigned Jun 9 2026 (T161) from a counts-only board into a holistic
+ * roster-PROGRESS snapshot:
+ *   • Trial countdown banner (kept).
+ *   • Slim 3-tile status row: Active Clients · Pending Invites · Needs Attention.
+ *     (Dropped the old "Active This Week" tile — the Training block covers it —
+ *     and the duplicate Pending-Invites PANEL.)
+ *   • Block 1 — Goal progress: roster weight-goal distribution (reached / on
+ *     track / needs attention), reusing loadWeightGoalRows so it matches the
+ *     Weight Goal Progress page exactly.
+ *   • Block 2 — Training this week: X-of-N trained + a 4-week roster
+ *     training-days mini-bar (engagement = the leading indicator).
+ *   • Block 3 — Recent wins: goal-reached + new-PR highlights to celebrate /
+ *     reach out (PRs detected with the same parse1RM/parseCardioBest logic the
+ *     client detail page uses).
+ *   • Recently Linked Clients (kept) + first-invite empty-state CTA.
  *
- * Coach-specific surface vs AdminOverview:
- *   • Trial countdown banner up top (kept from old placeholder page —
- *     it's the most-glanced number for a coach in their trial).
- *   • Stat tiles count rows from the coach's roster only, not all
- *     platform users.
- *   • Replaces AdminOverview's all-platform activity feed with two
- *     coach-specific cards: "Recently linked clients" and "Pending
- *     invites" — the roster + funnel a coach actually manages.
- *   • Empty-state CTA encourages first invite with coach-voice copy.
- *   • "Subscription is active" footer (kept).
- *
- * Stat tile definitions (all scoped to coach_id = auth.uid()):
- *   - Active Clients: profiles, coach_id = me, deactivated_at IS NULL
- *   - Pending Invites: coach_invites, status='pending', expires_at>now()
- *   - Active This Week: roster clients with ≥1 effort in last 7 days
- *   - Needs Attention: roster clients with 0 efforts in last 14d AND
- *                      account_age ≥ 7d (account-age-aware, matches
- *                      AdminOverview's inactivity logic)
+ * All blocks degrade gracefully on a tiny/empty roster.
  */
 
 import { useState, useEffect } from 'react'
@@ -30,15 +26,36 @@ import { Link, useLocation } from 'wouter'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../contexts/AuthContext'
 import { hydrateEmails } from '../../lib/hydrateEmails'
+import { loadWeightGoalRows } from '../../lib/weightGoalProgress'
 import {
-  Users, UserCheck, AlertCircle, MailQuestion,
-  Clock, UserPlus, ChevronRight,
+  Users, AlertCircle, MailQuestion, Clock, UserPlus, ChevronRight,
+  Target, TrendingUp, Trophy, Dumbbell,
 } from 'lucide-react'
 import TickerNumber from '../../components/TickerNumber'
 import AnimateRise from '../../components/AnimateRise'
 
-// ── Time formatter (matches AdminOverview pattern) ──────────────────────────
+// ── Effort-PR parsing (mirrors CoachClientDetail's snapshot logic) ──────────
+function parse1RM(v) {
+  const m = v?.match(/Est\. 1RM (\d+(?:\.\d+)?)/)
+  return m ? parseFloat(m[1]) : null
+}
+function parseCardioBest(v) {
+  if (!v) return null
+  const isPace = /\/(km|mi|500m|100m)\b/.test(v)
+  if (isPace) {
+    const m = v.match(/(\d+):(\d+)/)
+    if (!m) return null
+    return { val: parseInt(m[1], 10) * 60 + parseInt(m[2], 10), lowerBetter: true }
+  }
+  const m = v.match(/(\d+(?:\.\d+)?)/)
+  return m ? { val: parseFloat(m[1]), lowerBetter: false } : null
+}
+function exerciseKey(label) {
+  if (!label) return ''
+  return label.split(' · ')[0]
+}
 
+// ── Time formatters ─────────────────────────────────────────────────────────
 function formatRelative(ts) {
   const diff = Date.now() - new Date(ts).getTime()
   if (diff < 60_000) return 'just now'
@@ -51,19 +68,7 @@ function formatRelative(ts) {
   return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-function formatExpiresIn(ts) {
-  const diff = new Date(ts).getTime() - Date.now()
-  if (diff <= 0) return 'expired'
-  const days = Math.floor(diff / 86_400_000)
-  if (days >= 1) return `expires in ${days}d`
-  const hrs = Math.floor(diff / 3_600_000)
-  if (hrs >= 1) return `expires in ${hrs}h`
-  const mins = Math.max(1, Math.floor(diff / 60_000))
-  return `expires in ${mins}m`
-}
-
-// ── Clickable stat tile (1:1 with AdminOverview's StatTile) ─────────────────
-
+// ── Clickable stat tile ──────────────────────────────────────────────────────
 function StatTile({ label, value, sub, icon: Icon, color, bg, href, loading }) {
   const [, navigate] = useLocation()
   return (
@@ -85,34 +90,50 @@ function StatTile({ label, value, sub, icon: Icon, color, bg, href, loading }) {
   )
 }
 
+// ── Card shell (matches the existing dashboard card chrome) ──────────────────
+function Card({ title, icon: Icon, action, children }) {
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden h-full flex flex-col">
+      <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold">
+          {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
+          {title}
+        </h2>
+        {action}
+      </div>
+      <div className="flex-1">{children}</div>
+    </div>
+  )
+}
+
+const ViewAll = ({ href, label = 'View all' }) => (
+  <Link href={href}>
+    <a className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+      {label} <ChevronRight className="h-3 w-3" />
+    </a>
+  </Link>
+)
+
 export default function CoachDashboard() {
   const { user, profile } = useAuth()
   const [, navigate] = useLocation()
 
-  const [loading,        setLoading]        = useState(true)
-  const [clients,        setClients]        = useState([])
-  const [recentClients,  setRecentClients]  = useState([])
-  const [pendingInvites, setPendingInvites] = useState([])
-  const [stats,          setStats]          = useState({
-    activeClients: 0,
-    pendingInvites: 0,
-    activeThisWeek: 0,
-    needsAttention: 0,
-  })
+  const [loading,       setLoading]       = useState(true)
+  const [clients,       setClients]       = useState([])
+  const [recentClients, setRecentClients] = useState([])
+  const [stats, setStats] = useState({ activeClients: 0, pendingInvites: 0, needsAttention: 0 })
+  const [goal,  setGoal]  = useState({ total: 0, reached: 0, onTrack: 0, attention: 0 })
+  const [training, setTraining] = useState({ trainedThisWeek: 0, totalClients: 0, weeks: [], maxCount: 1 })
+  const [wins, setWins] = useState([])
 
-  // Trial countdown. Read straight off the profile (kept in sync by
-  // the stripe-webhook edge function).
+  // Trial countdown. Read straight off the profile (kept in sync by the
+  // stripe-webhook edge function). First invoice lands on the trial-end date.
   const trialEnds  = profile?.coach_trial_ends_at ? new Date(profile.coach_trial_ends_at) : null
   const daysLeft   = trialEnds ? Math.max(0, Math.ceil((trialEnds.getTime() - Date.now()) / 86_400_000)) : null
   const isTrialing = profile?.coach_subscription_status === 'trialing'
-  // First invoice lands the day the trial ends → coach_trial_ends_at.
   const trialEndsLabel = trialEnds
     ? trialEnds.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
     : null
-
-  // ── Data fetch + realtime subscription ────────────────────────────────────
-  // Single load function; realtime subscriptions on profiles + coach_invites
-  // (both filtered on coach_id = me) re-run it on any roster change.
 
   useEffect(() => {
     if (!user?.id) return
@@ -122,24 +143,13 @@ export default function CoachDashboard() {
       const now            = Date.now()
       const weekAgoISO     = new Date(now - 7  * 86_400_000).toISOString()
       const fourteenAgoISO = new Date(now - 14 * 86_400_000).toISOString()
+      const thirtyAgoISO   = new Date(now - 30 * 86_400_000).toISOString()
+      const ninetyAgoISO   = new Date(now - 90 * 86_400_000).toISOString()
       const nowISO         = new Date(now).toISOString()
 
       const [clientsRes, invitesRes] = await Promise.all([
         supabase
           .from('profiles')
-          // NOTE: profiles has NO `email` column — emails live in
-          // auth.users. Including `email` in the SELECT causes PostgREST
-          // to 400 + return zero rows, which silently masked as "no
-          // clients yet" in the UI. Removed May 27 2026. If emails are
-          // needed later, fetch via a SECURITY DEFINER RPC that joins
-          // auth.users (see admin portal's get_users_for_admin pattern).
-          //
-          // Filter anonymized_at IS NULL added May 29 2026 — defensive
-          // belt-and-suspenders. anonymize_account_now now clears the
-          // anonymized profile's coach_id (so they should naturally drop
-          // off this query via the .eq('coach_id', user.id) clause), but
-          // the filter guards against any pre-fix rows that didn't get
-          // backfilled.
           .select('id, full_name, avatar_url, created_at')
           .eq('coach_id', user.id)
           .is('deactivated_at', null)
@@ -147,115 +157,144 @@ export default function CoachDashboard() {
           .order('created_at', { ascending: false }),
         supabase
           .from('coach_invites')
-          .select('id, invitee_email, invitee_phone, sent_at, expires_at, status')
+          .select('id, status, expires_at')
           .eq('coach_id', user.id)
           .eq('status', 'pending')
-          .gt('expires_at', nowISO)
-          .order('sent_at', { ascending: false }),
+          .gt('expires_at', nowISO),
       ])
-
       if (cancelled) return
 
-      // Hydrate emails (auth.users) onto the profile rows. profiles has
-      // no email column; the RPC scopes to roster-only for coaches.
       const allClients = await hydrateEmails(supabase, clientsRes.data || [])
-      const allInvites = invitesRes.data || []
+      const clientById = Object.fromEntries(allClients.map(c => [c.id, c]))
+      const invitesCount = (invitesRes.data || []).length
 
-      // ── Efforts query: only against the coach's roster ─────────────────
-      // If the coach has no clients yet, skip the query entirely (would
-      // be a 0-row IN clause anyway, but cheaper to short-circuit).
-
-      let effortsByUser = new Map() // user_id → most-recent created_at
+      // ── Roster efforts (last 90d) — powers training + PR wins in one fetch ──
+      const lastEffortByUser = new Map()   // user_id → most-recent created_at
+      const bestStrength = {}              // `${uid}|${key}` → { best, at, uid }
+      const bestCardio   = {}
+      let effortRows = []
       if (allClients.length > 0) {
         const clientIds = allClients.map(c => c.id)
-        const { data: effortRows } = await supabase
+        const { data } = await supabase
           .from('efforts')
-          .select('user_id, created_at')
+          .select('user_id, type, label, value, created_at')
           .in('user_id', clientIds)
           .in('type', ['strength', 'cardio'])
-          .gte('created_at', fourteenAgoISO)
-          .limit(2000)
+          .gte('created_at', ninetyAgoISO)
+          .order('created_at', { ascending: false })
+          .limit(5000)
+        effortRows = data || []
 
-        ;(effortRows || []).forEach(e => {
-          const prev = effortsByUser.get(e.user_id)
-          if (!prev || e.created_at > prev) effortsByUser.set(e.user_id, e.created_at)
-        })
+        for (const e of effortRows) {
+          if (!lastEffortByUser.has(e.user_id)) lastEffortByUser.set(e.user_id, e.created_at)
+          const key = exerciseKey(e.label)
+          if (!key) continue
+          const k = `${e.user_id}|${key}`
+          if (e.type === 'strength') {
+            const v = parse1RM(e.value)
+            if (v && (!bestStrength[k] || v > bestStrength[k].best)) bestStrength[k] = { best: v, at: e.created_at, uid: e.user_id }
+          } else {
+            const p = parseCardioBest(e.value)
+            if (!p) continue
+            const ex = bestCardio[k]
+            const better = ex ? (p.lowerBetter ? p.val < ex.best : p.val > ex.best) : true
+            if (better) bestCardio[k] = { best: p.val, at: e.created_at, uid: e.user_id }
+          }
+        }
       }
 
-      // ── Roster-derived stats ───────────────────────────────────────────
+      // PRs = a movement best achieved in the last 30 days (per client).
+      const prsByUser = {}
+      for (const o of [...Object.values(bestStrength), ...Object.values(bestCardio)]) {
+        if (o.at >= thirtyAgoISO) prsByUser[o.uid] = (prsByUser[o.uid] || 0) + 1
+      }
 
-      const activeThisWeek = allClients.filter(c => {
-        const last = effortsByUser.get(c.id)
+      // ── Tile stats ──────────────────────────────────────────────────────
+      const trainedThisWeek = allClients.filter(c => {
+        const last = lastEffortByUser.get(c.id)
         return last && last >= weekAgoISO
       }).length
 
       const needsAttention = allClients.filter(c => {
-        const accountAgeDays = c.created_at
-          ? (now - new Date(c.created_at).getTime()) / 86_400_000
-          : 999
-        if (accountAgeDays < 7) return false // don't flag brand-new accounts
-        const last = effortsByUser.get(c.id)
+        const ageDays = c.created_at ? (now - new Date(c.created_at).getTime()) / 86_400_000 : 999
+        if (ageDays < 7) return false
+        const last = lastEffortByUser.get(c.id)
         return !last || last < fourteenAgoISO
       }).length
 
-      setStats({
-        activeClients:  allClients.length,
-        pendingInvites: allInvites.length,
-        activeThisWeek,
-        needsAttention,
+      // ── Block 2: 4-week roster training-days (distinct client-days/week) ──
+      const weekMs = 7 * 86_400_000
+      const weeks = [3, 2, 1, 0].map(i => {
+        const start = now - (i + 1) * weekMs
+        const end   = now - i * weekMs
+        const days = new Set()
+        for (const e of effortRows) {
+          const t = new Date(e.created_at).getTime()
+          if (t >= start && t < end) days.add(`${e.user_id}|${e.created_at.slice(0, 10)}`)
+        }
+        return { label: i === 0 ? 'This wk' : `${i}w`, count: days.size }
       })
+      const maxCount = Math.max(1, ...weeks.map(w => w.count))
 
+      // ── Block 1: weight-goal distribution (reuse the page's own loader) ──
+      let goalCounts = { total: 0, reached: 0, onTrack: 0, attention: 0 }
+      const goalReachedRows = []
+      try {
+        const rows = await loadWeightGoalRows(supabase, user.id)
+        for (const r of rows) {
+          goalCounts.total++
+          if (r.status === 'reached') { goalCounts.reached++; goalReachedRows.push(r) }
+          else if (r.status === 'on_track' || r.status === 'slow' || r.status === 'new') goalCounts.onTrack++
+          else goalCounts.attention++ // stalled / off_track / no_recent
+        }
+      } catch { /* leave zeros — block shows its empty state */ }
+
+      // ── Block 3: recent wins (goal-reached first, then PR counts) ──────────
+      const winList = []
+      for (const r of goalReachedRows) {
+        winList.push({ id: r.id, name: r.full_name || r.email || 'Client', avatar: r.avatar_url, kind: 'goal', text: 'reached their goal weight' })
+      }
+      Object.entries(prsByUser)
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([uid, n]) => {
+          const c = clientById[uid]
+          if (!c) return
+          winList.push({ id: uid, name: c.full_name || c.email || 'Client', avatar: c.avatar_url, kind: 'pr', text: `${n} new PR${n !== 1 ? 's' : ''} this month` })
+        })
+
+      if (cancelled) return
       setClients(allClients)
+      setStats({ activeClients: allClients.length, pendingInvites: invitesCount, needsAttention })
+      setTraining({ trainedThisWeek, totalClients: allClients.length, weeks, maxCount })
+      setGoal(goalCounts)
+      setWins(winList.slice(0, 6))
 
-      // Recently linked: profiles created in the last 14d (proxy for
-      // "newly accepted invite" — the profiles row is created at signup
-      // and coach_id is set during the invite-accept flow).
       const recentCutoff = now - 14 * 86_400_000
-      setRecentClients(
-        allClients
-          .filter(c => c.created_at && new Date(c.created_at).getTime() >= recentCutoff)
-          .slice(0, 5)
-      )
-
-      // Top 5 pending invites by recency
-      setPendingInvites(allInvites.slice(0, 5))
-
+      setRecentClients(allClients.filter(c => c.created_at && new Date(c.created_at).getTime() >= recentCutoff).slice(0, 5))
       setLoading(false)
     }
 
     load()
-
-    // Realtime — re-fetch on any change to roster or invites
     const channel = supabase
       .channel(`coach-dashboard-${user.id}`)
-      .on('postgres_changes', {
-        event:  '*',
-        schema: 'public',
-        table:  'profiles',
-        filter: `coach_id=eq.${user.id}`,
-      }, () => { if (!cancelled) load() })
-      .on('postgres_changes', {
-        event:  '*',
-        schema: 'public',
-        table:  'coach_invites',
-        filter: `coach_id=eq.${user.id}`,
-      }, () => { if (!cancelled) load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles',      filter: `coach_id=eq.${user.id}` }, () => { if (!cancelled) load() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'coach_invites',  filter: `coach_id=eq.${user.id}` }, () => { if (!cancelled) load() })
       .subscribe()
-
-    return () => {
-      cancelled = true
-      supabase.removeChannel(channel)
-    }
+    return () => { cancelled = true; supabase.removeChannel(channel) }
   }, [user?.id])
 
   const TILES = [
-    { label: 'Active Clients',  value: stats.activeClients,  sub: 'on your roster',          icon: Users,        color: 'text-primary',     bg: 'bg-primary/10',     href: '/coach/clients' },
-    { label: 'Pending Invites', value: stats.pendingInvites, sub: 'awaiting acceptance',     icon: MailQuestion, color: 'text-blue-400',    bg: 'bg-blue-500/10',    href: '/coach/invite' },
-    { label: 'Active This Week', value: stats.activeThisWeek, sub: 'logged training · 7d',   icon: UserCheck,    color: 'text-emerald-400', bg: 'bg-emerald-500/10', href: '/coach/clients' },
-    { label: 'Needs Attention', value: stats.needsAttention, sub: 'no training · 14d',       icon: AlertCircle,  color: 'text-amber-400',   bg: 'bg-amber-500/10',   href: '/coach/clients' },
+    { label: 'Active Clients',  value: stats.activeClients,  sub: 'on your roster',      icon: Users,        color: 'text-primary',   bg: 'bg-primary/10',   href: '/coach/clients' },
+    { label: 'Pending Invites', value: stats.pendingInvites, sub: 'awaiting acceptance', icon: MailQuestion, color: 'text-blue-400',  bg: 'bg-blue-500/10',  href: '/coach/invite'  },
+    { label: 'Needs Attention', value: stats.needsAttention, sub: 'no training · 14d',   icon: AlertCircle,  color: 'text-amber-400', bg: 'bg-amber-500/10', href: '/coach/clients' },
   ]
 
-  const showEmptyCTA = !loading && clients.length === 0 && pendingInvites.length === 0
+  const showEmptyCTA = !loading && clients.length === 0 && stats.pendingInvites === 0
+  const goalSegs = [
+    { n: goal.reached,   cls: 'bg-emerald-500', label: 'reached',        text: 'text-emerald-400' },
+    { n: goal.onTrack,   cls: 'bg-green-500',   label: 'on track',       text: 'text-green-400'   },
+    { n: goal.attention, cls: 'bg-amber-500',   label: 'need attention', text: 'text-amber-400'   },
+  ]
 
   return (
     <div className="space-y-6">
@@ -284,34 +323,129 @@ export default function CoachDashboard() {
         </div>
       )}
 
-      {/* Stat tiles */}
+      {/* Slim status tiles */}
       <AnimateRise delay={0}>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           {TILES.map(t => <StatTile key={t.label} {...t} loading={loading} />)}
         </div>
       </AnimateRise>
 
-      {/* Recently linked + Pending invites — side by side on lg+ */}
+      {/* Row 1: Goal progress + Training this week */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* Recently linked clients */}
         <AnimateRise delay={250}>
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-              <h2 className="text-sm font-semibold">Recently Linked Clients</h2>
-              <Link href="/coach/clients">
-                <a className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  View all <ChevronRight className="h-3 w-3" />
-                </a>
-              </Link>
-            </div>
+          <Card title="Goal progress" icon={Target} action={<ViewAll href="/coach/progress" />}>
+            {loading ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
+            ) : goal.total === 0 ? (
+              <div className="py-10 px-5 text-center text-sm text-muted-foreground">No weight goals set yet.</div>
+            ) : (
+              <div className="px-5 py-5 space-y-3">
+                <div className="flex items-baseline justify-between">
+                  <p className="text-2xl font-bold tabular-nums"><TickerNumber value={goal.total} /></p>
+                  <p className="text-[11px] text-muted-foreground">{goal.total === 1 ? 'client on a plan' : 'clients on a plan'}</p>
+                </div>
+                <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
+                  {goalSegs.map(s => s.n > 0 && (
+                    <div key={s.label} className={s.cls} style={{ width: `${(s.n / goal.total) * 100}%` }} />
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                  {goalSegs.map(s => (
+                    <span key={s.label} className="flex items-center gap-1.5">
+                      <span className={`h-2 w-2 rounded-full ${s.cls}`} />
+                      <span className={`font-semibold tabular-nums ${s.text}`}>{s.n}</span>
+                      <span className="text-muted-foreground">{s.label}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Card>
+        </AnimateRise>
+
+        <AnimateRise delay={250}>
+          <Card title="Training this week" icon={TrendingUp} action={<ViewAll href="/coach/clients" label="Clients" />}>
+            {loading ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
+            ) : training.totalClients === 0 ? (
+              <div className="py-10 px-5 text-center text-sm text-muted-foreground">No clients yet.</div>
+            ) : (
+              <div className="px-5 py-5 space-y-4">
+                <div className="flex items-baseline gap-2">
+                  <p className="text-2xl font-bold tabular-nums">
+                    <TickerNumber value={training.trainedThisWeek} /> <span className="text-muted-foreground">/ {training.totalClients}</span>
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">clients trained · 7d</p>
+                </div>
+                <div>
+                  <div className="flex items-end gap-2 h-16">
+                    {training.weeks.map((w, i) => (
+                      <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 h-full">
+                        <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">{w.count}</span>
+                        <div
+                          className={`w-full rounded-t ${i === training.weeks.length - 1 ? 'bg-primary' : 'bg-primary/30'}`}
+                          style={{ height: `${Math.max(4, (w.count / training.maxCount) * 100)}%` }}
+                          title={`${w.count} workout${w.count !== 1 ? 's' : ''} logged across your roster`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-1 flex gap-2">
+                    {training.weeks.map((w, i) => (
+                      <span key={i} className="flex-1 text-center text-[10px] text-muted-foreground">{w.label}</span>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[10px] text-muted-foreground text-center">workouts logged across your roster, by week</p>
+                </div>
+              </div>
+            )}
+          </Card>
+        </AnimateRise>
+      </div>
+
+      {/* Row 2: Recent wins + Recently Linked */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <AnimateRise delay={250}>
+          <Card title="Recent wins" icon={Trophy}>
+            {loading ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
+            ) : wins.length === 0 ? (
+              <div className="py-10 px-5 text-center text-sm text-muted-foreground">No new wins this week — good time to check in.</div>
+            ) : (
+              <div className="divide-y divide-border">
+                {wins.map((w, i) => (
+                  <Link key={`${w.id}-${w.kind}-${i}`} href={`/coach/client/${w.id}`}>
+                    <a className="flex items-center gap-3 px-5 py-3 hover:bg-accent/30 transition-colors cursor-pointer">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary overflow-hidden">
+                        {w.avatar
+                          ? <img src={w.avatar} alt={w.name} className="h-8 w-8 object-cover" />
+                          : (w.name?.[0]?.toUpperCase() ?? '?')}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{w.name}</p>
+                        <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                          {w.kind === 'goal'
+                            ? <Trophy className="h-3 w-3 text-emerald-400 shrink-0" />
+                            : <Dumbbell className="h-3 w-3 text-blue-400 shrink-0" />}
+                          {w.text}
+                        </p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
+                    </a>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </Card>
+        </AnimateRise>
+
+        <AnimateRise delay={500}>
+          <Card title="Recently Linked Clients" action={<ViewAll href="/coach/clients" />}>
             {loading ? (
               <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
             ) : recentClients.length === 0 ? (
               <div className="py-10 px-5 text-center text-sm text-muted-foreground">
-                {clients.length === 0
-                  ? 'Invitees show up here the moment they accept.'
-                  : 'No new clients in the last two weeks.'}
+                {clients.length === 0 ? 'Invitees show up here the moment they accept.' : 'No new clients in the last two weeks.'}
               </div>
             ) : (
               <div className="divide-y divide-border">
@@ -321,14 +455,11 @@ export default function CoachDashboard() {
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary overflow-hidden">
                         {c.avatar_url
                           ? <img src={c.avatar_url} alt={c.full_name || c.email} className="h-8 w-8 object-cover" />
-                          : (c.full_name?.[0]?.toUpperCase() ?? c.email?.[0]?.toUpperCase() ?? '?')
-                        }
+                          : (c.full_name?.[0]?.toUpperCase() ?? c.email?.[0]?.toUpperCase() ?? '?')}
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{c.full_name || c.email}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          Joined {formatRelative(c.created_at)}
-                        </p>
+                        <p className="text-[11px] text-muted-foreground">Joined {formatRelative(c.created_at)}</p>
                       </div>
                       <ChevronRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
                     </a>
@@ -336,54 +467,11 @@ export default function CoachDashboard() {
                 ))}
               </div>
             )}
-          </div>
-        </AnimateRise>
-
-        {/* Pending invites */}
-        <AnimateRise delay={500}>
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-              <h2 className="text-sm font-semibold">Pending Invites</h2>
-              <Link href="/coach/invite">
-                <a className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  Manage <ChevronRight className="h-3 w-3" />
-                </a>
-              </Link>
-            </div>
-            {loading ? (
-              <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
-            ) : pendingInvites.length === 0 ? (
-              <div className="py-10 px-5 text-center text-sm text-muted-foreground">
-                No invites waiting. Send one from the Invite page.
-              </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {pendingInvites.map(inv => {
-                  const target = inv.invitee_email || inv.invitee_phone || '—'
-                  return (
-                    <Link key={inv.id} href="/coach/invite">
-                      <a className="flex items-center gap-3 px-5 py-3 hover:bg-accent/30 transition-colors cursor-pointer">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-500/10 text-blue-400">
-                          <MailQuestion className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium">{target}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            Sent {formatRelative(inv.sent_at)} · {formatExpiresIn(inv.expires_at)}
-                          </p>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground/50 shrink-0" />
-                      </a>
-                    </Link>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+          </Card>
         </AnimateRise>
       </div>
 
-      {/* Empty-state CTA — only when no clients AND no pending invites */}
+      {/* First-invite empty-state CTA */}
       {showEmptyCTA && (
         <AnimateRise delay={500}>
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-5 text-center">
@@ -401,7 +489,6 @@ export default function CoachDashboard() {
           </div>
         </AnimateRise>
       )}
-
     </div>
   )
 }
