@@ -33,9 +33,10 @@
  */
 
 import { useState, useEffect } from 'react'
-import { BookOpen, Dumbbell, Utensils } from 'lucide-react'
+import { BookOpen, Dumbbell, Utensils, Scale } from 'lucide-react'
 import AdminMovements from './AdminMovements'
 import AdminFoodLibrary from './AdminFoodLibrary'
+import AdminLegalLibrary from './AdminLegalLibrary'
 
 function Tab({ active, onClick, children }) {
   return (
@@ -58,6 +59,7 @@ function readTabFromUrl() {
     const params = new URLSearchParams(window.location.search)
     const t = params.get('tab')
     if (t === 'foods') return 'foods'
+    if (t === 'legal') return 'legal'
     return 'movements'
   } catch {
     return 'movements'
@@ -100,11 +102,14 @@ export default function AdminLibraries() {
         <Tab active={tab === 'foods'} onClick={() => setTab('foods')}>
           <Utensils className="h-3.5 w-3.5" /> Foods
         </Tab>
+        <Tab active={tab === 'legal'} onClick={() => setTab('legal')}>
+          <Scale className="h-3.5 w-3.5" /> Legal
+        </Tab>
       </div>
 
-      {tab === 'movements'
-        ? <AdminMovements />
-        : <AdminFoodLibrary />}
+      {tab === 'movements' && <AdminMovements />}
+      {tab === 'foods'     && <AdminFoodLibrary />}
+      {tab === 'legal'     && <AdminLegalLibrary />}
     </div>
   )
 }
