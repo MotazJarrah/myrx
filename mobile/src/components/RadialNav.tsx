@@ -195,12 +195,19 @@ const TIER_LABEL: Record<Tier, string> = {
 // (set coach_id). The admin-portal "Attach as coach" UI is the future
 // home for that action — until it ships, the seed is done via direct
 // DB writes.
+// Active-sub aware (T098): the FullRX comp for coach-self / a coached client is
+// only live while the relevant coach subscription is active — trialing / active
+// / past_due keep it, lapsed / suspended / cancelled drop to the user's own b2c
+// tier. coach-self reads its own coach_subscription_status; a coached client
+// passes `coachActive` from the client_has_active_coach() RPC (AuthContext).
+const INACTIVE_COACH_STATUSES = ['lapsed', 'suspended', 'cancelled']
 function resolveTier(profile: {
   b2c_subscription_tier?: 'free' | 'corerx' | 'fullrx' | null
   coach_id?:              string | null
   is_superuser?:          boolean
   is_coach?:              boolean
-}): Tier {
+  coach_subscription_status?: string | null
+}, coachActive?: boolean): Tier {
   if (profile.is_superuser === true) return 'fullrx'
   // Coaches are humans who also work out — their paid coach subscription
   // (starter / pro / elite) bundles in full personal-use access. They
@@ -208,9 +215,12 @@ function resolveTier(profile: {
   // typically null. Without this branch, coaches fall through to 'free'
   // and only Strength + Cardio + Dashboard unlock. Added May 30 2026
   // after Test Coach (motaz.j@prdxfit.com, elite tier) appeared with
-  // 5 of 8 radial icons padlocked.
-  if (profile.is_coach === true)     return 'fullrx'
-  if (profile.coach_id)              return 'fullrx'
+  // 5 of 8 radial icons padlocked. T098: a LAPSED coach's bundle is revoked.
+  if (profile.is_coach === true)
+    return INACTIVE_COACH_STATUSES.includes(profile.coach_subscription_status ?? '')
+      ? ((profile.b2c_subscription_tier as Tier | null) ?? 'free') : 'fullrx'
+  if (profile.coach_id)
+    return coachActive === false ? ((profile.b2c_subscription_tier as Tier | null) ?? 'free') : 'fullrx'
   return (profile.b2c_subscription_tier as Tier | null) ?? 'free'
 }
 
@@ -513,7 +523,7 @@ function UpgradeModal({
 export default function RadialNav() {
   const pathname   = usePathname()
   const activePath = stripRouteGroups(pathname)
-  const { profile } = useAuth()
+  const { profile, coachEntitlementActive } = useAuth()
 
   // The centre button always shows Dashboard. Earlier versions swapped
   // the centre glyph to the current page; the simpler model is "centre
@@ -523,7 +533,7 @@ export default function RadialNav() {
 
   // Resolve tier from profile. Defaults to 'free' if profile is missing
   // (shouldn't happen in the (app) shell, but be defensive).
-  const userTier: Tier = profile ? resolveTier(profile as any) : 'free'
+  const userTier: Tier = profile ? resolveTier(profile as any, coachEntitlementActive) : 'free'
 
   // Compute locked-flag map per slot. Memoised by the slot index (stable)
   // + userTier (changes only on profile update). When userTier flips

@@ -23,7 +23,7 @@ import { usePersistedState } from '../../hooks/usePersistedState'
 
 const TABS = [
   { id: 'profile', label: 'Settings'   },
-  { id: 'plan',    label: 'Macro Plan' },
+  { id: 'plan',    label: 'Macro Plan Setting' },
 ]
 
 export default function AdminProfile() {

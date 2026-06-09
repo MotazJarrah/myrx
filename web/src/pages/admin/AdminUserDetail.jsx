@@ -157,16 +157,28 @@ function computeWeekStreak(dates) {
 
 // ── Tier model (mirrors mobile/app/(app)/dashboard.tsx::resolveTier +
 // TIER_RANK byte-for-byte — single source of truth for which stat pills a
-// subscription tier unlocks). free=0 < corerx=1 < fullrx=2. Superuser /
-// coach / coach-attached athletes all resolve to fullrx. Resolved against
-// the VIEWED CLIENT'S profile so the pills shown match what the client
-// would see on their own dashboard. ─────────────────────────────────────
+// subscription tier unlocks). free=0 < corerx=1 < fullrx=2. Resolved against
+// the VIEWED CLIENT'S profile so the pills shown match what the client would
+// see on their own dashboard.
+//
+// Active-sub aware (T098): the FullRX comp for a coach-self / coached client is
+// only live while the relevant coach subscription is active. trialing / active
+// / past_due keep it (active + the dunning grace window); lapsed / suspended /
+// cancelled revoke it and the user falls back to their own b2c tier. For a
+// coached client the coach's status isn't on the client row, so the caller
+// passes `coachActive` from the client_has_active_coach() RPC. ──────────────
 const TIER_RANK = { free: 0, corerx: 1, fullrx: 2 }
-function resolveTier(p) {
+const INACTIVE_COACH_STATUSES = ['lapsed', 'suspended', 'cancelled']
+function resolveTier(p, coachActive) {
   if (!p) return 'free'
   if (p.is_superuser === true) return 'fullrx'
-  if (p.is_coach === true)     return 'fullrx'
-  if (p.coach_id)              return 'fullrx'
+  if (p.is_coach === true)
+    return INACTIVE_COACH_STATUSES.includes(p.coach_subscription_status)
+      ? (p.b2c_subscription_tier ?? 'free') : 'fullrx'
+  if (p.coach_id)
+    // coachActive: true/false from the RPC; undefined while loading → assume
+    // active so we never flash a downgrade before the RPC resolves.
+    return coachActive === false ? (p.b2c_subscription_tier ?? 'free') : 'fullrx'
   return p.b2c_subscription_tier ?? 'free'
 }
 
@@ -505,6 +517,9 @@ export default function AdminUserDetail() {
   const [snapshot,       setSnapshot]       = useState(null)
   const [loading,        setLoading]        = useState(true)
   const [snapshotKey,    setSnapshotKey]    = useState(0)
+  // Coach-entitlement gate (T098): true/false once resolved, undefined while
+  // loading. Only meaningful when the viewed client has a coach_id.
+  const [coachActive,    setCoachActive]    = useState(undefined)
   const [togglingChat,   setTogglingChat]   = useState(false)
   const [togglingActive, setTogglingActive] = useState(false)
   const [activeError,    setActiveError]    = useState('')
@@ -542,6 +557,22 @@ export default function AdminUserDetail() {
     }
     load()
   }, [id])
+
+  // ── Coach-entitlement gate (T098) — for a coached client, FullRX is only
+  //    live while the linked coach's subscription is active. The coach's status
+  //    isn't on the client row, so resolve it via the SECURITY DEFINER RPC
+  //    (which counts a superuser/admin coach as always-active). undefined until
+  //    it resolves → resolveTier assumes active, so no downgrade flash. Self-
+  //    managed clients (no coach_id) skip the RPC entirely.
+  useEffect(() => {
+    if (!profile?.coach_id) { setCoachActive(undefined); return }
+    let alive = true
+    supabase.rpc('client_has_active_coach', { p_user_id: id }).then(({ data, error }) => {
+      if (!alive) return
+      setCoachActive(error ? undefined : data === true)
+    })
+    return () => { alive = false }
+  }, [id, profile?.coach_id])
 
   // ── Realtime sync — keep the profile state fresh when the row changes
   //    outside the admin's own actions. The in-page Cancel-deletion pill
@@ -749,7 +780,7 @@ export default function AdminUserDetail() {
   // Subscription tier of the VIEWED CLIENT → which stat pills render.
   // free: Strength + Cardio. corerx adds Weight + Heart + Food. fullrx adds
   // Sleep + Hydration. resolveTier guards null → 'free' (rank 0).
-  const tierRank = TIER_RANK[resolveTier(profile)]
+  const tierRank = TIER_RANK[resolveTier(profile, coachActive)]
 
   async function toggleChat() {
     if (togglingChat) return
@@ -986,9 +1017,10 @@ export default function AdminUserDetail() {
 
             <span className="text-border">·</span>
 
-            {/* Plan status — one mutually-exclusive state: reached / set / not set */}
+            {/* Plan status — one mutually-exclusive state: reached / set / not set.
+                Mirrored verbatim on the coach card (CoachClientDetail). */}
             <span className={existingPlan?.goal_reached ? 'text-blue-400' : existingPlan ? 'text-emerald-400' : 'text-muted-foreground'}>
-              {existingPlan?.goal_reached ? 'Macro plan goal reached' : existingPlan ? 'Macro plan set' : 'No macro plan'}
+              {existingPlan?.goal_reached ? 'Macro plan setting — goal reached' : existingPlan ? 'Macro plan setting saved' : 'No macro plan setting'}
             </span>
 
             {/* Chat-enable toggle — bordered pill; only when admin isn't this
@@ -1275,6 +1307,11 @@ export default function AdminUserDetail() {
           profile={profile}
           adminUserId={adminUser?.id}
           onPlanSaved={updated => setExistingPlan(updated)}
+          // Admin manages a client's macros only when the client is
+          // Admin-managed (coach_id === this admin). Self-managed or
+          // coach-managed clients hide the Macro Plan Setting tab — switch
+          // the coaching chip to Admin-managed to take over.
+          canManageMacros={profile?.coach_id === adminUser?.id}
         />
       )}
 

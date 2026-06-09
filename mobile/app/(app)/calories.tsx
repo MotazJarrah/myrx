@@ -373,7 +373,13 @@ export default function Calories() {
   // (they're their own client) — neither can edit it here on mobile. Real
   // self-coached athletes still get inline mobile editing. (T126, Jun 8 2026.)
   const isStaff         = isAdmin || isCoach
-  const canEditPlanHere = isSelfCoached && !isStaff
+  // A COACHED athlete whose coach has NOT taken over their macros
+  // (macros_managed_by_coach = false) edits their own plan on mobile — the
+  // coach's "Self-managed" chip hands the plan back (web 1a-A, Jun 8 2026).
+  // When the coach HAS taken over (true), the athlete sees the read-only
+  // PendingView. Self-coached athletes always edit (their flag is never true).
+  const macrosManagedByCoach = profile?.macros_managed_by_coach === true
+  const canEditPlanHere = !isStaff && (isSelfCoached || !macrosManagedByCoach)
 
   // Current weight in kg — sourced from latest bodyweight log if present,
   // else from profile.current_weight (which is stored in profile.weight_unit).

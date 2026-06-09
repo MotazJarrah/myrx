@@ -180,8 +180,21 @@ function SubTabBtn({ active, onClick, children }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function AdminUserCalories({ userId, existingPlan, profile, adminUserId, onPlanSaved }) {
+// canManageMacros — whether the VIEWER currently manages this client's macros.
+//   • Admin portal  → true only when the client is Admin-managed
+//                     (profile.coach_id === the admin's id).
+//   • Coach portal  → true only when the coach has taken over macros
+//                     (profile.macros_managed_by_coach === true).
+// When false, the Macro Plan Setting sub-tab is HIDDEN entirely — flip the
+// management chip in the header to take over, and it reappears.
+export default function AdminUserCalories({ userId, existingPlan, profile, adminUserId, onPlanSaved, canManageMacros = false }) {
   const [subTab, setSubTab] = useState('overview')
+
+  // If management is handed away while the plan tab is open, fall back to
+  // Overview so we never strand the viewer on a hidden tab.
+  useEffect(() => {
+    if (!canManageMacros && subTab === 'plan') setSubTab('overview')
+  }, [canManageMacros, subTab])
 
   const dailyTarget = (() => {
     if (!existingPlan || !profile) return null
@@ -196,7 +209,9 @@ export default function AdminUserCalories({ userId, existingPlan, profile, admin
       <div className="flex gap-1 rounded-lg border border-border bg-muted/20 p-0.5 w-fit flex-wrap">
         <SubTabBtn active={subTab === 'overview'} onClick={() => setSubTab('overview')}>Overview</SubTabBtn>
         <SubTabBtn active={subTab === 'foodlog'}  onClick={() => setSubTab('foodlog')}>Food Log</SubTabBtn>
-        <SubTabBtn active={subTab === 'plan'}     onClick={() => setSubTab('plan')}>Macro Plan</SubTabBtn>
+        {canManageMacros && (
+          <SubTabBtn active={subTab === 'plan'} onClick={() => setSubTab('plan')}>Macro Plan Setting</SubTabBtn>
+        )}
       </div>
 
       {/* Overview tab — read-only mirror of the athlete calorie dashboard */}
@@ -209,8 +224,10 @@ export default function AdminUserCalories({ userId, existingPlan, profile, admin
         <FoodLogTab userId={userId} dailyTarget={dailyTarget} />
       )}
 
-      {/* Macro Plan tab — unified MacroPlanEditor (coach edits the client's plan) */}
-      {subTab === 'plan' && (
+      {/* Macro Plan Setting tab — unified MacroPlanEditor (the manager edits the
+          client's plan). Gated on canManageMacros so it can never render for a
+          viewer who isn't the current manager. */}
+      {subTab === 'plan' && canManageMacros && (
         <MacroPlanEditor
           profile={profile}
           user={{ id: userId, email: profile?.email ?? null }}

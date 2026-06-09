@@ -534,7 +534,13 @@ export default function MacroPlanEditor({
   const missingData = !weight_kg || !height_cm || !age || !gender
 
   // ── State (seeded from existingPlan when present) ────────────────────────
-  const [bodyFatBand,    setBodyFatBand]    = useState(profile?.body_fat_band || 'average')
+  // Body composition is a CLIENT METRIC, not a coach default — seed it ONLY
+  // from the saved profile value. When the DB has no body_fat_band, start with
+  // NO selection (null) rather than silently pre-picking 'average'. The preview
+  // (BMR/TDEE/Target) gates to "—" until a real selection is made, so we never
+  // show numbers built on a fabricated body-comp input. (The sliders below —
+  // activity / pace / correction — keep sensible defaults by design.)
+  const [bodyFatBand,    setBodyFatBand]    = useState(profile?.body_fat_band || null)
   const [activityFactor, setActivityFactor] = useState(() => existingPlan?.activity_factor ?? 2)
   const [energyPct,      setEnergyPct]      = useState(() =>
     existingPlan?.energy_balance_pct != null ? Math.round(existingPlan.energy_balance_pct * 100) : -20
@@ -576,7 +582,9 @@ export default function MacroPlanEditor({
 
   // ── Computed BMR / TDEE / target ─────────────────────────────────────────
   const bmr = useMemo(() => {
-    if (missingData) return null
+    // No body-comp selection → no BMR. Forces an explicit pick before any
+    // calorie math runs (3a — never compute off a fabricated 'average').
+    if (missingData || !bodyFatBand) return null
     const raw = calcBMR(weight_kg, height_cm, age, gender)
     return raw ? Math.round(raw * bodyCompFactor(bodyFatBand)) : null
   }, [weight_kg, height_cm, age, gender, bodyFatBand, missingData])
@@ -685,6 +693,7 @@ export default function MacroPlanEditor({
     e?.preventDefault?.()
     setError('')
     if (missingData) { setError('Profile is missing weight / height / age / gender.'); return }
+    if (!bodyFatBand) { setError('Pick a body composition to compute the plan.'); return }
     if (!macros || !targetKcal) { setError('Macros not initialised yet.'); return }
     if (timeline?.mode === 'mismatch') {
       setError("Goal weight and pace point opposite directions. Adjust one of them before saving.")
@@ -780,7 +789,7 @@ export default function MacroPlanEditor({
         <div className="rounded-xl border border-border bg-card p-5 space-y-6">
 
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">Macro Plan variables</h2>
+            <h2 className="text-sm font-semibold">Macro Plan Setting variables</h2>
           </div>
 
           {existingPlan?.goal_reached && (
@@ -936,7 +945,7 @@ export default function MacroPlanEditor({
                 </p>
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground italic">Set body data + goal weight to unlock macro sliders.</p>
+              <p className="text-xs text-muted-foreground italic">Pick a body composition to unlock macro sliders.</p>
             )}
           </div>
 
@@ -994,11 +1003,11 @@ export default function MacroPlanEditor({
 
         <button type="submit" disabled={saving || readOnly || timeline?.mode === 'mismatch'}
           className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed">
-          {saved ? <><Check className="h-4 w-4" /> Macro Plan saved</>
+          {saved ? <><Check className="h-4 w-4" /> Macro Plan Setting saved</>
           : saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
           : timeline?.mode === 'mismatch' ? 'Fix direction mismatch to save'
-          : existingPlan ? 'Update Macro Plan'
-          : 'Save Macro Plan'}
+          : existingPlan ? 'Update Macro Plan Setting'
+          : 'Save Macro Plan Setting'}
         </button>
       </form>
 

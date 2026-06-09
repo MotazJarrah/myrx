@@ -129,6 +129,14 @@ interface Profile {
   // Default is true (new signups). Admin sets it to false on AdminUserDetail
   // when taking a client on for coaching. See supabase/migrations/20260523_self_coached_plan.sql.
   is_self_coached: boolean
+  // Coach take-over flag for a COACHED athlete's macro plan. When true, the
+  // coach owns the plan (set from the coach's web client-detail "Coach-managed"
+  // chip) and this athlete can't edit it on mobile — they see the read-only
+  // PendingView. When false, the coach has handed the plan back, so a coached
+  // athlete edits it on mobile again (mirrors web 1a-A, Jun 8 2026). Always
+  // false for self-coached athletes (they have no coach). Lives on profiles;
+  // RLS lets the coach write it (migration 20260525_macros_managed_by_coach).
+  macros_managed_by_coach?: boolean | null
   phone: string | null
   // Set by the verify-phone-otp Edge Function on a successful Twilio
   // Verify check. Profile screen reads this to render a ✓ Verified vs
@@ -212,6 +220,12 @@ interface AuthContextType {
   profile: Profile | null
   loading: boolean
   profileLoading: boolean
+  // T098 — coach-entitlement gate for a COACHED client: true/false once the
+  // client_has_active_coach() RPC resolves, undefined while loading (or N/A for
+  // self-coached / staff). resolveTier on dashboard.tsx + RadialNav.tsx reads
+  // this to drop a lapsed-coach's client back to their own tier. undefined is
+  // treated as active so the UI never flashes a downgrade before it lands.
+  coachEntitlementActive: boolean | undefined
   // Pending coach invites — list of un-accepted, un-expired, un-revoked
   // invites addressed to the signed-in user's email. The InviteBanner
   // on dashboard surfaces these; the AcceptInviteModal walks the user
@@ -268,6 +282,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(true)
+  // T098 — coach-entitlement gate for a coached client (see AuthContextType).
+  const [coachEntitlementActive, setCoachEntitlementActive] = useState<boolean | undefined>(undefined)
   // Pending coach invites for the signed-in user. Hydrated by the
   // useEffect below on sign-in + hourly + foreground transitions.
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([])
@@ -282,6 +298,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single()
       if (error && error.code !== 'PGRST116') throw error
       setProfile(data ?? null)
+      // T098 — a coached client keeps FullRX only while their coach's sub is
+      // active. The coach's status isn't on the client row, so resolve it via
+      // the SECURITY DEFINER RPC (counts superuser/admin coaches as active).
+      // Fire-and-forget so it doesn't delay profileLoading; only coached
+      // non-staff clients need it (coach-self uses its own status; superusers
+      // are always FullRX). On error → undefined → treated as active.
+      if (data?.coach_id && data?.is_coach !== true && data?.is_superuser !== true) {
+        supabase.rpc('client_has_active_coach', { p_user_id: userId }).then(
+          ({ data: active, error: rpcErr }) => setCoachEntitlementActive(rpcErr ? undefined : active === true)
+        )
+      } else {
+        setCoachEntitlementActive(undefined)
+      }
       // Honor an admin's remote fingerprint-disable. Fire-and-forget so it
       // doesn't delay profileLoading; clears on-device biometric + lock when
       // the admin's timestamp is newer than this device's enrol.
@@ -1020,7 +1049,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, profile, loading, profileLoading,
+      user, profile, loading, profileLoading, coachEntitlementActive,
       pendingInvites, refreshPendingInvites, attachInviteToken,
       signIn, signUp, signOut, refreshProfile, uploadAvatar,
       verifyOtp, resendOtp, requestPasswordReset, updatePassword,

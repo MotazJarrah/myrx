@@ -42,19 +42,31 @@ import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
 // ── Tier model (mirrors RadialNav.tsx::resolveTier — single source of truth for
 // which pages/pills a subscription tier unlocks). free=0 < corerx=1 < fullrx=2.
-// Superuser / coach / coach-attached athletes all resolve to fullrx. ────────────
+//
+// Active-sub aware (T098): the FullRX comp for coach-self / a coached client is
+// only live while the relevant coach subscription is active. trialing / active
+// / past_due keep it (active + grace window); lapsed / suspended / cancelled
+// drop to the user's own b2c tier. coach-self reads its own
+// coach_subscription_status; a coached client passes `coachActive` from the
+// client_has_active_coach() RPC (resolved once in AuthContext). undefined →
+// assume active so the nav/pills never flash a downgrade before it lands. ───────
 type Tier = 'free' | 'corerx' | 'fullrx'
 const TIER_RANK: Record<Tier, number> = { free: 0, corerx: 1, fullrx: 2 }
+const INACTIVE_COACH_STATUSES = ['lapsed', 'suspended', 'cancelled']
 function resolveTier(p: {
   b2c_subscription_tier?: 'free' | 'corerx' | 'fullrx' | null
   coach_id?: string | null
   is_superuser?: boolean
   is_coach?: boolean
-} | null | undefined): Tier {
+  coach_subscription_status?: string | null
+} | null | undefined, coachActive?: boolean): Tier {
   if (!p) return 'free'
   if (p.is_superuser === true) return 'fullrx'
-  if (p.is_coach === true)     return 'fullrx'
-  if (p.coach_id)              return 'fullrx'
+  if (p.is_coach === true)
+    return INACTIVE_COACH_STATUSES.includes(p.coach_subscription_status ?? '')
+      ? ((p.b2c_subscription_tier as Tier | null) ?? 'free') : 'fullrx'
+  if (p.coach_id)
+    return coachActive === false ? ((p.b2c_subscription_tier as Tier | null) ?? 'free') : 'fullrx'
   return (p.b2c_subscription_tier as Tier | null) ?? 'free'
 }
 
@@ -428,11 +440,11 @@ function ActivityRow({ item, onDelete }: { item: AnyItem; onDelete: () => void }
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const { user, profile } = useAuth()
+  const { user, profile, coachEntitlementActive } = useAuth()
 
   // Subscription tier → which stat pills show. free: Strength + Cardio only;
   // corerx adds Weight + Heart + Food; fullrx adds Sleep + Hydration.
-  const tierRank = TIER_RANK[resolveTier(profile as any)]
+  const tierRank = TIER_RANK[resolveTier(profile as any, coachEntitlementActive)]
 
   const cacheKey = user ? `dashboard:${user.id}` : null
   const cached   = cacheKey ? dataCache.get<any>(cacheKey) : null

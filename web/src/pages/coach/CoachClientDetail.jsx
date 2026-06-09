@@ -9,7 +9,7 @@
  *   • No Settings gear (coaches can't change client settings)
  *   • No Delete button (admin-only)
  *   • No Active/Inactive toggle (admin-only)
- *   • Action column shows: Chat toggle + "Manage macros" coach-specific toggle
+ *   • Action column shows: management chip (Self/Coach-managed) + Message + Remove
  *
  * Per the admin↔coach mirror rule, this file is a near-clone of
  * AdminUserDetail with role-based feature flags. Next pass (Phase 3+)
@@ -22,10 +22,10 @@
  * writes).
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Link, useParams, useLocation } from 'wouter'
 import {
-  ArrowLeft, UserCog, AlertCircle, Check, MessageCircle,
+  ArrowLeft, UserCog, UserX, ChevronDown, AlertCircle, Check, MessageCircle,
   Activity, Apple, Dumbbell, Weight, Heart, Moon, Droplet,
   UserMinus, AlertTriangle, Loader2, X,
 } from 'lucide-react'
@@ -111,16 +111,26 @@ function convertWeightForViewer(w, clientUnit, viewerUnit) {
 
 // ── Tier model (mirrors mobile/app/(app)/dashboard.tsx::resolveTier +
 // TIER_RANK byte-for-byte — single source of truth for which stat pills a
-// subscription tier unlocks). free=0 < corerx=1 < fullrx=2. Superuser /
-// coach / coach-attached athletes all resolve to fullrx. Resolved against
-// the VIEWED CLIENT'S profile so the pills shown match what the client
-// would see on their own dashboard. ─────────────────────────────────────
+// subscription tier unlocks). free=0 < corerx=1 < fullrx=2. Resolved against
+// the VIEWED CLIENT'S profile so the pills shown match what the client would
+// see on their own dashboard.
+//
+// Active-sub aware (T098): the FullRX comp for a coach-self / coached client is
+// only live while the relevant coach subscription is active. trialing / active
+// / past_due keep it (active + the dunning grace window); lapsed / suspended /
+// cancelled revoke it and the user falls back to their own b2c tier. Here the
+// viewing coach IS the client's coach (RLS guarantees roster ownership), so
+// `coachActive` is computed synchronously from the coach's own status. ──────
 const TIER_RANK = { free: 0, corerx: 1, fullrx: 2 }
-function resolveTier(p) {
+const INACTIVE_COACH_STATUSES = ['lapsed', 'suspended', 'cancelled']
+function resolveTier(p, coachActive) {
   if (!p) return 'free'
   if (p.is_superuser === true) return 'fullrx'
-  if (p.is_coach === true)     return 'fullrx'
-  if (p.coach_id)              return 'fullrx'
+  if (p.is_coach === true)
+    return INACTIVE_COACH_STATUSES.includes(p.coach_subscription_status)
+      ? (p.b2c_subscription_tier ?? 'free') : 'fullrx'
+  if (p.coach_id)
+    return coachActive === false ? (p.b2c_subscription_tier ?? 'free') : 'fullrx'
   return p.b2c_subscription_tier ?? 'free'
 }
 
@@ -140,7 +150,7 @@ function SnapshotBadge({ children, color, muted }) {
     cyan:    'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
-    <span className={`flex items-center justify-center gap-1 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium text-center leading-tight w-[48%] min-h-[2.25rem] ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
+    <span className={`flex flex-1 min-w-[110px] items-center justify-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium leading-none ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
       {children}
     </span>
   )
@@ -322,11 +332,15 @@ export default function CoachClientDetail() {
 
   // ── Action handlers ────────────────────────────────────────────────────
 
-  async function toggleManaged() {
+  // Set the macro-management state explicitly (Self-managed vs Coach-managed)
+  // from the header chip. Writes profiles.macros_managed_by_coach only — the
+  // roster link (coach_id) is untouched; Self-managed just hands the macro plan
+  // back to the athlete (they edit on mobile again). Use Remove to fully unlink.
+  async function setManaged(nextVal) {
     if (togglingMgmt || !client) return
+    if (nextVal === client.macros_managed_by_coach) return
     setTogglingMgmt(true)
     setMgmtError('')
-    const nextVal = !client.macros_managed_by_coach
     const { error: err } = await supabase
       .from('profiles')
       .update({ macros_managed_by_coach: nextVal })
@@ -395,7 +409,11 @@ export default function CoachClientDetail() {
   // Subscription tier of the VIEWED CLIENT → which stat pills render.
   // free: Strength + Cardio. corerx adds Weight + Heart + Food. fullrx adds
   // Sleep + Hydration. resolveTier guards null → 'free' (rank 0).
-  const tierRank = TIER_RANK[resolveTier(client)]
+  // T098: the viewing coach IS this client's coach (RLS roster ownership), so
+  // their own live subscription status decides whether the client keeps FullRX
+  // — active unless explicitly lapsed/suspended/cancelled.
+  const coachActive = !INACTIVE_COACH_STATUSES.includes(coachProfile?.coach_subscription_status)
+  const tierRank = TIER_RANK[resolveTier(client, coachActive)]
 
   return (
     <div className="space-y-4">
@@ -439,7 +457,7 @@ export default function CoachClientDetail() {
 
       {/* ── Profile summary card ── */}
       <div className="rounded-xl border border-border bg-card p-4">
-        <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-base font-bold text-primary">
             {client.avatar_url
               ? <img src={client.avatar_url} alt={client.full_name} className="h-11 w-11 rounded-full object-cover" />
@@ -452,77 +470,54 @@ export default function CoachClientDetail() {
             {client.phone && <p className="text-xs text-muted-foreground truncate">{client.phone}</p>}
           </div>
 
-          {/* Right-side action column — coach gates:
-              Row 1 = status pills (Intake Plan, Goal)
-              Row 2 = relationship toggles (Chat + Manage macros)
-              Row 3 = HIDDEN entirely for coach (Active/Settings/Delete are admin-only) */}
-          <div className="flex flex-col items-end gap-2 shrink-0">
-
-            {(existingPlan || existingPlan?.goal_reached) && (
-              <div className="flex flex-wrap items-center justify-end gap-1">
-                {existingPlan && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
-                    <Check className="h-3 w-3" /> Intake Plan
-                  </span>
-                )}
-                {existingPlan?.goal_reached && (
-                  <span className="inline-flex items-center rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[11px] font-medium text-blue-400">
-                    🎯 Goal
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Action buttons mirror the ADMIN client-detail header's button
-                shape (rounded-lg · px-2.5 py-1.5 · text-xs · h-3.5 icons) rather
-                than the old tiny pills. Order: secondary "Manage macros", then
-                the primary filled "Message athlete", then the destructive
-                "Remove" right beside Message (same shape, red). The admin's
-                status-control pills (tier / coach-assignment / Active / chat)
-                stay admin-only — coaches don't get those. (Jun 8 2026.) */}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <button
-                onClick={toggleManaged}
-                disabled={togglingMgmt}
-                title={isCoachManaged
-                  ? 'You manage this client\'s macro plan. Click to hand it back.'
-                  : 'Click to take over this client\'s macro plan.'}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
-                  isCoachManaged
-                    ? 'bg-primary/15 border-primary/40 text-primary hover:bg-primary/25'
-                    : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground'
-                } ${togglingMgmt ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+          {/* Action cluster — DO/OPEN actions only, mirroring the admin card's
+              top-right cluster ([Message] + Settings gear). Coach gets
+              [Message athlete] + [Remove]; no Settings gear (admin-only). */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Message athlete — deep-links to /coach/messages with this client
+                pre-selected. Same filled-primary button as the admin header. */}
+            <Link href={`/coach/messages?clientId=${client.id}`}>
+              <a
+                title="Open chat with this client and start typing"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
               >
-                <UserCog className="h-3.5 w-3.5 shrink-0" />
-                {isCoachManaged ? 'Managing macros' : 'Manage macros'}
-              </button>
+                <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                Message athlete
+              </a>
+            </Link>
 
-              {/* Message athlete — deep-links to /coach/messages with this client
-                  pre-selected. Same filled-primary button as the admin header. */}
-              <Link href={`/coach/messages?clientId=${client.id}`}>
-                <a
-                  title="Open chat with this client and start typing"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
-                >
-                  <MessageCircle className="h-3.5 w-3.5 shrink-0" />
-                  Message athlete
-                </a>
-              </Link>
-
-              {/* Remove from roster — coach-initiated unlink (T120). Same button
-                  shape as Message, right beside it, in destructive red. Opens a
-                  type-REMOVE confirmation. */}
-              <button
-                onClick={() => { setRemoveText(''); setRemoveError(''); setRemoveOpen(true) }}
-                disabled={removing}
-                title="Remove this athlete from your roster"
-                className={`inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20 transition-colors ${removing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-              >
-                <UserMinus className="h-3.5 w-3.5 shrink-0" />
-                Remove
-              </button>
-            </div>
+            {/* Remove from roster — coach-initiated unlink (T120). Same button
+                shape as Message, right beside it, in destructive red. Opens a
+                type-REMOVE confirmation. */}
+            <button
+              onClick={() => { setRemoveText(''); setRemoveError(''); setRemoveOpen(true) }}
+              disabled={removing}
+              title="Remove this athlete from your roster"
+              className={`inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20 transition-colors ${removing ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <UserMinus className="h-3.5 w-3.5 shrink-0" />
+              Remove
+            </button>
           </div>
+        </div>
+
+        {/* Status line below the name — mirrors the ADMIN client-detail card's
+            status row exactly: [management chip] · [plan-status]. Same row
+            classes, same `·` separator, same plan-status wording + colors. Coach
+            gets the Self/Coach chip (admin has the 3-state coaching chip); the
+            admin-only Active + chat pills are intentionally omitted. */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px]">
+          {/* Management chip — Self/Coach-managed. Coach-managed → coach owns the
+              macro plan + the Macro Plan Setting tab appears. Self-managed → hands
+              the plan back to the athlete (still on the roster) + hides that tab. */}
+          <CoachManageChip managed={isCoachManaged} busy={togglingMgmt} onPick={setManaged} />
+
+          <span className="text-border">·</span>
+
+          {/* Plan status — verbatim mirror of the admin card (same colors + copy). */}
+          <span className={existingPlan?.goal_reached ? 'text-blue-400' : existingPlan ? 'text-emerald-400' : 'text-muted-foreground'}>
+            {existingPlan?.goal_reached ? 'Macro plan setting — goal reached' : existingPlan ? 'Macro plan setting saved' : 'No macro plan setting'}
+          </span>
         </div>
 
         {mgmtError && (
@@ -563,7 +558,7 @@ export default function CoachClientDetail() {
             snapshot has loaded so the tier-appropriate empty states appear
             even with no signal. */}
         {snapshot && (
-          <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {/* Strength PRs — FREE. Last 30 days; "no recent strength PRs" when none. */}
             {tierRank >= TIER_RANK.free && snapshot.strengthPRsThisMonth != null && (
               snapshot.strengthPRsThisMonth > 0 ? (
@@ -720,9 +715,10 @@ export default function CoachClientDetail() {
       )}
 
       {/* Calories — full mirror of the admin tab: read-only Overview dashboard +
-          Food Log review + Macro Plan editor. The coach's "Manage macros" header
-          toggle still sets macros_managed_by_coach (the source-of-truth flag the
-          client app reads); savedBy = the coach so plan edits attribute to them. */}
+          Food Log review + Macro Plan Setting editor. The header management chip
+          sets macros_managed_by_coach (the source-of-truth flag the client app
+          reads) AND gates the Macro Plan Setting tab via canManageMacros; savedBy
+          = the coach so plan edits attribute to them. */}
       {activeTab === 'calories' && (
         <AdminUserCalories
           userId={id}
@@ -730,6 +726,9 @@ export default function CoachClientDetail() {
           profile={client}
           adminUserId={coachUser?.id}
           onPlanSaved={updated => setExistingPlan(updated)}
+          // Coach manages this client's macros only when they've taken over
+          // (Coach-managed chip). Self-managed hides the Macro Plan Setting tab.
+          canManageMacros={isCoachManaged}
         />
       )}
 
@@ -739,6 +738,72 @@ export default function CoachClientDetail() {
 
       {activeTab === 'hydration' && (
         <AdminUserHydration userId={id} profile={client} />
+      )}
+    </div>
+  )
+}
+
+// ── Coach macro-management chip ──────────────────────────────────────────────
+// Mirrors the admin AthleteCoachingChip, limited to the two states a coach can
+// set: Self-managed (athlete owns their macro plan again — stays on the roster)
+// and Coach-managed (coach controls the macro plan; athlete loses mobile edit).
+// Writes profiles.macros_managed_by_coach (coach RLS allows this flag). The
+// roster link (coach_id) is untouched — use Remove to fully unlink. Visual
+// language (pill + dropdown, emerald-when-active) matches the admin chip.
+const COACH_MANAGE_META = {
+  self:  { label: 'Self-managed',  icon: UserX,   classes: 'border-border text-muted-foreground hover:border-border hover:text-muted-foreground' },
+  coach: { label: 'Coach-managed', icon: UserCog, classes: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20' },
+}
+
+function CoachManageChip({ managed, busy, onPick }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const state = managed ? 'coach' : 'self'
+  const meta = COACH_MANAGE_META[state]
+  const Icon = meta.icon
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        disabled={busy}
+        title="Who manages this athlete's macro plan"
+        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${meta.classes} ${busy ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      >
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" /> : <Icon className="h-3.5 w-3.5 shrink-0" />}
+        {meta.label}
+        <ChevronDown className="h-3.5 w-3.5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-1 min-w-[180px] rounded-md border border-border bg-card shadow-lg ring-1 ring-black/5">
+          <div className="px-3 py-2 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+            Switch to
+          </div>
+          {Object.entries(COACH_MANAGE_META).map(([key, m]) => {
+            const MIcon = m.icon
+            const active = key === state
+            return (
+              <button
+                key={key}
+                onClick={() => { setOpen(false); if (!active) onPick(key === 'coach') }}
+                disabled={active}
+                className={`flex w-full items-center justify-between px-3 py-2 text-left text-xs transition-colors ${active ? 'text-muted-foreground/60 cursor-default' : 'text-foreground hover:bg-muted/30'}`}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <MIcon className="h-3.5 w-3.5" />
+                  {m.label}
+                </span>
+                {active && <Check className="h-3 w-3 text-primary" />}
+              </button>
+            )
+          })}
+        </div>
       )}
     </div>
   )

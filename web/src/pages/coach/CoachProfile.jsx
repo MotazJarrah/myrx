@@ -29,7 +29,7 @@ import { usePersistedState } from '../../hooks/usePersistedState'
 // About twice. Mirrors the admin's single-About layout.
 const TABS = [
   { id: 'profile', label: 'Settings'    },
-  { id: 'macro',   label: 'Macro Plan'  },
+  { id: 'macro',   label: 'Macro Plan Setting'  },
   { id: 'billing', label: 'Billing'     },
 ]
 

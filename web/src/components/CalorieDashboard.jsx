@@ -291,7 +291,7 @@ export default function CalorieDashboard({ userId, profile, plan }) {
               <h2 className="text-sm font-semibold">No intake plan yet</h2>
             </div>
             <p className="text-sm text-muted-foreground">
-              This client doesn't have a calorie plan. Set one in the <span className="font-medium text-foreground">Macro Plan</span> tab to give them daily targets.
+              This client doesn't have a calorie plan. Set one in the <span className="font-medium text-foreground">Macro Plan Setting</span> tab to give them daily targets.
             </p>
           </div>
         </>
