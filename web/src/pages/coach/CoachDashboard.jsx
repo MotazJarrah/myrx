@@ -32,7 +32,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { hydrateEmails } from '../../lib/hydrateEmails'
 import {
   Users, UserCheck, AlertCircle, MailQuestion,
-  Clock, CheckCircle2, UserPlus, ChevronRight,
+  Clock, UserPlus, ChevronRight,
 } from 'lucide-react'
 import TickerNumber from '../../components/TickerNumber'
 import AnimateRise from '../../components/AnimateRise'
@@ -105,7 +105,10 @@ export default function CoachDashboard() {
   const trialEnds  = profile?.coach_trial_ends_at ? new Date(profile.coach_trial_ends_at) : null
   const daysLeft   = trialEnds ? Math.max(0, Math.ceil((trialEnds.getTime() - Date.now()) / 86_400_000)) : null
   const isTrialing = profile?.coach_subscription_status === 'trialing'
-  const isActive   = profile?.coach_subscription_status === 'active' || isTrialing
+  // First invoice lands the day the trial ends → coach_trial_ends_at.
+  const trialEndsLabel = trialEnds
+    ? trialEnds.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+    : null
 
   // ── Data fetch + realtime subscription ────────────────────────────────────
   // Single load function; realtime subscriptions on profiles + coach_invites
@@ -275,7 +278,7 @@ export default function CoachDashboard() {
               Plan: {profile?.coach_subscription_tier
                 ? profile.coach_subscription_tier.charAt(0).toUpperCase() + profile.coach_subscription_tier.slice(1)
                 : '—'}.
-              Your first invoice arrives on day 15. Cancel anytime before then with no charge.
+              Your first invoice arrives on {trialEndsLabel}. Cancel anytime before then with no charge.
             </p>
           </div>
         </div>
@@ -399,19 +402,6 @@ export default function CoachDashboard() {
         </AnimateRise>
       )}
 
-      {/* Subscription-active footer */}
-      {isActive && (
-        <div className="p-4 rounded-xl bg-card border border-border">
-          <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 text-primary" /> Your Subscription Is Active
-          </h2>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Stripe emails the receipt and a manage-subscription link with every
-            charge — card, cancellation, tier swap all live there. Direct in-app
-            access ships next.
-          </p>
-        </div>
-      )}
     </div>
   )
 }

@@ -155,31 +155,19 @@ export default function CoachProfile() {
       </div>
 
       {activeTab === 'profile' && (
-        <>
-          <AccountSettings profile={profileWithEmail} user={user} />
-
-          {/* Danger zone — self-service delete account. Mirrors the admin's
-              schedule_account_deletion flow but with p_user_id=null so the
-              RPC defaults to auth.uid(). Once the coach confirms, the
-              ReactivationGate takes over via CoachProtectedLayout. They
-              have 30 days to sign in and reactivate before permanent
-              anonymization. Lives inside CoachProfile (not AccountSettings)
-              because AccountSettings is shared across surfaces — only the
-              coach owns the self-delete path on web. */}
-          <div className="max-w-2xl mx-auto mt-4 rounded-2xl border border-destructive/30 bg-card overflow-hidden">
-            <div className="border-b border-destructive/20 bg-destructive/5 px-5 py-3">
-              <h2 className="text-sm font-bold text-destructive flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4" />
-                Danger zone
-              </h2>
-            </div>
-            <div className="px-5 py-4 space-y-3">
+        // Self-service delete lives at the bottom of the Account sub-tab via
+        // AccountSettings' dangerZone slot — mirrors the mobile placement
+        // (Settings → Account, final entry). The full grace-period detail is
+        // in the confirm modal below; the inline note stays brief. Only the
+        // coach passes dangerZone here (self-mode), so it never leaks onto
+        // other surfaces that reuse AccountSettings.
+        <AccountSettings
+          profile={profileWithEmail}
+          user={user}
+          dangerZone={
+            <div className="space-y-3">
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Deleting starts a 30-day grace period. Sign in within those 30
-                days to reactivate. After that, your coach profile, client
-                links, and account data are permanently wiped. Billing records
-                stay on file — we're required to keep those for tax + dispute
-                resolution.
+                Deleting starts a 30-day grace period — sign back in within 30 days to undo. After that, your account and data are permanently wiped.
               </p>
               <button
                 onClick={() => {
@@ -193,8 +181,8 @@ export default function CoachProfile() {
                 Delete account
               </button>
             </div>
-          </div>
-        </>
+          }
+        />
       )}
 
       {activeTab === 'macro' && (

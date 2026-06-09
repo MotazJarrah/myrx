@@ -1183,6 +1183,9 @@ function AccountTab({ profile, user }: { profile: any; user: any }) {
           matching the web admin portal (Jun 8 2026). */}
       {profile?.is_superuser !== true && (
         <View style={s.deleteRow}>
+          <Text style={s.deleteNote}>
+            Deleting starts a 30-day grace period — sign back in within 30 days to undo. After that, your account and data are permanently wiped.
+          </Text>
           <Pressable
             onPress={openDeleteModal}
             style={({ pressed }) => [s.deleteBtn, pressed && s.deleteBtnPressed]}
@@ -3917,6 +3920,14 @@ const s = StyleSheet.create({
     backgroundColor: alpha(colors.destructive, 0.10),
   },
   deleteBtnText: { color: colors.destructive, fontSize: 14, fontWeight: '600' },
+  deleteNote: {
+    color: colors.mutedForeground,
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
+    marginBottom: 10,
+    paddingHorizontal: 12,
+  },
 
   // Modal extras — date emphasis, Privacy link, type-to-confirm field,
   // and the destructive (red) confirm button. Re-uses modalBackdrop /
