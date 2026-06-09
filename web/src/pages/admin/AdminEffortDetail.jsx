@@ -228,7 +228,7 @@ export default function AdminEffortDetail() {
         return <AdminStrengthOlympicDetail userId={userId} exercise={exercise} onBack={goBack} />
       // Ballistic kettlebell lifts — also before the weighted branch (they're equip=kettlebell).
       if (movement.lift_type === 'ballistic')
-        return <AdminStrengthBallisticDetail userId={userId} exercise={exercise} onBack={goBack} />
+        return <AdminStrengthBallisticDetail userId={userId} exercise={exercise} onBack={goBack} usesPair={movement.uses_pair === true} />
       if (WEIGHTED_STANDARD_EQUIP.includes(eq))
         return (
           <AdminStrengthWeightedDetail

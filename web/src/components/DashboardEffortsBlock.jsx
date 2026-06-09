@@ -12,7 +12,7 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'wouter'
 import { supabase } from '../lib/supabase'
-import { Dumbbell, ChevronRight } from 'lucide-react'
+import { Dumbbell, Activity, ChevronRight } from 'lucide-react'
 
 function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
 
@@ -68,16 +68,21 @@ export default function DashboardEffortsBlock({ userId, basePath = '/admin/user'
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden flex flex-col h-[260px]">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Dumbbell className="h-4 w-4 text-blue-400" />
-          <h3 className="text-sm font-semibold">Recent efforts</h3>
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2 min-w-0">
+          {/* Both domain icons — strength (blue) + cardio (amber) — side by side,
+              since this block covers both effort types. */}
+          <span className="flex items-center gap-1 shrink-0">
+            <Dumbbell className="h-4 w-4 text-blue-400" />
+            <Activity className="h-4 w-4 text-amber-400" />
+          </span>
+          <h3 className="text-sm font-semibold truncate">Strength &amp; Cardio Efforts</h3>
         </div>
         {onViewAll && (
           <button
             type="button"
             onClick={onViewAll}
-            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
           >
             View all →
           </button>

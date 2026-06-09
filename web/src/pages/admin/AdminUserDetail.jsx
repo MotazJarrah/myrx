@@ -1284,6 +1284,7 @@ export default function AdminUserDetail() {
       {activeTab === 'activity' && (
         <AdminUserActivity
           userId={id}
+          clientProfile={profile}
           onEffortSaved={() => setSnapshotKey(k => k + 1)}
         />
       )}

@@ -65,9 +65,12 @@ function nextBellAbove(bell, unit) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Component — props: userId (required), exercise (required), onBack (optional).
 // ─────────────────────────────────────────────────────────────────────────────
-export default function AdminStrengthBallisticDetail({ userId, exercise, onBack }) {
+export default function AdminStrengthBallisticDetail({ userId, exercise, onBack, usesPair }) {
   const [entries, setEntries] = useState([])
   const [loading, setLoading] = useState(true)
+  // Double-kettlebell moves log a PER-BELL weight (one bell); the copy reads
+  // "each hand" / "pair" and the ladder + best are per-bell. (T133)
+  const bellWord = usesPair ? 'pair' : 'bell'
 
   useEffect(() => {
     let cancelled = false
@@ -171,7 +174,7 @@ export default function AdminStrengthBallisticDetail({ userId, exercise, onBack 
             <>
               <span>Best —</span>
               <TickerNumber value={bestBell} className="font-mono font-semibold text-blue-400" />
-              <span>{unit}</span>
+              <span>{unit}{usesPair ? ' each hand' : ''}</span>
             </>
           ) : (
             <span>No efforts logged yet</span>
@@ -191,7 +194,7 @@ export default function AdminStrengthBallisticDetail({ userId, exercise, onBack 
           {/* ── 2. "Move up the bells" card ── */}
           <AnimateRise delay={0} className="rounded-xl border border-border bg-card p-4">
             <h2 className="text-sm font-bold">Move up the bells</h2>
-            <p className="mt-1 text-[11px] text-muted-foreground">Trained on power, not a 1-rep max — own a bell, then size up.</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">{`Trained on power, not a 1-rep max — own a ${bellWord}, then size up.`}</p>
 
             {bestBell > 0 ? (
               <>
@@ -204,10 +207,10 @@ export default function AdminStrengthBallisticDetail({ userId, exercise, onBack 
                     <>
                       <div className="flex items-baseline gap-1.5">
                         <TickerNumber value={bestBell} className="font-mono text-3xl font-bold text-blue-400" />
-                        <span className="text-sm text-muted-foreground">{unit} — top bell</span>
+                        <span className="text-sm text-muted-foreground">{unit}{usesPair ? ' each hand' : ''} — top {bellWord}</span>
                       </div>
                       <div className="mt-2.5 flex flex-col gap-1 border-t border-blue-500/15 pt-2.5">
-                        <CueText>{`On the heaviest bell, so keep the sets explosive (5–10 powerful reps), resting at least as long as each set takes.`}</CueText>
+                        <CueText>{`On the heaviest ${bellWord}, so keep the sets explosive (5–10 powerful reps), resting at least as long as each set takes.`}</CueText>
                         {benchmarkApplies && <p className="text-[11px] text-muted-foreground">{benchmark}</p>}
                       </div>
                     </>
@@ -215,10 +218,10 @@ export default function AdminStrengthBallisticDetail({ userId, exercise, onBack 
                     <>
                       <div className="flex items-baseline gap-1.5">
                         <TickerNumber value={targetBell} className="font-mono text-3xl font-bold text-blue-400" />
-                        <span className="text-sm text-muted-foreground">{unit} — next bell</span>
+                        <span className="text-sm text-muted-foreground">{unit}{usesPair ? ' each hand' : ''} — next {bellWord}</span>
                       </div>
                       <div className="mt-2.5 flex flex-col gap-1 border-t border-blue-500/15 pt-2.5">
-                        <CueText>{`Train the ${bestBell} ${unit} bell in explosive sets of 5–10, resting at least as long as each set takes. Own ~100 clean reps, then move up to ${targetBell} ${unit}.`}</CueText>
+                        <CueText>{`Train ${usesPair ? `a pair of ${bestBell} ${unit} bells` : `the ${bestBell} ${unit} bell`} in explosive sets of 5–10, resting at least as long as each set takes. Own ~100 clean reps, then move up to ${targetBell} ${unit}${usesPair ? ' each hand' : ''}.`}</CueText>
                         {benchmarkApplies && <p className="text-[11px] text-muted-foreground">{benchmark}</p>}
                       </div>
                     </>

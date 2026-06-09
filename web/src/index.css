@@ -102,6 +102,20 @@
     font-feature-settings: "cv11", "ss01";
   }
 
+  /* Kill the native number-input spinner arrows app-wide — they clutter every
+     numeric field (reps, weight, distance, calories, …) and we rely on typing.
+     Chrome/Safari/Edge use the spin-button pseudo-elements; Firefox uses
+     -moz-appearance: textfield. */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+
   /* JetBrains Mono for all numeric / monospaced displays */
   .font-mono,
   .tabular-nums,

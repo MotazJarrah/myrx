@@ -699,6 +699,7 @@ export default function CoachClientDetail() {
         <AdminUserActivity
           userId={id}
           basePath="/coach/client"
+          clientProfile={client}
           onEffortSaved={() => setSnapshotKey(k => k + 1)}
         />
       )}

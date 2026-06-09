@@ -4312,14 +4312,18 @@ function OlympicLiftDetail({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function BallisticLiftDetail({
-  exercise, efforts, onDelete, hideHeader,
+  exercise, efforts, onDelete, hideHeader, usesPair,
 }: {
   exercise: string
   efforts: Effort[]
   onDelete: (id: string) => void
   hideHeader?: boolean
+  usesPair?: boolean
 }) {
   const { profile } = useAuth()
+  // Double-kettlebell moves log a PER-BELL weight (one bell), so the ladder +
+  // best are per-bell and the copy reads "each hand" / "pair". (T133)
+  const bellWord = usesPair ? 'pair' : 'bell'
 
   const parsed = useMemo(() => efforts.map(e => ({
     ts: e.created_at,
@@ -4379,7 +4383,7 @@ function BallisticLiftDetail({
           <View style={s.subRow}>
             <Text style={s.subText}>{bestBell > 0 ? 'Best — ' : 'No efforts logged yet'}</Text>
             {bestBell > 0 && <TickerNumber value={bestBell} fontSize={14} color={palette.blue[400]} fontWeight="600" />}
-            {bestBell > 0 && <Text style={s.subText}> {unit}</Text>}
+            {bestBell > 0 && <Text style={s.subText}> {unit}{usesPair ? ' each hand' : ''}</Text>}
           </View>
           <View style={[s.carryTierBadge, { marginTop: 4, alignSelf: 'flex-start' }]}>
             <Text style={s.carryTierBadgeText}>BALLISTIC</Text>
@@ -4389,7 +4393,7 @@ function BallisticLiftDetail({
 
       <AnimateRise delay={0} style={s.card}>
         <Text style={s.h2}>Move up the bells</Text>
-        <Text style={s.tinyText}>Trained on power, not a 1-rep max — own a bell, then size up.</Text>
+        <Text style={s.tinyText}>{`Trained on power, not a 1-rep max — own a ${bellWord}, then size up.`}</Text>
 
         {bestBell > 0 ? (
           <>
@@ -4402,10 +4406,10 @@ function BallisticLiftDetail({
                 <>
                   <View style={s.calloutValueRow}>
                     <TickerNumber value={bestBell} fontSize={36} color={palette.blue[400]} fontWeight="700" />
-                    <Text style={s.calloutSubText}> {unit} — top bell</Text>
+                    <Text style={s.calloutSubText}> {unit}{usesPair ? ' each hand' : ''} — top {bellWord}</Text>
                   </View>
                   <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
-                    <CueText>{`You're on the heaviest bell, so keep the sets explosive (5–10 powerful reps), resting at least as long as each set takes.`}</CueText>
+                    <CueText>{`You're on the heaviest ${bellWord}, so keep the sets explosive (5–10 powerful reps), resting at least as long as each set takes.`}</CueText>
                     {benchmarkApplies && <Text style={s.tinyText}>{benchmark}</Text>}
                   </View>
                 </>
@@ -4413,10 +4417,10 @@ function BallisticLiftDetail({
                 <>
                   <View style={s.calloutValueRow}>
                     <TickerNumber value={targetBell} fontSize={36} color={palette.blue[400]} fontWeight="700" />
-                    <Text style={s.calloutSubText}> {unit} — next bell</Text>
+                    <Text style={s.calloutSubText}> {unit}{usesPair ? ' each hand' : ''} — next {bellWord}</Text>
                   </View>
                   <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: withAlpha(palette.blue[500], 0.15), gap: 2 }}>
-                    <CueText>{`Train the ${bestBell} ${unit} bell in explosive sets of 5–10, resting at least as long as each set takes. Own ~100 clean reps, then move up to ${targetBell} ${unit}.`}</CueText>
+                    <CueText>{`Train ${usesPair ? `a pair of ${bestBell} ${unit} bells` : `the ${bestBell} ${unit} bell`} in explosive sets of 5–10, resting at least as long as each set takes. Own ~100 clean reps, then move up to ${targetBell} ${unit}${usesPair ? ' each hand' : ''}.`}</CueText>
                     {benchmarkApplies && <Text style={s.tinyText}>{benchmark}</Text>}
                   </View>
                 </>
@@ -5041,7 +5045,7 @@ function StrengthDetail({
   if (isLoadHold)         return <LoadHoldDetail         exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isIsometric)        return <IsometricDetail        exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
   if (isOlympic)          return <OlympicLiftDetail      exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
-  if (isBallistic)        return <BallisticLiftDetail    exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} />
+  if (isBallistic)        return <BallisticLiftDetail    exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} usesPair={(movementRecord as any)?.uses_pair === true} />
   if (isAssistedMachine)  return <AssistedMachineDetail  exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} outerScrollGesture={outerScrollGesture} />
   if (isCarry)            return <CarryDetail            exercise={exercise} efforts={efforts} onDelete={handleDeleteEffort} hideHeader={propHideHeader} outerScrollGesture={outerScrollGesture} />
   // Bodyweight assisted variants fall through to the consolidated render

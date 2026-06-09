@@ -4,9 +4,15 @@ import { supabase } from '../../../lib/supabase'
 import { useMovements } from '../../../hooks/useMovements'
 import { STRENGTH_MOVEMENTS, CARDIO_MOVEMENTS, ISOMETRIC_EXERCISE_NAMES, getCardioMode } from '../../../lib/movements'
 import { estimate1RM } from '../../../lib/formulas'
+import {
+  BAND_LEVELS, RUCK_PACK_LADDER_LB, SPEED_MAX_KMH, SPEED_INPUT_ACTIVITIES,
+  carryWeightLadder, equipmentWeightLadder, freeWeightRange, addedLoadRange,
+} from '../../../lib/strengthLadders'
 import MovementSearch from '../../../components/MovementSearch'
 import CoachAddButton from '../../../components/CoachAddButton'
 import UnitToggle from '../../../components/UnitToggle'
+import Select from '../../../components/Select'
+import Toggle from '../../../components/Toggle'
 import {
   Dumbbell, Activity, ChevronRight,
   Loader2, Check, AlertCircle, X, Timer,
@@ -83,91 +89,289 @@ function fmtDuration(secs) {
 }
 
 // ── Add Effort Form ─────────────────────────────────────────────────────────────
-// Restored from commit a022b7f^ (removed in a022b7f when the Efforts tab became a
-// read-only mirror). The label/value construction is preserved verbatim so saved
-// efforts parse correctly on the detail pages.
+// Movement-AWARE coach/admin add-effort form (T131). Mirrors the mobile per-move
+// logging forms (mobile/app/(app)/strength.tsx + cardio.tsx) so the saved
+// `label` + `value` strings match the formats the detail pages parse. The
+// movement is classified by looking it up in the `movements` prop by name, then
+// the relevant fields + the exact save format are dispatched in the SAME order
+// mobile uses. Coaches log at "now" (no date field).
 
-function AddEffortForm({ userId, onSaved, onClose }) {
+const round1 = x => Math.round(x * 10) / 10
+
+// "MM:SS" — pace/duration string used in cardio labels.
+function formatMmSs(secs) {
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  return `${Math.floor(m)}:${String(Math.round(s)).padStart(2, '0')}`
+}
+
+function AddEffortForm({ userId, movements = [], clientProfile = {}, onSaved, onClose }) {
   const [type,         setType]         = useState(null)
   const [exerciseName, setExerciseName] = useState('')
   const [reps,         setReps]         = useState('')
-  const [weightVal,    setWeightVal]    = useState('')
+  const [weightVal,    setWeightVal]    = useState('')   // strength weight / added load / assistance / carry weight
   const [weightUnit,   setWeightUnit]   = useState('lb')
   const [timeStr,      setTimeStr]      = useState('')
-  const [distVal,      setDistVal]      = useState('')
-  const [distUnit,     setDistUnit]     = useState('km')
+  const [distVal,      setDistVal]      = useState('')   // cardio distance / carry distance
+  const [distUnit,     setDistUnit]     = useState('km') // cardio km/mi
+  const [carryDistUnit, setCarryDistUnit] = useState('m') // carry ft/m
+  const [bandLevel,    setBandLevel]    = useState('')   // '' = none
+  const [kneeAssist,   setKneeAssist]   = useState(false)
+  const [addedLoad,    setAddedLoad]    = useState('')   // weighted-bodyweight + load-hold added weight
+  const [calsVal,      setCalsVal]      = useState('')   // air bike
+  const [floorsVal,    setFloorsVal]    = useState('')   // stairmill
+  const [packVal,      setPackVal]      = useState('0')  // rucking pack lb
+  const [speedVal,     setSpeedVal]     = useState('')   // speed-machine cardio
   const [saving,       setSaving]       = useState(false)
   const [error,        setError]        = useState('')
 
   const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
 
-  // Strength derived state
-  const isIsometric = exerciseName ? ISOMETRIC_EXERCISE_NAMES.has(exerciseName) : false
-  const durSecs     = parseTimeStr(timeStr) || 0
-  const r           = Number(reps)
-  const w           = Number(weightVal)
-  const liveOneRM   = !isIsometric && r >= 1 && r <= 30 && reps && w > 0
-    ? estimate1RM(w, r)
-    : null
-  const canSaveStrength = isIsometric ? durSecs >= 1 : liveOneRM != null
+  // ── Movement record + classification (mirror mobile flags) ──────────────────
+  const rec = exerciseName ? (movements.find(m => m.name === exerciseName) ?? null) : null
+  const isIso        = rec?.strength_type === 'isometric'
+  const isLoadHold   = isIso && rec?.hold_type === 'load'
+  const isAssisted   = rec?.equipment === 'assisted'
+  const isCarry      = rec?.equipment === 'carry'
+  const isBodyweight = rec?.equipment === 'bodyweight'
+  const bandElig     = isBodyweight && rec?.band_assist === true
+  const kneeElig     = isBodyweight && rec?.knee_assist === true
+  const weightedProg = isBodyweight && rec?.weighted_progression === true
+  const isDumbbell   = rec?.equipment === 'dumbbell'
+  const usesPair     = rec?.uses_pair === true
+  // Olympic / ballistic lifts save an Est. 1RM (consumed by their detail pages)
+  // but progress on load/bar speed — so the on-form chip reads "Working set",
+  // not "Estimated 1RM" (mirrors mobile). The saved value is unchanged.
+  const isOlympic    = rec?.lift_type === 'olympic'
+  const isBallistic  = rec?.lift_type === 'ballistic'
+  const unitLock     = rec?.unit_lock || null  // 'lb'|'kg'|'mi'|'km'|null
+  const cardioModeRec = rec?.cardio_mode || 'pace'
+  // Fall back to the static name-based cardio-mode map when the movement isn't
+  // in the catalog (custom-typed activity) — same as the legacy form did.
+  const cardioMode = type === 'cardio'
+    ? (rec ? cardioModeRec : getCardioMode(exerciseName))
+    : 'pace'
 
-  useEffect(() => { setTimeStr(''); setReps(''); setWeightVal('') }, [isIsometric])
+  const isAirBike   = exerciseName === 'Air Bike'
+  const isStairMill = exerciseName === 'StairMill'
+  const isRucking   = exerciseName === 'Rucking'
+  const isSwim      = exerciseName === 'Swimming' || exerciseName.startsWith('Swimming [')
+  const isRowErg    = exerciseName === 'Row Erg'
+  const isSpeed     = SPEED_INPUT_ACTIVITIES.has(exerciseName)
 
-  // Cardio derived state
-  const cardioMode = exerciseName && type === 'cardio' ? getCardioMode(exerciseName) : 'pace'
-  const distKm     = distUnit === 'mi' ? (Number(distVal) || 0) * 1.60934 : (Number(distVal) || 0)
-  const timeSecs   = parseTimeStr(timeStr) || 0
+  // ── Client bodyweight (already in the form's weight unit — mirror mobile) ───
+  const bw = Number(clientProfile?.current_weight) || null
+  const swimUnit = clientProfile?.swim_unit || 'm'
 
-  const livePaceKm = (() => {
-    if (cardioMode !== 'pace' || distKm <= 0 || !timeSecs) return null
-    const sec = timeSecs / distKm
-    return `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}/km`
+  // Whichever weight unit the form should use for the selected movement.
+  const defaultWeightUnit = unitLock === 'lb' || unitLock === 'kg'
+    ? unitLock
+    : (clientProfile?.weight_unit || 'lb')
+
+  // Keep the strength weight unit synced to the movement's lock / client pref.
+  useEffect(() => { setWeightUnit(defaultWeightUnit) }, [defaultWeightUnit])
+  // Keep the cardio distance unit synced to the client pref (toggleable below
+  // unless the movement is unit-locked to mi/km, which only Rucking is today).
+  useEffect(() => {
+    if (unitLock === 'mi' || unitLock === 'km') setDistUnit(unitLock)
+    else setDistUnit(clientProfile?.distance_unit || 'km')
+  }, [unitLock, clientProfile?.distance_unit])
+  // Carry distance unit follows the client's distance preference (mi → ft).
+  useEffect(() => {
+    setCarryDistUnit(clientProfile?.distance_unit === 'mi' ? 'ft' : 'm')
+  }, [clientProfile?.distance_unit])
+
+  // Reset movement-specific fields whenever the selected movement changes so a
+  // value from a previous movement never leaks into the next save.
+  useEffect(() => {
+    setReps(''); setWeightVal(''); setTimeStr(''); setDistVal('')
+    setBandLevel(''); setKneeAssist(false); setAddedLoad('')
+    setCalsVal(''); setFloorsVal(''); setPackVal('0'); setSpeedVal('')
+  }, [exerciseName])
+
+  // ── Derived numbers ─────────────────────────────────────────────────────────
+  const durSecs  = parseTimeStr(timeStr) || 0
+  const r        = Number(reps)
+  const wNum     = Number(weightVal) || 0
+  const assistNum = Number(weightVal) || 0
+  const addedNum = Number(addedLoad) || 0
+  const distNum  = Number(distVal) || 0
+  const calsNum  = Math.round(Number(calsVal)) || 0
+  const floorsNum = Math.round(Number(floorsVal)) || 0
+  const packLb   = Math.round(Number(packVal)) || 0
+  const speedNum = Number(speedVal) || 0
+
+  // Carry ranges/ladder + free-weight ranges per equipment.
+  const carryLadder = isCarry ? carryWeightLadder(exerciseName, weightUnit) : null
+  const carryRange  = freeWeightRange('carry', weightUnit)
+  const stdLadder   = (rec && (rec.equipment === 'kettlebell' || rec.equipment === 'strongman'))
+    ? equipmentWeightLadder(rec.equipment, weightUnit) : null
+  const stdRange    = rec ? freeWeightRange(rec.equipment, weightUnit) : freeWeightRange('barbell', weightUnit)
+  const loadRange   = addedLoadRange(weightUnit)
+
+  // Effective weight for the 1RM estimate, by class (mirror mobile).
+  const effWeight = isAssisted
+    ? round1(Math.max(0, (bw || 0) - assistNum))
+    : isBodyweight
+      ? round1((bw || 0) + addedNum)
+      : wNum
+  const liveOneRM = (() => {
+    if (isIso || isCarry || bandLevel || kneeAssist) return null
+    if (isBodyweight && !weightedProg) return null
+    if (!(r >= 1 && r <= 30) || !reps) return null
+    if (effWeight <= 0) return null
+    return estimate1RM(effWeight, r)
   })()
 
-  const canSaveCardio = cardioMode === 'pace' ? (distKm > 0 && timeSecs > 0) : timeSecs > 0
+  // Cardio distance in km + computed pace.
+  const distKm = (() => {
+    if (cardioMode !== 'pace') return 0
+    if (isSwim)   return swimUnit === 'yd' ? distNum * 0.0009144 : distNum / 1000
+    if (isRowErg) return distNum / 1000
+    if (isRucking) return distNum * 1.60934
+    if (isSpeed)  return distUnit === 'mi' ? distNum * 1.60934 : distNum
+    return distUnit === 'mi' ? distNum * 1.60934 : distNum
+  })()
+  const speedKmh = isSpeed ? (distUnit === 'mi' ? speedNum * 1.60934 : speedNum) : 0
+  const speedTimeSecs = (isSpeed && distKm > 0 && speedKmh > 0) ? Math.round((distKm / speedKmh) * 3600) : 0
+  const effTimeSecs = isAirBike || isStairMill
+    ? durSecs
+    : (isSpeed ? speedTimeSecs : durSecs)
+  const effTimeStr = isSpeed ? formatMmSs(speedTimeSecs) : timeStr
 
-  useEffect(() => { setDistVal(''); setTimeStr('') }, [cardioMode])
+  const livePaceKm = (() => {
+    if (cardioMode !== 'pace' || distKm <= 0 || !effTimeSecs) return null
+    const sec = effTimeSecs / distKm
+    return `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}/km`
+  })()
+  const liveRate = (isAirBike && calsNum > 0 && effTimeSecs > 0)
+    ? `${(calsNum / (effTimeSecs / 60)).toFixed(1)} cal/min` : null
+  const liveFpm = (isStairMill && floorsNum > 0 && effTimeSecs > 0)
+    ? `${(floorsNum / (effTimeSecs / 60)).toFixed(1)} floors/min` : null
 
-  function resetForm() {
-    setExerciseName(''); setReps(''); setWeightVal(''); setTimeStr('')
-    setDistVal('')
-  }
+  // ── Save-guards by class ────────────────────────────────────────────────────
+  // bw-required classes: assisted, rep-only-bodyweight, and weighted bodyweight.
+  const bwRequired = isAssisted || (isBodyweight && !bandLevel && !kneeAssist)
+  const bwMissing  = bwRequired && bw == null
+
+  const canSaveStrength = (() => {
+    if (!exerciseName.trim()) return false
+    if (isLoadHold) return durSecs >= 1
+    if (isIso) return durSecs >= 1
+    if (isAssisted) return bw != null && !!liveOneRM && r >= 1 && r <= 30
+    if (isCarry) return wNum > 0 && distNum > 0
+    if (bandLevel || kneeAssist) return r >= 1 && !!reps
+    if (isBodyweight && !weightedProg) return bw != null && !!reps && r >= 1 && r <= 200
+    // standard weighted (incl. weighted bodyweight w/ added load)
+    if (isBodyweight) return bw != null && !!liveOneRM
+    return !!liveOneRM
+  })()
+
+  const canSaveCardio = (() => {
+    if (!exerciseName.trim()) return false
+    if (isAirBike) return calsNum > 0 && effTimeSecs > 0
+    if (isStairMill) return floorsNum > 0 && effTimeSecs > 0
+    if (cardioMode === 'duration') return durSecs > 0
+    return distKm > 0 && effTimeSecs > 0
+  })()
 
   async function handleSave(e) {
     e.preventDefault()
     setError('')
     setSaving(true)
     try {
-      // Coach entries log at the current time — the date field was removed
-      // (coaches add for "now"; back-dating stays the athlete's job).
+      // Coach entries log at the current time (back-dating stays the athlete's job).
       const ts = new Date().toISOString()
+      const ex = exerciseName
+      let label, value, effType
 
       if (type === 'strength') {
-        if (!exerciseName.trim()) throw new Error('Enter an exercise name.')
-        let label, value
-        if (isIsometric) {
-          label = `${exerciseName} · ${durSecs} sec`
+        if (!ex.trim()) throw new Error('Enter an exercise name.')
+        effType = 'strength'
+        // Dispatch order MUST match mobile: load-hold → iso → assisted → carry →
+        // band/knee → rep-only-bodyweight → standard weighted.
+        if (isLoadHold) {
+          label = wNum > 0
+            ? `${ex} · ${wNum} ${weightUnit} × ${durSecs} sec`
+            : `${ex} · ${durSecs} sec`
           value = `${durSecs} sec`
+        } else if (isIso) {
+          label = `${ex} · ${durSecs} sec`
+          value = `${durSecs} sec`
+        } else if (isAssisted) {
+          if (bw == null) throw new Error('No bodyweight on file for this client — log their weight first.')
+          const oneRM = estimate1RM(round1(Math.max(0, bw - assistNum)), r)
+          label = `${ex} · ${assistNum} ${weightUnit} assist × ${reps}`
+          value = `Est. 1RM ${oneRM} ${weightUnit}`
+        } else if (isCarry) {
+          const distM = carryDistUnit === 'ft' ? round1(distNum * 0.3048) : distNum
+          label = `${ex} · ${wNum} ${weightUnit} × ${distM} m`
+          value = `${distM} m @ ${wNum} ${weightUnit}`
+        } else if (bandLevel && kneeAssist) {
+          label = `${ex} [Band + Knee] · ${bandLevel} × ${reps}`
+          value = `${reps} reps`
+        } else if (bandLevel) {
+          label = `${ex} [Band] · ${bandLevel} × ${reps}`
+          value = `${reps} reps`
+        } else if (kneeAssist) {
+          label = `${ex} [Knee] · ${reps} reps`
+          value = `${reps} reps`
+        } else if (isBodyweight && !weightedProg) {
+          if (bw == null) throw new Error('No bodyweight on file for this client — log their weight first.')
+          label = `${ex} · ${bw} ${weightUnit} × ${reps}`
+          value = `${reps} reps`
         } else {
-          label = `${exerciseName} · ${w} ${weightUnit} × ${reps}`
-          value = `Est. 1RM ${liveOneRM} ${weightUnit}`
+          // Standard weighted (barbell / dumbbell / machine / kettlebell /
+          // strongman / olympic / ballistic / weighted-bodyweight-with-load).
+          if (isBodyweight && bw == null) throw new Error('No bodyweight on file for this client — log their weight first.')
+          const added = addedNum
+          const eff = isBodyweight ? round1((bw || 0) + added) : wNum
+          const oneRM = estimate1RM(eff, r)
+          if (!oneRM) throw new Error('Enter reps and weight.')
+          const labelWeight = isBodyweight
+            ? (added > 0 ? `${bw}+${added}` : `${bw}`)
+            : wNum
+          label = `${ex} · ${labelWeight} ${weightUnit} × ${reps}`
+          value = `Est. 1RM ${oneRM} ${weightUnit}`
         }
-        const { error: err } = await supabase.from('efforts').insert({
-          user_id: userId, type: 'strength', label, value, created_at: ts,
-        })
-        if (err) throw err
 
       } else if (type === 'cardio') {
-        if (!exerciseName.trim()) throw new Error('Enter an activity name.')
-        const label = cardioMode === 'pace'
-          ? `${exerciseName} · ${parseFloat(Number(distVal).toFixed(3))} ${distUnit} in ${timeStr}`
-          : `${exerciseName} · ${timeStr}`
-        const value = cardioMode === 'pace' ? livePaceKm : timeStr
-        const { error: err } = await supabase.from('efforts').insert({
-          user_id: userId, type: 'cardio', label, value, created_at: ts,
-        })
-        if (err) throw err
+        if (!ex.trim()) throw new Error('Enter an activity name.')
+        effType = 'cardio'
+        if (isAirBike) {
+          label = `${ex} · ${calsNum} cal in ${effTimeStr}`
+          value = `${(calsNum / (effTimeSecs / 60)).toFixed(1)} cal/min`
+        } else if (isStairMill) {
+          label = `${ex} · ${floorsNum} floors in ${effTimeStr}`
+          value = `${(floorsNum / (effTimeSecs / 60)).toFixed(1)} floors/min`
+        } else if (cardioMode === 'duration') {
+          label = `${ex} · ${effTimeStr}`
+          value = effTimeStr
+        } else if (isRucking) {
+          const distMi = parseFloat(distNum.toFixed(2))
+          label = packLb > 0
+            ? `${ex} · ${packLb} lb × ${distMi} mi in ${effTimeStr}`
+            : `${ex} · ${distMi} mi in ${effTimeStr}`
+          value = livePaceKm
+        } else if (isSwim) {
+          label = `${ex} · ${Math.round(distNum)} ${swimUnit} in ${effTimeStr}`
+          value = livePaceKm
+        } else if (isRowErg) {
+          label = `${ex} · ${Math.round(distNum)} m in ${effTimeStr}`
+          value = livePaceKm
+        } else if (isSpeed) {
+          label = `${ex} · ${parseFloat(distNum.toFixed(3))} ${distUnit} in ${effTimeStr}`
+          value = livePaceKm
+        } else {
+          label = `${ex} · ${parseFloat(distNum.toFixed(3))} ${distUnit} in ${effTimeStr}`
+          value = livePaceKm
+        }
       }
+
+      const { error: err } = await supabase.from('efforts').insert({
+        user_id: userId, type: effType, label, value, created_at: ts,
+      })
+      if (err) throw err
 
       onSaved?.()
       onClose()
@@ -177,6 +381,51 @@ function AddEffortForm({ userId, onSaved, onClose }) {
       setSaving(false)
     }
   }
+
+  // ── Small render helpers ────────────────────────────────────────────────────
+  const fieldLabel = (txt) => <p className="text-[10px] text-muted-foreground mb-1">{txt}</p>
+  const LockedUnit = ({ u }) => (
+    <div className="flex h-full items-center justify-center rounded-md border border-border bg-input/30 px-3 py-2 text-sm font-bold text-foreground">{u}</div>
+  )
+  const ChipBlue = ({ icon: Icon, label, val }) => (
+    <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
+      <div className="flex items-center gap-2"><Icon className="h-3.5 w-3.5 text-blue-400" /><span className="text-xs text-muted-foreground">{label}</span></div>
+      <span className="font-mono text-base tabular-nums font-bold text-blue-400">{val}</span>
+    </div>
+  )
+  const ChipAmber = ({ icon: Icon, label, val }) => (
+    <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
+      <div className="flex items-center gap-2"><Icon className="h-3.5 w-3.5 text-amber-400" /><span className="text-xs text-muted-foreground">{label}</span></div>
+      <span className="font-mono text-base tabular-nums font-bold text-amber-400">{val}</span>
+    </div>
+  )
+  // Weight: a modern ladder dropdown (Select) OR a free numeric input, by equipment.
+  const WeightField = ({ ladder, range, value, onChange, stepFallback }) => (
+    ladder
+      ? (
+        <Select
+          value={value}
+          onChange={onChange}
+          placeholder="Pick a weight"
+          options={ladder.map(w => ({ value: String(w), label: `${w}` }))}
+        />
+      )
+      : (
+        <input
+          type="number"
+          step={range?.step ?? stepFallback ?? 5}
+          min={range?.min ?? 0}
+          max={range?.max}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder="0"
+          className={inputCls}
+        />
+      )
+  )
+
+  // The weight column label for standard weighted movements.
+  const weightFieldLabel = isBodyweight ? 'Added load' : ((isDumbbell || usesPair) ? 'Per hand' : 'Weight')
 
   return (
     <form onSubmit={handleSave} className="rounded-xl border border-border bg-card p-4 space-y-4">
@@ -198,7 +447,7 @@ function AddEffortForm({ userId, onSaved, onClose }) {
             const Icon = t.icon
             return (
               <button key={t.id} type="button"
-                onClick={() => { setType(t.id); resetForm() }}
+                onClick={() => { setType(t.id); setExerciseName('') }}
                 className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-semibold transition-all ${
                   type === t.id ? t.cls : 'border-border text-muted-foreground hover:bg-accent'
                 }`}
@@ -218,45 +467,190 @@ function AddEffortForm({ userId, onSaved, onClose }) {
             <MovementSearch value={exerciseName} onChange={setExerciseName} movements={STRENGTH_MOVEMENTS} placeholder="Search or type exercise…" autoFocus />
           </div>
 
-          {/* Fields cascade in only after a movement is chosen — and only the
-              ones relevant to it (isometric → a hold; otherwise reps + weight). */}
-          {exerciseName && (isIsometric ? (
-            <>
-              <div>
-                <p className="text-[10px] text-muted-foreground mb-1">Duration</p>
-                <input type="text" inputMode="numeric" autoFocus value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+          {exerciseName && (
+            bwMissing ? (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-400">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                No bodyweight on file for this client — log their weight first.
               </div>
-              {durSecs >= 1 && (
-                <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
-                  <div className="flex items-center gap-2"><Timer className="h-3.5 w-3.5 text-blue-400" /><span className="text-xs text-muted-foreground">Hold duration</span></div>
-                  <span className="font-mono text-base tabular-nums font-bold text-blue-400">{fmtDuration(durSecs)}</span>
+            ) : isLoadHold ? (
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1.35fr 0.7fr 1.35fr' }}>
+                  <div>
+                    {fieldLabel('Added weight')}
+                    <input type="number" step={weightUnit === 'kg' ? 2.5 : 5} min="0" max={weightUnit === 'kg' ? 100 : 200}
+                      value={weightVal} onChange={e => setWeightVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel('Unit')}
+                    {unitLock === 'lb' || unitLock === 'kg'
+                      ? <LockedUnit u={unitLock} />
+                      : <UnitToggle value={weightUnit} options={['lb', 'kg']} onChange={setWeightUnit} className="w-full" />}
+                  </div>
+                  <div>
+                    {fieldLabel('Duration')}
+                    <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                  </div>
                 </div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1.35fr 1fr' }}>
+                {durSecs >= 1 && (
+                  <ChipBlue icon={Timer} label="Hold" val={wNum > 0 ? `${wNum} ${weightUnit} × ${fmtDuration(durSecs)}` : `Bodyweight · ${fmtDuration(durSecs)}`} />
+                )}
+              </>
+            ) : isIso ? (
+              <>
                 <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Reps</p>
-                  <input type="number" autoFocus value={reps} onChange={e => setReps(e.target.value)} min="1" max="30" className={inputCls} />
+                  {fieldLabel('Duration')}
+                  <input type="text" inputMode="numeric" autoFocus value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
                 </div>
+                {durSecs >= 1 && <ChipBlue icon={Timer} label="Hold duration" val={fmtDuration(durSecs)} />}
+              </>
+            ) : isAssisted ? (
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1.35fr 1fr' }}>
+                  <div>
+                    {fieldLabel('Reps')}
+                    <input type="number" value={reps} onChange={e => setReps(e.target.value)} min="1" max="30" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel('Assistance ↓')}
+                    <input type="number" step="5" min="0" max={weightUnit === 'kg' ? 90 : 200}
+                      value={weightVal} onChange={e => setWeightVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel('Unit')}
+                    {unitLock === 'lb' || unitLock === 'kg'
+                      ? <LockedUnit u={unitLock} />
+                      : <UnitToggle value={weightUnit} options={['lb', 'kg']} onChange={setWeightUnit} className="w-full" />}
+                  </div>
+                </div>
+                {bw != null && reps && r >= 1 && (
+                  <ChipBlue icon={Dumbbell} label={`${bw} − ${assistNum} = ${effWeight} ${weightUnit} effective`} val={liveOneRM != null ? `${liveOneRM} ${weightUnit}` : '—'} />
+                )}
+                <p className="text-[10px] text-muted-foreground">Lower assistance = less help = harder · Goal: reach 0 {weightUnit}</p>
+              </>
+            ) : isCarry ? (
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1.2fr 0.7fr 1.2fr 0.7fr' }}>
+                  <div>
+                    {fieldLabel('Weight')}
+                    <WeightField ladder={carryLadder} range={carryRange} value={weightVal} onChange={setWeightVal} />
+                  </div>
+                  <div>
+                    {fieldLabel('Unit')}
+                    {unitLock === 'lb' || unitLock === 'kg'
+                      ? <LockedUnit u={unitLock} />
+                      : <UnitToggle value={weightUnit} options={['lb', 'kg']} onChange={setWeightUnit} className="w-full" />}
+                  </div>
+                  <div>
+                    {fieldLabel('Distance')}
+                    <input type="number" step="5" min={carryDistUnit === 'ft' ? 15 : 5} max={carryDistUnit === 'ft' ? 300 : 100}
+                      value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel('Unit')}
+                    <UnitToggle value={carryDistUnit} options={['ft', 'm']} onChange={setCarryDistUnit} className="w-full" />
+                  </div>
+                </div>
+                {wNum > 0 && distNum > 0 && (
+                  <ChipBlue icon={Dumbbell} label="Work" val={`${(wNum * distNum).toLocaleString()} ${weightUnit}·${carryDistUnit}`} />
+                )}
+              </>
+            ) : (bandLevel || kneeAssist) ? (
+              <>
                 <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Weight</p>
-                  <input type="number" step="0.5" value={weightVal} onChange={e => setWeightVal(e.target.value)} className={inputCls} />
+                  {fieldLabel('Reps')}
+                  <input type="number" value={reps} onChange={e => setReps(e.target.value)} min="1" max="100" className={inputCls} />
                 </div>
+                {bandElig && (
+                  <div>
+                    {fieldLabel('Band assistance')}
+                    <Select
+                      value={bandLevel}
+                      onChange={setBandLevel}
+                      placeholder="None"
+                      options={[{ value: '', label: 'None' }, ...BAND_LEVELS.map(b => ({ value: b, label: b }))]}
+                    />
+                  </div>
+                )}
+                {kneeElig && (
+                  <Toggle checked={kneeAssist} onChange={setKneeAssist} label="Knee assisted" />
+                )}
+                {r >= 1 && reps && (
+                  <ChipBlue icon={Check} label={
+                    bandLevel && kneeAssist ? `${bandLevel} band + Knee · ${reps} reps`
+                      : bandLevel ? `${bandLevel} band · ${reps} reps`
+                      : `Knee assisted · ${reps} reps`
+                  } val={`${reps}`} />
+                )}
+              </>
+            ) : (isBodyweight && !weightedProg) ? (
+              <>
                 <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Unit</p>
-                  <UnitToggle value={weightUnit} options={['lb', 'kg']} onChange={setWeightUnit} className="w-full" />
+                  {fieldLabel('Reps')}
+                  <input type="number" value={reps} onChange={e => setReps(e.target.value)} min="1" max="200" className={inputCls} />
                 </div>
-              </div>
-              {liveOneRM && (
-                <div className="flex items-center justify-between rounded-lg border border-blue-500/25 bg-blue-500/8 px-4 py-2.5">
-                  <div className="flex items-center gap-2"><Dumbbell className="h-3.5 w-3.5 text-blue-400" /><span className="text-xs text-muted-foreground">Estimated 1RM</span></div>
-                  <span className="font-mono text-base tabular-nums font-bold text-blue-400">{liveOneRM} {weightUnit}</span>
+                {bandElig && (
+                  <div>
+                    {fieldLabel('Band assistance')}
+                    <Select
+                      value={bandLevel}
+                      onChange={setBandLevel}
+                      placeholder="None"
+                      options={[{ value: '', label: 'None' }, ...BAND_LEVELS.map(b => ({ value: b, label: b }))]}
+                    />
+                  </div>
+                )}
+                {kneeElig && (
+                  <Toggle checked={kneeAssist} onChange={setKneeAssist} label="Knee assisted" />
+                )}
+                {reps && r >= 1 && <ChipBlue icon={Dumbbell} label="Reps logged" val={`${reps} reps`} />}
+              </>
+            ) : (
+              /* Standard weighted (barbell / dumbbell / machine / kettlebell /
+                 strongman / olympic / ballistic / weighted-bodyweight-with-load) */
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1.35fr 1fr' }}>
+                  <div>
+                    {fieldLabel('Reps')}
+                    <input type="number" value={reps} onChange={e => setReps(e.target.value)} min="1" max="30" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel(weightFieldLabel)}
+                    {isBodyweight
+                      ? <input type="number" step={loadRange.step} min={loadRange.min} max={loadRange.max} value={addedLoad} onChange={e => setAddedLoad(e.target.value)} placeholder="0" className={inputCls} />
+                      : <WeightField ladder={stdLadder} range={stdRange} value={weightVal} onChange={setWeightVal} />}
+                  </div>
+                  <div>
+                    {fieldLabel('Unit')}
+                    {unitLock === 'lb' || unitLock === 'kg'
+                      ? <LockedUnit u={unitLock} />
+                      : <UnitToggle value={weightUnit} options={['lb', 'kg']} onChange={setWeightUnit} className="w-full" />}
+                  </div>
                 </div>
-              )}
-            </>
-          ))}
+                {bandElig && (
+                  <div>
+                    {fieldLabel('Band assistance')}
+                    <Select
+                      value={bandLevel}
+                      onChange={setBandLevel}
+                      placeholder="None"
+                      options={[{ value: '', label: 'None' }, ...BAND_LEVELS.map(b => ({ value: b, label: b }))]}
+                    />
+                  </div>
+                )}
+                {kneeElig && (
+                  <Toggle checked={kneeAssist} onChange={setKneeAssist} label="Knee assisted" />
+                )}
+                {(isOlympic || isBallistic)
+                  ? (r >= 1 && reps && Number(weightVal) > 0 && (
+                      <ChipBlue icon={Dumbbell} label="Working set" val={`${Number(weightVal)} ${weightUnit}${usesPair ? ' each' : ''} × ${r}`} />
+                    ))
+                  : (liveOneRM && (
+                      <ChipBlue icon={Dumbbell} label={r === 1 ? ((isDumbbell || usesPair) ? '1RM per hand' : '1RM') : ((isDumbbell || usesPair) ? 'Est. 1RM per hand' : 'Estimated 1RM')} val={`${liveOneRM} ${weightUnit}`} />
+                    ))}
+              </>
+            )
+          )}
         </div>
       )}
 
@@ -268,45 +662,140 @@ function AddEffortForm({ userId, onSaved, onClose }) {
             <MovementSearch value={exerciseName} onChange={setExerciseName} movements={CARDIO_MOVEMENTS} placeholder="Search or type activity…" autoFocus />
           </div>
 
-          {/* Fields cascade in only after an activity is chosen — pace gets
-              distance + time, duration-only activities get a single duration. */}
-          {exerciseName && (cardioMode === 'duration' ? (
-            <>
-              <div>
-                <p className="text-[10px] text-muted-foreground mb-1">Duration</p>
-                <input type="text" inputMode="numeric" autoFocus value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
-              </div>
-              {timeSecs > 0 && (
-                <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
-                  <div className="flex items-center gap-2"><Timer className="h-3.5 w-3.5 text-amber-400" /><span className="text-xs text-muted-foreground">Session time</span></div>
-                  <span className="font-mono text-base tabular-nums font-bold text-amber-400">{timeStr}</span>
+          {exerciseName && (
+            isAirBike ? (
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1.35fr 1.35fr' }}>
+                  <div>
+                    {fieldLabel('Calories')}
+                    <input type="number" step="1" min="0" max="300" value={calsVal} onChange={e => setCalsVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel('Time')}
+                    <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                  </div>
                 </div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 0.9fr 1.35fr' }}>
+                {liveRate && <ChipAmber icon={Activity} label="Rate" val={liveRate} />}
+              </>
+            ) : isStairMill ? (
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1.35fr 1.35fr' }}>
+                  <div>
+                    {fieldLabel('Floors')}
+                    <input type="number" step="1" min="0" max="500" value={floorsVal} onChange={e => setFloorsVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel('Time')}
+                    <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                  </div>
+                </div>
+                {liveFpm && <ChipAmber icon={Activity} label="Climb rate" val={liveFpm} />}
+              </>
+            ) : cardioMode === 'duration' ? (
+              <>
                 <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Distance</p>
-                  <input type="number" step="0.01" autoFocus value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
+                  {fieldLabel('Duration')}
+                  <input type="text" inputMode="numeric" autoFocus value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                </div>
+                {durSecs > 0 && <ChipAmber icon={Timer} label="Session time" val={timeStr} />}
+              </>
+            ) : isRucking ? (
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1.2fr 0.7fr 1.2fr 0.7fr' }}>
+                  <div>
+                    {fieldLabel('Pack weight')}
+                    <Select
+                      value={packVal}
+                      onChange={setPackVal}
+                      options={RUCK_PACK_LADDER_LB.map(p => ({ value: String(p), label: `${p}` }))}
+                    />
+                  </div>
+                  <div>{fieldLabel('Unit')}<LockedUnit u="lb" /></div>
+                  <div>
+                    {fieldLabel('Distance')}
+                    <input type="number" step="0.1" min="0" max="20" value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>{fieldLabel('Unit')}<LockedUnit u="mi" /></div>
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Unit</p>
-                  <UnitToggle value={distUnit} options={['km', 'mi']} onChange={setDistUnit} className="w-full" />
-                </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Time</p>
+                  {fieldLabel('Time')}
                   <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
                 </div>
-              </div>
-              {livePaceKm && (
-                <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/8 px-4 py-2.5">
-                  <div className="flex items-center gap-2"><Activity className="h-3.5 w-3.5 text-amber-400" /><span className="text-xs text-muted-foreground">Live pace</span></div>
-                  <span className="font-mono text-base tabular-nums font-bold text-amber-400">{livePaceKm}</span>
+                {livePaceKm && <ChipAmber icon={Activity} label="Live pace" val={livePaceKm} />}
+              </>
+            ) : isSwim ? (
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1.35fr 0.7fr 1.35fr' }}>
+                  <div>
+                    {fieldLabel('Distance')}
+                    <input type="number" step="25" min="0" max="5000" value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>{fieldLabel('Unit')}<LockedUnit u={swimUnit} /></div>
+                  <div>
+                    {fieldLabel('Time')}
+                    <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                  </div>
                 </div>
-              )}
-            </>
-          ))}
+                {livePaceKm && <ChipAmber icon={Activity} label="Live pace" val={livePaceKm} />}
+              </>
+            ) : isRowErg ? (
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1.35fr 0.7fr 1.35fr' }}>
+                  <div>
+                    {fieldLabel('Distance')}
+                    <input type="number" step="100" min="0" max="30000" value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>{fieldLabel('Unit')}<LockedUnit u="m" /></div>
+                  <div>
+                    {fieldLabel('Time')}
+                    <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                  </div>
+                </div>
+                {livePaceKm && <ChipAmber icon={Activity} label="Live pace" val={livePaceKm} />}
+              </>
+            ) : isSpeed ? (
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1.2fr 1.2fr 0.7fr' }}>
+                  <div>
+                    {fieldLabel('Distance')}
+                    <input type="number" step="0.1" min="0" value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel('Speed')}
+                    <input type="number" step="0.1" min="0" max={distUnit === 'mi' ? round1((SPEED_MAX_KMH[exerciseName] || 50) / 1.60934) : (SPEED_MAX_KMH[exerciseName] || 50)}
+                      value={speedVal} onChange={e => setSpeedVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel('Unit')}
+                    <UnitToggle value={distUnit} options={['km', 'mi']} onChange={setDistUnit} className="w-full" />
+                  </div>
+                </div>
+                {effTimeSecs > 0 && <ChipAmber icon={Timer} label="Session time" val={formatMmSs(effTimeSecs)} />}
+                {livePaceKm && <ChipAmber icon={Activity} label="Live pace" val={livePaceKm} />}
+              </>
+            ) : (
+              /* Default pace mode (Running / Cycling / Ski Erg / etc.) */
+              <>
+                <div className="grid gap-2" style={{ gridTemplateColumns: '1.35fr 0.7fr 1.35fr' }}>
+                  <div>
+                    {fieldLabel('Distance')}
+                    <input type="number" step="0.01" value={distVal} onChange={e => setDistVal(e.target.value)} placeholder="0" className={inputCls} />
+                  </div>
+                  <div>
+                    {fieldLabel('Unit')}
+                    {unitLock === 'mi' || unitLock === 'km'
+                      ? <LockedUnit u={unitLock} />
+                      : <UnitToggle value={distUnit} options={['km', 'mi']} onChange={setDistUnit} className="w-full" />}
+                  </div>
+                  <div>
+                    {fieldLabel('Time')}
+                    <input type="text" inputMode="numeric" value={timeStr} onChange={e => setTimeStr(applyTimeMask(e.target.value))} placeholder="mm:ss" className={inputCls} />
+                  </div>
+                </div>
+                {livePaceKm && <ChipAmber icon={Activity} label="Live pace" val={livePaceKm} />}
+              </>
+            )
+          )}
         </div>
       )}
 
@@ -605,7 +1094,7 @@ function MoveCard({ move, onClick }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export default function AdminUserActivity({ userId, onEffortSaved, basePath = '/admin/user' }) {
+export default function AdminUserActivity({ userId, onEffortSaved, basePath = '/admin/user', clientProfile = {} }) {
   const [, navigate]  = useLocation()
   const [efforts,  setEfforts]  = useState([])
   const [loading,  setLoading]  = useState(true)
@@ -1052,6 +1541,8 @@ export default function AdminUserActivity({ userId, onEffortSaved, basePath = '/
       {showForm && (
         <AddEffortForm
           userId={userId}
+          movements={dbMovements}
+          clientProfile={clientProfile}
           onSaved={() => { load(); onEffortSaved?.() }}
           onClose={() => setShowForm(false)}
         />

@@ -336,6 +336,10 @@ export default function Strength() {
   // "Estimated 1RM" chip (a 20RM snatch is meaningless + implies bad practice).
   const isOlympic         = (movementRecord as any)?.lift_type === 'olympic'
   const isBallistic       = (movementRecord as any)?.lift_type === 'ballistic'
+  // Double-implement moves (the double-kettlebell family). The weight entered is
+  // PER HAND (one bell), mirroring how dumbbells are logged — the field + chips
+  // say "per hand" and the detail surfaces render "each hand". (T133)
+  const usesPair          = (movementRecord as any)?.uses_pair === true
   // Force unit to the movement's `unit_lock` when set (e.g. strongman events
   // and stone/object carries are universally kg worldwide). Runs after the
   // profile-weight-unit effect so the movement lock wins. The UnitToggle is
@@ -433,8 +437,16 @@ export default function Strength() {
   // Skip 1RM projection for rep-only bodyweight movements (Burpee, Crunch,
   // etc.) — they have no weighted-progression concept, so an Est. 1RM banner
   // would be meaningless / misleading.
+  //
+  // Olympic + ballistic lifts DO get an Est. 1RM (T132). It's what their detail
+  // surfaces consume: OlympicLiftDetail uses the best single as a %-training
+  // anchor; BallisticLiftDetail reads the bell weight off the label and tracks
+  // the heaviest bell (top weight). Before this they were excluded HERE, which
+  // left them with NO save path — the Save button stayed permanently disabled.
+  // The on-form chip still shows the WORKING SET rather than the 1RM (see the
+  // chip block below), since these progress on load / bar speed; only the
+  // stored value carries the estimate.
   const liveOneRM = !isIsometric && !isCarry && !bandLevel && !kneeAssist
-    && !isOlympic && !isBallistic
     && !(isBodyweightExercise && !weightedProgression)
     && r >= 1 && r <= 30 && reps && effectiveWeight > 0
     ? estimate1RM(effectiveWeight, r)
@@ -1030,7 +1042,7 @@ export default function Strength() {
                   <Text style={s.label}>
                     {isBodyweightExercise
                       ? 'Added load'
-                      : (isDumbbell ? 'Per hand' : 'Weight')}
+                      : ((isDumbbell || usesPair) ? 'Per hand' : 'Weight')}
                   </Text>
                   <WheelInput>
                     {/* No inline unit — the adjacent UnitToggle / unitLock
@@ -1089,7 +1101,7 @@ export default function Strength() {
               </Pressable>
             )}
 
-            {liveOneRM != null && (
+            {liveOneRM != null && !isOlympic && !isBallistic && (
               <ChipBlue>
                 <Dumbbell size={14} color={palette.blue[400]} />
                 {/* At exactly 1 rep, the lift IS the 1RM — no Epley/Lombardi
@@ -1099,21 +1111,22 @@ export default function Strength() {
                     prefix. */}
                 <Text style={s.chipLabel}>
                   {r === 1
-                    ? (isDumbbell ? '1RM per hand' : '1RM')
-                    : (isDumbbell ? 'Est. 1RM per hand' : 'Estimated 1RM')}
+                    ? ((isDumbbell || usesPair) ? '1RM per hand' : '1RM')
+                    : ((isDumbbell || usesPair) ? 'Est. 1RM per hand' : 'Estimated 1RM')}
                 </Text>
                 <Text style={[s.chipValue, { color: palette.blue[400], marginLeft: 'auto' }]}>{liveOneRM} {unit}</Text>
               </ChipBlue>
             )}
 
-            {/* Olympic / ballistic lifts: NO rep-max chip (excluded from
-                liveOneRM above). Show the working set being logged instead —
-                these lifts progress on %-of-best load + bar speed, not a 1RM. */}
+            {/* Olympic / ballistic lifts: show the WORKING SET being logged, not
+                the Est. 1RM chip. The 1RM is still computed + stored (it feeds
+                the detail surface), but these lifts progress on %-of-best load +
+                bar speed, so the working set is the meaningful on-form readout. */}
             {(isOlympic || isBallistic) && r >= 1 && reps && Number(weight) > 0 && (
               <ChipBlue>
                 <Dumbbell size={14} color={palette.blue[400]} />
                 <Text style={s.chipLabel}>Working set</Text>
-                <Text style={[s.chipValue, { color: palette.blue[400], marginLeft: 'auto' }]}>{Number(weight)} {unit} × {r}</Text>
+                <Text style={[s.chipValue, { color: palette.blue[400], marginLeft: 'auto' }]}>{Number(weight)} {unit}{usesPair ? ' each' : ''} × {r}</Text>
               </ChipBlue>
             )}
 
