@@ -373,11 +373,22 @@ export default function Calories() {
   // (they're their own client) — neither can edit it here on mobile. Real
   // self-coached athletes still get inline mobile editing. (T126, Jun 8 2026.)
   const isStaff         = isAdmin || isCoach
-  // A COACHED athlete whose coach has NOT taken over their macros
-  // (macros_managed_by_coach = false) edits their own plan on mobile — the
-  // coach's "Self-managed" chip hands the plan back (web 1a-A, Jun 8 2026).
-  // When the coach HAS taken over (true), the athlete sees the read-only
-  // PendingView. Self-coached athletes always edit (their flag is never true).
+  // Who can edit the plan ON MOBILE (T143 lock, Jun 9 2026 — Option 1):
+  //   • Truly self-coached athletes (is_self_coached) — always.
+  //   • Coached clients the coach has HANDED BACK (macros_managed_by_coach
+  //     === false) — the coach's "Self-managed" chip hands plan ownership to
+  //     the athlete, so they edit on mobile even while still rostered.
+  //   • Coach-managed / admin-managed clients (macros_managed_by_coach ===
+  //     true) — READ-ONLY; the coach/admin owns the plan (no pencil, chips,
+  //     setup CTA, or goal-decision buttons).
+  //   • Staff (admin/coach) — never here; they manage their own plan on web.
+  //
+  // New attached clients DEFAULT to coach-managed (read-only): a DB trigger
+  // sets macros_managed_by_coach=true whenever coach_id goes NULL→set, so a
+  // freshly-linked client isn't accidentally editable. is_self_coached is a
+  // pure function of coach_id (coach_id IS NULL) via its own trigger, so a
+  // handed-back client stays is_self_coached=false — which is exactly why
+  // this gate must consult macros_managed_by_coach, not is_self_coached alone.
   const macrosManagedByCoach = profile?.macros_managed_by_coach === true
   const canEditPlanHere = !isStaff && (isSelfCoached || !macrosManagedByCoach)
 
@@ -416,8 +427,18 @@ export default function Calories() {
   }, [goalReachedKey])
 
   const goalReached = useMemo(() => {
-    // Admin goal-reached is handled from the admin Intake Plan tab on web.
-    // Suppress the inline detection here (May 23 2026 mirror).
+    // The goal-reached SELF-SERVICE block (Update plan / Switch to
+    // maintenance / Keep going) lets the athlete choose their own next
+    // phase. It's offered to anyone who OWNS their plan on mobile —
+    // i.e. canEditPlanHere: truly self-coached OR a coached client whose
+    // coach has handed the plan back (macros_managed_by_coach === false).
+    //
+    // Coach-managed / admin-managed clients (macros_managed_by_coach ===
+    // true) do NOT make the new-phase decision here — the coach does. They
+    // see the "done" message instead ("your coach will reach out to discuss
+    // your next phase" — GOAL_MESSAGES.done), the managed-client route.
+    // (T143 lock, Jun 9 2026: re-coupled to canEditPlanHere so handed-back
+    // clients regain the decision — reverts the T139 isSelfCoached-only gate.)
     if (!canEditPlanHere || !plan || !currentWeightKg) return false
     if (plan.energy_balance_pct == null || Math.abs(plan.energy_balance_pct) < 0.005) return false
     const goal = plan.goal_weight_kg
@@ -1417,15 +1438,20 @@ function CurrentWeightGoal({
   //     hides too since the Update plan button does the same job.
   //   • admin-coached    → "Your coach hasn't locked in" message
   //     (unchanged from pre-May-24-2026 behavior).
-  // Maintenance state — user picked the Maintain pace (or hit Switch
-  // to maintenance). Here `start ≈ goal ≈ current` AND
-  // energy_balance_pct === 0. The standard stat row / progress bar
-  // doesn't apply (nothing to progress toward — they're holding).
-  // Show a dedicated UI: current weight + "On maintenance" message
-  // + Update plan CTA. Self-coached only — admin-coached clients
-  // fall through to the next branch which has its own messaging.
+  // Maintenance state — the plan is "hold steady": energy_balance_pct ≈ 0
+  // AND start ≈ goal ≈ current. The standard stat row / progress bar
+  // doesn't apply (nothing to progress toward). Show the dedicated
+  // "HOLDING AT X / on maintenance" UI.
+  //
+  // T144 (Jun 9 2026): detect maintenance REGARDLESS of who owns the plan —
+  // a coach-managed client on a coach-set maintenance plan must see "On
+  // maintenance", not the wrong "your coach hasn't set a goal weight"
+  // fallback. The edit affordances degrade automatically: headerRow's pencil
+  // and planSummaryRow are each gated on canEditPlanHere, so a managed client
+  // sees this card READ-ONLY (no pencil, no chips), while a self-coached /
+  // handed-back client gets the editable version. (Previously this required
+  // canEditPlanHere, so managed clients fell through to the C2c "no goal" copy.)
   const isMaintenancePhase =
-    canEditPlanHere &&
     plan.energy_balance_pct != null &&
     Math.abs(plan.energy_balance_pct) < 0.005 &&
     !!startKg && !!goalKg &&

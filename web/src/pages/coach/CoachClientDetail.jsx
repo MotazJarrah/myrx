@@ -406,13 +406,18 @@ export default function CoachClientDetail() {
   )
   const isCoachManaged = client.macros_managed_by_coach === true
 
-  // Subscription tier of the VIEWED CLIENT → which stat pills render.
-  // free: Strength + Cardio. corerx adds Weight + Heart + Food. fullrx adds
-  // Sleep + Hydration. resolveTier guards null → 'free' (rank 0).
-  // T098: the viewing coach IS this client's coach (RLS roster ownership), so
-  // their own live subscription status decides whether the client keeps FullRX
-  // — active unless explicitly lapsed/suspended/cancelled.
-  const coachActive = !INACTIVE_COACH_STATUSES.includes(coachProfile?.coach_subscription_status)
+  // Subscription tier of the VIEWED CLIENT → which stat pills render
+  // (CLAUDE.md §20). free: Strength + Cardio. corerx adds Weight + Food.
+  // fullrx adds Heart + Sleep + Hydration (the wellness layer).
+  // T098 + T143: the viewing coach IS this client's coach (RLS roster
+  // ownership), so the coach's OWN live subscription status decides whether
+  // the client keeps FullRX. Use the SAME allow-list the client_has_active_coach
+  // RPC uses ('trialing' | 'active' | 'past_due', or a superuser coach) so the
+  // coach's view matches what the client's own app computes — the prior
+  // block-list (!lapsed/suspended/cancelled) diverged for null/paused/unpaid
+  // statuses (T143 audit).
+  const coachActive = coachProfile?.is_superuser === true
+    || ['trialing', 'active', 'past_due'].includes(coachProfile?.coach_subscription_status)
   const tierRank = TIER_RANK[resolveTier(client, coachActive)]
 
   return (
@@ -546,10 +551,10 @@ export default function CoachClientDetail() {
         {/* Stat chips — mirrors the mobile Dashboard stat-pill block exactly
             (locked May 24 2026, re-mirrored Jun 3 2026 with tier ordering,
             leading icons, and "no recent" empty states).
-            Pill order follows subscription tier:
+            Pill order follows subscription tier (CLAUDE.md §20):
               free   → Strength, Cardio
-              corerx → Weight, Heart, Food
-              fullrx → Sleep, Hydration
+              corerx → Weight, Food
+              fullrx → Heart, Sleep, Hydration
             Each pill is gated on the client's tierRank. Count pills
             (Strength / Cardio / Food) render their number even at 0 (gated
             on `!= null`); measurement pills (Weight / Heart / Sleep /
@@ -604,8 +609,8 @@ export default function CoachClientDetail() {
               )
             )}
 
-            {/* Lowest ambient HR — CORERX. Last 7 days; "no recent HR" when empty. */}
-            {tierRank >= TIER_RANK.corerx && (
+            {/* Lowest ambient HR — FULLRX (CLAUDE.md §20 wellness layer). Last 7 days; "no recent HR" when empty. */}
+            {tierRank >= TIER_RANK.fullrx && (
               snapshot.lowestBpm != null ? (
                 <SnapshotBadge color="fuchsia">
                   <Heart className="h-3 w-3 shrink-0 text-fuchsia-400" />

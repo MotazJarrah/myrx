@@ -2,14 +2,20 @@
  * /pricing — athlete (B2C) pricing page.
  *
  * Pairs with /coach/pricing (which lists the coach subscription tiers).
- * This page lists the three end-user tiers from CLAUDE.md May 25 2026
- * lock: Free / CoreRX / FullRX. Tiers are one-time unlocks, NOT
- * subscriptions — pay once, keep the unlock forever.
+ * Lists the three end-user tiers per CLAUDE.md §20 (LOCKED FINAL
+ * 2026-06-06): Free / CoreRX / FullRX. Tiers are a recurring MONTHLY
+ * subscription (annual option = 17% off). The earlier one-time / lifetime
+ * "own it forever" model is RETIRED — do not reintroduce that copy.
  *
- * Status (May 26 2026): the B2C purchase flow is Phase 7 / pending. We
- * show pricing as informational with "Coming soon" CTAs so visitors
- * understand the model without expecting to be able to buy yet. When
- * Phase 7 lands, swap the CTAs for actual Stripe Checkout / IAP paths.
+ * Tier → pages (cumulative):
+ *   Free   — Strength + Cardio
+ *   CoreRX — Free + Bodyweight + Calories/Food            ($4.99/mo · $49.99/yr)
+ *   FullRX — CoreRX + Heart + Hydration + Sleep + future  ($6.99/mo · $69.99/yr)
+ * Every signup starts with a 14-day FullRX trial.
+ *
+ * Status: the B2C checkout flow isn't built yet (individual Stripe/IAP
+ * pending), so the paid CTAs read "Coming soon". When checkout ships,
+ * swap the CTAs for the Stripe Checkout / RevenueCat IAP paths.
  *
  * Structure mirrors /coach/pricing for visual consistency:
  *   1. Header (athlete-context: Coaches | Pricing highlighted)
@@ -25,75 +31,71 @@ import { Link } from 'wouter'
 import { ArrowRight, Check, ChevronDown } from 'lucide-react'
 
 // ── Tier definitions ────────────────────────────────────────────────
-// Canonical names + prices per CLAUDE.md (Coach Platform v1 + B2C
-// Public tier prices lock). The 'lookup_key' field maps to the Stripe
-// price.lookup_key once Phase 7 wires actual purchases — for v1 the
-// CTA is "Coming soon", so the keys are documentation-only right now.
+// Canonical names + prices per CLAUDE.md §20 (LOCKED FINAL 2026-06-06).
+// Recurring monthly subscription; annual = 17% off ("2 months free").
+// The 'lookupKey' maps to the Stripe price.lookup_key once individual
+// checkout is wired — for now the paid CTA is "Coming soon".
 const ATHLETE_TIERS = [
   {
-    id:        'free',
-    name:      'Free',
-    price:     0,
-    priceLabel:'$0',
-    cadence:   'forever',
-    tagline:   'Track everything. No card.',
-    lookupKey: null,   // no Stripe product for free tier
+    id:         'free',
+    name:       'Free',
+    priceLabel: '$0',
+    cadence:    'forever',
+    annualLabel: null,
+    tagline:    'Track everything. No card.',
+    lookupKey:  null,   // no Stripe product for free tier
     features: [
       'Full strength + cardio logging',
       'Coaching prescriptions on every detail page',
-      'Bodyweight, calorie, and food tracking',
-      'Heart-rate sync from wearables',
-      '1 device',
+      'Always free — no trial, no card',
     ],
   },
   {
-    id:        'corerx',
-    name:      'CoreRX',
-    price:     39,
-    priceLabel:'$39',
-    cadence:   'one-time',
-    tagline:   'The essential prescription. One payment, lifetime unlock.',
-    lookupKey: 'corerx_onetime',
+    id:         'corerx',
+    name:       'CoreRX',
+    priceLabel: '$4.99',
+    cadence:    'per month',
+    annualLabel: '$49.99/yr',
+    tagline:    'Add the two most-asked-for tools: bodyweight + nutrition.',
+    lookupKey:  'corerx_monthly',
     features: [
       'Everything in Free',
-      'Sleep page + Hydration page',
-      'Multi-device sync',
-      'Cross-domain Dashboard (all metrics, one view)',
-      'No upgrade prompts, ever',
+      'Bodyweight tracking + body-composition',
+      'Calorie + macro coaching, with food log',
     ],
   },
   {
-    id:        'fullrx',
-    name:      'FullRX',
-    price:     59,
-    priceLabel:'$59',
-    cadence:   'one-time',
-    tagline:   'The full prescription. Everything we ship, forever.',
-    lookupKey: 'fullrx_onetime',
+    id:         'fullrx',
+    name:       'FullRX',
+    priceLabel: '$6.99',
+    cadence:    'per month',
+    annualLabel: '$69.99/yr',
+    tagline:    'The full picture — wellness, recovery, and everything to come.',
+    lookupKey:  'fullrx_monthly',
     recommended: true,
     features: [
       'Everything in CoreRX',
-      'Body composition picker + projection',
-      'Advanced training plans + auto-progression',
-      'Priority email support',
-      'Every future feature shipped after v1, free',
+      'Heart-rate page (wearable sync)',
+      'Hydration + Sleep pages',
+      'Cross-domain Dashboard — all metrics, one view',
+      'Every future feature we ship, included',
     ],
   },
 ]
 
 const PRICING_FAQ = [
-  { q: 'Is it really one-time?',
-    a: 'Yes. CoreRX and FullRX are one-time purchases that unlock the tier forever on that account. No recurring charges, no renewal at the end of a year. Pay once, keep the unlock for as long as the account exists.' },
-  { q: 'Do I need a paid tier to use the app?',
-    a: 'No. The Free tier is permanent and includes every coaching surface (Strength, Cardio, Bodyweight, Calories, Heart). CoreRX and FullRX add features like Sleep, Hydration, and multi-device sync.' },
+  { q: 'Is there a free tier?',
+    a: 'Yes — Free is permanent, no card required. It covers full Strength + Cardio logging with coaching cues on every detail page. CoreRX and FullRX add tracking and wellness pages on top.' },
   { q: 'What\'s the difference between CoreRX and FullRX?',
-    a: 'CoreRX unlocks the convenience + sleep/hydration tier. FullRX adds the advanced coaching layer (body composition projections, auto-progressing training plans) AND grandfathers you into every future feature we ship — no second purchase needed.' },
-  { q: 'Can I upgrade from CoreRX to FullRX later?',
-    a: 'Yes. You pay the difference ($20) and your unlock is instantly upgraded. No need to repurchase from scratch.' },
-  { q: 'Refunds?',
-    a: 'Within 14 days of purchase, full refund — no questions. After that, the unlock is yours.' },
+    a: 'CoreRX ($4.99/mo) adds Bodyweight tracking and the calorie + macro coaching with a food log. FullRX ($6.99/mo) adds the wellness layer — Heart-rate, Hydration, and Sleep — plus the cross-domain Dashboard and every future feature we ship. For $2 more a month, FullRX is the no-brainer.' },
+  { q: 'Is there a trial?',
+    a: 'Every new account starts with a 14-day FullRX trial, so you can feel the full thing before deciding. When it ends you land on whichever tier you pick — and Free is always a fine place to stay.' },
+  { q: 'Monthly or annual?',
+    a: 'Either. Pay monthly, or save 17% (about two months free) on an annual plan: CoreRX is $49.99/yr and FullRX is $69.99/yr.' },
+  { q: 'Can I change or cancel anytime?',
+    a: 'Yes. Upgrade, downgrade, or cancel whenever you want. If you cancel, you keep your tier until the end of the period you already paid for, then drop to Free — your data stays put.' },
   { q: 'What payment methods?',
-    a: 'All major credit + debit cards via Stripe on web. Apple Pay + Google Pay via the mobile app once Phase 7 launches.' },
+    a: 'All major credit + debit cards via Stripe on web. Apple Pay + Google Pay via the mobile app once in-app purchases launch.' },
 ]
 
 // ── Header ─────────────────────────────────────────────────────────
@@ -158,6 +160,9 @@ function TierCard({ tier }) {
         <span className="text-4xl font-bold tabular-nums text-foreground">{tier.priceLabel}</span>
         <span className="text-sm text-muted-foreground">{tier.cadence}</span>
       </div>
+      <p className="mt-1 h-4 text-xs text-muted-foreground">
+        {tier.annualLabel ? `or ${tier.annualLabel} billed annually · 2 months free` : ''}
+      </p>
       <ul className="mt-6 flex-1 space-y-2.5">
         {tier.features.map((f, i) => (
           <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
@@ -221,11 +226,12 @@ export default function Pricing() {
         <div className="text-center max-w-3xl mx-auto">
           <p className="text-xs font-bold uppercase tracking-widest text-primary">Athlete pricing</p>
           <h1 className="mt-3 text-4xl md:text-5xl font-bold tracking-tight">
-            Track free forever. <span className="text-primary">Unlock more, once.</span>
+            Track free forever. <span className="text-primary">Go deeper for a few bucks a month.</span>
           </h1>
           <p className="mt-5 text-base text-muted-foreground leading-relaxed">
-            Every coaching surface is in the Free tier. Pay once for the extras — sleep, hydration, multi-device sync,
-            and the full advanced layer — and keep them forever. No subscriptions on the athlete side.
+            Strength + Cardio are free for good. Add bodyweight and nutrition with CoreRX, or unlock the full
+            wellness layer — heart, hydration, sleep, and every future feature — with FullRX. Every account
+            starts with a 14-day FullRX trial.
           </p>
         </div>
 
@@ -239,7 +245,7 @@ export default function Pricing() {
         {/* "Coming soon" disclosure for paid tiers — sets expectations
             cleanly so visitors don't think the buttons are broken. */}
         <p className="mt-8 text-center text-xs text-muted-foreground">
-          CoreRX and FullRX are launching with the Phase 7 release. Start with the Free tier today and you'll have first access.
+          Paid plans are launching soon. Start free today and you'll be first in line — with a 14-day FullRX trial waiting.
         </p>
 
         {/* FAQ */}

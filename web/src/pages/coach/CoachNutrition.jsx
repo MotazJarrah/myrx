@@ -1,10 +1,11 @@
 /**
- * Admin — Nutrition Overview (/admin/nutrition)
+ * Coach — Nutrition Overview (/coach/nutrition)
  *
- * 7-day calorie-compliance grid for the ADMIN's own managed clients
- * (coach_id = admin id) — NOT the full platform roster. The scoped fetch
- * (loadNutritionRows) + the grid (NutritionOverviewList) are shared with the
- * coach Nutrition page so both surfaces stay identical (T138 + T145).
+ * Mirror of the admin Nutrition Overview, scoped to the COACH's own clients
+ * (coach_id = the signed-in coach). Reuses the shared loadNutritionRows loader
+ * + NutritionOverviewList grid (T145), so the coach gets the identical 7-day
+ * calorie-compliance view as admin. RLS independently scopes calorie_plans /
+ * calorie_logs to the coach roster.
  */
 
 import { useState, useEffect, useMemo } from 'react'
@@ -13,7 +14,7 @@ import { supabase } from '../../lib/supabase'
 import { lastNDays, loadNutritionRows } from '../../lib/nutritionOverview'
 import NutritionOverviewList from '../../components/NutritionOverviewList'
 
-export default function AdminNutrition() {
+export default function CoachNutrition() {
   const { user } = useAuth()
   const [rows,    setRows]    = useState([])
   const [loading, setLoading] = useState(true)
@@ -23,6 +24,7 @@ export default function AdminNutrition() {
     if (!user?.id) return
     let cancelled = false
     async function load() {
+      // Scope to the coach's OWN clients (coach_id = coach id).
       const built = await loadNutritionRows(supabase, user.id, days)
       if (cancelled) return
       setRows(built)
@@ -45,7 +47,7 @@ export default function AdminNutrition() {
         rows={rows}
         days={days}
         loading={loading}
-        clientHref={(id) => `/admin/user/${id}`}
+        clientHref={(id) => `/coach/client/${id}`}
       />
     </div>
   )

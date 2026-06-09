@@ -72,6 +72,8 @@ const CoachInvite      = lazy(() => import('./pages/coach/CoachInvite'))
 const CoachMessages    = lazy(() => import('./pages/coach/CoachMessages'))
 const CoachBriefing    = lazy(() => import('./pages/coach/CoachBriefing'))
 const CoachAdjustments = lazy(() => import('./pages/coach/CoachAdjustments'))
+const CoachProgress    = lazy(() => import('./pages/coach/CoachProgress'))
+const CoachNutrition   = lazy(() => import('./pages/coach/CoachNutrition'))
 const CoachProfile     = lazy(() => import('./pages/coach/CoachProfile'))
 const CoachClientDetail = lazy(() => import('./pages/coach/CoachClientDetail'))
 const CoachAcceptInvite = lazy(() => import('./pages/coach/AcceptInvite'))
@@ -422,6 +424,8 @@ function RootRoute() {
 // Locked May 27 2026. See route block below for the regression context.
 function CoachPortalRoute()        { return <CoachProtectedLayout><CoachDashboard    /></CoachProtectedLayout> }
 function CoachClientsRoute()       { return <CoachProtectedLayout><CoachClients      /></CoachProtectedLayout> }
+function CoachProgressRoute()      { return <CoachProtectedLayout><CoachProgress     /></CoachProtectedLayout> }
+function CoachNutritionRoute()     { return <CoachProtectedLayout><CoachNutrition    /></CoachProtectedLayout> }
 function CoachClientDetailRoute()  { return <CoachProtectedLayout><CoachClientDetail /></CoachProtectedLayout> }
 // Coach effort-detail routes reuse the admin detail components — they're
 // portal-aware (back-link derives /coach/client vs /admin/user from the URL).
@@ -495,6 +499,8 @@ function AppRoutes() {
             consts defined just above AppRoutes. */}
         <Route path="/coach/portal"      component={CoachPortalRoute} />
         <Route path="/coach/clients"     component={CoachClientsRoute} />
+        <Route path="/coach/progress"    component={CoachProgressRoute} />
+        <Route path="/coach/nutrition"   component={CoachNutritionRoute} />
         <Route path="/coach/client/:id"  component={CoachClientDetailRoute} />
         {/* cardio route MUST precede the generic :kind route so 'cardio' matches here */}
         <Route path="/coach/client/:userId/effort/cardio/:slug" component={CoachCardioDetailRoute} />

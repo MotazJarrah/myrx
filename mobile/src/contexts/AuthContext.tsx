@@ -178,8 +178,8 @@ interface Profile {
   coach_id: string | null
   // B2C athlete subscription tier — independent of coach attachment.
   // 'free'   → Strength + Cardio unlocked (+ Dashboard via center button)
-  // 'corerx' → free + Bodyweight + Calories + Heart
-  // 'fullrx' → corerx + Sleep + Hydration
+  // 'corerx' → free + Bodyweight + Calories
+  // 'fullrx' → corerx + Heart + Hydration + Sleep (the wellness layer)
   // RadialNav reads this to grey-out + lock-badge any icon above the user's
   // tier. Coach-attached athletes (coach_id != null) get FULL access regardless
   // of this value — the coach is paying for them. NULL is treated as 'free'

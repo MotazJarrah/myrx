@@ -777,9 +777,10 @@ export default function AdminUserDetail() {
     : '—'
   const displayHeight   = formatHeightForAdmin(profile.current_height, profile.height_unit || 'imperial', adminHeightUnit)
 
-  // Subscription tier of the VIEWED CLIENT → which stat pills render.
-  // free: Strength + Cardio. corerx adds Weight + Heart + Food. fullrx adds
-  // Sleep + Hydration. resolveTier guards null → 'free' (rank 0).
+  // Subscription tier of the VIEWED CLIENT → which stat pills render
+  // (CLAUDE.md §20). free: Strength + Cardio. corerx adds Weight + Food.
+  // fullrx adds Heart + Sleep + Hydration (the wellness layer). resolveTier
+  // guards null → 'free' (rank 0).
   const tierRank = TIER_RANK[resolveTier(profile, coachActive)]
 
   async function toggleChat() {
@@ -1120,10 +1121,10 @@ export default function AdminUserDetail() {
         {/* Stat chips — mirrors the mobile Dashboard stat-pill block exactly
             (locked May 24 2026, re-mirrored to admin Jun 3 2026 with tier
             ordering, leading icons, and "no recent" empty states).
-            Pill order follows subscription tier:
+            Pill order follows subscription tier (CLAUDE.md §20):
               free   → Strength, Cardio
-              corerx → Weight, Heart, Food
-              fullrx → Sleep, Hydration
+              corerx → Weight, Food
+              fullrx → Heart, Sleep, Hydration
             Each pill is gated on the client's tierRank. Count pills
             (Strength / Cardio / Food) render their number even at 0 (gated
             on `!= null` so they don't flash during the initial null load);
@@ -1178,8 +1179,8 @@ export default function AdminUserDetail() {
               )
             )}
 
-            {/* Lowest ambient HR — CORERX. Last 7 days; "no recent HR" when empty. */}
-            {tierRank >= TIER_RANK.corerx && (
+            {/* Lowest ambient HR — FULLRX (CLAUDE.md §20 wellness layer). Last 7 days; "no recent HR" when empty. */}
+            {tierRank >= TIER_RANK.fullrx && (
               snapshot.lowestBpm != null ? (
                 <SnapshotBadge color="fuchsia">
                   <Heart className="h-3 w-3 shrink-0 text-fuchsia-400" />

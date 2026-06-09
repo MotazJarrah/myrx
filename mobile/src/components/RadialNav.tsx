@@ -9,8 +9,12 @@
  * unlocked vs. greyed-out + lock-badged:
  *
  *   FREE   — Strength, Cardio (+ Dashboard via centre button).
- *   COREX  — Free + Bodyweight, Calories, Heart.
- *   FULLRX — CoreRX + Sleep, Hydration. All 7 unlocked.
+ *   COREX  — Free + Bodyweight, Calories.
+ *   FULLRX — CoreRX + Heart, Sleep, Hydration. All 7 unlocked.
+ *
+ * (CLAUDE.md §20 lock, 2026-06-06: Heart belongs to FullRX — the
+ * wellness/recovery layer alongside Sleep + Hydration. Earlier code wrongly
+ * gated Heart at CoreRX; fixed Jun 9 2026.)
  *
  * COACH-ATTACHED OVERRIDE: an athlete with a non-null coach_id gets FULL
  * access regardless of b2c_subscription_tier — their coach is paying a
@@ -27,20 +31,21 @@
  *     show the lime hover state — feels different so the user knows it
  *     won't navigate.
  *
- * ── Layout (LOCKED — matches user's drawing, May 28 2026) ──────────────
+ * ── Layout (LOCKED — Jun 9 2026: Heart ↔ Bodyweight swapped) ───────────
  *
- *       sleep    heart                calories    hydration       ← outer ring
- *                          bodyweight                              ← inner top
+ *       sleep    bodyweight           calories    hydration       ← outer ring
+ *                          heart                                   ← inner top
  *               strength                  cardio                   ← inner sides
  *                          dashboard                               ← centre button
  *
- * Geometry (unchanged from May 24 2026 pass 4 — same radii + angles,
- * just remapped pages per the user's drawing):
+ * Geometry (same radii + angles; Jun 9 2026 swapped the page at the
+ * inner-top 90° slot with the page at the outer 110° slot — Heart took
+ * the inner top, Bodyweight took the outer-left):
  *
  *   Inner ring (3 items, 80px radius):
- *     strength    @ 140°   bodyweight @ 90°    cardio    @ 40°
+ *     strength    @ 140°   heart      @ 90°    cardio    @ 40°
  *   Outer ring (4 items, 165px radius):
- *     sleep       @ 155°   heart      @ 110°   calories  @ 70°    hydration @ 25°
+ *     sleep       @ 155°   bodyweight @ 110°   calories  @ 70°    hydration @ 25°
  *
  * Centre button = Dashboard. Tap → /dashboard. Long-press → bloom.
  *
@@ -242,36 +247,36 @@ const NAV_BY_HREF: Record<string, NavItem> = {
   '/(app)/strength':   { href: '/(app)/strength',   label: 'Strength',   Icon: Dumbbell,        tier: 'free'   },
   '/(app)/cardio':     { href: '/(app)/cardio',     label: 'Cardio',     Icon: Activity,        tier: 'free'   },
   '/(app)/bodyweight': { href: '/(app)/bodyweight', label: 'Bodyweight', Icon: Weight,          tier: 'corerx' },
-  '/(app)/heart':      { href: '/(app)/heart',      label: 'Heart',      Icon: Heart,           tier: 'corerx' },
+  '/(app)/heart':      { href: '/(app)/heart',      label: 'Heart',      Icon: Heart,           tier: 'fullrx' },
   '/(app)/calories':   { href: '/(app)/calories',   label: 'Calories',   Icon: Apple,           tier: 'corerx' },
   '/(app)/sleep':      { href: '/(app)/sleep',      label: 'Sleep',      Icon: Moon,            tier: 'fullrx' },
   '/(app)/hydration':  { href: '/(app)/hydration',  label: 'Hydration',  Icon: Droplet,         tier: 'fullrx' },
 }
 
-// Static slot layout — matches the user's drawn arrangement:
+// Static slot layout (Jun 9 2026 — Heart ↔ Bodyweight swapped):
 //
-//       sleep    heart                calories    hydration       ← outer ring
-//                          bodyweight                              ← inner top
+//       sleep    bodyweight           calories    hydration       ← outer ring
+//                          heart                                   ← inner top
 //               strength                  cardio                   ← inner sides
 //                          dashboard                               ← centre button
 //
 // Angles measured CCW from horizontal-right; higher angle = farther left.
 //
-// Note that BOTH strength AND cardio are FREE — they sit in the inner ring
-// because they're the two pages every user can reach. Bodyweight sits at
-// the inner top (90°) as the prime CoreRX entry point. Outer ring
-// alternates locked tiers: sleep + hydration (fullrx) at the wings, heart
-// + calories (corerx) in the inner-outer slots.
+// strength + cardio are FREE and sit in the inner ring (every user can
+// reach them). Heart now sits at the inner top (90°); Bodyweight moved to
+// the outer-left (110°). The rings are NOT a clean tier split — slot
+// placement is per the user's arrangement, and tier gating is enforced by
+// resolveTier + TIER_RANK regardless of which ring a page sits in.
 const INNER_RING: { href: string; angle: number }[] = [
-  { href: '/(app)/strength',   angle: 140 },
-  { href: '/(app)/bodyweight', angle: 90  },
-  { href: '/(app)/cardio',     angle: 40  },
+  { href: '/(app)/strength', angle: 140 },
+  { href: '/(app)/heart',    angle: 90  },
+  { href: '/(app)/cardio',   angle: 40  },
 ]
 const OUTER_RING: { href: string; angle: number }[] = [
-  { href: '/(app)/sleep',     angle: 155 },
-  { href: '/(app)/heart',     angle: 110 },
-  { href: '/(app)/calories',  angle: 70  },
-  { href: '/(app)/hydration', angle: 25  },
+  { href: '/(app)/sleep',      angle: 155 },
+  { href: '/(app)/bodyweight', angle: 110 },
+  { href: '/(app)/calories',   angle: 70  },
+  { href: '/(app)/hydration',  angle: 25  },
 ]
 
 // Static slot positions (x, y, spoke endpoint) — independent of which

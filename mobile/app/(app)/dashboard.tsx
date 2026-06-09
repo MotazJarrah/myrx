@@ -442,8 +442,9 @@ function ActivityRow({ item, onDelete }: { item: AnyItem; onDelete: () => void }
 export default function Dashboard() {
   const { user, profile, coachEntitlementActive } = useAuth()
 
-  // Subscription tier → which stat pills show. free: Strength + Cardio only;
-  // corerx adds Weight + Heart + Food; fullrx adds Sleep + Hydration.
+  // Subscription tier → which stat pills show (CLAUDE.md §20). free: Strength
+  // + Cardio only; corerx adds Weight + Food; fullrx adds Heart + Sleep +
+  // Hydration (the wellness layer).
   const tierRank = TIER_RANK[resolveTier(profile as any, coachEntitlementActive)]
 
   const cacheKey = user ? `dashboard:${user.id}` : null
@@ -887,8 +888,9 @@ export default function Dashboard() {
             </View>
           )}
 
-          {/* Lowest ambient HR — CORERX. Last 7 days; "no recent" when empty. */}
-          {tierRank >= TIER_RANK.corerx && (
+          {/* Lowest ambient HR — FULLRX (CLAUDE.md §20: Heart is the FullRX
+              wellness layer, alongside Sleep + Hydration). */}
+          {tierRank >= TIER_RANK.fullrx && (
             <View style={[d.statChip, d.statChipFuchsia]}>
               {lowestHR7d != null ? (
                 <>

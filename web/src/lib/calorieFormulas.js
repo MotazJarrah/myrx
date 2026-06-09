@@ -167,6 +167,38 @@ export function calcTimeline(currentWeightKg, goalWeightKg, energyAdjustment, co
 }
 
 /**
+ * Daily energy adjustment (kcal/day, signed) for a plan — the same number
+ * calcFullPlan derives internally, but WITHOUT the macro pipeline (so it
+ * doesn't need protein_level / fat_level, and won't throw when those are
+ * unset). Used by the Weight Goal Progress page to turn a plan into a
+ * target weekly rate of weight change.
+ *
+ * energy_balance_pct (new) takes priority over energy_balance_type (legacy).
+ * Returns null when body data needed for the % case is missing.
+ *
+ * @param {object} profile – { current_weight, weight_unit, current_height, height_unit, gender, birthdate }
+ * @param {object} plan    – { activity_factor, energy_balance_pct?, energy_balance_type? }
+ */
+export function calcEnergyAdjustment(profile, plan) {
+  if (!plan) return null
+
+  if (plan.energy_balance_pct != null) {
+    const weightKg = profile?.current_weight ? toKg(profile.current_weight, profile.weight_unit || 'lb') : null
+    const heightCm = profile?.current_height ? toCm(profile.current_height, profile.height_unit || 'imperial') : null
+    const age      = calcAge(profile?.birthdate)
+    if (!weightKg || !heightCm || !age || !profile?.gender || plan.activity_factor == null) return null
+    const tdee = calcTDEE(calcBMR(weightKg, heightCm, age, profile.gender), plan.activity_factor)
+    return Math.round(tdee * plan.energy_balance_pct)
+  }
+
+  if (plan.energy_balance_type != null) {
+    return ENERGY_BALANCE_TYPES[plan.energy_balance_type]?.adjustment ?? null
+  }
+
+  return null
+}
+
+/**
  * Full pipeline. Returns null if required data is missing.
  * @param {object} profile                    – { current_weight, weight_unit, current_height, height_unit, gender, birthdate }
  * @param {object} plan                       – { activity_factor, energy_balance_type?, energy_balance_pct?, protein_level, fat_level, goal_weight_kg, correction_factor }
