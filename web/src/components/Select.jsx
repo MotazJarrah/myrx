@@ -2,18 +2,24 @@
  * Select — modern dropdown that replaces the raw native <select> in coach/admin
  * forms (the native popup renders an un-themeable OS menu that breaks the dark
  * UI). Styled trigger + dark popover list, accent-highlighted selection,
- * outside-click + Escape to close. Mirrors the AthleteCoachingChip dropdown look.
+ * outside-click + Escape to close.
+ *
+ * The popover is rendered in a PORTAL to <body> with fixed positioning, so it
+ * escapes ancestor stacking contexts (e.g. the `animate-rise` transform on each
+ * form step) and `overflow:hidden` clipping — otherwise a later sibling section
+ * paints over the open list regardless of z-index.
  *
  * Props:
  *   value       — current value (compared by String())
  *   options     — array of strings OR { value, label } objects
  *   onChange    — called with the picked option's value
  *   placeholder — shown when nothing selected (default "Select…")
- *   className   — extra classes on the wrapper (e.g. "w-full")
+ *   className   — extra classes on the wrapper (e.g. "w-full", "max-w-xs")
  *   disabled    — disables the trigger
  *   buttonClassName — extra classes on the trigger button
  */
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, Check } from 'lucide-react'
 
 export default function Select({
@@ -21,17 +27,36 @@ export default function Select({
   placeholder = 'Select…', className = '', disabled = false, buttonClassName = '',
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef(null)
+  const [rect, setRect] = useState(null)
+  const triggerRef = useRef(null)
+  const popRef = useRef(null)
+
+  const measure = () => {
+    const el = triggerRef.current
+    if (el) setRect(el.getBoundingClientRect())
+  }
+
+  useLayoutEffect(() => { if (open) measure() }, [open])
 
   useEffect(() => {
     if (!open) return
-    function onDoc(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    function onDoc(e) {
+      if (triggerRef.current?.contains(e.target)) return
+      if (popRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
     function onKey(e) { if (e.key === 'Escape') setOpen(false) }
+    function reposition() { measure() }
     document.addEventListener('mousedown', onDoc)
     document.addEventListener('keydown', onKey)
+    // capture:true catches scrolls in ANY scrollable ancestor, not just window.
+    window.addEventListener('scroll', reposition, true)
+    window.addEventListener('resize', reposition)
     return () => {
       document.removeEventListener('mousedown', onDoc)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', reposition, true)
+      window.removeEventListener('resize', reposition)
     }
   }, [open])
 
@@ -39,7 +64,7 @@ export default function Select({
   const current = opts.find(o => String(o.value) === String(value))
 
   return (
-    <div className={`relative ${className}`} ref={ref}>
+    <div className={`relative ${className}`} ref={triggerRef}>
       <button
         type="button"
         onClick={() => !disabled && setOpen(o => !o)}
@@ -54,8 +79,12 @@ export default function Select({
         <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      {open && (
-        <div className="absolute left-0 right-0 z-40 mt-1 max-h-60 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-xl ring-1 ring-black/5">
+      {open && rect && createPortal(
+        <div
+          ref={popRef}
+          style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, width: rect.width, zIndex: 9999 }}
+          className="max-h-60 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-xl ring-1 ring-black/5"
+        >
           {opts.map(o => {
             const active = String(o.value) === String(value)
             return (
@@ -72,7 +101,8 @@ export default function Select({
               </button>
             )
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

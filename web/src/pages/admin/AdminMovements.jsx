@@ -5,6 +5,7 @@ const IS_TOUCH = typeof window !== 'undefined'
 import { supabase } from '../../lib/supabase'
 import { invalidateMovements } from '../../hooks/useMovements'
 import DeleteAction from '../../components/DeleteAction'
+import Select from '../../components/Select'
 import {
   Dumbbell, Activity, Timer,
   Ruler, Check, Plus, ChevronLeft, Pencil, X,
@@ -40,6 +41,26 @@ const EQUIPMENT_OPTIONS = [
   { value: 'assisted',   label: 'Assist machine',   description: 'REDUCES bodyweight — gravitron, assisted pull-up' },
   { value: 'strongman',  label: 'Strongman',        description: 'Atlas stones, sandbags, kegs, yokes — kg-locked' },
   { value: 'carry',      label: 'Carry / Sled',     description: 'Weight + distance' },
+]
+
+// ── Lift-style options ───────────────────────────────────────────────────────
+// `lift_type` (barbell / kettlebell rep-based only). Olympic lifts get a
+// %-of-best coaching surface; ballistic lifts (KB swing, snatch) get a
+// bell-ladder surface. None = standard lift. DB CHECK: NULL | olympic | ballistic.
+const LIFT_TYPE_OPTIONS = [
+  { value: '', label: 'None' },
+  { value: 'olympic', label: 'Olympic' },
+  { value: 'ballistic', label: 'Ballistic' },
+]
+
+// ── Hold-type options ────────────────────────────────────────────────────────
+// `hold_type` (isometric only). Weighted (load) holds add an added-weight
+// field when logging; leverage holds are lever-based (front lever, planche);
+// standard = plain bodyweight hold. DB CHECK: NULL | leverage | load.
+const HOLD_TYPE_OPTIONS = [
+  { value: '', label: 'Standard hold' },
+  { value: 'leverage', label: 'Leverage hold' },
+  { value: 'load', label: 'Weighted (load) hold' },
 ]
 
 // ── Unit-lock options ────────────────────────────────────────────────────────
@@ -217,7 +238,7 @@ function ToggleChip({ label, description, checked, onChange }) {
 
 // ── Summary badge ─────────────────────────────────────────────────────────────
 
-function buildSummary(category, cardioMode, strengthType, equipment, bandAssist, kneeAssist, unitLock, deprecated) {
+function buildSummary(category, cardioMode, strengthType, equipment, bandAssist, kneeAssist, unitLock, deprecated, liftType, holdType) {
   // Rep-range was dropped from the admin form on May 20 2026 — the columns
   // stay in the DB (existing rows preserved) but no field collects them and
   // mobile never read them anyway since the May 2026 adp-zone redesign moved
@@ -230,7 +251,11 @@ function buildSummary(category, cardioMode, strengthType, equipment, bandAssist,
     else if (cardioMode === 'duration') parts.push('Duration only')
   } else if (category === 'strength') {
     parts.push('Strength')
-    if (strengthType === 'isometric') parts.push('Isometric hold')
+    if (strengthType === 'isometric') {
+      parts.push('Isometric hold')
+      if (holdType === 'load')     parts.push('Load hold')
+      if (holdType === 'leverage') parts.push('Leverage hold')
+    }
     else if (strengthType === 'rep-based') {
       parts.push('Rep-based')
       if (equipment === 'barbell')    parts.push('Barbell')
@@ -245,6 +270,10 @@ function buildSummary(category, cardioMode, strengthType, equipment, bandAssist,
       if (equipment === 'assisted')   parts.push('Assisted')
       if (equipment === 'strongman')  parts.push('Strongman')
       if (equipment === 'carry')      parts.push('Carry / Sled')
+      if ((equipment === 'barbell' || equipment === 'kettlebell')) {
+        if (liftType === 'olympic')   parts.push('Olympic')
+        if (liftType === 'ballistic') parts.push('Ballistic')
+      }
     }
   }
   if (unitLock) parts.push(`Locked to ${unitLock}`)
@@ -305,12 +334,16 @@ function MovementPills({ m }) {
   } else {
     if (m.strength_type === 'isometric') {
       pills.push({ label: 'Isometric', cls: 'bg-rose-500/10 text-rose-600 dark:text-rose-400' })
+      if (m.hold_type === 'load')     pills.push({ label: 'Load hold', cls: 'bg-muted text-muted-foreground' })
+      if (m.hold_type === 'leverage') pills.push({ label: 'Leverage hold', cls: 'bg-muted text-muted-foreground' })
     } else {
       const eq = EQUIPMENT_PILL[m.equipment]
       if (eq) pills.push(eq)
       if (m.band_assist) pills.push({ label: 'Band assist', cls: 'bg-muted text-muted-foreground' })
       if (m.knee_assist) pills.push({ label: 'Knee assist', cls: 'bg-muted text-muted-foreground' })
       if (m.uses_pair)   pills.push({ label: 'Pair', cls: 'bg-muted text-muted-foreground' })
+      if (m.lift_type === 'olympic')   pills.push({ label: 'Olympic', cls: 'bg-muted text-muted-foreground' })
+      if (m.lift_type === 'ballistic') pills.push({ label: 'Ballistic', cls: 'bg-muted text-muted-foreground' })
       if (m.weight_ladder_override) {
         pills.push({ label: 'Custom ladder', cls: 'bg-muted text-muted-foreground' })
       }
@@ -629,6 +662,8 @@ export default function AdminMovements() {
   const [kneeAssist,   setKneeAssist]   = useState(false)
   const [weightedProgression, setWeightedProgression] = useState(false)  // bodyweight: supports added load
   const [usesPair,     setUsesPair]     = useState(false)  // kettlebell pair flag
+  const [liftType,     setLiftType]     = useState('')    // '' | 'olympic' | 'ballistic' (barbell/kettlebell rep-based)
+  const [holdType,     setHoldType]     = useState('')    // '' | 'leverage' | 'load' (isometric)
   const [ladderLb,     setLadderLb]     = useState('')        // structured ladder rows
   const [ladderKg,     setLadderKg]     = useState('')
   const [isoLadderStr, setIsoLadderStr] = useState('')        // isometric milestone override (seconds)
@@ -659,6 +694,8 @@ export default function AdminMovements() {
   const [editKneeAssist,   setEditKneeAssist]   = useState(false)
   const [editWeightedProgression, setEditWeightedProgression] = useState(false)
   const [editUsesPair,     setEditUsesPair]     = useState(false)
+  const [editLiftType,     setEditLiftType]     = useState('')
+  const [editHoldType,     setEditHoldType]     = useState('')
   const [editLadderLb,     setEditLadderLb]     = useState('')
   const [editLadderKg,     setEditLadderKg]     = useState('')
   const [editIsoLadderStr, setEditIsoLadderStr] = useState('')
@@ -732,6 +769,8 @@ export default function AdminMovements() {
     setEditKneeAssist(editingMovement.knee_assist ?? false)
     setEditWeightedProgression(editingMovement.weighted_progression ?? false)
     setEditUsesPair(editingMovement.uses_pair ?? false)
+    setEditLiftType(editingMovement.lift_type ?? '')
+    setEditHoldType(editingMovement.hold_type ?? '')
     const rows = ladderToRows(
       editingMovement.weight_ladder_override,
       editingMovement.unit_lock === 'kg' ? 'kg' : 'lb',
@@ -795,12 +834,16 @@ export default function AdminMovements() {
     setCategory(val)
     setCardioMode(null); setStrengthType(null)
     setEquipment(null); setBandAssist(false); setKneeAssist(false); setWeightedProgression(false); setUsesPair(false)
+    setLiftType(''); setHoldType('')
     setLadderLb(''); setLadderKg(''); setIsoLadderStr('')
   }
   function selectStrengthType(val) {
     setStrengthType(val)
     setEquipment(null); setBandAssist(false); setKneeAssist(false); setWeightedProgression(false); setUsesPair(false)
     setLadderLb(''); setLadderKg('')
+    // lift_type is rep-based-only; hold_type is isometric-only.
+    setLiftType('')
+    if (val !== 'isometric') setHoldType('')
     // Isometric ladder only meaningful when the movement IS isometric.
     if (val !== 'isometric') setIsoLadderStr('')
   }
@@ -811,6 +854,8 @@ export default function AdminMovements() {
     if (val !== 'bodyweight') setWeightedProgression(false)
     // uses_pair is kettlebell-only
     if (val !== 'kettlebell') setUsesPair(false)
+    // lift_type only applies to barbell / kettlebell.
+    if (!['barbell', 'kettlebell'].includes(val)) setLiftType('')
     // Ladder override only makes sense for ladder-style equipment.
     if (!['kettlebell', 'strongman', 'carry'].includes(val)) { setLadderLb(''); setLadderKg('') }
   }
@@ -820,12 +865,15 @@ export default function AdminMovements() {
     setEditCategory(val)
     setEditCardioMode(null); setEditStrengthType(null)
     setEditEquipment(null); setEditBandAssist(false); setEditKneeAssist(false); setEditWeightedProgression(false); setEditUsesPair(false)
+    setEditLiftType(''); setEditHoldType('')
     setEditLadderLb(''); setEditLadderKg(''); setEditIsoLadderStr('')
   }
   function editSelectStrengthType(val) {
     setEditStrengthType(val)
     setEditEquipment(null); setEditBandAssist(false); setEditKneeAssist(false); setEditWeightedProgression(false); setEditUsesPair(false)
     setEditLadderLb(''); setEditLadderKg('')
+    setEditLiftType('')
+    if (val !== 'isometric') setEditHoldType('')
     if (val !== 'isometric') setEditIsoLadderStr('')
   }
   function editSelectEquipment(val) {
@@ -833,6 +881,7 @@ export default function AdminMovements() {
     setEditBandAssist(false); setEditKneeAssist(false)
     if (val !== 'bodyweight') setEditWeightedProgression(false)
     if (val !== 'kettlebell') setEditUsesPair(false)
+    if (!['barbell', 'kettlebell'].includes(val)) setEditLiftType('')
     if (!['kettlebell', 'strongman', 'carry'].includes(val)) { setEditLadderLb(''); setEditLadderKg('') }
   }
 
@@ -890,6 +939,8 @@ export default function AdminMovements() {
       knee_assist:   equipment === 'bodyweight' ? kneeAssist : false,
       weighted_progression: equipment === 'bodyweight' ? weightedProgression : false,
       uses_pair:     equipment === 'kettlebell' ? usesPair : false,
+      lift_type:     (equipment === 'barbell' || equipment === 'kettlebell') && strengthType === 'rep-based' ? (liftType || null) : null,
+      hold_type:     strengthType === 'isometric' ? (holdType || null) : null,
       cardio_mode:   category === 'cardio' ? cardioMode : null,
       weight_ladder_override:    ladderOverride,
       isometric_ladder_override: isIso ? parseIsoLadder(isoLadderStr) : null,
@@ -946,6 +997,7 @@ export default function AdminMovements() {
     setName(''); setCategory(null); setCardioMode(null)
     setStrengthType(null); setEquipment(null)
     setBandAssist(false); setKneeAssist(false); setWeightedProgression(false); setUsesPair(false)
+    setLiftType(''); setHoldType('')
     setLadderLb(''); setLadderKg('')
     setIsoLadderStr(''); setUnitLock(null); setUnitLockTouched(false); setDeprecated(false)
     setVariants([]); setVariantInput(''); setVariantShortInput('')
@@ -977,6 +1029,8 @@ export default function AdminMovements() {
       knee_assist:   editEquipment === 'bodyweight' ? editKneeAssist : false,
       weighted_progression: editEquipment === 'bodyweight' ? editWeightedProgression : false,
       uses_pair:     editEquipment === 'kettlebell' ? editUsesPair : false,
+      lift_type:     (editEquipment === 'barbell' || editEquipment === 'kettlebell') && editStrengthType === 'rep-based' ? (editLiftType || null) : null,
+      hold_type:     editStrengthType === 'isometric' ? (editHoldType || null) : null,
       cardio_mode:   editCategory === 'cardio' ? editCardioMode : null,
       weight_ladder_override:    ladderOverride,
       isometric_ladder_override: isIso ? parseIsoLadder(editIsoLadderStr) : null,
@@ -1259,11 +1313,13 @@ export default function AdminMovements() {
     editCategory, editCardioMode, editStrengthType, editEquipment,
     editBandAssist, editKneeAssist,
     editUnitLock, editDeprecated,
+    editLiftType, editHoldType,
   )
   const addSummaryParts  = buildSummary(
     category, cardioMode, strengthType, equipment,
     bandAssist, kneeAssist,
     unitLock, deprecated,
+    liftType, holdType,
   )
 
   // ── Dynamic step numbering ─────────────────────────────────────────────────
@@ -1290,7 +1346,9 @@ export default function AdminMovements() {
     // bodyweight / kettlebell modifier blocks on isometric movements.
     if (strengthType === 'rep-based' && equipment === 'bodyweight') steps.push('bwModifiers')
     if (strengthType === 'rep-based' && equipment === 'kettlebell') steps.push('kbSetup')
+    if (strengthType === 'rep-based' && (equipment === 'barbell' || equipment === 'kettlebell')) steps.push('liftStyle')
     if (strengthType === 'rep-based' && ['kettlebell', 'strongman', 'carry'].includes(equipment)) steps.push('weightLadder')
+    if (category === 'strength' && strengthType === 'isometric') steps.push('holdType')
     if (category === 'strength' && strengthType === 'isometric') steps.push('isoLadder')
     if (shouldShowUnitLock(category, cardioMode, strengthType, equipment)) steps.push('unitLock')
     // Variants step renders for BOTH strength and cardio once the core
@@ -1516,6 +1574,29 @@ export default function AdminMovements() {
             </div>
           )}
 
+          {/* Lift style — barbell / kettlebell rep-based only. Olympic →
+              %-of-best surface; ballistic → bell-ladder. None = standard lift. */}
+          {editStrengthType === 'rep-based' && (editEquipment === 'barbell' || editEquipment === 'kettlebell') && (
+            <div data-step="liftStyle" className="animate-rise space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">{editStep('liftStyle')}</span>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Lift style <span className="font-normal normal-case text-muted-foreground/60">(optional)</span>
+                </p>
+              </div>
+              <Select
+                value={editLiftType}
+                options={LIFT_TYPE_OPTIONS}
+                onChange={setEditLiftType}
+                placeholder="None"
+                className="max-w-xs"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Olympic → %-of-best surface; Ballistic → bell-ladder. Leave None for standard lifts.
+              </p>
+            </div>
+          )}
+
           {/* Ladder override (kettlebell / strongman / carry — optional) */}
           {editStrengthType === 'rep-based' && ['kettlebell', 'strongman', 'carry'].includes(editEquipment) && (
             <div data-step="weightLadder" className="animate-rise space-y-3">
@@ -1531,6 +1612,29 @@ export default function AdminMovements() {
                 onChangeLb={setEditLadderLb}
                 onChangeKg={setEditLadderKg}
               />
+            </div>
+          )}
+
+          {/* Hold type — isometric strength only. Weighted (load) adds an
+              added-weight field when logging; leverage = lever holds. */}
+          {editStrengthType === 'isometric' && (
+            <div data-step="holdType" className="animate-rise space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">{editStep('holdType')}</span>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Hold type <span className="font-normal normal-case text-muted-foreground/60">(optional)</span>
+                </p>
+              </div>
+              <Select
+                value={editHoldType}
+                options={HOLD_TYPE_OPTIONS}
+                onChange={setEditHoldType}
+                placeholder="Standard hold"
+                className="max-w-xs"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Weighted (load) adds an added-weight field when logging; Leverage = lever holds; Standard = plain hold.
+              </p>
             </div>
           )}
 
@@ -1695,6 +1799,7 @@ export default function AdminMovements() {
                 setName(''); setCategory(null); setCardioMode(null)
                 setStrengthType(null); setEquipment(null)
                 setBandAssist(false); setKneeAssist(false); setWeightedProgression(false); setUsesPair(false)
+                setLiftType(''); setHoldType('')
                 setLadderLb(''); setLadderKg(''); setIsoLadderStr('')
                 setUnitLock(null); setUnitLockTouched(false); setDeprecated(false)
                 setError('')
@@ -1790,6 +1895,29 @@ export default function AdminMovements() {
             </div>
           )}
 
+          {/* Lift style — barbell / kettlebell rep-based only. Olympic →
+              %-of-best surface; ballistic → bell-ladder. None = standard lift. */}
+          {strengthType === 'rep-based' && (equipment === 'barbell' || equipment === 'kettlebell') && (
+            <div data-step="liftStyle" className="animate-rise space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">{addStep('liftStyle')}</span>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Lift style <span className="font-normal normal-case text-muted-foreground/60">(optional)</span>
+                </p>
+              </div>
+              <Select
+                value={liftType}
+                options={LIFT_TYPE_OPTIONS}
+                onChange={setLiftType}
+                placeholder="None"
+                className="max-w-xs"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Olympic → %-of-best surface; Ballistic → bell-ladder. Leave None for standard lifts.
+              </p>
+            </div>
+          )}
+
           {/* Ladder override (kettlebell / strongman / carry — optional) */}
           {strengthType === 'rep-based' && ['kettlebell', 'strongman', 'carry'].includes(equipment) && (
             <div data-step="weightLadder" className="animate-rise space-y-3">
@@ -1805,6 +1933,29 @@ export default function AdminMovements() {
                 onChangeLb={setLadderLb}
                 onChangeKg={setLadderKg}
               />
+            </div>
+          )}
+
+          {/* Hold type — isometric strength only. Weighted (load) adds an
+              added-weight field when logging; leverage = lever holds. */}
+          {strengthType === 'isometric' && (
+            <div data-step="holdType" className="animate-rise space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">{addStep('holdType')}</span>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Hold type <span className="font-normal normal-case text-muted-foreground/60">(optional)</span>
+                </p>
+              </div>
+              <Select
+                value={holdType}
+                options={HOLD_TYPE_OPTIONS}
+                onChange={setHoldType}
+                placeholder="Standard hold"
+                className="max-w-xs"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Weighted (load) adds an added-weight field when logging; Leverage = lever holds; Standard = plain hold.
+              </p>
             </div>
           )}
 
@@ -1927,6 +2078,7 @@ export default function AdminMovements() {
                     setName(''); setCategory(null); setCardioMode(null)
                     setStrengthType(null); setEquipment(null)
                     setBandAssist(false); setKneeAssist(false); setWeightedProgression(false); setUsesPair(false)
+                    setLiftType(''); setHoldType('')
                     setLadderLb(''); setLadderKg(''); setIsoLadderStr('')
                     setUnitLock(null); setUnitLockTouched(false); setDeprecated(false)
                     setVariants([]); setVariantInput(''); setVariantShortInput('')
