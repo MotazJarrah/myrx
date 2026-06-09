@@ -198,7 +198,7 @@ function SnapshotBadge({ children, color, muted }) {
     cyan:    'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
-    <span className={`flex flex-1 min-w-[110px] items-center justify-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium leading-none ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
+    <span className={`flex flex-1 min-w-[110px] items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-medium leading-none ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
       {children}
     </span>
   )
@@ -509,8 +509,15 @@ function ActivityFeed({ userId, clientName, clientEmail }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function AdminUserDetail() {
-  const { id }                         = useParams()
+  const { id: routeId }                = useParams()
   const { user: adminUser, profile: adminProfile } = useAuth()
+
+  // Self-view ("My Profile"): /admin/me carries no :id (or the route id IS the
+  // admin's own uid). In self-mode the page points at the admin's own account
+  // and every admin-action control (suspend / chat / coaching / settings /
+  // delete) is hidden.
+  const selfMode = !routeId || (!!adminUser?.id && routeId === adminUser.id)
+  const id = selfMode ? adminUser?.id : routeId
 
   const [profile,        setProfile]        = useState(null)
   const [existingPlan,   setExistingPlan]   = useState(null)
@@ -966,7 +973,7 @@ export default function AdminUserDetail() {
               Message button + the Settings gear. Delete lives inside settings.
               On small screens the Message label collapses to its icon to save
               width so the top row stays clean. */}
-          {!profile.anonymized_at && (
+          {!profile.anonymized_at && !selfMode && (
             <div className="flex items-center gap-2 shrink-0">
               {profile.admin_chat_enabled === true && (
                 <Link href={`/admin/messages?userId=${profile.id}`}>
@@ -994,7 +1001,7 @@ export default function AdminUserDetail() {
             name column on mobile). Self-describing items: account status
             (toggle), coaching mode (dropdown), plan state, chat toggle. Wraps
             cleanly on narrow viewports. */}
-        {!profile.anonymized_at && (
+        {!profile.anonymized_at && !selfMode && (
           <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px]">
             {/* Account status — bordered pill so it reads as a clickable toggle */}
             <button
@@ -1141,7 +1148,7 @@ export default function AdminUserDetail() {
             tier-appropriate empty states appear even with no signal. */}
         {snapshot && (
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {/* Strength PRs — FREE. Last 30 days; "no recent strength PRs" when none. */}
+            {/* Strength PRs — FREE. Last 30 days; "no strength PRs" when none. */}
             {tierRank >= TIER_RANK.free && snapshot.strengthPRsThisMonth != null && (
               snapshot.strengthPRsThisMonth > 0 ? (
                 <SnapshotBadge color="blue">
@@ -1151,12 +1158,12 @@ export default function AdminUserDetail() {
               ) : (
                 <SnapshotBadge color="blue" muted>
                   <Dumbbell className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  no recent strength PRs
+                  no strength PRs
                 </SnapshotBadge>
               )
             )}
 
-            {/* Cardio PRs — FREE. Last 30 days; "no recent cardio PRs" when none. */}
+            {/* Cardio PRs — FREE. Last 30 days; "no cardio PRs" when none. */}
             {tierRank >= TIER_RANK.free && snapshot.cardioPRsThisMonth != null && (
               snapshot.cardioPRsThisMonth > 0 ? (
                 <SnapshotBadge color="amber">
@@ -1166,7 +1173,7 @@ export default function AdminUserDetail() {
               ) : (
                 <SnapshotBadge color="amber" muted>
                   <Activity className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  no recent cardio PRs
+                  no cardio PRs
                 </SnapshotBadge>
               )
             )}
@@ -1320,7 +1327,8 @@ export default function AdminUserDetail() {
           // Admin-managed (coach_id === this admin). Self-managed or
           // coach-managed clients hide the Macro Plan Setting tab — switch
           // the coaching chip to Admin-managed to take over.
-          canManageMacros={profile?.coach_id === adminUser?.id}
+          // In self-view the admin always manages their own plan, so force it on.
+          canManageMacros={selfMode || profile?.coach_id === adminUser?.id}
         />
       )}
 

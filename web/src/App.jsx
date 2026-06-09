@@ -314,6 +314,10 @@ function ProtectedLayout() {
                   Locked May 28 2026 after the Archive → Exports rename. */}
               <Route path="/admin/archive"      component={() => <Redirect to="/admin/exports?tab=archive" />} />
               <Route path="/admin/profile"      component={AdminProfile} />
+              {/* /admin/me — the admin's own "My Profile" self-view. Reuses
+                  AdminUserDetail with no :id; it self-detects (id === own uid)
+                  and hides all admin-action controls. */}
+              <Route path="/admin/me"           component={AdminUserDetail} />
               <Route path="/admin/user/:userId/effort/cardio/:slug"       component={AdminCardioDetail} />
               <Route path="/admin/user/:userId/effort/:kind/:slug"        component={AdminEffortDetail} />
               <Route path="/admin/user/:id"                               component={AdminUserDetail} />
@@ -497,6 +501,9 @@ function AppRoutes() {
         <Route path="/coach/clients"     component={CoachClientsRoute} />
         <Route path="/coach/progress"    component={CoachProgressRoute} />
         <Route path="/coach/nutrition"   component={CoachNutritionRoute} />
+        {/* /coach/me — the coach's own "My Profile" self-view. Reuses
+            CoachClientDetail with no :id; self-detects + hides coach-action controls. */}
+        <Route path="/coach/me"          component={CoachClientDetailRoute} />
         <Route path="/coach/client/:id"  component={CoachClientDetailRoute} />
         {/* cardio route MUST precede the generic :kind route so 'cardio' matches here */}
         <Route path="/coach/client/:userId/effort/cardio/:slug" component={CoachCardioDetailRoute} />

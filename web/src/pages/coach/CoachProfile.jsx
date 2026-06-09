@@ -16,7 +16,6 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { Sparkles, Trash2, AlertTriangle, X, Loader2, Clock } from 'lucide-react'
 import AccountSettings from '../../components/AccountSettings'
-import MacroPlanEditor from '../../components/MacroPlanEditor'
 import BillingView from '../../components/BillingView'
 import { supabase } from '../../lib/supabase'
 import { usePersistedState } from '../../hooks/usePersistedState'
@@ -27,9 +26,10 @@ import { usePersistedState } from '../../hooks/usePersistedState'
 // tab's About sub-section (AccountSettings → About, which shows the coach
 // docs via its is_coach/superuser gate) — so the coach no longer sees
 // About twice. Mirrors the admin's single-About layout.
+// Macro Plan Setting moved OUT of Settings into the coach's "My Profile"
+// self-view (its Calories tab) — Jun 9 2026. Settings is now Settings + Billing.
 const TABS = [
   { id: 'profile', label: 'Settings'    },
-  { id: 'macro',   label: 'Macro Plan Setting'  },
   { id: 'billing', label: 'Billing'     },
 ]
 
@@ -42,12 +42,8 @@ export default function CoachProfile() {
   // If a stale 'about' tab was persisted before the standalone About tab was
   // removed (Jun 8 2026), fall back to Settings so the body never renders blank.
   useEffect(() => {
-    if (!['profile', 'macro', 'billing'].includes(activeTab)) setActiveTab('profile')
+    if (!['profile', 'billing'].includes(activeTab)) setActiveTab('profile')
   }, [activeTab, setActiveTab])
-
-  // Coach's OWN macro plan (separate fetch — they're managing themselves)
-  const [existingPlan, setExistingPlan] = useState(null)
-  const [planLoading,  setPlanLoading]  = useState(true)
 
   // Self-service delete account modal state. Calls schedule_account_deletion
   // RPC with p_user_id=null (defaults to auth.uid()), which sets
@@ -59,17 +55,6 @@ export default function CoachProfile() {
   const [deleting,          setDeleting]          = useState(false)
   const [deleteError,       setDeleteError]       = useState('')
 
-  useEffect(() => {
-    if (!user?.id) return
-    async function load() {
-      setPlanLoading(true)
-      const { data } = await supabase
-        .from('calorie_plans').select('*').eq('user_id', user.id).maybeSingle()
-      setExistingPlan(data ?? null)
-      setPlanLoading(false)
-    }
-    load()
-  }, [user?.id])
 
   // Schedule the coach's own account for deletion. Calls the
   // schedule_account_deletion RPC with p_user_id=null so the function
@@ -185,18 +170,6 @@ export default function CoachProfile() {
         />
       )}
 
-      {activeTab === 'macro' && (
-        planLoading ? (
-          <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>
-        ) : (
-          <MacroPlanEditor
-            profile={profileWithEmail}
-            user={user}
-            existingPlan={existingPlan}
-            onPlanSaved={setExistingPlan}
-          />
-        )
-      )}
 
       {activeTab === 'billing' && (
         // Billing surface is the same component admin uses on

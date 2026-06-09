@@ -24,12 +24,13 @@ import { Link, useLocation } from 'wouter'
 import { useAuth } from '../../contexts/AuthContext'
 import {
   Users, LogOut, X, Menu, LayoutDashboard,
-  MessageCircle, UserPlus, Settings, TrendingUp, Utensils,
+  MessageCircle, UserPlus, Settings, TrendingUp, Utensils, UserCircle,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
 const NAV = [
   { href: '/coach/portal',      label: 'Dashboard',             icon: LayoutDashboard },
+  { href: '/coach/me',          label: 'My Profile',            icon: UserCircle },
   { href: '/coach/clients',     label: 'My Clients',            icon: Users },
   { href: '/coach/progress',    label: 'Weight Goal Progress',  icon: TrendingUp },
   { href: '/coach/nutrition',   label: 'Nutrition Overview',    icon: Utensils },

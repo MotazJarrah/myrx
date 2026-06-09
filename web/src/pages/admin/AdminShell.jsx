@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'wouter'
 import { useAuth } from '../../contexts/AuthContext'
 import {
-  Users, LogOut, X, Menu,
+  Users, LogOut, X, Menu, UserCircle,
   LayoutDashboard, TrendingUp, Utensils,
   MessageCircle, BookOpen, Settings, FileDown,
 } from 'lucide-react'
@@ -10,6 +10,7 @@ import { supabase } from '../../lib/supabase'
 
 const NAV = [
   { href: '/admin/overview',  label: 'Dashboard',            icon: LayoutDashboard },
+  { href: '/admin/me',        label: 'My Profile',           icon: UserCircle },
   { href: '/admin/clients',   label: 'Clients',              icon: Users },
   { href: '/admin/progress',  label: 'Weight Goal Progress', icon: TrendingUp },
   { href: '/admin/nutrition', label: 'Nutrition Overview',   icon: Utensils },

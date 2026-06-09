@@ -150,7 +150,7 @@ function SnapshotBadge({ children, color, muted }) {
     cyan:    'bg-cyan-500/10 border-cyan-500/20 text-cyan-400',
   }[color] || 'bg-muted border-border text-muted-foreground'
   return (
-    <span className={`flex flex-1 min-w-[110px] items-center justify-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium leading-none ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
+    <span className={`flex flex-1 min-w-[110px] items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-[11px] font-medium leading-none ${cls}${muted ? ' !text-muted-foreground' : ''}`}>
       {children}
     </span>
   )
@@ -172,9 +172,15 @@ const TABS = [
 // ── Main ────────────────────────────────────────────────────────────────────
 
 export default function CoachClientDetail() {
-  const { id } = useParams()
+  const { id: routeId } = useParams()
   const [, navigate] = useLocation()
   const { user: coachUser, profile: coachProfile } = useAuth()
+
+  // Self-view ("My Profile"): /coach/me carries no :id (or the route id IS the
+  // coach's own uid). In self-mode the page points at the coach's own account
+  // and every coach-action-on-another-person control is hidden.
+  const selfMode = !routeId || (!!coachUser?.id && routeId === coachUser.id)
+  const id = selfMode ? coachUser?.id : routeId
 
   const [client,        setClient]        = useState(null)
   const [existingPlan,  setExistingPlan]  = useState(null)
@@ -423,12 +429,15 @@ export default function CoachClientDetail() {
   return (
     <div className="space-y-4">
 
-      {/* Back link */}
-      <Link href="/coach/clients">
-        <a className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
-          <ArrowLeft className="h-4 w-4" /> Back to clients
-        </a>
-      </Link>
+      {/* Back link — client view only; the self-view ("My Profile") is reached
+          from the sidebar, so there's nothing to go "back" to. */}
+      {!selfMode && (
+        <Link href="/coach/clients">
+          <a className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <ArrowLeft className="h-4 w-4" /> Back to clients
+          </a>
+        </Link>
+      )}
 
       {/* Remove-from-roster confirmation (type-REMOVE gate) */}
       {removeOpen && (
@@ -475,9 +484,9 @@ export default function CoachClientDetail() {
             {client.phone && <p className="text-xs text-muted-foreground truncate">{client.phone}</p>}
           </div>
 
-          {/* Action cluster — DO/OPEN actions only, mirroring the admin card's
-              top-right cluster ([Message] + Settings gear). Coach gets
-              [Message athlete] + [Remove]; no Settings gear (admin-only). */}
+          {/* Action cluster — Message + Remove. Hidden in self-view (you can't
+              message or remove yourself). */}
+          {!selfMode && (
           <div className="flex items-center gap-2 shrink-0">
             {/* Message athlete — deep-links to /coach/messages with this client
                 pre-selected. Same filled-primary button as the admin header. */}
@@ -504,6 +513,7 @@ export default function CoachClientDetail() {
               Remove
             </button>
           </div>
+          )}
         </div>
 
         {/* Status line below the name — mirrors the ADMIN client-detail card's
@@ -511,6 +521,7 @@ export default function CoachClientDetail() {
             classes, same `·` separator, same plan-status wording + colors. Coach
             gets the Self/Coach chip (admin has the 3-state coaching chip); the
             admin-only Active + chat pills are intentionally omitted. */}
+        {!selfMode && (
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px]">
           {/* Management chip — Self/Coach-managed. Coach-managed → coach owns the
               macro plan + the Macro Plan Setting tab appears. Self-managed → hands
@@ -524,6 +535,7 @@ export default function CoachClientDetail() {
             {existingPlan?.goal_reached ? 'Macro plan setting — goal reached' : existingPlan ? 'Macro plan setting saved' : 'No macro plan setting'}
           </span>
         </div>
+        )}
 
         {mgmtError && (
           <div className="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -564,7 +576,7 @@ export default function CoachClientDetail() {
             even with no signal. */}
         {snapshot && (
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {/* Strength PRs — FREE. Last 30 days; "no recent strength PRs" when none. */}
+            {/* Strength PRs — FREE. Last 30 days; "no strength PRs" when none. */}
             {tierRank >= TIER_RANK.free && snapshot.strengthPRsThisMonth != null && (
               snapshot.strengthPRsThisMonth > 0 ? (
                 <SnapshotBadge color="blue">
@@ -574,12 +586,12 @@ export default function CoachClientDetail() {
               ) : (
                 <SnapshotBadge color="blue" muted>
                   <Dumbbell className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  no recent strength PRs
+                  no strength PRs
                 </SnapshotBadge>
               )
             )}
 
-            {/* Cardio PRs — FREE. Last 30 days; "no recent cardio PRs" when none. */}
+            {/* Cardio PRs — FREE. Last 30 days; "no cardio PRs" when none. */}
             {tierRank >= TIER_RANK.free && snapshot.cardioPRsThisMonth != null && (
               snapshot.cardioPRsThisMonth > 0 ? (
                 <SnapshotBadge color="amber">
@@ -589,7 +601,7 @@ export default function CoachClientDetail() {
               ) : (
                 <SnapshotBadge color="amber" muted>
                   <Activity className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  no recent cardio PRs
+                  no cardio PRs
                 </SnapshotBadge>
               )
             )}
@@ -734,7 +746,8 @@ export default function CoachClientDetail() {
           onPlanSaved={updated => setExistingPlan(updated)}
           // Coach manages this client's macros only when they've taken over
           // (Coach-managed chip). Self-managed hides the Macro Plan Setting tab.
-          canManageMacros={isCoachManaged}
+          // In self-view the coach always manages their own plan, so force it on.
+          canManageMacros={selfMode ? true : isCoachManaged}
         />
       )}
 
