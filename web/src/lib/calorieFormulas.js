@@ -40,6 +40,18 @@ const FAT_LEVELS = {
   5: { label: 'Keto',      pctOfCals: 0.70 },
 }
 
+// Macro preset name → (protein_level, fat_level) pair. Used ONLY as a fallback
+// when a plan has no stored grams — a rare legacy/edge case now that grams are
+// the single source of truth (T151). Mirrors the mobile preset definitions;
+// 'high_carb' is web-only. Unknown names default to balanced.
+const PRESET_LEVELS = {
+  balanced:     { protein_level: 2, fat_level: 3 },
+  high_protein: { protein_level: 3, fat_level: 3 },
+  high_carb:    { protein_level: 1, fat_level: 2 },
+  keto:         { protein_level: 1, fat_level: 5 },
+  performance:  { protein_level: 2, fat_level: 2 },
+}
+
 // ── Unit helpers ──────────────────────────────────────────────────────────────
 
 export function toKg(weight, unit) {
@@ -91,22 +103,52 @@ export function calcDailyTarget(tdee, energyBalanceTypeKey) {
  * Macro split in grams + calories + %.
  * Protein based on GOAL weight; fats as % of total; carbs = remainder.
  */
-function calcMacros(dailyTargetCals, goalWeightKg, proteinLevelKey, fatLevelKey) {
+function calcMacros(dailyTargetCals, goalWeightKg, proteinLevelKey, fatLevelKey, carbCapG = null) {
   const proteinG    = PROTEIN_LEVELS[proteinLevelKey].gPerKg * goalWeightKg
   const proteinCals = proteinG * 4
 
-  const fatPct  = FAT_LEVELS[fatLevelKey].pctOfCals
-  const fatCals = dailyTargetCals * fatPct
-  const fatG    = fatCals / 9
+  let fatCals
+  let carbCals
+  if (carbCapG != null && carbCapG > 0) {
+    // Carb-capped path (Keto et al.): carbs LOCKED at the cap, fat = residual.
+    // Mirrors mobile/src/lib/calorieFormulas.ts exactly so a keto plan reads
+    // identically on web and phone. fat_level is ignored when a cap is set.
+    carbCals = carbCapG * 4
+    fatCals  = Math.max(0, dailyTargetCals - proteinCals - carbCals)
+  } else {
+    // Default path: fat at fixed %, carbs = residual.
+    const fatPct = FAT_LEVELS[fatLevelKey].pctOfCals
+    fatCals  = dailyTargetCals * fatPct
+    carbCals = Math.max(0, dailyTargetCals - proteinCals - fatCals)
+  }
 
-  const carbCals = Math.max(0, dailyTargetCals - proteinCals - fatCals)
-  const carbG    = carbCals / 4
+  const fatG  = fatCals / 9
+  const carbG = carbCals / 4
 
   const safe = (n) => Math.max(0, Math.round(n))
   return {
     protein: { grams: safe(proteinG), calories: safe(proteinCals), pct: safe((proteinCals / dailyTargetCals) * 100) },
     fat:     { grams: safe(fatG),     calories: safe(fatCals),     pct: safe((fatCals     / dailyTargetCals) * 100) },
     carbs:   { grams: safe(carbG),    calories: safe(carbCals),    pct: safe((carbCals    / dailyTargetCals) * 100) },
+  }
+}
+
+/**
+ * Build a macro breakdown directly from stored gram targets (T151 — grams are
+ * the single source of truth). Used whenever a plan carries explicit macro
+ * grams (coach-authored on web, or self-set via the mobile wizard). Percentages
+ * are relative to the grams' own calorie sum so the composition bar totals ~100%.
+ */
+function macrosFromGrams(proteinG, fatG, carbG) {
+  const proteinCals = proteinG * 4
+  const fatCals     = fatG * 9
+  const carbCals    = carbG * 4
+  const base = (proteinCals + fatCals + carbCals) || 1
+  const safe = (n) => Math.max(0, Math.round(n))
+  return {
+    protein: { grams: safe(proteinG), calories: safe(proteinCals), pct: safe((proteinCals / base) * 100) },
+    fat:     { grams: safe(fatG),     calories: safe(fatCals),     pct: safe((fatCals     / base) * 100) },
+    carbs:   { grams: safe(carbG),    calories: safe(carbCals),    pct: safe((carbCals    / base) * 100) },
   }
 }
 
@@ -201,7 +243,7 @@ export function calcEnergyAdjustment(profile, plan) {
 /**
  * Full pipeline. Returns null if required data is missing.
  * @param {object} profile                    – { current_weight, weight_unit, current_height, height_unit, gender, birthdate }
- * @param {object} plan                       – { activity_factor, energy_balance_type?, energy_balance_pct?, protein_level, fat_level, goal_weight_kg, correction_factor }
+ * @param {object} plan                       – { activity_factor, energy_balance_type?, energy_balance_pct?, macro_preset?, macros_p_g?, macros_f_g?, macros_c_g?, carb_cap_g?, goal_weight_kg, correction_factor }
  *   energy_balance_pct takes priority (e.g. -0.20 = −20% of TDEE).
  *   Falls back to energy_balance_type for legacy plans.
  * @param {number|null} currentWeightKgOverride – When provided, overrides profile weight for the
@@ -219,15 +261,34 @@ export function calcFullPlan(profile, plan, currentWeightKgOverride = null) {
   const tdee = calcTDEE(bmr, plan.activity_factor)
 
   // energy_balance_pct (new) takes priority over energy_balance_type (legacy)
-  const energyAdj = (plan.energy_balance_pct != null)
+  let energyAdj = (plan.energy_balance_pct != null)
     ? Math.round(tdee * plan.energy_balance_pct)
     : ENERGY_BALANCE_TYPES[plan.energy_balance_type]?.adjustment ?? 0
 
-  const dailyTarget = Math.round(tdee + energyAdj)
+  let dailyTarget = Math.round(tdee + energyAdj)
 
   // Fall back to current weight for protein calc when goal isn't set yet
   const effectiveGoalKg = plan.goal_weight_kg || weightKg
-  const macros = calcMacros(dailyTarget, effectiveGoalKg, plan.protein_level, plan.fat_level)
+
+  // Macros: grams are the single source of truth (T151). When the plan carries
+  // explicit gram targets — coach-authored in the web Macro Plan editor, or
+  // self-set via the mobile wizard — honor them verbatim and let them define the
+  // calorie goal too (so the ring and the macro bar always agree). The energy
+  // adjustment is back-derived from the prescribed grams so the timeline reflects
+  // what the athlete is actually eating. Fall back to the level-derived split
+  // only for legacy rows saved before grams existed.
+  let macros
+  if (plan.macros_p_g != null && plan.macros_f_g != null && plan.macros_c_g != null) {
+    macros      = macrosFromGrams(plan.macros_p_g, plan.macros_f_g, plan.macros_c_g)
+    dailyTarget = macros.protein.calories + macros.fat.calories + macros.carbs.calories
+    energyAdj   = dailyTarget - Math.round(tdee)
+  } else {
+    // No stored grams (rare legacy/edge row). The protein_level/fat_level
+    // columns are gone (T151); derive the level pair from the stored preset
+    // name, defaulting to balanced.
+    const lv = PRESET_LEVELS[plan.macro_preset ?? 'balanced'] || PRESET_LEVELS.balanced
+    macros = calcMacros(dailyTarget, effectiveGoalKg, lv.protein_level, lv.fat_level, plan.carb_cap_g ?? null)
+  }
 
   // Timeline uses live bodyweight (override) if available, else profile weight.
   // Skip entirely if no goal weight — prevents null-as-0 producing 300-month timelines.

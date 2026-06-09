@@ -24,7 +24,7 @@ import { Link, useLocation } from 'wouter'
 import { useAuth } from '../../contexts/AuthContext'
 import {
   Users, LogOut, X, Menu, LayoutDashboard,
-  MessageCircle, BarChart3, Sparkles, UserPlus, Settings, TrendingUp, Utensils,
+  MessageCircle, UserPlus, Settings, TrendingUp, Utensils,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 
@@ -35,8 +35,6 @@ const NAV = [
   { href: '/coach/nutrition',   label: 'Nutrition Overview',    icon: Utensils },
   { href: '/coach/invite',      label: 'Invite Client',         icon: UserPlus },
   { href: '/coach/messages',    label: 'Messages',              icon: MessageCircle },
-  { href: '/coach/briefing',    label: 'Morning Briefing',      icon: BarChart3 },
-  { href: '/coach/adjustments', label: 'Suggested Adjustments', icon: Sparkles },
 ]
 
 // Coach subscription tier → display label for the "Coach {Tier}" sub-label.
@@ -52,14 +50,14 @@ function Logo() {
   const raw   = profile?.coach_subscription_tier
   const tier  = raw ? (COACH_TIER_LABEL[raw] || (raw.charAt(0).toUpperCase() + raw.slice(1))) : null
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-end gap-2">
       <img
         src="/myrx-wordmark-dark.png?v=6-final"
         alt="MyRX"
         className="h-5 w-auto"
         style={{ height: '22px' }}
       />
-      <span className="text-base font-semibold tracking-tight text-primary">
+      <span className="text-lg font-semibold tracking-tight text-primary leading-none whitespace-nowrap">
         {tier ? `Coach ${tier}` : 'Coach'}
       </span>
     </div>

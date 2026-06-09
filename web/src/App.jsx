@@ -70,8 +70,6 @@ const CoachDashboard   = lazy(() => import('./pages/coach/CoachDashboard'))
 const CoachClients     = lazy(() => import('./pages/coach/CoachClients'))
 const CoachInvite      = lazy(() => import('./pages/coach/CoachInvite'))
 const CoachMessages    = lazy(() => import('./pages/coach/CoachMessages'))
-const CoachBriefing    = lazy(() => import('./pages/coach/CoachBriefing'))
-const CoachAdjustments = lazy(() => import('./pages/coach/CoachAdjustments'))
 const CoachProgress    = lazy(() => import('./pages/coach/CoachProgress'))
 const CoachNutrition   = lazy(() => import('./pages/coach/CoachNutrition'))
 const CoachProfile     = lazy(() => import('./pages/coach/CoachProfile'))
@@ -433,8 +431,6 @@ function CoachEffortDetailRoute()  { return <CoachProtectedLayout><AdminEffortDe
 function CoachCardioDetailRoute()  { return <CoachProtectedLayout><AdminCardioDetail /></CoachProtectedLayout> }
 function CoachInviteRoute()        { return <CoachProtectedLayout><CoachInvite       /></CoachProtectedLayout> }
 function CoachMessagesRoute()      { return <CoachProtectedLayout><CoachMessages     /></CoachProtectedLayout> }
-function CoachBriefingRoute()      { return <CoachProtectedLayout><CoachBriefing     /></CoachProtectedLayout> }
-function CoachAdjustmentsRoute()   { return <CoachProtectedLayout><CoachAdjustments  /></CoachProtectedLayout> }
 function CoachProfileRoute()       { return <CoachProtectedLayout><CoachProfile      /></CoachProtectedLayout> }
 
 function AppRoutes() {
@@ -507,8 +503,6 @@ function AppRoutes() {
         <Route path="/coach/client/:userId/effort/:kind/:slug"  component={CoachEffortDetailRoute} />
         <Route path="/coach/invite"      component={CoachInviteRoute} />
         <Route path="/coach/messages"    component={CoachMessagesRoute} />
-        <Route path="/coach/briefing"    component={CoachBriefingRoute} />
-        <Route path="/coach/adjustments" component={CoachAdjustmentsRoute} />
         <Route path="/coach/profile"     component={CoachProfileRoute} />
 
         <Route path="/coach"         component={() => <Redirect to="/coach/signup" />} />

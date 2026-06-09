@@ -49,13 +49,13 @@ import {
   SELF_COACHED_CORRECTION_FACTOR,
   deriveGoalWeightKg, predictLbDeltaForPace, predictLeanFatSplit, paceProfileWarning,
   macroProfileWarning,
-  macroPresetForPlan, paceForPlan, resolveCarbCap,
+  macroPresetKeyFromStored, paceForPlan, resolveCarbCap,
   BODY_FAT_BAND_INFO, bodyFatGenderKey,
   evaluateRealism,
   formatLbDelta, formatWeightFromKg, formatProteinPerWeight,
   type BodyFatBand, type WeightUnit,
 } from '../lib/planPresets'
-import { FAT_LEVELS, PROTEIN_LEVELS, calcBMR, calcTimeline } from '../lib/calorieFormulas'
+import { FAT_LEVELS, PROTEIN_LEVELS, calcBMR, calcTimeline, calcMacros } from '../lib/calorieFormulas'
 import BodyCompPicker from './BodyCompPicker'
 import TickerNumber from './TickerNumber'
 import { colors, alpha, palette, withAlpha, fonts } from '../theme'
@@ -65,8 +65,7 @@ import { colors, alpha, palette, withAlpha, fonts } from '../theme'
 interface ExistingPlan {
   activity_factor?:     number | null
   energy_balance_pct?:  number | null
-  protein_level?:       number | null
-  fat_level?:           number | null
+  macro_preset?:        string | null
 }
 
 type StartStep = 'bodyComp' | 'pace' | 'activity' | 'macros' | 'reality'
@@ -165,10 +164,7 @@ export default function PlanWizardSheet({
     () => existingPlan?.activity_factor ?? 0,
   )
   const [macro, setMacro] = useState<MacroPresetKey | null>(() =>
-    macroPresetForPlan(
-      existingPlan?.protein_level ?? null,
-      existingPlan?.fat_level     ?? null,
-    ),
+    macroPresetKeyFromStored(existingPlan?.macro_preset),
   )
   const [saving, setSaving] = useState(false)
 
@@ -226,10 +222,7 @@ export default function PlanWizardSheet({
     setStep(seed)
     setPace(paceForPlan(existingPlan?.energy_balance_pct ?? null))
     setActivity(existingPlan?.activity_factor ?? 0)
-    setMacro(macroPresetForPlan(
-      existingPlan?.protein_level ?? null,
-      existingPlan?.fat_level     ?? null,
-    ))
+    setMacro(macroPresetKeyFromStored(existingPlan?.macro_preset))
   }, [isOpen, startStep, existingPlan, bodyFatBand, singleScreen, dragY])
 
   // ── TDEE — recomputed live from chosen activity ──────────────────────────
@@ -360,13 +353,35 @@ export default function PlanWizardSheet({
       // stored goal mismatches the badge.
       const goalWeight  = deriveGoalWeightKg(currentWeightKg, pace, tdeeForSave, activity, bodyFat)
 
+      // T151 — grams are the single source of truth. Persist explicit macro
+      // grams so this plan reads identically everywhere (the calories screen,
+      // web + phone, reads stored grams first and only falls back to the level
+      // math for legacy rows). Only write grams when we have a REAL tdee: if the
+      // profile was incomplete (tdee null → 2000 fallback), leave grams null so
+      // calcFullPlan recomputes from levels once the profile is complete.
+      let macrosPG: number | null = null
+      let macrosFG: number | null = null
+      let macrosCG: number | null = null
+      if (tdee != null) {
+        const dailyDelta  = Math.round(tdee * paceOpt.energy_balance_pct)
+        const dailyTarget = Math.round(tdee + dailyDelta)
+        const m = calcMacros(
+          dailyTarget,
+          goalWeight,
+          macroOpt.protein_level,
+          macroOpt.fat_level,
+          resolveCarbCap(macroOpt, activity),
+        )
+        macrosPG = m.protein.grams
+        macrosFG = m.fat.grams
+        macrosCG = m.carbs.grams
+      }
+
       const payload = {
         user_id:             userId,
         activity_factor:     activity,
         energy_balance_pct:  paceOpt.energy_balance_pct,
         energy_balance_type: null,                          // legacy field — not used by new flow
-        protein_level:       macroOpt.protein_level,
-        fat_level:           macroOpt.fat_level,
         // Carb cap (null for everything except Keto). Resolved per the
         // user's activity tier — Keto's cap scales 20g (sedentary) →
         // 50g (extreme). The DB column stores a single int; the
@@ -374,6 +389,12 @@ export default function PlanWizardSheet({
         // calcMacros downstream uses this int directly to lock carbs
         // and make fat the residual (instead of fat_level as a %).
         carb_cap_g:          resolveCarbCap(macroOpt, activity),
+        // T151 — persist the chosen preset key + explicit grams so every plan
+        // speaks the same language as the web Macro Plan editor.
+        macro_preset:        macro,
+        macros_p_g:          macrosPG,
+        macros_f_g:          macrosFG,
+        macros_c_g:          macrosCG,
         goal_weight_kg:      goalWeight,
         starting_weight_kg:  Math.round(currentWeightKg * 10) / 10,
         correction_factor:   SELF_COACHED_CORRECTION_FACTOR,

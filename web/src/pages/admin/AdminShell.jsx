@@ -34,14 +34,14 @@ function Logo() {
   // "Admin" stays as a lime sub-label (no combined "MyRX Admin" variant).
   // Mirrors CoachShell's Logo.
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-end gap-2">
       <img
         src="/myrx-wordmark-dark.png?v=6-final"
         alt="MyRX"
         className="h-5 w-auto"
         style={{ height: '22px' }}
       />
-      <span className="text-base font-semibold tracking-tight text-primary">
+      <span className="text-lg font-semibold tracking-tight text-primary leading-none whitespace-nowrap">
         Admin
       </span>
     </div>

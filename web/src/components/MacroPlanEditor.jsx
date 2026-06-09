@@ -964,7 +964,7 @@ export default function MacroPlanEditor({
 
           {/* Meals */}
           <div>
-            <SectionLabel hint="UP = let the client choose; otherwise this becomes their starting point.">Number of meals</SectionLabel>
+            <SectionLabel hint="UP = User Preference — allows the client to choose the number of meals per day for the breakdown.">Number of meals</SectionLabel>
             <div className="flex flex-wrap gap-1.5">
               <button type="button" onClick={() => setMealsAssignment(null)}
                 className={`flex h-9 items-center justify-center rounded-full border px-4 text-xs font-semibold transition-all ${mealsAssignment === null ? 'bg-primary border-primary text-primary-foreground' : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground'}`}>UP</button>

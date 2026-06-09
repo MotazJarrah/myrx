@@ -983,21 +983,21 @@ export function deriveGoalWeightKg(
 }
 
 /**
- * Lookup the preset that matches an existing plan's (protein_level,
- * fat_level) pair — used when re-opening the wizard to highlight the
- * current selection. Returns null if no preset matches exactly (the
- * plan was hand-tuned by an admin and doesn't fit any preset shape).
+ * Validate a plan's stored `macro_preset` name against the mobile preset set —
+ * used when re-opening the wizard (to highlight the current chip) and on the
+ * calories card (to label the macro chip). Returns null for a web-only preset
+ * (e.g. 'high_carb') or an unrecognized / custom value, which the UI renders as
+ * "Custom". Replaces the old (protein_level, fat_level) reverse lookup now that
+ * those columns are gone (T151 — grams are the single source of truth, and the
+ * chosen preset name is persisted directly).
  */
-export function macroPresetForPlan(
-  protein_level: number | null,
-  fat_level:     number | null,
+export function macroPresetKeyFromStored(
+  stored: string | null | undefined,
 ): MacroPresetKey | null {
-  if (protein_level == null || fat_level == null) return null
-  for (const key of MACRO_PRESET_ORDER) {
-    const p = MACRO_PRESETS[key]
-    if (p.protein_level === protein_level && p.fat_level === fat_level) return key
-  }
-  return null
+  if (!stored) return null
+  return (MACRO_PRESET_ORDER as readonly string[]).includes(stored)
+    ? (stored as MacroPresetKey)
+    : null
 }
 
 /**

@@ -37,7 +37,7 @@ import CalorieStrip from '../../src/components/CalorieStrip'
 import FoodLogDrawer from '../../src/components/FoodLogDrawer'
 import type { MealSlot } from '../../src/components/FoodLogDrawer'
 import PlanWizardSheet from '../../src/components/PlanWizardSheet'
-import { MACRO_PRESETS, PACE_OPTIONS, macroPresetForPlan, paceForPlan } from '../../src/lib/planPresets'
+import { MACRO_PRESETS, PACE_OPTIONS, macroPresetKeyFromStored, paceForPlan } from '../../src/lib/planPresets'
 import TickerNumber from '../../src/components/TickerNumber'
 import AnimateRise from '../../src/components/AnimateRise'
 import Skeleton from '../../src/components/Skeleton'
@@ -1317,7 +1317,7 @@ function CurrentWeightGoal({
   // macroPresetForPlan return null and the chip falls back to "Custom".
   const paceKey       = paceForPlan(plan.energy_balance_pct ?? null)
   const paceText      = paceKey ? PACE_OPTIONS[paceKey].label : 'Custom'
-  const macroKey      = macroPresetForPlan(plan.protein_level ?? null, plan.fat_level ?? null)
+  const macroKey      = macroPresetKeyFromStored(plan.macro_preset)
   // Replace the hyphen in "High-Protein" with a space so RN can wrap
   // cleanly at a word boundary inside the narrow chip. Without this,
   // RN falls back to character-level wrapping and we get "High-Protei"
