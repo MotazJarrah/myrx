@@ -104,7 +104,7 @@ The user explicitly asked for vendor unification ("i hate that we have so many c
 
 **Operational notes:**
 - The SendGrid API key is scoped to "Mail Send" only (Restricted Access in SendGrid's permission model). Even if it leaks, attacker can only send email — not read suppression lists, not change billing, not view contacts.
-- Tracking (click-tracking, open-tracking, subscription-tracking) is DISABLED on every outbound. Click-tracking would rewrite our URLs into SendGrid redirects which (a) leak invite tokens to SendGrid's logs and (b) break Android App Link autoVerify because the host changes from `myrxfit.com` to `sendgrid.net`.
+- Tracking (click-tracking, open-tracking, subscription-tracking) MUST be DISABLED on every outbound. **⚠ 2026-06-12 (T227): click-tracking was found ON in production** — signup confirmation links were being rewritten to `http://url####.myrxfit.com/ls/click?upn=…` (an SSL-less branded subdomain), so Chrome's HTTPS-only mode blocked the link on desktop AND mobile. Re-disable it in the SendGrid DASHBOARD (Settings → Tracking → Click Tracking → off); the Mail-Send-only API key CANNOT change tracking settings, so this is NOT scriptable. Re-verify off after any SendGrid account change. Click-tracking would rewrite our URLs into SendGrid redirects which (a) leak invite tokens to SendGrid's logs and (b) break Android App Link autoVerify because the host changes from `myrxfit.com` to `sendgrid.net`.
 - If deliverability ever drops, first check: SendGrid dashboard → Activity Feed for bounces/blocks/spam reports. Don't blame Supabase — they're just relaying through SendGrid now.
 
 ---
