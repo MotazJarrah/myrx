@@ -89,7 +89,11 @@ export default function Auth() {
           if (prof?.is_coach)     { navigate('/portal');  return }
         }
       } catch { /* fall through to default */ }
-      navigate('/app')
+      // Host-aware default: go to '/' and let RootRoute/RoleRouter route by
+      // host -- coach host -> /signup (resume coach signup) or /portal; main
+      // host -> /app (athlete). A hardcoded /app 404s on coach.myrxfit.com,
+      // which has no athlete app. (T233)
+      navigate('/')
     } catch (err) {
       setError(friendlyAuthMessage(err, 'Something went wrong.'))
     } finally {
