@@ -7,6 +7,7 @@
  */
 
 import { View, Text, StyleSheet } from 'react-native'
+import { Check } from 'lucide-react-native'
 import { colors, alpha, palette, withAlpha } from '../theme'
 
 export function checkStrength(pw: string): number {
@@ -17,6 +18,26 @@ export function checkStrength(pw: string): number {
   if (/\d/.test(pw))                          score++
   if (/[^A-Za-z0-9]/.test(pw))               score++
   return Math.min(score, 4)
+}
+
+/**
+ * REQUIRED rules to SET a password (signup / reset / change / invite).
+ * Distinct from the advisory strength score above: these four are
+ * HARD-gated — the form cannot proceed until ALL pass.
+ *   >= 8 chars, >= 1 uppercase, >= 1 number, >= 1 symbol.
+ * (No lowercase rule — not required.) Web mirror: web/src/lib/passwordRules.js.
+ */
+export function passwordRequirements(pw: string) {
+  return {
+    length: pw.length >= 8,
+    upper:  /[A-Z]/.test(pw),
+    number: /[0-9]/.test(pw),
+    symbol: /[^A-Za-z0-9]/.test(pw),
+  }
+}
+export function passwordMeetsRequirements(pw: string): boolean {
+  const r = passwordRequirements(pw)
+  return r.length && r.upper && r.number && r.symbol
 }
 
 const LABELS = ['Too short', 'Weak', 'Fair', 'Strong', 'Excellent'] as const
@@ -65,6 +86,39 @@ export function PasswordStrengthMeter({ password }: Props) {
   )
 }
 
+const REQ_LABELS = [
+  { key: 'length', label: 'At least 8 characters' },
+  { key: 'upper',  label: '1 uppercase letter' },
+  { key: 'number', label: '1 number' },
+  { key: 'symbol', label: '1 symbol' },
+] as const
+
+/**
+ * Hard-requirement checklist shown beneath the password input. Each row
+ * turns green with a check once its rule is met; the form's Continue/Save
+ * button stays disabled until passwordMeetsRequirements(password) is true.
+ */
+export function PasswordRequirements({ password }: Props) {
+  const r = passwordRequirements(password)
+  return (
+    <View style={s.reqList}>
+      {REQ_LABELS.map(({ key, label }) => {
+        const ok = r[key]
+        return (
+          <View key={key} style={s.reqRow}>
+            <View style={[s.reqDot, { backgroundColor: ok ? alpha(colors.primary, 0.18) : colors.muted }]}>
+              {ok ? <Check size={11} color={colors.primary} strokeWidth={3} /> : null}
+            </View>
+            <Text style={[s.reqText, { color: ok ? colors.foreground : colors.mutedForeground }]}>
+              {label}
+            </Text>
+          </View>
+        )
+      })}
+    </View>
+  )
+}
+
 const s = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 4 },
   barTrack: {
@@ -77,4 +131,8 @@ const s = StyleSheet.create({
   },
   barCell: { flex: 1, borderRadius: 9999 },
   label:   { fontSize: 11, width: 64, textAlign: 'right' },
+  reqList: { gap: 6, paddingTop: 8 },
+  reqRow:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  reqDot:  { width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  reqText: { fontSize: 12 },
 })

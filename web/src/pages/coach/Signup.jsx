@@ -42,6 +42,8 @@ import {
   Mars, Venus, Transgender, HelpCircle, Gift,
   Minus, Plus, Dumbbell, User as UserIcon, AlertCircle,
 } from 'lucide-react'
+import { passwordMeetsRequirements } from '../../lib/passwordRules'
+import { PasswordRequirements } from '../../components/PasswordRequirements'
 // react-easy-crop drives the avatar crop UI on the PhotoScreen.
 // Same library + UX pattern the end-user web signup uses, so the two
 // flows feel identical at the photo step. cropAndDownscale runs the
@@ -420,7 +422,7 @@ function PasswordScreen({ data, patch, next, back }) {
   const strength = coachCheckStrength(data.password || '')
   const strengthLabel = ['Too short', 'Weak', 'Fair', 'Strong', 'Excellent'][strength]
   const strengthColor = ['bg-muted', 'bg-destructive/70', 'bg-yellow-500/80', 'bg-primary/70', 'bg-[#00BFFF]'][strength]
-  const valid = (data.password?.length || 0) >= 6 && agreed
+  const valid = passwordMeetsRequirements(data.password || '') && agreed
 
   // On Continue: kick off a REAL Supabase auth signUp + save body data
   // via the init-profile-checkpoint edge function. signUp sends the
@@ -622,7 +624,7 @@ function PasswordScreen({ data, patch, next, back }) {
 
   return (
     <>
-      <Heading eyebrow="Save your profile" title="Pick a password" subtitle="At least 6 characters." />
+      <Heading eyebrow="Save your profile" title="Pick a password" subtitle="Create a strong password." />
       <div className="mt-8 space-y-4">
         <TextInput
           type={show ? 'text' : 'password'}
@@ -656,6 +658,7 @@ function PasswordScreen({ data, patch, next, back }) {
             {data.password ? strengthLabel : ' '}
           </span>
         </div>
+        <PasswordRequirements password={data.password || ''} />
         {error && (
           <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error}

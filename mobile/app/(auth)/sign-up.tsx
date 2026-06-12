@@ -48,7 +48,7 @@ import { friendlyAuthMessage } from '../../src/lib/authErrors'
 import { OTPInput } from '../../src/components/OTPInput'
 import { PasswordInput } from '../../src/components/PasswordInput'
 import Slider from '../../src/components/Slider'
-import { PasswordStrengthMeter } from '../../src/components/PasswordStrengthMeter'
+import { PasswordStrengthMeter, PasswordRequirements, passwordMeetsRequirements } from '../../src/components/PasswordStrengthMeter'
 import { KeyboardScreen } from '../../src/components/KeyboardScreen'
 import AnimateRise from '../../src/components/AnimateRise'
 import TickerNumber from '../../src/components/TickerNumber'
@@ -1692,7 +1692,7 @@ function PasswordScreenInner({ data, patch, next, rehydrate, setPendingResendCoo
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [agreed, setAgreed] = useState(false)
-  const valid = data.password.length >= 6 && agreed
+  const valid = passwordMeetsRequirements(data.password) && agreed
 
   function goSignIn() {
     // Pre-fill the email and mark the navigation as a deliberate
@@ -1828,7 +1828,7 @@ function PasswordScreenInner({ data, patch, next, rehydrate, setPendingResendCoo
       <Heading
         eyebrow="Save your profile"
         title="Pick a password"
-        subtitle="At least 6 characters."
+        subtitle="Create a strong password."
       />
       <View style={{ marginTop: 32, gap: 12 }}>
         <PasswordInput
@@ -1837,6 +1837,7 @@ function PasswordScreenInner({ data, patch, next, rehydrate, setPendingResendCoo
           autoFocus
         />
         <PasswordStrengthMeter password={data.password} />
+        <PasswordRequirements password={data.password} />
         {error ? <ErrorBox msg={error} /> : null}
       </View>
 

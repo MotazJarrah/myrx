@@ -34,7 +34,7 @@ import Svg, { Defs, RadialGradient, Stop, Rect, Line, G } from 'react-native-svg
 import { ChevronLeft, AlertCircle, Check, RefreshCw } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { PasswordInput } from '../../src/components/PasswordInput'
-import { PasswordStrengthMeter } from '../../src/components/PasswordStrengthMeter'
+import { PasswordStrengthMeter, PasswordRequirements, passwordMeetsRequirements } from '../../src/components/PasswordStrengthMeter'
 import { OTPInput } from '../../src/components/OTPInput'
 import { StepDots } from '../../src/components/StepDots'
 import AnimateRise from '../../src/components/AnimateRise'
@@ -161,7 +161,7 @@ export default function ForgotPassword() {
 
   // ── Step 3 ────────────────────────────────────────────────────────────────
   async function handleUpdate() {
-    if (newPassword.length < 6) { setError('Password must be at least 6 characters.'); return }
+    if (!passwordMeetsRequirements(newPassword)) { setError('Password must be 8+ characters with an uppercase letter, a number, and a symbol.'); return }
     if (newPassword !== confirmPassword) { setError('Passwords do not match.'); return }
     setError('')
     setLoading(true)
@@ -287,6 +287,7 @@ export default function ForgotPassword() {
                     isNew
                   />
                   <PasswordStrengthMeter password={newPassword} />
+                  <PasswordRequirements password={newPassword} />
                 </View>
                 <View style={s.field}>
                   <Text style={s.label}>Confirm password</Text>
@@ -299,7 +300,7 @@ export default function ForgotPassword() {
                 <ErrorBanner msg={error} />
                 <Pressable
                   onPress={handleUpdate}
-                  disabled={loading}
+                  disabled={loading || !passwordMeetsRequirements(newPassword)}
                   style={[s.primaryBtn, loading ? s.btnDisabled : null]}
                 >
                   {loading

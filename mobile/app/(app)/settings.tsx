@@ -42,6 +42,7 @@ import {
 } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { PasswordInput } from '../../src/components/PasswordInput'
+import { PasswordRequirements, passwordMeetsRequirements } from '../../src/components/PasswordStrengthMeter'
 import { OTPInput } from '../../src/components/OTPInput'
 import { supabase } from '../../src/lib/supabase'
 import { friendlyAuthMessage } from '../../src/lib/authErrors'
@@ -2119,7 +2120,7 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
     setPwdSuccess(false)
     if (!user?.email) { setPwdError('Not signed in'); return }
     if (!pwdCurrent || !pwdNext || !pwdConfirm) { setPwdError('Fill in all three fields'); return }
-    if (pwdNext.length < 8) { setPwdError('New password must be at least 8 characters'); return }
+    if (!passwordMeetsRequirements(pwdNext)) { setPwdError('Password must be 8+ characters with an uppercase letter, a number, and a symbol'); return }
     if (pwdNext !== pwdConfirm) { setPwdError('New passwords do not match'); return }
     if (pwdNext === pwdCurrent) { setPwdError('New password must differ from current'); return }
     setPwdBusy(true)
@@ -2231,6 +2232,7 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
             onChangeText={setPwdNext}
             placeholder="At least 8 characters"
           />
+          <PasswordRequirements password={pwdNext} />
         </View>
         <View style={s.field}>
           <Text style={s.label}>Confirm new password</Text>
@@ -2262,7 +2264,7 @@ function SecurityTab({ profile, user }: { profile: any; user: any }) {
             submits with empty fields. */}
         {(() => {
           const allFilled = pwdCurrent.length > 0 && pwdNext.length > 0 && pwdConfirm.length > 0
-          const canSubmit = allFilled && !pwdBusy
+          const canSubmit = allFilled && !pwdBusy && passwordMeetsRequirements(pwdNext)
           return (
             <Pressable
               onPress={handlePasswordChange}

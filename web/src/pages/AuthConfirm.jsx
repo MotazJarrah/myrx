@@ -3,6 +3,8 @@ import { Link, useLocation } from 'wouter'
 import { Loader2, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { friendlyAuthMessage } from '../lib/authErrors'
+import { passwordMeetsRequirements } from '../lib/passwordRules'
+import { PasswordRequirements } from '../components/PasswordRequirements'
 
 // Auth confirmation handler.
 //
@@ -303,8 +305,8 @@ export default function AuthConfirm() {
   async function handleResetPassword(e) {
     e.preventDefault()
     setResetError('')
-    if (newPassword.length < 6) {
-      setResetError('Password must be at least 6 characters.')
+    if (!passwordMeetsRequirements(newPassword)) {
+      setResetError('Password must be 8+ characters with an uppercase letter, a number, and a symbol.')
       return
     }
     if (newPassword !== confirmPassword) {
@@ -391,7 +393,7 @@ export default function AuthConfirm() {
   return shell(
     <div className="animate-rise rounded-2xl border border-border bg-card/80 p-6 shadow-lg backdrop-blur md:p-8">
       <h1 className="text-xl font-semibold tracking-tight">Set a new password</h1>
-      <p className="mt-1 text-sm text-muted-foreground">Choose something only you know — at least 6 characters.</p>
+      <p className="mt-1 text-sm text-muted-foreground">Choose something only you know — meet the rules below.</p>
 
       <form onSubmit={handleResetPassword} className="mt-6 flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
@@ -402,7 +404,7 @@ export default function AuthConfirm() {
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
               required
-              minLength={6}
+              minLength={8}
               autoFocus
               className={inputCls + ' pr-10'}
             />
@@ -423,6 +425,7 @@ export default function AuthConfirm() {
             </div>
             <span className="text-xs text-muted-foreground w-16 text-right">{strengthLabel}</span>
           </div>
+          <PasswordRequirements password={newPassword} />
         </div>
 
         <div className="flex flex-col gap-1.5">
@@ -432,7 +435,7 @@ export default function AuthConfirm() {
             value={confirmPassword}
             onChange={e => setConfirmPassword(e.target.value)}
             required
-            minLength={6}
+            minLength={8}
             className={inputCls}
           />
         </div>
@@ -446,7 +449,7 @@ export default function AuthConfirm() {
 
         <button
           type="submit"
-          disabled={resetting}
+          disabled={resetting || !passwordMeetsRequirements(newPassword)}
           className="flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-60"
         >
           {resetting && <Loader2 className="h-4 w-4 animate-spin" />}

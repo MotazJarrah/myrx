@@ -39,6 +39,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { ProfileTab } from '../pages/EditProfile'
 import { friendlyAuthMessage } from '../lib/authErrors'
+import { passwordMeetsRequirements } from '../lib/passwordRules'
+import { PasswordRequirements } from './PasswordRequirements'
 import { usePersistedState } from '../hooks/usePersistedState'
 import BodyCompPicker from './BodyCompPicker'
 import AvatarCropper from './AvatarCropper'
@@ -638,7 +640,7 @@ function SecurityTab({ profile, user, targetUserId = null, viewerRole = 'self' }
     e.preventDefault()
     setError('')
     if (!current || !next || !confirm) { setError('Fill in all three fields.'); return }
-    if (next.length < 8) { setError('New password must be at least 8 characters.'); return }
+    if (!passwordMeetsRequirements(next)) { setError('New password must be 8+ characters with an uppercase letter, a number, and a symbol.'); return }
     if (next !== confirm) { setError('New passwords do not match.'); return }
     if (next === current) { setError('Your new password must be different from the current one.'); return }
 
@@ -734,7 +736,7 @@ function SecurityTab({ profile, user, targetUserId = null, viewerRole = 'self' }
                 autoComplete="new-password"
                 className="w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors"
               />
-              <p className="text-[11px] text-muted-foreground mt-1">At least 8 characters.</p>
+              <PasswordRequirements password={next} />
             </div>
             <div>
               <label className="block text-xs text-muted-foreground mb-1">Confirm new password</label>
@@ -770,7 +772,7 @@ function SecurityTab({ profile, user, targetUserId = null, viewerRole = 'self' }
         <>
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || !passwordMeetsRequirements(next)}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {done ? <><Check className="h-4 w-4" /> Password updated</>
