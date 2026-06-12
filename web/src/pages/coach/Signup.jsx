@@ -2694,8 +2694,16 @@ export default function CoachSignup() {
           (which are full-bleed and don't show the back-arrow chrome),
           so the user is never trapped in the funnel. */}
       <button
-        onClick={() => { window.location.href = '/for-coaches' }}
-        aria-label="Exit signup"
+        onClick={async () => {
+          // Sign out on exit. A signed-in mid-signup user is otherwise trapped:
+          // / role-routes them straight back to /signup (T230), so there's no
+          // way to reach the home page or sign into a different account. Signing
+          // out frees them; signing back in resumes at their last step (T231
+          // durable checkpoint). No-op for pre-account screens (no session yet).
+          try { await supabase.auth.signOut() } catch { /* ignore */ }
+          window.location.href = '/'
+        }}
+        aria-label="Sign out and exit signup"
         className="absolute top-4 right-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
       >
         <XIcon className="h-4 w-4" />
