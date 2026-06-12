@@ -189,7 +189,7 @@ export default function Auth() {
                 {/* T199: coach signup lives on the coach subdomain. A full-URL
                     <a> (not a wouter <Link>) so this works whether the user is
                     signing in on coach.myrxfit.com or myrxfit.com (admin). */}
-                <a href="https://coach.myrxfit.com/signup" className="font-medium text-foreground underline-offset-4 hover:underline">
+                <a href="https://coach.myrxfit.com/signup?fresh=1" className="font-medium text-foreground underline-offset-4 hover:underline">
                   Create a coach account
                 </a>
               </p>

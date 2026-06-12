@@ -98,7 +98,7 @@ function Header() {
         <a href="https://myrxfit.com" className={navLinkCls}>For Athletes</a>
         <Link href="/pricing" className={navLinkCls}>Pricing</Link>
         <Link href="/auth?mode=signin" className={navLinkCls}>Sign in</Link>
-        <Link href="/signup"
+        <Link href="/signup?fresh=1"
           className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
           Start free trial
         </Link>
@@ -127,7 +127,7 @@ function Header() {
           <nav className="flex flex-col gap-0.5 px-4 py-3 text-sm">
             <a href="https://myrxfit.com" className={navLinkCls}>For Athletes</a>
             <Link href="/pricing" onClick={() => setMenuOpen(false)} className={navLinkCls}>Pricing</Link>
-            <Link href="/signup" onClick={() => setMenuOpen(false)}
+            <Link href="/signup?fresh=1" onClick={() => setMenuOpen(false)}
               className="mt-1 rounded-md bg-primary px-3 py-2.5 text-center font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
               Start free trial
             </Link>
@@ -278,7 +278,7 @@ function Hero() {
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <Link
-                href="/signup"
+                href="/signup?fresh=1"
                 className="group inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
               >
                 Start 30-day free trial
@@ -432,7 +432,7 @@ function PricingTeaser() {
                 or ${t.annual}/yr (billed yearly)
               </p>
               <Link
-                href={`/signup?tier=${t.id}`}
+                href={`/signup?tier=${t.id}&fresh=1`}
                 className={`mt-4 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold transition-all ${
                   t.recommended
                     ? 'bg-primary text-primary-foreground hover:opacity-90'
@@ -521,7 +521,7 @@ function BottomCTA() {
           30 days free. Cancel anytime.
         </p>
         <Link
-          href="/signup"
+          href="/signup?fresh=1"
           className="group inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
         >
           Start 14-day free trial

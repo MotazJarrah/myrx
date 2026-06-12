@@ -41,7 +41,7 @@ function Header() {
         <Link href="/for-coaches" className={navLinkCls}>For Coaches</Link>
         <Link href="/pricing" className="rounded-md px-3 py-1.5 text-primary font-semibold">Pricing</Link>
         <Link href="/auth?mode=signin" className={navLinkCls}>Sign in</Link>
-        <Link href="/signup"
+        <Link href="/signup?fresh=1"
           className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
           Start free trial
         </Link>
@@ -70,7 +70,7 @@ function Header() {
           <nav className="flex flex-col gap-0.5 px-4 py-3 text-sm">
             <Link href="/for-coaches" onClick={() => setMenuOpen(false)} className={navLinkCls}>For Coaches</Link>
             <Link href="/pricing" onClick={() => setMenuOpen(false)} className="rounded-md px-3 py-2.5 text-primary font-semibold">Pricing</Link>
-            <Link href="/signup" onClick={() => setMenuOpen(false)}
+            <Link href="/signup?fresh=1" onClick={() => setMenuOpen(false)}
               className="mt-1 rounded-md bg-primary px-3 py-2.5 text-center font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
               Start free trial
             </Link>
@@ -278,7 +278,7 @@ export default function CoachPricing() {
             as ?tier=… so the signup PlanScreen lands on the same tier. */}
         <div className="mt-8 mx-auto max-w-md">
           <Link
-            href={`/signup?tier=${selectedTierId}`}
+            href={`/signup?tier=${selectedTierId}&fresh=1`}
             className="group flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
           >
             <Sparkles className="h-4 w-4" />
@@ -331,7 +331,7 @@ export default function CoachPricing() {
           </h2>
           <p className="text-base text-muted-foreground">30 days free. Cancel anytime.</p>
           <Link
-            href="/signup"
+            href="/signup?fresh=1"
             className="group inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
           >
             Start 30-day free trial

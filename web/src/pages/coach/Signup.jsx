@@ -2510,6 +2510,26 @@ export default function CoachSignup() {
   useEffect(() => {
     let cancelled = false
     async function detectFlow() {
+      // T236: explicit fresh-start entry. Every signup CTA on the coach
+      // landing + pricing pages links to /signup?fresh=1 — a deliberate
+      // "start signing up" click must NEVER resume a stale journey from
+      // sessionStorage (real case: the user wiped the test account, hit
+      // "Start free trial", and landed mid-journey on the email step with
+      // the dead account's email pre-filled — sessionStorage is per-tab
+      // and survives sign-out AND account wipes). The param is consumed
+      // and stripped from the URL so a mid-journey REFRESH (plain
+      // /signup) still resumes scenario-H style. Signed-in branches are
+      // unaffected either way — they derive from the profile/checkpoint,
+      // not sessionStorage.
+      try {
+        const freshParams = new URLSearchParams(window.location.search)
+        if (freshParams.get('fresh') === '1') {
+          clearStoredState()
+          freshParams.delete('fresh')
+          const qs = freshParams.toString()
+          window.history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''))
+        }
+      } catch { /* ignore */ }
       // Step 1: is anyone signed in?
       let user = null
       try {
@@ -2927,6 +2947,11 @@ export default function CoachSignup() {
           // way to reach the home page or sign into a different account. Signing
           // out frees them; signing back in resumes at their last step (T231
           // durable checkpoint). No-op for pre-account screens (no session yet).
+          // T236: exiting = abandoning this journey. Clear the per-tab
+          // sessionStorage state so the next signup entry starts clean
+          // instead of resuming an abandoned (possibly wiped) account's
+          // half-filled journey.
+          clearStoredState()
           try { await supabase.auth.signOut() } catch { /* ignore */ }
           window.location.href = '/'
         }}
