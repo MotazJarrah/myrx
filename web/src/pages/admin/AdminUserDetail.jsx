@@ -508,7 +508,7 @@ export default function AdminUserDetail() {
   const [deleteError,    setDeleteError]    = useState('')
   // Wipe out (T197) — admin-only HARD erase via the delete-user edge fn. No
   // grace, no anonymize, no archive: every trace of the account is removed.
-  // Confirm word: "wipeout".
+  // Confirm word: "WIPEOUT".
   const [wipeOpen,    setWipeOpen]    = useState(false)
   const [wipeConfirm, setWipeConfirm] = useState('')
   const [wiping,      setWiping]      = useState(false)
@@ -874,10 +874,10 @@ export default function AdminUserDetail() {
   // function (superuser-gated server-side): cancels Stripe, deletes every data
   // table + avatar + the profiles row (clients' coach_id SET NULL) + the auth
   // user; the trg_wipe_account_traces trigger then clears the archive + access
-  // log. No recovery. Gated on typing the exact word "wipeout".
+  // log. No recovery. Gated on typing the exact word "WIPEOUT".
   async function doWipeOut() {
     if (wiping) return
-    if (wipeConfirm.trim().toLowerCase() !== 'wipeout') return
+    if (wipeConfirm.trim() !== 'WIPEOUT') return
     setWiping(true)
     setWipeError('')
     try {
@@ -1398,7 +1398,7 @@ export default function AdminUserDetail() {
                 <button
                   onClick={() => { setSettingsOpen(false); setDeleteOpen(true); setDeleteConfirm(''); setDeleteError('') }}
                   title="Schedule this account for deletion (30-day grace period)"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/20 cursor-pointer"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400 hover:bg-amber-500/20 cursor-pointer"
                 >
                   <Trash2 className="h-3.5 w-3.5" /> Delete account
                 </button>
@@ -1407,13 +1407,13 @@ export default function AdminUserDetail() {
             {/* Wipe out (T197) — admin-only PERMANENT erase. No grace, no
                 anonymize, no archive: the account stops existing. Always shown
                 (even when already anonymized/scheduled) so any record can be
-                fully erased. Confirm word: "wipeout". */}
+                fully erased. Confirm word: "WIPEOUT". */}
             <button
               onClick={() => { setSettingsOpen(false); setWipeOpen(true); setWipeConfirm(''); setWipeError('') }}
               title="Permanently erase this account and every trace of it — no recovery"
               className="inline-flex items-center gap-1.5 rounded-md border border-destructive bg-destructive/15 px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/25 cursor-pointer"
             >
-              <Trash2 className="h-3.5 w-3.5" /> Wipe out
+              <Trash2 className="h-3.5 w-3.5" /> Wipe out account
             </button>
           </div>
         }
@@ -1539,7 +1539,7 @@ export default function AdminUserDetail() {
 
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-                  Type <span className="font-mono font-semibold text-destructive">wipeout</span> to confirm
+                  Type <span className="font-mono font-semibold text-destructive">WIPEOUT</span> to confirm
                 </label>
                 <input
                   type="text"
@@ -1548,7 +1548,7 @@ export default function AdminUserDetail() {
                   autoFocus
                   autoComplete="off"
                   spellCheck={false}
-                  placeholder="wipeout"
+                  placeholder="WIPEOUT"
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-destructive"
                 />
               </div>
@@ -1570,7 +1570,7 @@ export default function AdminUserDetail() {
               </button>
               <button
                 onClick={doWipeOut}
-                disabled={wiping || wipeConfirm.trim().toLowerCase() !== 'wipeout'}
+                disabled={wiping || wipeConfirm.trim() !== 'WIPEOUT'}
                 className="flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {wiping
