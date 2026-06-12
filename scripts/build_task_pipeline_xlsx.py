@@ -584,12 +584,6 @@ TASKS = [
      "mobile dashboard.tsx; web AdminUserDetail.jsx, CoachClientDetail.jsx",
      "2026-06-03"),
 
-    ("T066", "Redeploy delete-user edge function (rom_records removal)", "Backend", "Backend", "Done",
-     "Flagged during T049 (rom_records drop): the delete-user edge function's SOURCE had its rom_records table-list entry removed, but the LIVE function still needed a deploy. Tracked as its own row (not buried in the closed T049) after the user's process callout.",
-     "DONE 2026-06-03: deployed via MCP deploy_edge_function (CLI had no access token). delete-user is now version 12 (was 11), verify_jwt on; live USER_DATA_TABLES no longer includes rom_records. Source was already committed in 6a58fc3 — this was the runtime push.",
-     "supabase/functions/delete-user/index.ts",
-     "2026-06-03"),
-
     ("T067", "Dashboard pills: strip labels + remove emojis", "Dashboard", "Cross", "Done",
      "Screenshot review after T063 shipped: the pills look awful — labels are too verbose ('strength PRs last 30 days', 'days logged in last 14 days', 'days hit water goal · 7d') and wrap to 2-3 lines inside the 48% chips, stranding the number on its own line. User: strip the text 'just enough to be understandable' AND remove ALL emojis (the 🏆 🍴 ❤️ 😴 💧 ⚖️ prefixes). Mobile + admin + coach.",
      "DONE 2026-06-03: removed ALL emoji prefixes + stripped labels to single-line forms on all 3 surfaces — 'N strength PRs · 30d', 'N cardio PR(s) · 30d', 'N food days · 14d', 'N low bpm · 7d', '±N lb change', 'N.Nh sleep · 7d', 'N water days · 7d'. Mobile: chips single-line + centered (minHeight 34, removed flex:1 wrap on the label). Web: SnapshotBadge -> min-h-[2.25rem] + leading-tight, content centered. Built + deployed.",
