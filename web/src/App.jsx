@@ -411,7 +411,9 @@ function RoleRouter() {
   if (isCoachHost()) {
     // Coach host: a signed-in coach (or an admin previewing) → coach portal;
     // anyone else somehow signed in here → the coach landing.
-    return <Redirect to={(profile?.is_coach || profile?.is_superuser) ? '/portal' : '/'} />
+    // A signed-in non-coach here is a coach prospect / mid-signup -> send them
+    // to /signup (NOT '/' -- that re-enters RoleRouter = infinite loop = blank).
+    return <Redirect to={(profile?.is_coach || profile?.is_superuser) ? '/portal' : '/signup'} />
   }
   if (profile?.is_superuser) return <Redirect to="/admin/overview" />
   return <Redirect to="/app" />
