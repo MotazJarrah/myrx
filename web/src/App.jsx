@@ -16,6 +16,7 @@ import CookieBanner from './components/CookieBanner'
 import ErrorBoundary from './components/ErrorBoundary'
 import ReactivationGate from './components/ReactivationGate'
 import { useIsDesktop } from './hooks/useIsDesktop'
+import { isCoachHost, roleHomePath } from './lib/roleRouting'
 
 // ── Lazy page imports — each becomes its own JS chunk ─────────────────────────
 // The browser downloads only the chunks the user actually visits.
@@ -364,13 +365,9 @@ function NotFoundPage() {
   // Host-aware (T199): on the coach host send signed-in users back to the coach
   // portal; on the main host, admins → admin overview, athletes → the app
   // placeholder. Signed-out → the host's landing ('/').
-  const homeHref = isCoachHost()
-    ? (profile ? '/portal' : '/')
-    : profile?.is_superuser
-      ? '/admin/overview'
-      : profile
-        ? '/app'
-        : '/'
+  // Host + marker aware (T234): signed-in users go back where they belong
+  // (roleHomePath); signed-out users to the host landing.
+  const homeHref = profile ? roleHomePath(profile) : '/'
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="max-w-2xl w-full text-center">
@@ -398,25 +395,18 @@ function NotFoundPage() {
 // purely-informative athlete landing. One web build, two addresses — this host
 // check is the only thing that differs the root page by address. Dev/preview
 // hosts (localhost, *.pages.dev) are NOT coach.* so they get the main landing.
-function isCoachHost() {
-  try { return /^coach\./i.test(window.location.hostname) } catch { return false }
-}
+// isCoachHost + roleHomePath now live in ./lib/roleRouting (shared with
+// Auth.jsx so sign-in and the root route resolve identically). (T234)
 
 function RoleRouter() {
-  // Used by the root `/` route for signed-in users + as the post-sign-in
-  // redirect destination. Branches by role AND host (T199): coach surfaces live
-  // only on coach.myrxfit.com (root-level paths, no /coach prefix); admin + the
-  // athlete app live on myrxfit.com.
-  const { profile } = useAuth()
-  if (isCoachHost()) {
-    // Coach host: a signed-in coach (or an admin previewing) → coach portal;
-    // anyone else somehow signed in here → the coach landing.
-    // A signed-in non-coach here is a coach prospect / mid-signup -> send them
-    // to /signup (NOT '/' -- that re-enters RoleRouter = infinite loop = blank).
-    return <Redirect to={(profile?.is_coach || profile?.is_superuser) ? '/portal' : '/signup'} />
-  }
-  if (profile?.is_superuser) return <Redirect to="/admin/overview" />
-  return <Redirect to="/app" />
+  // Root `/` redirect for signed-in users + the post-sign-in destination.
+  // Single source of truth = roleHomePath (host + account_marker aware, shared
+  // with Auth.jsx). T234. Wait for the profile before routing so the marker's
+  // 'A' default during the async profile load never mis-routes a coach to the
+  // athlete download-app page.
+  const { user, profile } = useAuth()
+  if (user && !profile) return <PageLoader />
+  return <Redirect to={roleHomePath(profile)} />
 }
 
 function RootRoute() {
@@ -497,6 +487,10 @@ function AppRoutes() {
             {/* Legacy /for-coaches → this host's root already IS the coach landing. */}
             <Route path="/for-coaches"   component={() => <Redirect to="/" />} />
             <Route path="/signup"        component={CoachSignup} />
+            {/* Download-app placeholder — where an athlete (marker A) who
+                signs in on the coach host is routed (no athlete web surface).
+                Also available on the main host below. T234. */}
+            <Route path="/app"           component={DownloadAppPlaceholder} />
             <Route path="/pricing"       component={CoachPricing} />
             <Route path="/welcome"       component={CoachWelcome} />
             {/* Public coach-invite acceptance — reads ?token=xxx. */}

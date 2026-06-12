@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { friendlyAuthMessage } from '../lib/authErrors'
 import { useIsDesktop } from '../hooks/useIsDesktop'
+import { roleHomePath } from '../lib/roleRouting'
 
 function Logo() {
   // Real wordmark per brand book ("Never render the brand name as JSX text").
@@ -82,11 +83,11 @@ export default function Auth() {
         if (user && isDesktop) {
           const { data: prof } = await supabase
             .from('profiles')
-            .select('is_superuser, is_coach')
+            .select('is_superuser, is_coach, account_marker, coach_subscription_status')
             .eq('id', user.id)
             .single()
-          if (prof?.is_superuser) { navigate('/admin/overview'); return }
-          if (prof?.is_coach)     { navigate('/portal');  return }
+          navigate(roleHomePath(prof))   // T234: host + account_marker aware
+          return
         }
       } catch { /* fall through to default */ }
       // Host-aware default: go to '/' and let RootRoute/RoleRouter route by

@@ -109,6 +109,11 @@ Deno.serve(async (req) => {
     height_unit:      bd.height_unit,
     distance_unit:    bd.distance_unit,
     signup_checkpoint: "password",
+    // T234: a brand-new web coach signup (no pre-existing athlete account)
+    // is marked 'C' the moment its profile row is created here, right after
+    // email validation. An existing athlete who converts is marked 'AC'
+    // elsewhere (coach Signup detectFlow) and never reaches this function.
+    account_marker:    "C",
   }, { onConflict: "id" })
   if (profErr) {
     console.error("init-profile-checkpoint upsert failed:", profErr)

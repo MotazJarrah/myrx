@@ -2356,7 +2356,7 @@ export default function CoachSignup() {
       try {
         const { data: p } = await supabase
           .from('profiles')
-          .select('is_coach, is_superuser, coach_subscription_status, coach_stripe_customer_id, full_name, phone, phone_verified_at, avatar_url, signup_checkpoint')
+          .select('is_coach, is_superuser, coach_subscription_status, coach_stripe_customer_id, full_name, phone, phone_verified_at, avatar_url, signup_checkpoint, account_marker')
           .eq('id', user.id)
           .maybeSingle()
         profile = p
@@ -2375,6 +2375,17 @@ export default function CoachSignup() {
       if (profile?.is_coach && ACTIVE_COACH_STATES.has(profile?.coach_subscription_status)) {
         window.location.href = '/auth?mode=signin&next=/portal'
         return
+      }
+
+      // T234: an existing athlete (marker 'A') who has reached the coach signup
+      // is mid-conversion -> stamp AC (athlete switching to coach). This durable
+      // marker is what RoleRouter reads to keep routing them back INTO coach
+      // signup (instead of the athlete download-app page) until they finish +
+      // pay (-> C) or switch back to athlete on mobile (-> A). A brand-new coach
+      // is already 'C' (set at init-profile-checkpoint), so only genuine
+      // converting athletes match here. Fire-and-forget; never blocks the flow.
+      if (profile?.account_marker === 'A') {
+        supabase.from('profiles').update({ account_marker: 'AC' }).eq('id', user.id).then(() => {}, () => {})
       }
 
       // Mid-fresh-coach-signup resume (authoritative -- wins over the
@@ -2674,6 +2685,7 @@ export default function CoachSignup() {
                 auth_user_id: u.id,   // per CLAUDE.md auth_user_id upsert rule
                 onboarded_at: new Date().toISOString(),
                 signup_checkpoint: 'welcome-end',
+                account_marker: 'C',   // T234: coach signup complete -> settle marker to C
               },
               { onConflict: 'id' },
             )
