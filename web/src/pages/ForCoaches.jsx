@@ -104,11 +104,11 @@ function Header() {
         </Link>
       </nav>
 
-      {/* Mobile (below md): one primary CTA + a hamburger */}
+      {/* Mobile (below md): Sign in stays visible + a hamburger for the rest */}
       <div className="flex md:hidden items-center gap-2">
-        <Link href="/signup"
-          className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
-          Start trial
+        <Link href="/auth?mode=signin"
+          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors">
+          Sign in
         </Link>
         <button
           type="button"
@@ -121,13 +121,16 @@ function Header() {
         </button>
       </div>
 
-      {/* Mobile dropdown — the links that don't fit in the header */}
+      {/* Mobile dropdown — nav links + the trial CTA */}
       {menuOpen && (
         <div className="absolute left-0 right-0 top-full z-30 border-b border-border/40 bg-background shadow-lg md:hidden">
           <nav className="flex flex-col gap-0.5 px-4 py-3 text-sm">
             <a href="https://myrxfit.com" className={navLinkCls}>For Athletes</a>
             <Link href="/pricing" onClick={() => setMenuOpen(false)} className={navLinkCls}>Pricing</Link>
-            <Link href="/auth?mode=signin" onClick={() => setMenuOpen(false)} className={navLinkCls}>Sign in</Link>
+            <Link href="/signup" onClick={() => setMenuOpen(false)}
+              className="mt-1 rounded-md bg-primary px-3 py-2.5 text-center font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
+              Start free trial
+            </Link>
           </nav>
         </div>
       )}

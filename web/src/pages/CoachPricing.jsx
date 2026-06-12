@@ -18,41 +18,65 @@
 
 import { useState } from 'react'
 import { Link } from 'wouter'
-import { ArrowRight, Check, ChevronDown, Sparkles } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, Sparkles, Menu, X } from 'lucide-react'
 import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
 
 // Reuse the same header pattern as ForCoaches — extracting to a shared
 // component would make sense if we add more marketing pages; for v1
 // these two duplicates are fine.
 function Header() {
+  const [menuOpen, setMenuOpen] = useState(false)
+  // "For Athletes" intentionally omitted — coach context here shouldn't
+  // cross-promote the end-user landing. "For Coaches" links back to the pitch.
+  const navLinkCls =
+    'rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
   return (
-    <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10 border-b border-border/40">
-      <Link href="/" className="flex items-center gap-2">
-        <img src="/myrx-wordmark-dark.png" alt="MyRX" className="h-7" />
+    <header className="relative z-30 flex h-16 items-center justify-between px-6 md:px-10 border-b border-border/40">
+      <Link href="/" className="flex items-center gap-2 shrink-0">
+        <img src="/myrx-wordmark-dark.png" alt="MyRX" className="h-7 w-auto" />
       </Link>
-      <nav className="flex items-center gap-1 sm:gap-2 text-sm">
-        {/* "For Athletes" removed May 26 2026 — coach context here
-            shouldn't cross-promote the end-user landing. "For Coaches"
-            stays as the link back to the marketing page for visitors
-            who landed directly on /pricing via a paid ad / email
-            and want to read the pitch before committing. */}
-        <Link href="/for-coaches"
-          className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-          For Coaches
-        </Link>
-        <Link href="/pricing"
-          className="rounded-md px-3 py-1.5 text-primary font-semibold">
-          Pricing
-        </Link>
-        <Link href="/auth?mode=signin"
-          className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-          Sign in
-        </Link>
+
+      {/* Desktop nav (md and up) */}
+      <nav className="hidden md:flex items-center gap-1 sm:gap-2 text-sm">
+        <Link href="/for-coaches" className={navLinkCls}>For Coaches</Link>
+        <Link href="/pricing" className="rounded-md px-3 py-1.5 text-primary font-semibold">Pricing</Link>
+        <Link href="/auth?mode=signin" className={navLinkCls}>Sign in</Link>
         <Link href="/signup"
           className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
           Start free trial
         </Link>
       </nav>
+
+      {/* Mobile (below md): Sign in stays visible + a hamburger for the rest */}
+      <div className="flex md:hidden items-center gap-2">
+        <Link href="/auth?mode=signin"
+          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors">
+          Sign in
+        </Link>
+        <button
+          type="button"
+          onClick={() => setMenuOpen(v => !v)}
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
+          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+      </div>
+
+      {/* Mobile dropdown — nav links + the trial CTA */}
+      {menuOpen && (
+        <div className="absolute left-0 right-0 top-full z-30 border-b border-border/40 bg-background shadow-lg md:hidden">
+          <nav className="flex flex-col gap-0.5 px-4 py-3 text-sm">
+            <Link href="/for-coaches" onClick={() => setMenuOpen(false)} className={navLinkCls}>For Coaches</Link>
+            <Link href="/pricing" onClick={() => setMenuOpen(false)} className="rounded-md px-3 py-2.5 text-primary font-semibold">Pricing</Link>
+            <Link href="/signup" onClick={() => setMenuOpen(false)}
+              className="mt-1 rounded-md bg-primary px-3 py-2.5 text-center font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
+              Start free trial
+            </Link>
+          </nav>
+        </div>
+      )}
     </header>
   )
 }
