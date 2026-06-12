@@ -5,7 +5,7 @@
  * Used by the protected route layouts to switch coach/admin users into the
  * client app when they open the site on a phone:
  *
- *   • Desktop: coach → /coach/portal, admin → /admin/overview
+ *   • Desktop: coach → /portal, admin → /admin/overview
  *   • Mobile : same coach/admin → /dashboard (the regular client app)
  *
  * Rationale: the admin and coach portals are dense, multi-column dashboards
@@ -16,7 +16,7 @@
  *
  * Server-side: the user's profile flags (is_coach, is_superuser) are
  * unchanged. This hook only affects which UI shell renders. Manual
- * navigation to /coach/portal or /admin/* from mobile still hits the
+ * navigation to /portal or /admin/* from mobile still hits the
  * protected layout's mobile-redirect to /dashboard.
  */
 

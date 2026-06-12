@@ -5,7 +5,7 @@
 // token, records the invite in coach_invites, and dispatches the
 // email via SendGrid. The accept URL is:
 //
-//   https://myrxfit.com/coach/accept-invite?token=<64-char-token>
+//   https://coach.myrxfit.com/accept-invite?token=<64-char-token>
 //
 // Authorization:
 //
@@ -119,37 +119,54 @@ async function sendInviteEmail(args: {
     return { ok: false, status: 0, body: "sendgrid_not_configured" }
   }
 
+  // Optional coach note → a light quoted block with a lime accent rule.
   const personalLine = args.coachMessage
-    ? `<p style="white-space:pre-wrap;color:#374151;line-height:1.5">${escapeHtml(args.coachMessage)}</p>`
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;"><tr><td style="padding:14px 16px;background:#F4F3EF;border-left:3px solid #CAF240;border-radius:8px;">
+            <p style="margin:0;font-size:14px;line-height:1.6;color:#374151;white-space:pre-wrap;font-style:italic;">${escapeHtml(args.coachMessage)}</p>
+          </td></tr></table>`
     : ""
 
+  const safeCoach = escapeHtml(args.coachName)
+
+  // Light, high-contrast, table-based email (T178). Matches the auth-email
+  // shell: cream #F4F3EF outer, white #FFFFFF card, dark #121721 header
+  // strip with the white+lime wordmark, single lime button (table-cell
+  // bgcolor so Outlook renders it), near-black body text. The
+  // color-scheme meta + supported-color-schemes lock it to LIGHT so
+  // Outlook's dark mode can't invert it into a muddy block.
   const html = `<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#121721;color:#F4F3EF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-  <div style="max-width:540px;margin:0 auto;padding:40px 24px;">
-    <div style="margin:0 0 32px;">
-      <img src="${SITE_URL}/email-logo.png" alt="MyRX" width="160" height="35" style="display:block;height:auto;border:0;outline:none;text-decoration:none;">
-    </div>
-    ${personalLine}
-    <p style="font-size:14px;color:#A8ADAA;margin:0 0 12px;">
-      Tap below to accept and start training together.
-    </p>
-    <p style="font-size:13px;color:#6F7572;margin:0 0 24px;">
-      Your MyRX subscription is covered by your coach. No payment is required from you.
-    </p>
-    <div style="margin:32px 0;">
-      <a href="${args.acceptUrl}"
-         style="display:inline-block;padding:14px 28px;background:#CAF240;color:#121721;text-decoration:none;border-radius:10px;font-weight:700;font-size:14px;">
-        Accept invite
-      </a>
-    </div>
-    <p style="font-size:12px;color:#6F7572;margin:24px 0 0;">
-      Button not working? Use this link instead:<br/>
-      <span style="color:#A8ADAA;word-break:break-all;">${args.acceptUrl}</span>
-    </p>
-    <p style="font-size:11px;color:#525252;margin:32px 0 0;border-top:1px solid #2A332E;padding-top:16px;">
-      This link expires in 14 days. Didn't expect this? Ignore the email — nothing happens.
-    </p>
-  </div>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="supported-color-schemes" content="light">
+  <title>${safeCoach} invited you to MyRX</title>
+</head>
+<body style="margin:0;padding:0;background:#F4F3EF;color:#121721;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color-scheme:light;supported-color-schemes:light;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#F4F3EF" style="background:#F4F3EF;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:560px;background:#FFFFFF;border-radius:16px;overflow:hidden;border:1px solid #E5E2DA;">
+        <tr><td align="center" bgcolor="#121721" style="background:#121721;padding:28px 16px;">
+          <img src="${SITE_URL}/email-logo.png" alt="MyRX" width="120" style="display:block;border:0;outline:none;text-decoration:none;height:auto;">
+        </td></tr>
+        <tr><td style="padding:32px 28px;">
+          <h1 style="margin:0 0 18px;font-size:22px;line-height:1.3;font-weight:700;color:#121721;">${safeCoach} invited you to train on MyRX</h1>
+          ${personalLine}
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#374151;">Accept the invite and your coach sees your training and your numbers, and works the plan with you — right inside the app.</p>
+          <p style="margin:0 0 28px;font-size:15px;line-height:1.6;color:#374151;">Your MyRX subscription is fully covered by your coach. No payment needed from you.</p>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#CAF240" style="background:#CAF240;border-radius:10px;">
+            <a href="${args.acceptUrl}" style="display:inline-block;padding:15px 34px;color:#121721;font-size:15px;font-weight:700;text-decoration:none;">Accept invite</a>
+          </td></tr></table>
+          <p style="margin:28px 0 0;font-size:13px;line-height:1.5;color:#6B7280;">Button not working? Paste this into your browser:<br><a href="${args.acceptUrl}" style="color:#3B7A57;word-break:break-all;">${args.acceptUrl}</a></p>
+        </td></tr>
+        <tr><td style="padding:18px 28px;border-top:1px solid #E5E2DA;">
+          <p style="margin:0;font-size:12px;line-height:1.5;color:#9CA3AF;">This invite expires in 14 days. Didn't expect it? Just ignore this email — nothing happens.</p>
+        </td></tr>
+      </table>
+      <p style="margin:16px 0 0;font-size:11px;color:#A8A29E;">MyRX — train one step at a time</p>
+    </td></tr>
+  </table>
 </body></html>`
 
   const text = `${args.coachName} invited you to MyRX.
@@ -389,7 +406,7 @@ Deno.serve(async (req) => {
     })
   }
 
-  const acceptUrl = `${SITE_URL}/coach/accept-invite?token=${token}`
+  const acceptUrl = `${SITE_URL}/accept-invite?token=${token}`
   const coachName = callerProfile.full_name?.trim() || "Your coach"
 
   // ── Step 7: send the email (best-effort via SendGrid) ──────────────

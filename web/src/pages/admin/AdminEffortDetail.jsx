@@ -104,9 +104,10 @@ function RMGrid({ oneRM, unit }) {
 export default function AdminEffortDetail() {
   const { userId, kind, slug } = useParams()
   const [routePath, navigate] = useLocation()
-  // Back-link is portal-aware: under /coach/client/... return to the coach view,
-  // else the admin view — lets this one detail component serve both portals.
-  const detailBase = routePath.startsWith('/coach/') ? '/coach/client' : '/admin/user'
+  // Back-link is portal-aware: under /client/... return to the coach view
+  // (root-level on coach.myrxfit.com, T199), else the admin view — lets this
+  // one detail component serve both portals.
+  const detailBase = routePath.startsWith('/client/') ? '/client' : '/admin/user'
   const exercise = decodeURIComponent(slug || '')
 
   const [entries,  setEntries]  = useState([])

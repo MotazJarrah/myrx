@@ -91,6 +91,29 @@ function humanizeSignupError(code) {
   }
 }
 
+// Detect Supabase auth rate-limit responses. supabase-js surfaces these
+// as either a 429 status OR a message containing one of the throttle
+// phrases ("for security reasons, you can only request this after N
+// seconds", "rate limit", "too many"). Mirrors the mobile signup's
+// isRateLimitError so both surfaces absorb the throttle the same way.
+function isRateLimitError(err) {
+  if (!err) return false
+  const msg = String(err?.message || '')
+  const status = err?.status
+  return status === 429
+    || /security reasons|rate limit|too many|after \d+ second/i.test(msg)
+}
+// Pull "N" out of strings like "you can only request this after 23
+// seconds". Falls back to 60s (Supabase's default email-OTP floor)
+// when the message carries no number. Mirrors the mobile helper.
+function parseRateLimitCooldown(err) {
+  const msg = String(err?.message || '')
+  const m = msg.match(/(\d+)\s*second/i)
+  if (!m) return 60
+  const n = parseInt(m[1], 10)
+  return Number.isFinite(n) && n > 0 ? n : 60
+}
+
 // Mirrors the mobile signup sequence EXACTLY (welcome → units → magic →
 // sex → dob → height → weight → promise → email → password → otp →
 // name → phone → phone-otp → photo → welcome-end), with the client-only
@@ -433,7 +456,7 @@ function PasswordScreen({ data, patch, next, back }) {
           // Two-layer routing for the "clicked the magic-link in the
           // email instead of typing the OTP" path:
           //
-          //   1. emailRedirectTo carries ?next=/coach/signup as a hint
+          //   1. emailRedirectTo carries ?next=/signup as a hint
           //      — but Supabase's email template renders the link as
           //      `{SiteURL}/auth/confirm?token_hash=...&type=...` and
           //      DOES NOT preserve extra query params reliably. So
@@ -446,11 +469,18 @@ function PasswordScreen({ data, patch, next, back }) {
           //      AuthConfirm reads user.user_metadata.signup_journey
           //      after verifyOtp succeeds and routes accordingly.
           //
-          // Either path lands the user on /coach/signup — the flow-
+          // Either path lands the user on /signup — the flow-
           // detection there sees they're signed in + profile-incomplete
           // and continues the journey at the first missing data screen
           // (Name in this case).
-          emailRedirectTo: 'https://myrxfit.com/auth/confirm?next=%2Fcoach%2Fsignup',
+          // T199: host-relative so a coach who signs up on coach.myrxfit.com
+          // gets the confirmation link back to coach.myrxfit.com (not
+          // myrxfit.com) — keeps the entire signup on one origin so the
+          // session created by verifyOtp / the magic-link is visible to the
+          // funnel. Both myrxfit.com/auth/confirm and
+          // coach.myrxfit.com/auth/confirm are in the Supabase redirect
+          // allow-list.
+          emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Fsignup`,
           data: { signup_journey: 'coach' },
         },
       })
@@ -465,6 +495,18 @@ function PasswordScreen({ data, patch, next, back }) {
         (!signUpErr && result?.user && (!result.user.identities || result.user.identities.length === 0))
       if (isEmailExistsError) {
         setEmailExistsPrompt(true)
+        return
+      }
+      // Rate-limited signUp: don't surface the scary "for security
+      // reasons…" string. A confirmation email/OTP from a recent
+      // attempt is almost certainly still valid (within Supabase's
+      // throttle window), so advance to the OTP screen and seed its
+      // Resend cooldown to the remaining window so the user can't
+      // immediately re-hammer the send and hit the same throttle.
+      // Mirrors the mobile signup's rate-limit absorption.
+      if (signUpErr && isRateLimitError(signUpErr)) {
+        patch({ pendingResendCooldown: parseRateLimitCooldown(signUpErr) })
+        next()
         return
       }
       if (signUpErr) {
@@ -508,6 +550,10 @@ function PasswordScreen({ data, patch, next, back }) {
         // the Stripe step too. Just log it.
         console.warn('init-profile-checkpoint failed:', initErr)
       }
+      // signUp just sent a fresh OTP. Seed the OTP screen's Resend
+      // cooldown to 60s so the user doesn't tap Resend the instant
+      // they land and hit Supabase's throttle. Mirrors mobile signup.
+      patch({ pendingResendCooldown: 60 })
       next()
     } catch (e) {
       setError(humanizeSignupError(e?.message))
@@ -522,7 +568,7 @@ function PasswordScreen({ data, patch, next, back }) {
   // out), and lets them either:
   //   • Sign in to convert their athlete account → coach (preserves
   //     all their data). The signin page reads the ?next= query param
-  //     and routes them right back to /coach/signup, which on the
+  //     and routes them right back to /signup, which on the
   //     return trip hits the SCREENS_RESUME path (welcome → magic →
   //     promise → plan → stripe → done — 8 screens, no re-collect of
   //     data they already gave us).
@@ -545,7 +591,7 @@ function PasswordScreen({ data, patch, next, back }) {
           </div>
           <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3.5">
             <p className="text-sm text-foreground leading-relaxed">
-              After signing in, we'll bring you right back here to pick your coach plan and start your 14-day trial.
+              After signing in, we'll bring you right back here to pick your coach plan and start your 30-day trial.
             </p>
           </div>
           <PrimaryButton
@@ -553,7 +599,7 @@ function PasswordScreen({ data, patch, next, back }) {
               const qs = new URLSearchParams({
                 mode:  'signin',
                 email: data.email || '',
-                next:  '/coach/signup',
+                next:  '/signup',
               })
               window.location.href = `/auth?${qs.toString()}`
             }}
@@ -732,6 +778,35 @@ function OTPScreen({ data, patch, next, kind }) {
   // verify twice (the change event for each pasted char fires, but
   // we only want to verify on the final 6-char state).
   const inflightRef = useRef(false)
+  // Resend cooldown. Seeded once on mount from the one-shot
+  // data.pendingResendCooldown the previous screen relayed (60s after a
+  // successful signUp/send, or Supabase's remaining throttle window
+  // after a rate-limited one), then ticks down to 0. Disables the
+  // Resend button + shows a countdown while > 0 so the user can't
+  // re-hammer the send and hit the same throttle. Mirrors mobile signup.
+  const [resendCooldown, setResendCooldown] = useState(data.pendingResendCooldown || 0)
+  const cooldownConsumedRef = useRef(false)
+
+  // Consume the one-shot cooldown exactly once per mount and clear it
+  // from the parent (via patch) so a future OTP visit doesn't re-seed
+  // a stale value. Done in an effect (not just useState's initial
+  // value) because pendingResendCooldown may land in the same render
+  // batch as the step change that mounts this screen.
+  useEffect(() => {
+    if (cooldownConsumedRef.current) return
+    if ((data.pendingResendCooldown || 0) > 0) {
+      cooldownConsumedRef.current = true
+      setResendCooldown(data.pendingResendCooldown)
+      patch({ pendingResendCooldown: 0 })
+    }
+  }, [data.pendingResendCooldown, patch])
+
+  // Tick the cooldown down once per second.
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const t = setTimeout(() => setResendCooldown(c => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [resendCooldown])
 
   // ── Cross-tab auto-advance (email OTP only) ──────────────────────
   // When the user clicks the magic-link in their email instead of
@@ -843,12 +918,12 @@ function OTPScreen({ data, patch, next, kind }) {
   // Resend — re-trigger the original send (signUp for email, send-phone-otp
   // for phone). Same pattern mobile uses.
   async function resend() {
-    if (resending) return
+    if (resending || resendCooldown > 0) return
     setResending(true)
     setError(null)
     try {
       if (kind === 'email') {
-        // Resend signup confirmation. Carry the same ?next=/coach/signup
+        // Resend signup confirmation. Carry the same ?next=/signup
         // redirect that the original signUp used, so if the user clicks
         // the resent email's magic-link they land back in the coach
         // funnel — not on the end-user /dashboard.
@@ -860,14 +935,34 @@ function OTPScreen({ data, patch, next, kind }) {
         const { error: rErr } = await supabase.auth.resend({
           type:    'signup',
           email:   data.email,
-          options: { emailRedirectTo: 'https://myrxfit.com/auth/confirm?next=%2Fcoach%2Fsignup' },
+          options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Fsignup` },
         })
-        if (rErr) setError(rErr.message || 'Could not resend the code.')
+        if (rErr) {
+          // Rate-limited while the previous code is still valid: show
+          // the remaining throttle window in the Resend countdown
+          // rather than surfacing the raw "for security reasons…"
+          // string as an error. Mirrors mobile signup.
+          if (isRateLimitError(rErr)) {
+            setResendCooldown(parseRateLimitCooldown(rErr))
+            return
+          }
+          setError(rErr.message || 'Could not resend the code.')
+          return
+        }
+        setResendCooldown(60)
       } else {
         const { error: rErr } = await supabase.functions.invoke('send-phone-otp', {
           body: { phone: data.phone },
         })
-        if (rErr) setError('Could not resend the code. Try again.')
+        if (rErr) {
+          if (isRateLimitError(rErr)) {
+            setResendCooldown(parseRateLimitCooldown(rErr))
+            return
+          }
+          setError('Could not resend the code. Try again.')
+          return
+        }
+        setResendCooldown(60)
       }
     } finally {
       setResending(false)
@@ -961,10 +1056,14 @@ function OTPScreen({ data, patch, next, kind }) {
         <button
           type="button"
           onClick={resend}
-          disabled={resending || busy || verified}
+          disabled={resending || busy || verified || resendCooldown > 0}
           className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
         >
-          {resending ? 'Resending…' : 'Resend code'}
+          {resending
+            ? 'Resending…'
+            : resendCooldown > 0
+              ? `Resend code in ${resendCooldown}s`
+              : 'Resend code'}
         </button>
       </div>
     </>
@@ -1419,7 +1518,7 @@ function PromiseScreen({ next }) {
       body: 'Strength weights, rep counts, pace zones, interval prescriptions, watts targets. The system computes the next step for every client, every session. You guide, the math runs in the background.' },
     { n: 3,
       title: 'Set the goal, see the commitment.',
-      body: 'You set the goal weight and pace. The system handles the calorie math. Clients log their meals in-app, you see how committed they are.' },
+      body: 'If you choose to set their goal weight and rate, the system handles the calorie math. Clients log their meals in-app, so you see how committed they are.' },
   ]
   return (
     <>
@@ -1782,18 +1881,17 @@ function PhotoScreen({ next }) {
 // Three coach tiers locked in CLAUDE.md (Coach Platform v1, May 24 2026):
 // Starter / Pro / Elite. Client cap differentiates the tiers; everything
 // else (features, dashboard, integrations) is the same across all three.
-// Annual = 17% off FIRST YEAR ONLY; renews at full monthly × 12. Per the
-// user lock, copy must explicitly say "first year" so coaches don't get
-// renewal-shocked. 14-day free trial applies to every tier.
+// Annual = 17% off vs paying monthly (≈ 2 months free), RECURRING every year
+// — no year-2 jump to full price (locked D3, 2026-06-11). 30-day free trial
+// applies to every tier.
 const COACH_TIERS = [
   { id: 'starter', name: 'Starter', cap: 'Up to 10 clients',  monthly: 19, annual: 189 },
   { id: 'pro',     name: 'Pro',     cap: 'Up to 25 clients',  monthly: 39, annual: 389, recommended: true },
   { id: 'elite',   name: 'Elite',   cap: 'Unlimited clients', monthly: 99, annual: 989 },
 ]
 
-// Renewal price at full annual rate (monthly × 12) — shown alongside the
-// first-year promo price so the bill at year 2 isn't a surprise.
-const renewalAnnual = (monthly) => monthly * 12
+// Annual recurs every year at the same discounted rate (no year-2 jump), so
+// there is no separate "renews at full price" figure to show (D3 2026-06-11).
 
 // 7 features — universal across all tiers, no per-tier feature gating.
 // All real, all built (or shipping in the same Coach Platform v1 batch).
@@ -1804,7 +1902,7 @@ const COACH_FEATURES = [
   { icon: '🎯', label: 'Built-in coaching prescriptions',
     sub: 'Every client gets science-backed next-set weights, pace zones, watts targets, and macro splits — auto-generated from their own numbers.' },
   { icon: '🍴', label: 'Macro plan engine',
-    sub: 'Set each client\'s goal weight and pace; the system computes calories and macros. They log meals in-app, you see compliance live.' },
+    sub: 'Set each client\'s goal weight and rate; the system computes calories and macros. They log meals in-app, you see compliance live.' },
   { icon: '💬', label: '1-on-1 chat with every client',
     sub: 'Real-time messaging with each client, controlled by you (turn on or off per client).' },
   { icon: '🏋️', label: 'Your personal MyRX athlete account',
@@ -1820,7 +1918,7 @@ function PlanScreen({ data, patch, next }) {
   const selectedTierId = data.tier || 'pro'
   const setTier = (t) => patch({ tier: t })
   const selectedTier = COACH_TIERS.find(t => t.id === selectedTierId) || COACH_TIERS[1]
-  const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toLocaleDateString(
+  const trialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString(
     undefined, { month: 'short', day: 'numeric' }
   )
 
@@ -1839,7 +1937,7 @@ function PlanScreen({ data, patch, next }) {
           </div>
           <div className="flex-1">
             <p className="text-[10px] font-bold uppercase tracking-widest text-primary">No-hassle trial period</p>
-            <p className="text-lg font-bold text-foreground mt-0.5">14-day free trial.</p>
+            <p className="text-lg font-bold text-foreground mt-0.5">30-day free trial.</p>
             <p className="text-sm text-foreground/90 mt-1 leading-relaxed">
               First charge on <span className="font-semibold tabular-nums">{trialEnd}</span>. Cancel before then in one click — no charge, no questions.
             </p>
@@ -1850,13 +1948,12 @@ function PlanScreen({ data, patch, next }) {
       {/* Cadence toggle — monthly vs annual. Annual badge frames the
           discount as "2 months free" rather than "17% off" — concrete,
           gift-flavored, ~17% mathematically (Pro: $39 × 2 = $78 ≈ $79
-          saved). "First year" disclosure stays so coaches see the promo
-          isn't permanent. */}
+          saved). The discount recurs every year (D3) — no year-2 jump. */}
       <div className="mt-5">
         <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-card p-1">
           {[
             { id: 'monthly', label: 'Monthly' },
-            { id: 'annual',  label: 'Annual',  badge: '2 months free first year' },
+            { id: 'annual',  label: 'Annual',  badge: '2 months free' },
           ].map(c => {
             const active = cadence === c.id
             return (
@@ -1881,9 +1978,8 @@ function PlanScreen({ data, patch, next }) {
 
       {/* Three tier cards — stacked. Tap to select. Active tier gets lime
           border + bg-primary/10. Pro gets a "Recommended" pill. Each card
-          shows: tier name + client cap + price-for-selected-cadence + (on
-          annual) a small renewal-price disclosure so year-2 isn't a
-          surprise. */}
+          shows: tier name + client cap + price-for-selected-cadence + a
+          billing-cadence note. Annual recurs at the same rate (D3). */}
       <div className="mt-3 space-y-2">
         {COACH_TIERS.map(t => {
           const active = selectedTierId === t.id
@@ -1925,8 +2021,8 @@ function PlanScreen({ data, patch, next }) {
                     </span>
                   </div>
                   {isAnnual && (
-                    <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
-                      First year, then at ${renewalAnnual(t.monthly)}/yr
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Billed yearly, cancel any time
                     </p>
                   )}
                   {!isAnnual && (
@@ -1962,7 +2058,7 @@ function PlanScreen({ data, patch, next }) {
 
       <div className="mt-6">
         <PrimaryButton onClick={next}>
-          <Sparkles className="h-4 w-4" /> Start 14-day free trial — Coach {selectedTier.name}
+          <Sparkles className="h-4 w-4" /> Start 30-day free trial — Coach {selectedTier.name}
         </PrimaryButton>
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
           No charge until {trialEnd}. Card required to start trial.
@@ -1983,7 +2079,7 @@ function StripeScreen({ data, next }) {
   // it upserts the coach fields, creates a Stripe Customer, and creates
   // a Checkout Session. Returns checkout_url; we redirect the browser
   // to Stripe. Stripe handles payment and redirects back to
-  // /coach/welcome?session_id=…
+  // /welcome?session_id=…
   //
   // STRIPE_MODE on the edge function defaults to 'test' — currently
   // running in Stripe Test mode (no real money). To flip to live at
@@ -2025,7 +2121,7 @@ function StripeScreen({ data, next }) {
       // Hand the browser off to Stripe Checkout (hosted). Clear the
       // sessionStorage resume state — once we leave the SPA there's
       // no value preserving step state; if the user cancels Stripe
-      // they'll land back at /coach/signup?cancelled=1 and our
+      // they'll land back at /signup?cancelled=1 and our
       // on-mount detectFlow will pick up the abbreviated flow because
       // they're now authed + their profile is partial coach.
       clearStoredState()
@@ -2042,7 +2138,7 @@ function StripeScreen({ data, next }) {
   const selectedTier = COACH_TIERS.find(t => t.id === (data?.tier || 'pro')) || COACH_TIERS[1]
   const cadence = data?.cadence || 'annual'
   const isAnnual = cadence === 'annual'
-  const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toLocaleDateString(
+  const trialEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString(
     undefined, { month: 'short', day: 'numeric' }
   )
   const afterTrialAmount = isAnnual
@@ -2050,7 +2146,7 @@ function StripeScreen({ data, next }) {
     : `$${selectedTier.monthly} / month`
   return (
     <>
-      <Heading eyebrow="Almost there" title="Start your free trial" subtitle="You'll be redirected to Stripe to enter your card. Nothing's charged today — your trial runs for 14 days first." />
+      <Heading eyebrow="Almost there" title="Start your free trial" subtitle="You'll be redirected to Stripe to enter your card. Nothing's charged today — your trial runs for 30 days first." />
       <div className="mt-8 rounded-2xl border border-border bg-card p-5">
         <div className="flex items-center gap-3 mb-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/15">
@@ -2072,7 +2168,7 @@ function StripeScreen({ data, next }) {
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Trial</span>
-            <span className="font-medium">14 days free</span>
+            <span className="font-medium">30 days free</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">After trial</span>
@@ -2081,7 +2177,7 @@ function StripeScreen({ data, next }) {
           {isAnnual && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">Renews at</span>
-              <span className="font-medium tabular-nums">${renewalAnnual(selectedTier.monthly)} / year</span>
+              <span className="font-medium tabular-nums">${selectedTier.annual} / year</span>
             </div>
           )}
           <div className="flex justify-between">
@@ -2116,7 +2212,7 @@ function WelcomeEndScreen({ data, onFinish }) {
         <Check className="h-10 w-10 text-primary" />
       </div>
       <h1 className="mt-6 text-3xl font-semibold tracking-tight">You're in.</h1>
-      <p className="mt-3 text-base text-muted-foreground">14-day trial running.</p>
+      <p className="mt-3 text-base text-muted-foreground">30-day trial running.</p>
       <div className="mt-6 max-w-sm mx-auto rounded-2xl border border-border bg-card p-4 text-left space-y-2">
         <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Up next</p>
         <p className="text-sm text-foreground">Invite your first client. We'll generate a link you can text or email — they sign up, you start coaching.</p>
@@ -2154,6 +2250,13 @@ const INITIAL_DATA = {
   // re-enter the OTP step. Mirrors mobile signup behavior.
   verifiedEmail: null,
   verifiedPhone: null,
+  // One-shot Resend cooldown relayed from the screen that just sent (or
+  // got throttled sending) a code, into the OTP screen that consumes it.
+  // Mirrors mobile signup's parent-level `pendingResendCooldown`: a
+  // successful signUp/send seeds 60s; a rate-limited one seeds Supabase's
+  // remaining throttle window. The OTP screen reads it once on mount and
+  // resets it to 0 so a later OTP visit doesn't re-seed a stale value.
+  pendingResendCooldown: 0,
 }
 
 // SessionStorage key for resume-on-abandonment (scenario H).
@@ -2175,8 +2278,10 @@ function readStoredState() {
 function saveStoredState(step, data) {
   try {
     // Don't persist password — leak hazard. Don't persist photoPreview
-    // either — blob URLs are tab-scoped + worthless after reload.
-    const { password, photoPreview, ...safe } = data
+    // either — blob URLs are tab-scoped + worthless after reload. Don't
+    // persist pendingResendCooldown — it's an ephemeral one-shot relay;
+    // a stale value resurrected on reload would wrongly disable Resend.
+    const { password, photoPreview, pendingResendCooldown, ...safe } = data
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ step, data: safe }))
   } catch { /* silent */ }
 }
@@ -2245,7 +2350,7 @@ export default function CoachSignup() {
       try {
         const { data: p } = await supabase
           .from('profiles')
-          .select('is_coach, is_superuser, coach_subscription_status, full_name, phone, phone_verified_at, avatar_url')
+          .select('is_coach, is_superuser, coach_subscription_status, coach_stripe_customer_id, full_name, phone, phone_verified_at, avatar_url')
           .eq('id', user.id)
           .maybeSingle()
         profile = p
@@ -2262,7 +2367,7 @@ export default function CoachSignup() {
       // not via the public signup flow.
       const ACTIVE_COACH_STATES = new Set(['active', 'trialing', 'past_due'])
       if (profile?.is_coach && ACTIVE_COACH_STATES.has(profile?.coach_subscription_status)) {
-        window.location.href = '/auth?mode=signin&next=/coach/portal'
+        window.location.href = '/auth?mode=signin&next=/portal'
         return
       }
 
@@ -2336,7 +2441,7 @@ export default function CoachSignup() {
         return
       }
 
-      // Scenarios B + E + post-signin-C: existing athlete OR lapsed
+      // Scenarios B + E + post-signin-C: existing athlete OR lapsed/pending
       // coach with a COMPLETE profile. Abbreviated 8-screen flow. Pre-fill
       // what we know so the data object is consistent if the user
       // back-navigates through welcome/magic screens.
@@ -2349,7 +2454,18 @@ export default function CoachSignup() {
         lastName:  rest.join(' ') || prev.lastName,
         phone:     profile?.phone || prev.phone,
       }))
-      setStep(0)
+      // T194 step 5 — RESUME landing. A RETURNING coach (already started
+      // checkout once → has a Stripe customer, OR was a coach before → has a
+      // past coach_subscription_status like lapsed/cancelled) is dropped
+      // straight on the PLAN screen to (re)subscribe — they've already seen the
+      // marketing and abandoned at payment, so re-walking welcome/magic/promise
+      // is pure friction. coach-signup reuses their existing Stripe customer (no
+      // orphan). A brand-new coach (existing athlete upgrading, no coach
+      // history) still starts at welcome for the full pitch.
+      const isReturningCoach =
+        !!profile?.coach_stripe_customer_id || profile?.coach_subscription_status != null
+      const planIdx = SCREENS_RESUME.indexOf('plan')
+      setStep(isReturningCoach && planIdx >= 0 ? planIdx : 0)
       setMode('resume')
     }
     detectFlow()

@@ -37,9 +37,9 @@ const BEAT_YOUR_BEST = ['cycling', 'stationary_bike', 'elliptical']
 export default function AdminCardioDetail() {
   const { userId, slug } = useParams()
   const [routePath, navigate] = useLocation()
-  // Portal-aware back-link (see AdminEffortDetail): /coach/client under the coach
-  // portal, /admin/user under admin.
-  const detailBase = routePath.startsWith('/coach/') ? '/coach/client' : '/admin/user'
+  // Portal-aware back-link (see AdminEffortDetail): /client under the coach
+  // portal (root-level on coach.myrxfit.com, T199), /admin/user under admin.
+  const detailBase = routePath.startsWith('/client/') ? '/client' : '/admin/user'
   const activity = decodeURIComponent(slug || '')
 
   function onBack() {

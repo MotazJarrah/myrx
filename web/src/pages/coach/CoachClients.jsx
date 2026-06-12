@@ -1,8 +1,8 @@
 /**
- * Coach Clients — /coach/clients
+ * Coach Clients — /clients
  *
  * Lists every active client linked to the calling coach via
- * profiles.coach_id = auth.uid(). Each row links to /coach/client/:id
+ * profiles.coach_id = auth.uid(). Each row links to /client/:id
  * (CoachClientDetail) where the coach manages the per-client plan.
  *
  * Realtime: subscribes to profiles INSERT/UPDATE events filtered on
@@ -256,7 +256,7 @@ export default function CoachClients() {
               portal.
             </p>
             <button
-              onClick={() => navigate('/coach/invite')}
+              onClick={() => navigate('/invite')}
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
             >
               <UserPlus className="h-4 w-4" /> Go to Invite Client
@@ -283,7 +283,7 @@ export default function CoachClients() {
               const secondary = c.email || c.phone || null
               const SecondaryIcon = c.email ? Mail : c.phone ? Phone : null
               return (
-                <Link key={c.id} href={`/coach/client/${c.id}`}>
+                <Link key={c.id} href={`/client/${c.id}`}>
                   <a className="flex items-center gap-3 px-4 py-3 hover:bg-accent/30 transition-colors">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/15 text-sm font-bold text-primary overflow-hidden">
                       {c.avatar_url ? (

@@ -1,5 +1,5 @@
 /**
- * Account Settings — shared 4-tab layout used by /admin/profile and /coach/profile.
+ * Account Settings — shared 4-tab layout used by /admin/profile and /profile.
  *
  * Mirrors the mobile profile.tsx tab structure (Account / Preferences /
  * Security / Connect / About — see mobile/app/(app)/profile.tsx) and
@@ -1011,7 +1011,7 @@ const APP_VERSION = '1.0.0'  // Bump when shipping production releases
 
 function AboutTab({ profile }) {
   // Coach-specific docs only render for users with a coach role (coaches
-  // signed up via /coach/signup, OR superusers who manage the platform).
+  // signed up via /signup, OR superusers who manage the platform).
   // Athletes don't see Coach Agreement / DPA in their About — those are
   // B2B docs that don't apply to them. Mirrors the mobile About page
   // (mobile/app/(app)/about.tsx) which uses the same is_coach gate.

@@ -177,7 +177,7 @@ interface Profile {
   // successful invite acceptance — banner UI clears, confirmation shows.
   coach_id: string | null
   // B2C athlete subscription tier — independent of coach attachment.
-  // 'free'   → Strength + Cardio unlocked (+ Dashboard via center button)
+  // 'free'   → Strength + Cardio unlocked (Dashboard is the always-on home, not a tier feature)
   // 'corerx' → free + Bodyweight + Calories
   // 'fullrx' → corerx + Heart + Hydration + Sleep (the wellness layer)
   // RadialNav reads this to grey-out + lock-badge any icon above the user's
@@ -201,18 +201,29 @@ interface Profile {
   // means there's an unacknowledged coach change to surface. Added
   // May 29 2026 alongside the admin coaching chip.
   coach_change_acknowledged_at?: string | null
-  // Set by the WelcomeEndScreen "Open my dashboard" tap. The single
-  // source of truth for "did this user finish the signup journey?" —
-  // isProfileComplete (lib/profile.ts) gates dashboard access on this
-  // column being non-null. Photo / biometric / notifications screens
-  // don't write profile fields, so a field-set check alone wouldn't
-  // catch a user bailing on those screens; this timestamp does.
+  // Set by the WelcomeEndScreen "Open my dashboard" tap. Proves the user
+  // reached the END of the signup journey — isProfileComplete
+  // (lib/profile.ts) requires this PLUS the body fields (T165 hardening;
+  // see that file's header for why both). Photo / biometric /
+  // notifications screens don't write profile fields, so a field-set
+  // check alone wouldn't catch a user bailing on those screens; this
+  // timestamp does.
   onboarded_at: string | null
   // Highest signup step the user has completed. See migration
   // add_profiles_signup_checkpoint for allowed values + their order.
   // Used by the journey's hydration to land a returning user one step
   // past their last completed checkpoint.
   signup_checkpoint: string | null
+  // ── T165: 30-day FullRX reverse trial (athlete B2C) ────────────────
+  // Our OWN grant, never a store subscription. Set once at welcome-end
+  // (now + 30 days). resolveTier (RadialNav / dashboard) returns fullrx
+  // while this is in the future; expiry drops the user to their paid
+  // tier (or free) with no DB write. NULL on coaches + pre-T165 rows.
+  b2c_trial_ends_at?: string | null
+  // Dismissal stamp for the day-30 TrialEndedModal step-down screen —
+  // NULL + expired trial + no paid tier = show the modal once.
+  // (b2c_subscription_tier — the paid store tier — is declared higher up.)
+  b2c_trial_ended_acknowledged_at?: string | null
 }
 
 interface AuthContextType {
@@ -954,7 +965,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             serverBody = await res.json()
           }
         } catch { /* swallow */ }
-        if (serverBody && typeof serverBody === 'object') return serverBody
+        if (serverBody && typeof serverBody === 'object') {
+          // Reconcile the banner with the server's truth on every attempt.
+          // If the invite was revoked / expired / already used / not found,
+          // the pending-invites RPC now drops it and the stale banner clears.
+          // Without this, tapping a revoked invite showed the error but left
+          // the banner up (T182 — realtime didn't auto-clear it when the coach
+          // revoked on web; the athlete-side realtime path is email-matched and
+          // unreliable, so reconcile deterministically here).
+          fetchPendingInvites()
+          return serverBody
+        }
         return { success: false, code: 'attach_failed', error: error.message || "Couldn't attach the invite. Try again." }
       }
       // Success — refresh profile (new coach_id) + pending invites (banner removal).

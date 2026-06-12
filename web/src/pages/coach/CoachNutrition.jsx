@@ -1,5 +1,5 @@
 /**
- * Coach — Nutrition Overview (/coach/nutrition)
+ * Coach — Nutrition Overview (/nutrition)
  *
  * Mirror of the admin Nutrition Overview, scoped to the COACH's own clients
  * (coach_id = the signed-in coach). Reuses the shared loadNutritionRows loader
@@ -47,7 +47,7 @@ export default function CoachNutrition() {
         rows={rows}
         days={days}
         loading={loading}
-        clientHref={(id) => `/coach/client/${id}`}
+        clientHref={(id) => `/client/${id}`}
       />
     </div>
   )

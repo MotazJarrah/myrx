@@ -1,5 +1,5 @@
 /**
- * Coach — Weight Goal Progress (/coach/progress)
+ * Coach — Weight Goal Progress (/progress)
  *
  * Mirror of the admin Weight Goal Progress page (AdminProgress.jsx), scoped
  * to the COACH's own clients (coach_id = the signed-in coach). Same revamped
@@ -53,7 +53,7 @@ export default function CoachProgress() {
         rows={rows}
         weightUnit={weightUnit}
         loading={loading}
-        clientHref={(id) => `/coach/client/${id}`}
+        clientHref={(id) => `/client/${id}`}
       />
     </div>
   )

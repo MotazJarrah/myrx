@@ -133,17 +133,24 @@ function computeWeekStreak(dates) {
 // coached client the coach's status isn't on the client row, so the caller
 // passes `coachActive` from the client_has_active_coach() RPC. ──────────────
 const TIER_RANK = { free: 0, corerx: 1, fullrx: 2 }
-const INACTIVE_COACH_STATUSES = ['lapsed', 'suspended', 'cancelled']
+// T194: ALLOW-list, mirroring is_active_coach() + the web coach gate — FullRX comp
+// is live ONLY for these; any other status (incl. null / incomplete) drops to b2c.
+const LIVE_COACH_STATUSES = ['trialing', 'active', 'past_due']
 function resolveTier(p, coachActive) {
   if (!p) return 'free'
   if (p.is_superuser === true) return 'fullrx'
   if (p.is_coach === true)
-    return INACTIVE_COACH_STATUSES.includes(p.coach_subscription_status)
-      ? (p.b2c_subscription_tier ?? 'free') : 'fullrx'
+    return LIVE_COACH_STATUSES.includes(p.coach_subscription_status)
+      ? 'fullrx' : (p.b2c_subscription_tier ?? 'free')
   if (p.coach_id)
     // coachActive: true/false from the RPC; undefined while loading → assume
     // active so we never flash a downgrade before the RPC resolves.
     return coachActive === false ? (p.b2c_subscription_tier ?? 'free') : 'fullrx'
+  // T165 — 30-day FullRX reverse trial: our own grant (no store sub).
+  // Live trial lifts the effective tier to fullrx; expiry drops it
+  // automatically with no DB write. Mirrors mobile resolveTier.
+  if (p.b2c_trial_ends_at && new Date(p.b2c_trial_ends_at).getTime() > Date.now())
+    return 'fullrx'
   return p.b2c_subscription_tier ?? 'free'
 }
 
@@ -499,6 +506,13 @@ export default function AdminUserDetail() {
   const [deleteConfirm,  setDeleteConfirm]  = useState('')
   const [deleting,       setDeleting]       = useState(false)
   const [deleteError,    setDeleteError]    = useState('')
+  // Wipe out (T197) — admin-only HARD erase via the delete-user edge fn. No
+  // grace, no anonymize, no archive: every trace of the account is removed.
+  // Confirm word: "wipeout".
+  const [wipeOpen,    setWipeOpen]    = useState(false)
+  const [wipeConfirm, setWipeConfirm] = useState('')
+  const [wiping,      setWiping]      = useState(false)
+  const [wipeError,   setWipeError]   = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [activeTab,    setActiveTab]    = useState(() => {
     const params   = new URLSearchParams(window.location.search)
@@ -853,6 +867,35 @@ export default function AdminUserDetail() {
       setDeleteError(err?.message || 'Failed to schedule deletion.')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  // Wipe out (T197) — admin-only PERMANENT erase. Calls the delete-user edge
+  // function (superuser-gated server-side): cancels Stripe, deletes every data
+  // table + avatar + the profiles row (clients' coach_id SET NULL) + the auth
+  // user; the trg_wipe_account_traces trigger then clears the archive + access
+  // log. No recovery. Gated on typing the exact word "wipeout".
+  async function doWipeOut() {
+    if (wiping) return
+    if (wipeConfirm.trim().toLowerCase() !== 'wipeout') return
+    setWiping(true)
+    setWipeError('')
+    try {
+      const { data, error } = await supabase.functions.invoke('delete-user', { body: { user_id: id } })
+      if (error) {
+        // delete-user returns JSON { error } on non-2xx; supabase-js hides it
+        // behind a generic wrapper, so pull the real reason off error.context.
+        let msg = ''
+        try { const body = await error.context?.json?.(); msg = body?.error || '' } catch { /* not JSON */ }
+        throw new Error(msg || 'Wipe failed. Try again.')
+      }
+      if (data?.error) throw new Error(data.error)
+      // The account no longer exists — leave this now-dead detail page.
+      dataCache.bustPrefix('admin:')
+      window.location.href = '/admin/clients'
+    } catch (err) {
+      setWipeError(err?.message || 'Something went wrong. Try again.')
+      setWiping(false)
     }
   }
 
@@ -1339,26 +1382,41 @@ export default function AdminUserDetail() {
         clientProfile={profile}
         viewerRole="admin"
         onProfileSaved={updated => setProfile(prev => ({ ...prev, ...updated }))}
-        dangerZone={profile?.anonymized_at ? null : (
-          profile?.scheduled_for_deletion_at ? (
+        dangerZone={
+          <div className="flex flex-col gap-2">
+            {!profile?.anonymized_at && (
+              profile?.scheduled_for_deletion_at ? (
+                <button
+                  onClick={() => { setSettingsOpen(false); doCancelDeletion() }}
+                  disabled={deleting}
+                  title="Cancel the scheduled deletion for this account"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400 hover:bg-amber-500/20 cursor-pointer disabled:opacity-50"
+                >
+                  <X className="h-3.5 w-3.5" /> Cancel scheduled deletion
+                </button>
+              ) : (
+                <button
+                  onClick={() => { setSettingsOpen(false); setDeleteOpen(true); setDeleteConfirm(''); setDeleteError('') }}
+                  title="Schedule this account for deletion (30-day grace period)"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/20 cursor-pointer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete account
+                </button>
+              )
+            )}
+            {/* Wipe out (T197) — admin-only PERMANENT erase. No grace, no
+                anonymize, no archive: the account stops existing. Always shown
+                (even when already anonymized/scheduled) so any record can be
+                fully erased. Confirm word: "wipeout". */}
             <button
-              onClick={() => { setSettingsOpen(false); doCancelDeletion() }}
-              disabled={deleting}
-              title="Cancel the scheduled deletion for this account"
-              className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-400 hover:bg-amber-500/20 cursor-pointer disabled:opacity-50"
+              onClick={() => { setSettingsOpen(false); setWipeOpen(true); setWipeConfirm(''); setWipeError('') }}
+              title="Permanently erase this account and every trace of it — no recovery"
+              className="inline-flex items-center gap-1.5 rounded-md border border-destructive bg-destructive/15 px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/25 cursor-pointer"
             >
-              <X className="h-3.5 w-3.5" /> Cancel scheduled deletion
+              <Trash2 className="h-3.5 w-3.5" /> Wipe out
             </button>
-          ) : (
-            <button
-              onClick={() => { setSettingsOpen(false); setDeleteOpen(true); setDeleteConfirm(''); setDeleteError('') }}
-              title="Schedule this account for deletion (30-day grace period)"
-              className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/20 cursor-pointer"
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Delete account
-            </button>
-          )
-        )}
+          </div>
+        }
       />
 
 
@@ -1432,6 +1490,92 @@ export default function AdminUserDetail() {
                 {deleting
                   ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Scheduling…</>
                   : <><Clock className="h-3.5 w-3.5" /> Schedule deletion (30 days)</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Wipe out confirm modal (T197) — permanent, no recovery ── */}
+      {wipeOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => !wiping && setWipeOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-destructive/50 bg-card shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-destructive/20">
+                  <AlertTriangle className="h-5 w-5 text-destructive" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-foreground">Wipe out account</h2>
+                  <p className="text-xs text-muted-foreground">Permanent · no grace period · no recovery</p>
+                </div>
+              </div>
+              <button
+                onClick={() => !wiping && setWipeOpen(false)}
+                disabled={wiping}
+                className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs text-foreground leading-relaxed">
+                This permanently erases{' '}
+                <span className="font-semibold">{profile.full_name || profile.email}</span>{' '}
+                and <span className="font-semibold text-destructive">every trace of the account</span> — training history, body and nutrition logs, chat, billing records, the auth login, and even the deletion archive. It will be as if the account never existed.
+                <ul className="mt-2 ml-4 list-disc text-muted-foreground space-y-0.5">
+                  <li>Any active Stripe subscription is cancelled first.</li>
+                  <li>If this is a coach, their clients are released (coach link cleared).</li>
+                  <li><span className="font-semibold text-destructive">This cannot be undone.</span></li>
+                </ul>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1.5">
+                  Type <span className="font-mono font-semibold text-destructive">wipeout</span> to confirm
+                </label>
+                <input
+                  type="text"
+                  value={wipeConfirm}
+                  onChange={e => setWipeConfirm(e.target.value)}
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="wipeout"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-destructive"
+                />
+              </div>
+
+              {wipeError && (
+                <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span>{wipeError}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+              <button
+                onClick={() => setWipeOpen(false)}
+                disabled={wiping}
+                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={doWipeOut}
+                disabled={wiping || wipeConfirm.trim().toLowerCase() !== 'wipeout'}
+                className="flex items-center gap-1.5 rounded-md bg-destructive px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {wiping
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Wiping…</>
+                  : <><Trash2 className="h-3.5 w-3.5" /> Wipe out</>}
               </button>
             </div>
           </div>

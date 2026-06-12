@@ -11,7 +11,7 @@
  * tying "should reset" to React's unmount lifecycle.
  *
  * The clearOnUnmount flag works because:
- *   • Explicit React Router nav (away from /coach/profile, etc.) →
+ *   • Explicit React Router nav (away from /profile, etc.) →
  *     React unmounts the component → cleanup fires → localStorage
  *     cleared → next visit loads the initial value. ✓ reset case.
  *   • Sign-out → window.location.replace('/auth') → page navigates →

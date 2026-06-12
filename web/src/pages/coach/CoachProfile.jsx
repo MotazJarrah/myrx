@@ -1,5 +1,5 @@
 /**
- * Coach Profile + Subscription — /coach/profile
+ * Coach Profile + Subscription — /profile
  *
  * Mirror of AdminProfile.jsx (the admin's own account page). For Phase 2
  * we wire the basics — name / bio / specialties / sign-in stuff — and
@@ -54,6 +54,36 @@ export default function CoachProfile() {
   const [deleteConfirmText, setDeleteConfirmText] = useState('')
   const [deleting,          setDeleting]          = useState(false)
   const [deleteError,       setDeleteError]       = useState('')
+
+  // "Manage plan" → opens the Stripe Billing Portal (T194 step 8) via the
+  // coach-billing-portal edge fn. Stripe hosts card update / cancel / tier
+  // switch; the resulting webhook events update is_coach + coach_subscription_
+  // status for us, so there's nothing to sync here beyond the redirect.
+  const [portalLoading, setPortalLoading] = useState(false)
+  const [portalError,   setPortalError]   = useState('')
+  async function openBillingPortal() {
+    if (portalLoading) return
+    setPortalError('')
+    setPortalLoading(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('coach-billing-portal', { body: {} })
+      if (error) {
+        // supabase-js wraps a non-2xx as FunctionsHttpError whose generic
+        // message ("Edge Function returned a non-2xx status code") HIDES our
+        // friendly { error } body — that lives on error.context (the Response),
+        // not on error.message. Pull it out so the coach sees the real reason
+        // (e.g. "No billing account found for your coach plan.").
+        let msg = ''
+        try { const body = await error.context?.json?.(); msg = body?.error || '' } catch { /* body not JSON */ }
+        throw new Error(msg || "Couldn't open the billing portal. Try again.")
+      }
+      if (!data?.url) throw new Error("Couldn't open the billing portal. Try again.")
+      window.location.href = data.url
+    } catch (e) {
+      setPortalError(e.message || 'Something went wrong. Try again.')
+      setPortalLoading(false)
+    }
+  }
 
 
   // Schedule the coach's own account for deletion. Calls the
@@ -180,18 +210,28 @@ export default function CoachProfile() {
         <div className="max-w-2xl mx-auto">
           <BillingView userId={user.id} viewer="user" />
 
-          {/* Stripe Customer Portal CTA — placeholder until Phase 4
-              wires the actual portal session edge function. Until then,
-              coach uses the portal link Stripe emails with every
-              receipt. */}
-          <div className="mt-4 flex items-start gap-2 rounded-lg bg-primary/5 border border-primary/20 p-3">
-            <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Card update, cancellation, and tier changes are managed via
-              the Stripe Customer Portal — Stripe emails you a portal
-              link with every receipt. Direct in-app portal access ships
-              in the next release.
+          {/* Stripe Billing Portal — "Manage plan" (T194 step 8). Opens
+              Stripe's hosted portal where the coach can update their card,
+              switch tier, or cancel. Any change there flows back through the
+              stripe-webhook → is_coach + coach_subscription_status. */}
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={openBillingPortal}
+              disabled={portalLoading}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+            >
+              {portalLoading
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Opening…</>
+                : <>Manage plan</>}
+            </button>
+            <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+              Update your card, switch tier, or cancel — all handled securely
+              by Stripe.
             </p>
+            {portalError && (
+              <p className="mt-2 text-xs text-destructive">{portalError}</p>
+            )}
           </div>
         </div>
       )}

@@ -23,12 +23,13 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Linking } from 'react-native'
-import {
-  Receipt, CheckCircle2, XCircle, RefreshCw, DollarSign, AlertTriangle,
-  Clock, ExternalLink, CreditCard,
-} from 'lucide-react-native'
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from 'react-native'
+import { Receipt, AlertTriangle, CreditCard } from 'lucide-react-native'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
+import PlanCards from './PlanCards'
+import BottomSheet from './BottomSheet'
+import { ATHLETE_TIERS, isTrialActive, trialDaysLeft, isPaidAthleteTier } from '../lib/billing'
 import { colors, alpha, palette, fonts } from '../theme'
 
 // ── Formatters ──────────────────────────────────────────────────────────────
@@ -52,44 +53,22 @@ function formatDate(iso: string | null): string {
   })
 }
 
-function formatDateFull(iso: string | null): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString(undefined, {
-    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
+// Trial end + N days. The chosen plan begins the day AFTER the trial ends, so
+// the "free through" date and the "plan begins" date never read as the same day.
+function addDaysIso(iso: string | null, days: number): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  d.setDate(d.getDate() + days)
+  return d.toISOString()
 }
 
-// ── Per-type display chrome ─────────────────────────────────────────────────
-type EventType =
-  | 'invoice_paid' | 'invoice_failed'
-  | 'subscription_started' | 'subscription_updated' | 'subscription_cancelled'
-  | 'refund_issued' | 'dispute_opened' | 'b2c_purchase'
-
-type Tone = 'green' | 'red' | 'blue' | 'amber'
-
-const TYPE_DISPLAY: Record<string, { label: string; icon: any; tone: Tone }> = {
-  invoice_paid:           { label: 'Invoice paid',           icon: CheckCircle2,  tone: 'green' },
-  invoice_failed:         { label: 'Invoice failed',         icon: XCircle,       tone: 'red'   },
-  subscription_started:   { label: 'Subscription started',   icon: Receipt,       tone: 'blue'  },
-  subscription_updated:   { label: 'Subscription updated',   icon: RefreshCw,     tone: 'blue'  },
-  subscription_cancelled: { label: 'Subscription cancelled', icon: XCircle,       tone: 'blue'  },
-  refund_issued:          { label: 'Refund issued',          icon: DollarSign,    tone: 'red'   },
-  dispute_opened:         { label: 'Dispute opened',         icon: AlertTriangle, tone: 'amber' },
-  b2c_purchase:           { label: 'One-time purchase',      icon: CheckCircle2,  tone: 'green' },
-}
-
-const TONE_BG: Record<Tone, string> = {
-  green: alpha(palette.emerald[400], 0.10),
-  red:   alpha(palette.red[400],     0.10),
-  blue:  alpha(palette.blue[400],    0.10),
-  amber: alpha(palette.amber[400],   0.10),
-}
-const TONE_FG: Record<Tone, string> = {
-  green: palette.emerald[400],
-  red:   palette.red[400],
-  blue:  palette.blue[400],
-  amber: palette.amber[400],
+// ── Transaction label helper ────────────────────────────────────────────────
+// Turn a billing_events description into a clean "Plan · Cadence" title — strip
+// the "— mock store" (provider) suffix and capitalise the cadence.
+function cleanTxLabel(description: string | null, fallback: string): string {
+  if (!description) return fallback
+  const s = description.replace(/\s*[—-]\s*mock store\s*$/i, '').trim()
+  return s.replace(/\bmonthly\b/i, 'Monthly').replace(/\bannual\b/i, 'Annual') || fallback
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -122,6 +101,9 @@ interface ProfileLite {
   // to plumb the chip state through props.
   coach_id: string | null
   b2c_subscription_tier: 'free' | 'corerx' | 'fullrx' | null
+  // T165 — the 30-day FullRX reverse trial grant. Drives the trial-aware
+  // Current-section copy below.
+  b2c_trial_ends_at: string | null
 }
 
 interface CoachInfo {
@@ -134,6 +116,13 @@ interface Props {
 
 // ── Main component ─────────────────────────────────────────────────────────
 export default function BillingTab({ userId }: Props) {
+  // Signed-in auth user — gates the PlanCards purchase surface to the
+  // SELF view only (see render note below).
+  const { user: authUser } = useAuth()
+  const authUserId = authUser?.id ?? null
+  // Plan-picker sheet (T177) — opened by the "See plans" / "Manage plan"
+  // button when the inline picker isn't shown.
+  const [pickerOpen,      setPickerOpen]      = useState(false)
   const [profile,         setProfile]         = useState<ProfileLite | null>(null)
   const [events,          setEvents]          = useState<BillingEvent[]>([])
   const [loading,         setLoading]         = useState(true)
@@ -144,6 +133,11 @@ export default function BillingTab({ userId }: Props) {
   // admin superuser — drives a different "complimentary account" copy.
   const [coachInfo,       setCoachInfo]       = useState<CoachInfo | null>(null)
   const [isAdminCoached,  setIsAdminCoached]  = useState(false)
+  // Bumped after a purchase so the load() effect re-fetches profile + events.
+  // BillingTab keeps its OWN copies; PlanCards' refreshProfile() only updates
+  // the AuthContext profile, not these — without this the view stayed stale
+  // (picker never receded to "Manage plan", transactions never refreshed).
+  const [refreshKey,      setRefreshKey]      = useState(0)
 
   useEffect(() => {
     if (!userId) return
@@ -155,7 +149,7 @@ export default function BillingTab({ userId }: Props) {
       try {
         const [{ data: prof }, { data: evts, error: evtErr }] = await Promise.all([
           supabase.from('profiles')
-            .select('id, full_name, is_coach, is_superuser, anonymized_at, scheduled_for_deletion_at, coach_id, b2c_subscription_tier')
+            .select('id, full_name, is_coach, is_superuser, anonymized_at, scheduled_for_deletion_at, coach_id, b2c_subscription_tier, b2c_trial_ends_at')
             .eq('id', userId)
             .maybeSingle(),
           supabase.from('billing_events')
@@ -168,18 +162,18 @@ export default function BillingTab({ userId }: Props) {
         const profLite = prof as ProfileLite | null
         setProfile(profLite)
         setEvents((evts as BillingEvent[]) || [])
-        // If they're coach-attached, resolve the coach's name for the
-        // covered-by-coach banner. Skip for admin-attached (the admin
-        // is "the MyRX team" in the user-facing copy, not an individual).
+        // If they're coach-attached, resolve the coach's display info via
+        // the get_coach_info RPC (SECURITY DEFINER). A direct profiles
+        // SELECT is blocked by RLS for the athlete — that's the T171 bug:
+        // the name came back null and the covered-by-coach copy rendered
+        // the nonsense "covered while your coach is your coach".
+        // The RPC reads the CALLER's coach, so it only applies on the
+        // self view (userId === auth user); an admin viewing someone
+        // else's billing gets the nameless fallback copy instead.
         if (profLite?.coach_id) {
-          const { data: coach } = await supabase
-            .from('profiles')
-            .select('id, full_name, is_superuser')
-            .eq('id', profLite.coach_id)
-            .maybeSingle()
+          const { data: info } = await supabase.rpc('get_coach_info')
           if (!cancelled) {
-            // Treat admin-coach as a special category (drives the
-            // complimentary-account copy instead of the covered-by-coach copy)
+            const coach = info as { full_name?: string | null; is_superuser?: boolean } | null
             if (coach?.is_superuser) {
               setCoachInfo({ full_name: null })  // signals admin path
               setIsAdminCoached(true)
@@ -203,12 +197,16 @@ export default function BillingTab({ userId }: Props) {
     }
     load()
     return () => { cancelled = true }
-  }, [userId])
+  }, [userId, refreshKey])
 
   // Group events by year-month for the transactions list.
+  // Transactions = actual charges only (amount present). Lifecycle-only rows
+  // like subscription_cancelled (null amount) aren't payments, so they're
+  // skipped — the Current-plan card carries the live status instead.
   const grouped = useMemo(() => {
     const out: Record<string, BillingEvent[]> = {}
     for (const e of events) {
+      if (e.amount_cents == null) continue
       const d = new Date(e.occurred_at)
       const key = d.toLocaleDateString(undefined, { year: 'numeric', month: 'long' })
       if (!out[key]) out[key] = []
@@ -235,6 +233,27 @@ export default function BillingTab({ userId }: Props) {
     )
   }
 
+  // The plans surface only applies on the SELF view of a self-managed
+  // athlete — coach-attached users are covered by their coach, and an
+  // admin viewing someone else's billing must not buy against their own
+  // auth user.
+  const selfManaged =
+    authUserId === userId &&
+    !profile?.coach_id &&
+    !profile?.anonymized_at &&
+    profile?.is_coach !== true &&
+    profile?.is_superuser !== true
+  const trialActive = isTrialActive(profile?.b2c_trial_ends_at)
+  const hasPaidTier = isPaidAthleteTier(profile?.b2c_subscription_tier)
+  // T177: inline picker ONLY during the trial decision window with no plan
+  // yet (transactions are empty then, nothing's buried, and it's
+  // time-boxed — not a permanent upsell). Once a plan is chosen OR the
+  // trial ends, the picker recedes behind a button that opens it as a
+  // sheet. Coach-covered/admin/anonymized get neither.
+  const showInlinePicker = selfManaged && trialActive && !hasPaidTier
+  const showPlansButton  = selfManaged && !showInlinePicker
+  const plansButtonLabel = hasPaidTier ? 'Manage plan' : 'See plans'
+
   return (
     <View style={s.container}>
       <CurrentSection
@@ -242,17 +261,40 @@ export default function BillingTab({ userId }: Props) {
         coachInfo={coachInfo}
         isAdminCoached={isAdminCoached}
       />
-      <TransactionsSection grouped={grouped} events={events} />
+      {showInlinePicker && <PlanCards onTierChanged={() => setRefreshKey(k => k + 1)} />}
+      {showPlansButton && (
+        <Pressable style={s.plansBtn} onPress={() => setPickerOpen(true)}>
+          <Text style={s.plansBtnText}>{plansButtonLabel}</Text>
+        </Pressable>
+      )}
+      <TransactionsSection grouped={grouped} />
+
+      {/* Plan-picker sheet — opened by the See plans / Manage plan button.
+          The inline picker above covers the trial-decision window; this
+          sheet is the deliberate change-plan surface once decided/expired. */}
+      <BottomSheet
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title={hasPaidTier ? 'Manage plan' : 'Choose a plan'}
+        icon={<CreditCard size={14} color={palette.blue[400]} />}
+      >
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.sheetContent}>
+          <PlanCards onTierChanged={() => { setPickerOpen(false); setRefreshKey(k => k + 1) }} />
+        </ScrollView>
+      </BottomSheet>
     </View>
   )
 }
 
 // ── Current section ─────────────────────────────────────────────────────────
-// Branches off coach attachment state, picked in this order:
+// Branches off coach/attachment state, picked in this order:
 //   1. anonymized_at        → terminal "account anonymized" copy
-//   2. coach_id is admin    → "complimentary account" copy
-//   3. coach_id is a coach  → "covered by [coach name]" copy
-//   4. coach_id is null     → self-managed (B2C surface lives here)
+//   2. is_coach (self)      → "full access through your coach plan" (T194) — a
+//                             coach gets the app free via their WEB coach sub;
+//                             never show them an athlete upgrade prompt/paywall
+//   3. coach_id is admin    → "complimentary account" copy
+//   4. coach_id is a coach  → "covered by [coach name]" copy
+//   5. coach_id is null     → self-managed (B2C surface lives here)
 // All branches still render the Transactions list below for history.
 function CurrentSection({
   profile, coachInfo, isAdminCoached,
@@ -279,13 +321,35 @@ function CurrentSection({
     )
   }
 
-  // 2. Admin-coached — complimentary account managed by the MyRX team.
+  // 2. Coach (self) — their FullRX access comes free with their WEB coach
+  //    subscription, managed at myrxfit.com, NOT here. Never show a coach an
+  //    athlete upgrade prompt (T194 step 8). is_coach is webhook-managed to be
+  //    true only while the coach plan is live, so this only renders for an
+  //    actually-paying coach; a lapsed coach drops to is_coach=false and sees
+  //    the normal athlete states below. Plain text + web pointer (no in-app
+  //    buy/manage CTA) keeps it store-compliant.
+  if (profile?.is_coach === true) {
+    return (
+      <View style={s.currentCard}>
+        <View style={s.currentHeader}>
+          <CreditCard size={16} color={colors.mutedForeground} />
+          <Text style={s.currentEyebrow}>Current plan</Text>
+        </View>
+        <Text style={s.currentTitle}>Full access through your coach plan</Text>
+        <Text style={s.currentBody}>
+          Your coaching subscription unlocks everything here — no separate purchase needed. Manage your plan (card, tier, or cancel) on the web at myrxfit.com.
+        </Text>
+      </View>
+    )
+  }
+
+  // 3. Admin-coached — complimentary account managed by the MyRX team.
   if (profile?.coach_id && isAdminCoached) {
     return (
       <View style={s.currentCard}>
         <View style={s.currentHeader}>
           <CreditCard size={16} color={colors.mutedForeground} />
-          <Text style={s.currentEyebrow}>Current</Text>
+          <Text style={s.currentEyebrow}>Current plan</Text>
         </View>
         <Text style={s.currentTitle}>Complimentary access</Text>
         <Text style={s.currentBody}>
@@ -295,57 +359,98 @@ function CurrentSection({
     )
   }
 
-  // 3. Coach-attached athlete — coach's subscription covers them.
+  // 4. Coach-attached athlete — coach's subscription covers them.
+  //    T171: when the coach's name can't be resolved (RPC unavailable,
+  //    coach anonymized, or an admin viewing someone else's billing),
+  //    DROP the name clause entirely — never render the template with a
+  //    placeholder ("covered while your coach is your coach" was the bug).
   if (profile?.coach_id) {
-    const coachName = coachInfo?.full_name || 'your coach'
+    const coachName = coachInfo?.full_name || null
     return (
       <View style={s.currentCard}>
         <View style={s.currentHeader}>
           <CreditCard size={16} color={colors.mutedForeground} />
-          <Text style={s.currentEyebrow}>Current</Text>
+          <Text style={s.currentEyebrow}>Current plan</Text>
         </View>
         <Text style={s.currentTitle}>Covered while you're coached</Text>
         <Text style={s.currentBody}>
-          Your MyRX subscription is covered while{' '}
-          <Text style={s.currentBodyEmphasis}>{coachName}</Text> is your coach. No payment is required from you. Past purchases you made on your own appear below.
+          {coachName ? (
+            <>
+              Your MyRX subscription is covered while{' '}
+              <Text style={s.currentBodyEmphasis}>{coachName}</Text> is your coach.
+            </>
+          ) : (
+            <>Your MyRX subscription is covered by your coach's plan.</>
+          )}
+          {' '}No payment is required from you. Past purchases you made on your own appear below.
         </Text>
       </View>
     )
   }
 
-  // 4. Self-managed athlete (default). B2C purchase / subscription UI
-  // lives here once Roadmap C ships.
+  // 4. Self-managed athlete (default) — T165 trial/tier-aware copy.
+  //    Trial live → countdown + what happens at day 30.
+  //    Paid tier  → which plan + how it renews.
+  //    Neither    → Free-tier copy pointing at the plans below.
+  const trialLive = isTrialActive(profile?.b2c_trial_ends_at)
+  // 'free' is the column DEFAULT (not null) — it is NOT a paid plan.
+  const paidTier = isPaidAthleteTier(profile?.b2c_subscription_tier)
+    ? ATHLETE_TIERS.find(t => t.id === profile!.b2c_subscription_tier)
+    : null
+
+  let title = 'Free tier'
+  let body = "You're on the free tier — Strength and Cardio are free for good. Pick a plan below to unlock more."
+  if (trialLive) {
+    const days = trialDaysLeft(profile?.b2c_trial_ends_at)
+    if (paidTier) {
+      // Plan chosen DURING the trial — it's SCHEDULED (begins the day AFTER the
+      // trial ends), so the standing line shows both at once: trial countdown ·
+      // plan start date.
+      const startDate = formatDate(addDaysIso(profile?.b2c_trial_ends_at ?? null, 1))
+      title = `FullRX trial — ${days} day${days === 1 ? '' : 's'} left · ${paidTier.name} starts ${startDate}`
+      // No "card on file" copy — we never hold the card (native IAP).
+      body = "You keep every free day until then — no charge yet."
+    } else {
+      title = `FullRX trial — ${days} day${days === 1 ? '' : 's'} left`
+      body = "Everything's unlocked, free through your trial — no commitment. When it ends you'll move to Free unless you pick a plan below."
+    }
+  } else if (paidTier) {
+    // No price in the title — the mock rail doesn't persist the billing
+    // cadence, so claiming "/mo" would lie for an annual purchase. The
+    // plan cards below carry the exact prices.
+    title = `${paidTier.name} — active`
+    body = `Your ${paidTier.name} plan is active. Your data stays put on every tier.`
+  }
+
   return (
     <View style={s.currentCard}>
       <View style={s.currentHeader}>
         <CreditCard size={16} color={colors.mutedForeground} />
-        <Text style={s.currentEyebrow}>Current</Text>
+        <Text style={s.currentEyebrow}>Current plan</Text>
       </View>
-      <Text style={s.currentTitle}>Free tier</Text>
-      <Text style={s.currentBody}>
-        You're on the free tier. Paid tiers unlock here when they launch. Past purchases or refunds appear below.
-      </Text>
+      <Text style={s.currentTitle}>{title}</Text>
+      <Text style={s.currentBody}>{body}</Text>
     </View>
   )
 }
 
 // ── Transactions section ────────────────────────────────────────────────────
 function TransactionsSection({
-  grouped, events,
-}: { grouped: Record<string, BillingEvent[]>; events: BillingEvent[] }) {
+  grouped,
+}: { grouped: Record<string, BillingEvent[]> }) {
+  const count = Object.values(grouped).reduce((n, rows) => n + rows.length, 0)
   return (
     <View style={s.txCard}>
       <View style={s.txHeader}>
         <Text style={s.txEyebrow}>
-          Transactions
-          {events.length > 0 ? `  ·  ${events.length} record${events.length === 1 ? '' : 's'}` : ''}
+          Transactions{count > 0 ? `  ·  ${count} record${count === 1 ? '' : 's'}` : ''}
         </Text>
       </View>
-      {events.length === 0 ? (
+      {count === 0 ? (
         <View style={s.txEmpty}>
           <Receipt size={24} color={alpha(colors.mutedForeground, 0.30)} />
           <Text style={s.txEmptyText}>
-            No transactions yet. Charges, refunds, and subscription changes show up here automatically.
+            No transactions yet. Your subscription charges show up here automatically.
           </Text>
         </View>
       ) : (
@@ -363,56 +468,24 @@ function TransactionsSection({
 }
 
 function EventRow({ event }: { event: BillingEvent }) {
-  const def = TYPE_DISPLAY[event.type] || { label: event.type, icon: Receipt, tone: 'amber' as Tone }
-  const Icon = def.icon
-
-  // Pick the most-useful Stripe dashboard link for this row. Invoice >
-  // subscription > charge in terms of admin-readability.
-  const stripeUrl = event.stripe_invoice_id
-    ? `https://dashboard.stripe.com/invoices/${event.stripe_invoice_id}`
-    : event.stripe_subscription_id
-      ? `https://dashboard.stripe.com/subscriptions/${event.stripe_subscription_id}`
-      : event.stripe_charge_id
-        ? `https://dashboard.stripe.com/payments/${event.stripe_charge_id}`
-        : null
-
-  // Amount color follows tone: refunds are red even though the row tone is red,
-  // paid invoices green, lifecycle events neutral (no amount typically).
+  // Amount colour conveys the status: green = paid, red = failed / refund.
   const amountColor =
     event.type === 'refund_issued' ? palette.red[400] :
     (event.status === 'paid' || event.status === 'completed') ? palette.emerald[400] :
     event.status === 'failed' ? palette.red[400] :
     colors.foreground
+  const title = cleanTxLabel(event.description, 'Subscription')
+  const status = event.status ? event.status.charAt(0).toUpperCase() + event.status.slice(1) : ''
 
   return (
     <View style={s.eventRow}>
-      <View style={[s.eventIcon, { backgroundColor: TONE_BG[def.tone] }]}>
-        <Icon size={14} color={TONE_FG[def.tone]} />
-      </View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={s.eventLabel}>{def.label}</Text>
-        {event.description ? (
-          <Text style={s.eventDescription} numberOfLines={1}>{event.description}</Text>
-        ) : null}
-        <Text style={s.eventDate}>{formatDateFull(event.occurred_at)}</Text>
+        <Text style={s.eventTitle} numberOfLines={1}>{title}</Text>
+        <Text style={s.eventSub}>{status ? `${status} · ` : ''}{formatDate(event.occurred_at)}</Text>
       </View>
-      <View style={s.eventRight}>
-        {event.amount_cents != null && (
-          <Text style={[s.eventAmount, { color: amountColor }]}>
-            {event.type === 'refund_issued' ? '−' : ''}{formatAmount(event.amount_cents, event.currency)}
-          </Text>
-        )}
-        {stripeUrl && (
-          <Pressable
-            onPress={() => Linking.openURL(stripeUrl).catch(() => {})}
-            hitSlop={4}
-            style={s.eventStripeLink}
-          >
-            <Text style={s.eventStripeLinkText}>Stripe</Text>
-            <ExternalLink size={10} color={alpha(colors.mutedForeground, 0.6)} />
-          </Pressable>
-        )}
-      </View>
+      <Text style={[s.eventAmount, { color: amountColor }]}>
+        {event.type === 'refund_issued' ? '−' : ''}{formatAmount(event.amount_cents, event.currency)}
+      </Text>
     </View>
   )
 }
@@ -524,38 +597,37 @@ const s = StyleSheet.create({
 
   // Event row
   eventRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-    paddingHorizontal: 14, paddingVertical: 11,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16, paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: alpha(colors.border, 0.6),
   },
-  eventIcon: {
-    width: 26, height: 26, borderRadius: 13,
-    alignItems: 'center', justifyContent: 'center',
-    marginTop: 1,
+  eventTitle: {
+    fontFamily: fonts.sans[600], fontSize: 13.5, color: colors.foreground,
   },
-  eventLabel: {
-    fontFamily: fonts.sans[600], fontSize: 13, color: colors.foreground,
-  },
-  eventDescription: {
-    fontFamily: fonts.sans[400], fontSize: 11, color: colors.mutedForeground,
-    marginTop: 1,
-  },
-  eventDate: {
-    fontFamily: fonts.mono[400], fontSize: 10,
-    color: alpha(colors.mutedForeground, 0.6),
+  eventSub: {
+    fontFamily: fonts.sans[400], fontSize: 11.5, color: colors.mutedForeground,
     marginTop: 2,
   },
-  eventRight: { alignItems: 'flex-end', minWidth: 60 },
   eventAmount: {
-    fontFamily: fonts.mono[700], fontSize: 13,
+    fontFamily: fonts.mono[700], fontSize: 14,
   },
-  eventStripeLink: {
-    flexDirection: 'row', alignItems: 'center', gap: 3,
-    marginTop: 2,
+
+  // T177 — "See plans" / "Manage plan" button (shown when the inline
+  // picker isn't). Lime-accent bordered button: clear action, not a
+  // screaming CTA. colors.primary is HSL so alpha() is correct here.
+  plansBtn: {
+    borderRadius: 12, paddingVertical: 13,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: alpha(colors.primary, 0.40),
+    backgroundColor: alpha(colors.primary, 0.10),
   },
-  eventStripeLinkText: {
-    fontFamily: fonts.sans[400], fontSize: 10,
-    color: alpha(colors.mutedForeground, 0.6),
+  plansBtnText: {
+    fontFamily: fonts.sans[700], fontSize: 14, color: colors.primary,
   },
+
+  // Plan-picker content padding — the drawer chrome now lives in the shared
+  // BottomSheet component.
+  sheetContent: { padding: 20, paddingBottom: 32, gap: 12 },
 })

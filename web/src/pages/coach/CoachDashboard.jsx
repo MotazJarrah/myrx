@@ -1,5 +1,5 @@
 /**
- * Coach Dashboard — the /coach/portal landing page.
+ * Coach Dashboard — the /portal landing page.
  *
  * Roster-scoped to the calling coach (profiles where coach_id = auth.uid()).
  * Redesigned Jun 9 2026 (T161) from a counts-only board into a holistic
@@ -264,9 +264,9 @@ export default function CoachDashboard() {
   }, [user?.id])
 
   const TILES = [
-    { label: 'Active Clients',  value: stats.activeClients,  sub: 'on your roster',      icon: Users,        color: 'text-primary',   bg: 'bg-primary/10',   href: '/coach/clients' },
-    { label: 'Pending Invites', value: stats.pendingInvites, sub: 'awaiting acceptance', icon: MailQuestion, color: 'text-blue-400',  bg: 'bg-blue-500/10',  href: '/coach/invite'  },
-    { label: 'Needs Attention', value: stats.needsAttention, sub: 'no training · 14d',   icon: AlertCircle,  color: 'text-amber-400', bg: 'bg-amber-500/10', href: '/coach/clients' },
+    { label: 'Active Clients',  value: stats.activeClients,  sub: 'on your roster',      icon: Users,        color: 'text-primary',   bg: 'bg-primary/10',   href: '/clients' },
+    { label: 'Pending Invites', value: stats.pendingInvites, sub: 'awaiting acceptance', icon: MailQuestion, color: 'text-blue-400',  bg: 'bg-blue-500/10',  href: '/invite'  },
+    { label: 'Needs Attention', value: stats.needsAttention, sub: 'no training · 14d',   icon: AlertCircle,  color: 'text-amber-400', bg: 'bg-amber-500/10', href: '/clients' },
   ]
 
   const showEmptyCTA = !loading && clients.length === 0 && stats.pendingInvites === 0
@@ -313,7 +313,7 @@ export default function CoachDashboard() {
       {/* Row 1: Goal progress + Training this week */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <AnimateRise delay={250}>
-          <Card title="Goal progress" icon={Target} action={<ViewAll href="/coach/progress" />}>
+          <Card title="Goal progress" icon={Target} action={<ViewAll href="/progress" />}>
             {loading ? (
               <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
             ) : goal.total === 0 ? (
@@ -344,7 +344,7 @@ export default function CoachDashboard() {
         </AnimateRise>
 
         <AnimateRise delay={250}>
-          <Card title="Training this week" icon={TrendingUp} action={<ViewAll href="/coach/clients" label="Clients" />}>
+          <Card title="Training this week" icon={TrendingUp} action={<ViewAll href="/clients" label="Clients" />}>
             {loading ? (
               <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
             ) : training.totalClients === 0 ? (
@@ -394,7 +394,7 @@ export default function CoachDashboard() {
             ) : (
               <div className="divide-y divide-border">
                 {wins.map((w, i) => (
-                  <Link key={`${w.id}-${w.kind}-${i}`} href={`/coach/client/${w.id}`}>
+                  <Link key={`${w.id}-${w.kind}-${i}`} href={`/client/${w.id}`}>
                     <a className="flex items-center gap-3 px-5 py-3 hover:bg-accent/30 transition-colors cursor-pointer">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary overflow-hidden">
                         {w.avatar
@@ -420,7 +420,7 @@ export default function CoachDashboard() {
         </AnimateRise>
 
         <AnimateRise delay={500}>
-          <Card title="Recently Linked Clients" action={<ViewAll href="/coach/clients" />}>
+          <Card title="Recently Linked Clients" action={<ViewAll href="/clients" />}>
             {loading ? (
               <div className="py-10 text-center text-sm text-muted-foreground">Loading…</div>
             ) : recentClients.length === 0 ? (
@@ -430,7 +430,7 @@ export default function CoachDashboard() {
             ) : (
               <div className="divide-y divide-border">
                 {recentClients.map(c => (
-                  <Link key={c.id} href={`/coach/client/${c.id}`}>
+                  <Link key={c.id} href={`/client/${c.id}`}>
                     <a className="flex items-center gap-3 px-5 py-3 hover:bg-accent/30 transition-colors cursor-pointer">
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary overflow-hidden">
                         {c.avatar_url
@@ -461,7 +461,7 @@ export default function CoachDashboard() {
               Drop an email. They get a one-tap accept link and land on your roster the moment they sign up.
             </p>
             <button
-              onClick={() => navigate('/coach/invite')}
+              onClick={() => navigate('/invite')}
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
             >
               <UserPlus className="h-4 w-4" /> Invite a Client

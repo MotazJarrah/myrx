@@ -3,8 +3,8 @@
  *
  *   • /admin/profile          → Macro Plan tab (admin's own plan)
  *   • /admin/user/:id         → Macro Plan tab (admin manages client)
- *   • /coach/profile          → Macro Plan tab (coach's own plan)
- *   • /coach/client/:id       → Macro Plan section (coach manages client)
+ *   • /profile                → Macro Plan tab (coach's own plan)
+ *   • /client/:id             → Macro Plan section (coach manages client)
  *
  * Structure (mirrors the old AdminUserPlan flow that the user already
  * knew, plus the new pieces):

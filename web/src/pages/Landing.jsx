@@ -1,6 +1,6 @@
 import { Link } from 'wouter'
 import { useTheme } from '../contexts/ThemeContext'
-import { Dumbbell, Activity, Weight, Apple, ArrowRight, Zap, LineChart, Lock } from 'lucide-react'
+import { Dumbbell, Activity, Weight, Apple, Zap, LineChart, Lock } from 'lucide-react'
 
 function Logo() {
   const { theme } = useTheme()
@@ -37,31 +37,20 @@ export default function Landing() {
 
       <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10">
         <Logo />
+        {/* myrxfit.com is a PURELY INFORMATIVE landing (T198): no athlete sign
+            in / sign up / pricing — athletes onboard in the mobile app. The only
+            nav item is the pointer to the coach side. T199: this crosses domains
+            to coach.myrxfit.com (a real <a>, not a wouter <Link>) so the coach
+            experience — marketing, signup, login, billing — lives entirely on
+            the coach subdomain and the logged-in session never straddles two
+            origins. */}
         <nav className="flex items-center gap-1 sm:gap-2">
-          <Link
-            href="/for-coaches"
-            className="hidden sm:inline-flex rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            For Coaches
-          </Link>
-          <Link
-            href="/pricing"
-            className="hidden sm:inline-flex rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            Pricing
-          </Link>
-          <Link
-            href="/auth?mode=signin"
+          <a
+            href="https://coach.myrxfit.com"
             className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           >
-            Sign in
-          </Link>
-          <Link
-            href="/auth?mode=signup"
-            className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
-          >
-            Get started
-          </Link>
+            For Coaches
+          </a>
         </nav>
       </header>
 
@@ -93,24 +82,6 @@ export default function Landing() {
             target paces. Sports-science formulas, no guesswork.
           </p>
 
-          <div
-            className="animate-rise mt-8 flex flex-wrap items-center justify-center gap-3"
-            style={{ animationDelay: '180ms' }}
-          >
-            <Link
-              href="/auth?mode=signup"
-              className="group inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
-            >
-              Start tracking
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-            </Link>
-            <Link
-              href="/auth?mode=signin"
-              className="inline-flex items-center rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
-            >
-              I have an account
-            </Link>
-          </div>
         </section>
 
         {/* Preview card */}
@@ -174,22 +145,18 @@ export default function Landing() {
           ))}
         </section>
 
-        {/* Bottom CTA */}
+        {/* Closing statement — informative only. No download button until the
+            apps are live in the stores; the Apple + Google badges (and a QR for
+            desktop visitors) drop in here at launch. T198: the web landing is a
+            pure marketing surface — no auth, no pricing, no account creation. */}
         <section className="mt-20 rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-card to-card p-8 text-center md:p-12">
           <Zap className="mx-auto h-6 w-6 text-primary" />
           <h2 className="mt-3 text-xl font-semibold tracking-tight md:text-2xl">
             Train with data, not guesses.
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-            Create a free account and start projecting your next PR in under a minute.
+            Coming soon to iOS and Android.
           </p>
-          <Link
-            href="/auth?mode=signup"
-            className="mt-6 inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
-          >
-            Create your account
-            <ArrowRight className="h-4 w-4" />
-          </Link>
         </section>
       </main>
 
@@ -210,7 +177,7 @@ export default function Landing() {
             <Link href="/health-disclaimer" className="hover:text-foreground transition-colors">Health Disclaimer</Link>
             <Link href="/acceptable-use" className="hover:text-foreground transition-colors">Acceptable Use</Link>
             <Link href="/cookies" className="hover:text-foreground transition-colors">Cookies</Link>
-            <Link href="/for-coaches" className="hover:text-foreground transition-colors">For coaches</Link>
+            <a href="https://coach.myrxfit.com" className="hover:text-foreground transition-colors">For coaches</a>
           </nav>
           <p className="text-center text-[10px] text-muted-foreground/60">© {new Date().getFullYear()} MyRX. All rights reserved.</p>
         </div>

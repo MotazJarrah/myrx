@@ -61,9 +61,9 @@ export default function CoachAgreement() {
 
       <h3>3.2 Free trial</h3>
       <p>
-        Every coach subscription includes a 14-day free trial. You must enter a
+        Every coach subscription includes a 30-day free trial. You must enter a
         payment method at signup, but you are not charged on day 1. Your first
-        charge happens on day 15 unless you cancel before the trial ends.
+        charge happens on day 31 unless you cancel before the trial ends.
       </p>
 
       <h3>3.3 Auto-renewal disclosure</h3>

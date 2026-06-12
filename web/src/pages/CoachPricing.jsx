@@ -1,5 +1,5 @@
 /**
- * /coach/pricing — dedicated pricing page for the coach platform.
+ * /pricing — dedicated pricing page for the coach platform.
  *
  * Pairs with /for-coaches (which has an inline pricing teaser). This
  * standalone page is the link target for email / paid ads / nav-header
@@ -19,7 +19,7 @@
 import { useState } from 'react'
 import { Link } from 'wouter'
 import { ArrowRight, Check, ChevronDown, Sparkles } from 'lucide-react'
-import { COACH_TIERS, COACH_FEATURES, renewalAnnual } from '../lib/coachPlan'
+import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
 
 // Reuse the same header pattern as ForCoaches — extracting to a shared
 // component would make sense if we add more marketing pages; for v1
@@ -34,13 +34,13 @@ function Header() {
         {/* "For Athletes" removed May 26 2026 — coach context here
             shouldn't cross-promote the end-user landing. "For Coaches"
             stays as the link back to the marketing page for visitors
-            who landed directly on /coach/pricing via a paid ad / email
+            who landed directly on /pricing via a paid ad / email
             and want to read the pitch before committing. */}
         <Link href="/for-coaches"
           className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
           For Coaches
         </Link>
-        <Link href="/coach/pricing"
+        <Link href="/pricing"
           className="rounded-md px-3 py-1.5 text-primary font-semibold">
           Pricing
         </Link>
@@ -48,7 +48,7 @@ function Header() {
           className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
           Sign in
         </Link>
-        <Link href="/coach/signup"
+        <Link href="/signup"
           className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
           Start free trial
         </Link>
@@ -59,14 +59,14 @@ function Header() {
 
 // Billing-focused FAQ. Different angle than the ForCoaches FAQ — this
 // one drills into the financial mechanics, which is what visitors who
-// land directly on /coach/pricing are looking for.
+// land directly on /pricing are looking for.
 const PRICING_FAQ = [
   { q: 'When am I charged?',
-    a: 'You enter a card to start your 14-day free trial, but nothing is charged on day 1. The first charge happens on day 15 unless you cancel before then.' },
+    a: 'You enter a card to start your 30-day free trial, but nothing is charged on day 1. The first charge happens on day 31 unless you cancel before then.' },
   { q: 'What happens if I cancel during the trial?',
     a: 'No charge. The trial ends, your account closes, and your data is retained per our data-retention policy in case you change your mind.' },
   { q: 'How does the annual first-year discount work?',
-    a: 'Annual subscriptions are 17% off in year 1 (≈ 2 months free), then renew at the full annual rate of monthly × 12. You\'ll see the renewal price disclosed on every annual price quote across the site.' },
+    a: 'Annual subscriptions are 17% off versus paying monthly (≈ 2 months free), and that discount recurs every year — no jump to full price at renewal.' },
   { q: 'Can I switch tiers?',
     a: 'Yes. Upgrade takes effect immediately and your slots are reclaimed. Downgrade takes effect at your next billing cycle so you keep the higher cap for the rest of the period you\'ve already paid for.' },
   { q: 'Can I get a refund?',
@@ -139,12 +139,12 @@ export default function CoachPricing() {
           <span className="text-primary">how coaches actually work.</span>
         </h1>
         <p className="mt-5 mx-auto max-w-2xl text-base md:text-lg leading-relaxed text-muted-foreground">
-          Three tiers. Same features. Only the client cap changes. 14-day free trial on every tier — no charge until day 15.
+          Three tiers. Same features. Only the client cap changes. 30-day free trial on every tier — no charge until day 31.
         </p>
       </section>
 
       {/* Cadence toggle — compact pill (Monthly | Annual only). The
-          "2 months free first year" disclosure moved out of the button
+          "2 months free" disclosure moved out of the button
           and sits below as a contextual caption, only when Annual is
           selected. Keeps the toggle visually tight while preserving the
           promo callout. */}
@@ -178,7 +178,7 @@ export default function CoachPricing() {
           <p className={`text-center text-[11px] h-4 font-medium uppercase tracking-wider transition-colors ${
             isAnnual ? 'text-primary' : 'text-transparent'
           }`}>
-            2 months free, first year
+            2 months free
           </p>
         </div>
       </section>
@@ -235,9 +235,7 @@ export default function CoachPricing() {
                         <span className="text-sm text-muted-foreground">/ {isAnnual ? 'year' : 'month'}</span>
                       </div>
                       {isAnnual ? (
-                        <p className="text-[11px] text-muted-foreground tabular-nums">
-                          First year, then at ${renewalAnnual(t.monthly)}/yr
-                        </p>
+                        <p className="text-[11px] text-muted-foreground">Billed yearly, cancel any time</p>
                       ) : (
                         <p className="text-[11px] text-muted-foreground">Billed monthly, cancel any time</p>
                       )}
@@ -253,15 +251,15 @@ export default function CoachPricing() {
             as ?tier=… so the signup PlanScreen lands on the same tier. */}
         <div className="mt-8 mx-auto max-w-md">
           <Link
-            href={`/coach/signup?tier=${selectedTierId}`}
+            href={`/signup?tier=${selectedTierId}`}
             className="group flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
           >
             <Sparkles className="h-4 w-4" />
-            Start 14-day free trial — Coach {selectedTier.name}
+            Start 30-day free trial — Coach {selectedTier.name}
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
           <p className="mt-2 text-center text-[11px] text-muted-foreground">
-            No charge for 14 days. Cancel any time.
+            No charge for 30 days. Cancel any time.
           </p>
         </div>
 
@@ -304,12 +302,12 @@ export default function CoachPricing() {
             Your clients, every metric,<br />
             <span className="text-primary">one platform.</span>
           </h2>
-          <p className="text-base text-muted-foreground">14 days free. Cancel anytime.</p>
+          <p className="text-base text-muted-foreground">30 days free. Cancel anytime.</p>
           <Link
-            href="/coach/signup"
+            href="/signup"
             className="group inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
           >
-            Start 14-day free trial
+            Start 30-day free trial
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
         </div>

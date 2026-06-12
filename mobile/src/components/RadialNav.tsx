@@ -8,9 +8,12 @@
  * Three athlete subscription tiers — gates which icons in the arc are
  * unlocked vs. greyed-out + lock-badged:
  *
- *   FREE   — Strength, Cardio (+ Dashboard via centre button).
+ *   FREE   — Strength, Cardio.
  *   COREX  — Free + Bodyweight, Calories.
  *   FULLRX — CoreRX + Heart, Sleep, Hydration. All 7 unlocked.
+ *
+ * The Dashboard is the centre/home button — always reachable on EVERY tier, so
+ * it is NOT a tier feature. Never list it as a free/paid feature in copy.
  *
  * (CLAUDE.md §20 lock, 2026-06-06: Heart belongs to FullRX — the
  * wellness/recovery layer alongside Sleep + Hydration. Earlier code wrongly
@@ -200,32 +203,44 @@ const TIER_LABEL: Record<Tier, string> = {
 // (set coach_id). The admin-portal "Attach as coach" UI is the future
 // home for that action — until it ships, the seed is done via direct
 // DB writes.
-// Active-sub aware (T098): the FullRX comp for coach-self / a coached client is
-// only live while the relevant coach subscription is active — trialing / active
-// / past_due keep it, lapsed / suspended / cancelled drop to the user's own b2c
-// tier. coach-self reads its own coach_subscription_status; a coached client
-// passes `coachActive` from the client_has_active_coach() RPC (AuthContext).
-const INACTIVE_COACH_STATUSES = ['lapsed', 'suspended', 'cancelled']
+// Active-sub aware (T098, hardened T194): the FullRX comp for coach-self / a
+// coached client is live ONLY while the coach subscription is in a LIVE state —
+// trialing / active / past_due. Any other status (lapsed / suspended / cancelled,
+// or a null / incomplete edge) drops to the user's own b2c tier. This ALLOW-list
+// mirrors the DB is_active_coach() helper AND the web CoachProtectedLayout gate
+// EXACTLY (T194) so every surface agrees on "is this coach live". coach-self reads
+// its own coach_subscription_status; a coached client passes `coachActive` from
+// the client_has_active_coach() RPC (AuthContext). NOTE post-T194, is_coach is
+// itself webhook-managed to be true only for live statuses, so this is also
+// defense-in-depth against a stale is_coach.
+const LIVE_COACH_STATUSES = ['trialing', 'active', 'past_due']
 function resolveTier(profile: {
   b2c_subscription_tier?: 'free' | 'corerx' | 'fullrx' | null
   coach_id?:              string | null
   is_superuser?:          boolean
   is_coach?:              boolean
   coach_subscription_status?: string | null
+  b2c_trial_ends_at?:     string | null
 }, coachActive?: boolean): Tier {
   if (profile.is_superuser === true) return 'fullrx'
   // Coaches are humans who also work out — their paid coach subscription
   // (starter / pro / elite) bundles in full personal-use access. They
   // don't separately pay for a B2C tier, so b2c_subscription_tier is
   // typically null. Without this branch, coaches fall through to 'free'
-  // and only Strength + Cardio + Dashboard unlock. Added May 30 2026
+  // and only Strength + Cardio unlock (Dashboard is the always-on home, not a feature). Added May 30 2026
   // after Test Coach (motaz.j@prdxfit.com, elite tier) appeared with
   // 5 of 8 radial icons padlocked. T098: a LAPSED coach's bundle is revoked.
   if (profile.is_coach === true)
-    return INACTIVE_COACH_STATUSES.includes(profile.coach_subscription_status ?? '')
-      ? ((profile.b2c_subscription_tier as Tier | null) ?? 'free') : 'fullrx'
+    return LIVE_COACH_STATUSES.includes(profile.coach_subscription_status ?? '')
+      ? 'fullrx' : ((profile.b2c_subscription_tier as Tier | null) ?? 'free')
   if (profile.coach_id)
     return coachActive === false ? ((profile.b2c_subscription_tier as Tier | null) ?? 'free') : 'fullrx'
+  // T165 — 30-day FullRX reverse trial: our own grant (profiles.
+  // b2c_trial_ends_at, no store sub). While live it lifts the effective
+  // tier to fullrx; at expiry this branch goes false on its own and the
+  // user lands on their paid tier (or free) with no DB write needed.
+  if (profile.b2c_trial_ends_at && new Date(profile.b2c_trial_ends_at).getTime() > Date.now())
+    return 'fullrx'
   return (profile.b2c_subscription_tier as Tier | null) ?? 'free'
 }
 
@@ -243,6 +258,8 @@ type NavItem = {
 const DASHBOARD_HREF = '/(app)/dashboard'
 
 const NAV_BY_HREF: Record<string, NavItem> = {
+  // Dashboard's tier:'free' = the minimum tier that can REACH it (everyone). It's
+  // the always-on home/centre button, NOT a tier feature — the arc never renders it.
   '/(app)/dashboard':  { href: '/(app)/dashboard',  label: 'Dashboard',  Icon: LayoutDashboard, tier: 'free'   },
   '/(app)/strength':   { href: '/(app)/strength',   label: 'Strength',   Icon: Dumbbell,        tier: 'free'   },
   '/(app)/cardio':     { href: '/(app)/cardio',     label: 'Cardio',     Icon: Activity,        tier: 'free'   },

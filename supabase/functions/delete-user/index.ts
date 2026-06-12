@@ -103,16 +103,34 @@ async function stripeCancelSubscription(subscriptionId: string): Promise<{ ok: b
 // require sequencing — hr_samples.workout_id is SET NULL, not CASCADE,
 // so wearable_workouts can delete first without breaking).
 const USER_DATA_TABLES: ReadonlyArray<{ table: string; column: string }> = Object.freeze([
-  { table: 'bodyweight',        column: 'user_id' },
-  { table: 'calorie_logs',      column: 'user_id' },
-  { table: 'calorie_plans',     column: 'user_id' },
-  { table: 'efforts',           column: 'user_id' },
-  { table: 'food_logs',         column: 'user_id' },
-  { table: 'hr_samples',        column: 'user_id' },
-  { table: 'messages',          column: 'user_id' },
-  { table: 'step_samples',      column: 'user_id' },
-  { table: 'user_integrations', column: 'user_id' },
-  { table: 'wearable_workouts', column: 'user_id' },
+  // T167 (2026-06-10): added the 5 tables that postdate this function's
+  // original list — activity_events, billing_events, sleep_sessions,
+  // user_activity_events, water_logs. None of the five has any FK, so
+  // every hard delete was orphaning their rows (activity + billing +
+  // sleep + hydration data surviving the wipe). billing_events IS
+  // included here on purpose: hard delete's contract is "wipe
+  // EVERYTHING" (the anonymize path is the one that retains
+  // transactions for tax compliance — see anonymize_account_now).
+  { table: 'activity_events',      column: 'user_id' },
+  { table: 'billing_events',       column: 'user_id' },
+  { table: 'bodyweight',           column: 'user_id' },
+  { table: 'calorie_logs',         column: 'user_id' },
+  { table: 'calorie_plans',        column: 'user_id' },
+  { table: 'efforts',              column: 'user_id' },
+  { table: 'food_logs',            column: 'user_id' },
+  { table: 'hr_samples',           column: 'user_id' },
+  { table: 'messages',             column: 'user_id' },
+  { table: 'sleep_sessions',       column: 'user_id' },
+  { table: 'step_samples',         column: 'user_id' },
+  { table: 'user_activity_events', column: 'user_id' },
+  { table: 'user_integrations',    column: 'user_id' },
+  { table: 'water_logs',           column: 'user_id' },
+  { table: 'wearable_workouts',    column: 'user_id' },
+  // NOTE (T197): the last two user-referencing tables — deleted_account_archive
+  // + messages_admin_access_log — are NOT listed here; they're cleared by the
+  // trg_wipe_account_traces trigger that fires on the profiles-row DELETE below
+  // (step 6), so any hard delete leaves zero trace. The anonymize/soft path
+  // UPDATEs profiles (never deletes it), so it keeps the archive (legal hold).
 ])
 
 // Tables that DO cascade from profiles — for the result summary

@@ -1,5 +1,5 @@
 /**
- * Coach Welcome — web /coach/welcome?session_id=cs_xxx
+ * Coach Welcome — web /welcome?session_id=cs_xxx
  *
  * Landing page after Stripe Checkout completes. Stripe redirects here
  * with ?session_id={CHECKOUT_SESSION_ID}.
@@ -10,7 +10,7 @@
  *      (the stripe-webhooks worker fires asynchronously — usually
  *      within 1-2 seconds, but we allow up to ~10 seconds before
  *      showing the "your subscription is being set up" message)
- *   3. Once we see the row, show success + button to /coach/portal
+ *   3. Once we see the row, show success + button to /portal
  *
  * If polling times out, we still show success (the user paid, the
  * webhook will catch up) with a note that it can take a minute.
@@ -92,7 +92,7 @@ export default function CoachWelcome() {
             <div>
               <h1 className="text-2xl font-semibold mb-1">Setting up your account</h1>
               <p className="text-sm text-muted-foreground">
-                Confirming payment with Stripe... this takes just a moment.
+                This might take a moment.
               </p>
             </div>
           </>
@@ -108,12 +108,12 @@ export default function CoachWelcome() {
                 You're in{coach?.full_name ? `, ${coach.full_name.split(' ')[0]}` : ''}.
               </h1>
               <p className="text-sm text-muted-foreground">
-                14-day trial active. First invoice on day 15 — cancel before then for no charge.
+                30-day trial active. First invoice on day 31 — cancel before then for no charge.
               </p>
             </div>
             <div className="space-y-2 pt-2">
               <button
-                onClick={() => setLocation('/coach/portal')}
+                onClick={() => setLocation('/portal')}
                 className="w-full h-12 rounded-lg bg-primary text-primary-foreground font-medium flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
               >
                 Open your portal <ArrowRight className="h-4 w-4" />
@@ -131,24 +131,24 @@ export default function CoachWelcome() {
               <CheckCircle2 className="h-12 w-12 text-amber-400" />
             </div>
             <div>
-              <h1 className="text-2xl font-semibold mb-1">Payment received!</h1>
+              <h1 className="text-2xl font-semibold mb-1">All set!</h1>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Payment in. Stripe confirmed it, but we're a beat behind on the rest of the setup —
-                usually clears within a minute. Refresh, or head straight to your portal.
+                Payment received and your trial's active — you're good to go. Head into your portal;
+                if anything looks unfinished, a quick refresh will catch it up.
               </p>
             </div>
             <div className="space-y-2 pt-2">
               <button
-                onClick={() => window.location.reload()}
-                className="w-full h-12 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+                onClick={() => setLocation('/portal')}
+                className="w-full h-12 rounded-lg bg-primary text-primary-foreground font-medium flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
               >
-                Refresh
+                Open your portal <ArrowRight className="h-4 w-4" />
               </button>
               <button
-                onClick={() => setLocation('/coach/portal')}
+                onClick={() => window.location.reload()}
                 className="w-full h-12 rounded-lg border border-border text-foreground font-medium hover:bg-card transition-colors"
               >
-                Go to portal anyway
+                Refresh
               </button>
             </div>
           </>

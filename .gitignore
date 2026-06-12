@@ -84,3 +84,6 @@ docs/plan_wizard_strings_*.xlsx
 # Icon-source backups created automatically by mobile/assets/rebuild-icons.py
 # when it overwrites the published icons. Local rollback aid only.
 mobile/assets/icon-source-backup/
+
+# Supabase CLI local scratch (project ref, versions, pooler url) — not versioned
+supabase/.temp/

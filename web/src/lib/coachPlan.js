@@ -11,18 +11,18 @@
  */
 
 // Three coach tiers — Starter / Pro / Elite. Client cap differentiates,
-// everything else is identical across tiers. Annual = 17% off year 1
-// only (≈ 2 months free); renews at full monthly × 12 from year 2.
+// everything else is identical across tiers. Annual = 17% off vs paying
+// monthly (≈ 2 months free), and that discount RECURS every year — there is
+// no year-2 jump to full price (locked D3, 2026-06-11).
 export const COACH_TIERS = [
   { id: 'starter', name: 'Starter', cap: 'Up to 10 clients',  monthly: 19, annual: 189 },
   { id: 'pro',     name: 'Pro',     cap: 'Up to 25 clients',  monthly: 39, annual: 389, recommended: true },
   { id: 'elite',   name: 'Elite',   cap: 'Unlimited clients', monthly: 99, annual: 989 },
 ]
 
-// Renewal price at full annual rate (monthly × 12) — shown alongside
-// year-1 promo price so year-2 isn't a surprise. CLAUDE.md §18 explicitly
-// requires "first year" copy on every annual price quote.
-export const renewalAnnual = (monthly) => monthly * 12
+// (renewalAnnual removed, D3 2026-06-11) — the annual price recurs every year
+// at the same discounted rate, so there is no separate "renews at full price"
+// figure to disclose. The `annual` field above IS the recurring yearly price.
 
 // 7 features universal across all tiers. No tier-gated features in v1.
 // All shipped or shipping in the same Coach Platform v1 batch. No AI

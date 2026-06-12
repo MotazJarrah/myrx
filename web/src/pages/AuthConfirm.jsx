@@ -67,7 +67,7 @@ export default function AuthConfirm() {
   //
   // Signal 1 (URL param, best-effort):
   //   The signUp call sets options.emailRedirectTo = '/auth/confirm?
-  //   next=/coach/signup'. Supabase renders the email link as roughly
+  //   next=/signup'. Supabase renders the email link as roughly
   //   '{SiteURL}/auth/confirm?token_hash=...&type=...' — and the extra
   //   ?next param does NOT reliably survive. So we read it if it's
   //   there, but treat it as advisory only.
@@ -76,7 +76,7 @@ export default function AuthConfirm() {
   //   The coach signUp ALSO sets options.data.signup_journey = 'coach',
   //   which gets stamped onto the auth user. After verifyOtp succeeds
   //   we fetch the user and check user_metadata.signup_journey — if it
-  //   says 'coach', route to /coach/signup regardless of what the URL
+  //   says 'coach', route to /signup regardless of what the URL
   //   said. This is 100% reliable across email-template / Supabase-
   //   version changes.
   //
@@ -92,9 +92,10 @@ export default function AuthConfirm() {
     : null
   // Default to /app per CLAUDE.md "Web / Mobile role rule" (LOCKED May 27
   // 2026): athletes have no web surfaces, /app is the placeholder. Coach
-  // signup flows pass ?next=/coach/signup so they override this default.
+  // signup flows pass ?next=/signup so they override this default. (T199: the
+  // coach signup moved from /coach/signup → /signup on coach.myrxfit.com.)
   const [nextDest, setNextDest] = useState(nextParamSafe || '/app')
-  const [isCoachFlow, setIsCoachFlow] = useState(nextParamSafe?.startsWith('/coach/') || false)
+  const [isCoachFlow, setIsCoachFlow] = useState(nextParamSafe?.startsWith('/signup') || false)
 
   useEffect(() => {
     if (verifyStartedRef.current) return
@@ -115,6 +116,31 @@ export default function AuthConfirm() {
         if (linkType !== 'recovery') {
           setTimeout(() => navigate(nextDest), 1200)
         }
+        return
+      }
+      // Self-heal (T169, 2026-06-10 — mirrors mobile app/auth/confirm.tsx):
+      // a confirm URL can arrive with neither token_hash nor a hash
+      // session (e.g. a re-tap after the implicit-flow fragment was
+      // consumed, or a courier mangling the URL). The verification has
+      // usually ALREADY happened on an earlier hop — if the visitor is
+      // already signed in + confirmed, the link did its job; treat as
+      // success instead of dead-ending. Recovery links are excluded:
+      // they need the token to grant the password-reset session, a
+      // prior session doesn't substitute.
+      if (linkType !== 'recovery') {
+        supabase.auth.getUser().then(({ data: { user } }) => {
+          if (user?.email_confirmed_at) {
+            setStatus('success')
+            setMessage('Email confirmed. Welcome to MyRX.')
+            setTimeout(() => navigate(nextDest), 1200)
+          } else {
+            setStatus('error')
+            setMessage('This confirmation link is missing required parameters.')
+          }
+        }).catch(() => {
+          setStatus('error')
+          setMessage('This confirmation link is missing required parameters.')
+        })
         return
       }
       setStatus('error')
@@ -163,9 +189,9 @@ export default function AuthConfirm() {
           const { data: { user: confirmedUser } } = await supabase.auth.getUser()
           const journey = confirmedUser?.user_metadata?.signup_journey
           if (journey === 'coach') {
-            finalDest    = '/coach/signup'
+            finalDest    = '/signup'
             finalIsCoach = true
-            setNextDest('/coach/signup')
+            setNextDest('/signup')
             setIsCoachFlow(true)
           }
         } catch { /* best-effort — fall through to whatever the URL said */ }
@@ -255,7 +281,7 @@ export default function AuthConfirm() {
                 : 'You can close this tab — you are signed in.')
               // Still navigate after another beat as a safety net, in
               // case the original tab is also gone (e.g. user closed
-              // it). The flow-detection at /coach/signup / dashboard
+              // it). The flow-detection at /signup / dashboard
               // will pick them up from whatever profile state they're
               // in.
               setTimeout(() => { if (!cancelled) navigate(finalDest) }, 2000)

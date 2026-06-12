@@ -10,7 +10,7 @@
  * DO NOT use `useIsDesktop()` for those gates — that's pure viewport
  * width, which flips false the moment a desktop user opens DevTools
  * (DevTools panel narrows the available viewport). Symptom: the user
- * is on /coach/portal, opens DevTools to inspect something, and gets
+ * is on /portal, opens DevTools to inspect something, and gets
  * silently redirected to /dashboard. Closing DevTools doesn't reverse
  * it because /dashboard has no gate. Locked May 27 2026 after exactly
  * that bug bit a coach during invite testing.

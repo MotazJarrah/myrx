@@ -105,6 +105,37 @@ function formatMmSs(secs) {
   return `${Math.floor(m)}:${String(Math.round(s)).padStart(2, '0')}`
 }
 
+// Shared input chrome — module scope so its identity is stable across renders.
+const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
+
+// Weight: a ladder dropdown (Select) OR a free numeric input, by equipment.
+// MUST stay at module scope. Defined INSIDE AddEffortForm it was re-created on
+// every render, so React remounted the <input> and the Weight field lost focus
+// after each digit (T183). Hoisting gives it a stable identity.
+function WeightField({ ladder, range, value, onChange, stepFallback }) {
+  return ladder
+    ? (
+      <Select
+        value={value}
+        onChange={onChange}
+        placeholder="Pick a weight"
+        options={ladder.map(w => ({ value: String(w), label: `${w}` }))}
+      />
+    )
+    : (
+      <input
+        type="number"
+        step={range?.step ?? stepFallback ?? 5}
+        min={range?.min ?? 0}
+        max={range?.max}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="0"
+        className={inputCls}
+      />
+    )
+}
+
 function AddEffortForm({ userId, movements = [], clientProfile = {}, onSaved, onClose }) {
   const [type,         setType]         = useState(null)
   const [exerciseName, setExerciseName] = useState('')
@@ -124,8 +155,6 @@ function AddEffortForm({ userId, movements = [], clientProfile = {}, onSaved, on
   const [speedVal,     setSpeedVal]     = useState('')   // speed-machine cardio
   const [saving,       setSaving]       = useState(false)
   const [error,        setError]        = useState('')
-
-  const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring transition-colors'
 
   // ── Movement record + classification (mirror mobile flags) ──────────────────
   const rec = exerciseName ? (movements.find(m => m.name === exerciseName) ?? null) : null
@@ -399,31 +428,6 @@ function AddEffortForm({ userId, movements = [], clientProfile = {}, onSaved, on
       <span className="font-mono text-base tabular-nums font-bold text-amber-400">{val}</span>
     </div>
   )
-  // Weight: a modern ladder dropdown (Select) OR a free numeric input, by equipment.
-  const WeightField = ({ ladder, range, value, onChange, stepFallback }) => (
-    ladder
-      ? (
-        <Select
-          value={value}
-          onChange={onChange}
-          placeholder="Pick a weight"
-          options={ladder.map(w => ({ value: String(w), label: `${w}` }))}
-        />
-      )
-      : (
-        <input
-          type="number"
-          step={range?.step ?? stepFallback ?? 5}
-          min={range?.min ?? 0}
-          max={range?.max}
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          placeholder="0"
-          className={inputCls}
-        />
-      )
-  )
-
   // The weight column label for standard weighted movements.
   const weightFieldLabel = isBodyweight ? 'Added load' : ((isDumbbell || usesPair) ? 'Per hand' : 'Weight')
 

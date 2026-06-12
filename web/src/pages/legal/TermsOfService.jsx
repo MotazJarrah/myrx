@@ -165,7 +165,7 @@ export default function TermsOfService() {
         conflict with this section</strong>. In summary:
       </p>
       <ul>
-        <li>Coach subscriptions include a 14-day free trial.</li>
+        <li>Coach subscriptions include a 30-day free trial.</li>
         <li>
           Annual coach subscriptions are fully refundable within 14
           days of the initial charge; after 14 days, refunds are

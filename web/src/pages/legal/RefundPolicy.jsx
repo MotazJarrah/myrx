@@ -13,7 +13,7 @@ export default function RefundPolicy() {
       </p>
       <p>
         <strong>Short version.</strong> Free trials are free — cancel before
-        day 15, no charge. Coach subscriptions cancel forward (no mid-period
+        your trial ends, no charge. Coach subscriptions cancel forward (no mid-period
         refund) except where law requires otherwise. Athlete subscriptions
         (CoreRX / FullRX) come with a 14-day money-back guarantee. App Store
         and Google Play purchases are refunded by Apple / Google, not by us.
@@ -21,9 +21,9 @@ export default function RefundPolicy() {
 
       <h2>1. Coach subscriptions</h2>
 
-      <h3>1.1 14-day free trial</h3>
+      <h3>1.1 30-day free trial</h3>
       <p>
-        Every coach subscription includes a 14-day free trial. You enter a
+        Every coach subscription includes a 30-day free trial. You enter a
         payment method at signup, but no charge is made on day 1. Cancel at
         any point during the trial via your account billing settings and you
         will not be charged. Your account closes at the end of the trial; your

@@ -1,7 +1,8 @@
 // coach-signup
 //
-// JWT-required. Converts an ALREADY-AUTHED user into a coach +
-// creates a Stripe Customer + Checkout Session for the 14-day trial.
+// JWT-required. For an ALREADY-AUTHED user, creates (or reuses) a Stripe
+// Customer + Checkout Session for the 30-day coach trial. Does NOT grant coach
+// status — the stripe-webhook does that after Stripe confirms (T194 grant-flip).
 //
 // Background (May 26 2026 refactor):
 //
@@ -20,21 +21,24 @@
 //   init-profile-checkpoint after password). This function just:
 //
 //     1. Verifies the JWT (verify_jwt: true at the function level).
-//     2. Upserts the profile to flip is_coach=true + coach_subscription_*
-//        + 14-day trial timestamp.
+//     2. (T194) Does NOT grant coach status. Picking a plan must not
+//        unlock the portal — the stripe-webhook is the SOLE granter and
+//        sets is_coach + coach_subscription_* only after Stripe confirms
+//        a live subscription.
 //     3. Looks up the target Stripe price by lookup_key (e.g.
 //        coach_starter_monthly).
-//     4. Creates the Stripe Customer with the coach's email + name
-//        pulled from auth metadata.
+//     4. Creates (or reuses) the Stripe Customer with the coach's email +
+//        name, and stores its id on the profile as a pending-coach marker.
 //     5. Creates the Stripe Checkout Session in subscription mode
-//        with the 14-day trial and metadata.coach_id so the
-//        stripe-webhooks worker can map subscription events back.
+//        with the 30-day trial and metadata.coach_id so the
+//        stripe-webhook can map subscription events back.
 //     6. Returns { checkout_url, session_id, coach_id }.
 //
 //   The frontend redirects the user to checkout_url. Stripe handles
-//   payment, then redirects to success_url. The stripe-webhooks
-//   worker populates coach_subscriptions + flips
-//   coach_subscription_status to 'trialing' asynchronously.
+//   payment, then redirects to success_url. The stripe-webhook then
+//   sets is_coach=true + coach_subscription_status='trialing' and
+//   populates coach_subscriptions asynchronously — THAT is what grants
+//   portal access.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "jsr:@supabase/supabase-js@2"
@@ -128,49 +132,35 @@ Deno.serve(async (req) => {
   const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
   // ── Step 1: Block duplicates ──────────────────────────────────────
-  // If this user is already an active coach with a paid subscription,
-  // they shouldn't be running through signup again. Trialing or none →
-  // proceed (lets users who abandoned mid-checkout retry cleanly).
+  // Read the existing profile. The block decision is below (T194): only a LIVE
+  // coach (is_coach=true) is turned away; a lapsed or pending one proceeds so
+  // they can (re)subscribe. We also read coach_stripe_customer_id to reuse it
+  // on a retry instead of orphaning a new Stripe customer.
   const { data: existingProfile } = await admin
     .from("profiles")
-    .select("id, is_coach, coach_subscription_status")
+    .select("id, is_coach, coach_subscription_status, coach_stripe_customer_id")
     .eq("id", user.id)
     .maybeSingle()
 
-  if (existingProfile?.is_coach
-      && existingProfile?.coach_subscription_status
-      && !["trialing", null, "incomplete", "incomplete_expired", "canceled"].includes(existingProfile.coach_subscription_status)) {
+  // After the T194 grant-flip, is_coach is TRUE only while the Stripe
+  // subscription is live (trialing/active/past_due) — the webhook is the sole
+  // granter. So is_coach===true here means "already a live coach" → send them to
+  // sign-in. A lapsed/cancelled coach (is_coach=false) or a pending coach who
+  // abandoned checkout (is_coach=false, customer id set) falls through and may
+  // (re)subscribe.
+  if (existingProfile?.is_coach === true) {
     return json(409, { error: "You're already a coach — sign in instead of going through signup.", code: "already_a_coach" })
   }
 
-  // ── Step 2: Convert profile to coach + start trial ────────────────
-  // Upsert (not insert) — init-profile-checkpoint already created the
-  // profile row with body data during the password step. We just need
-  // to add the coach-specific fields.
-  const trialEndsAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
-  const fullName    = (user.user_metadata?.full_name as string)
-                      || user.email
-                      || ""
-  const { data: profile, error: profileErr } = await admin
-    .from("profiles")
-    .upsert({
-      id:                          user.id,
-      auth_user_id:                user.id,
-      full_name:                   fullName,
-      is_coach:                    true,
-      is_superuser:                false,
-      coach_subscription_status:   "trialing",
-      coach_subscription_tier:     tier,
-      coach_trial_ends_at:         trialEndsAt,
-      coach_id:                    null,  // coaches themselves are unlinked
-    }, { onConflict: "id" })
-    .select()
-    .single()
-
-  if (profileErr || !profile) {
-    console.error("profile upsert failed:", profileErr)
-    return json(500, { error: "Couldn't save your coach profile. Try again.", code: "profile_update_failed", detail: profileErr?.message })
-  }
+  // ── Step 2: NO coach grant here (T194 grant-flip) ─────────────────
+  // Picking a plan must NOT grant portal access. The webhook is the SOLE
+  // granter — is_coach + coach_subscription_* are written only after Stripe
+  // confirms the subscription (status 'trialing'). Here we just need the user's
+  // name for the Stripe customer. The profile row already exists (created by
+  // init-profile-checkpoint at the password step).
+  const fullName = (user.user_metadata?.full_name as string)
+                   || user.email
+                   || ""
 
   // ── Step 3: Resolve the Stripe price by lookup_key ────────────────
   // Stripe lookup_keys use the canonical tier + interval values
@@ -190,19 +180,26 @@ Deno.serve(async (req) => {
     return json(500, { error: "We couldn't load the tier pricing. Try again in a moment.", code: "stripe_price_lookup_failed", detail: String(err) })
   }
 
-  // ── Step 4: Create the Stripe Customer ────────────────────────────
-  let customerId: string
-  try {
-    const customer = await stripePost("/customers", {
-      email: user.email!,
-      name:  fullName,
-      "metadata[coach_id]": profile.id,
-      "metadata[supabase_user_id]": user.id,
-    })
-    customerId = customer.id
-  } catch (err) {
-    console.error("Stripe customer create failed:", err)
-    return json(500, { error: "Couldn't set up your Stripe customer. Try again.", code: "stripe_customer_create_failed", detail: String(err) })
+  // ── Step 4: Create (or reuse) the Stripe Customer ─────────────────
+  // Reuse the customer from a prior abandoned attempt so retries don't orphan a
+  // new customer each time. Storing the id is the PENDING-coach marker (customer
+  // id present + is_coach still false = started checkout, not yet paid) — NOT the
+  // access grant (that's the webhook).
+  let customerId = existingProfile?.coach_stripe_customer_id ?? ""
+  if (!customerId) {
+    try {
+      const customer = await stripePost("/customers", {
+        email: user.email!,
+        name:  fullName,
+        "metadata[coach_id]": user.id,
+        "metadata[supabase_user_id]": user.id,
+      })
+      customerId = customer.id
+    } catch (err) {
+      console.error("Stripe customer create failed:", err)
+      return json(500, { error: "Couldn't set up your Stripe customer. Try again.", code: "stripe_customer_create_failed", detail: String(err) })
+    }
+    await admin.from("profiles").update({ coach_stripe_customer_id: customerId }).eq("id", user.id)
   }
 
   // ── Step 5: Create the Checkout Session ───────────────────────────
@@ -212,12 +209,12 @@ Deno.serve(async (req) => {
       customer: customerId,
       "line_items[0][price]":    priceId,
       "line_items[0][quantity]": "1",
-      "subscription_data[trial_period_days]": "14",
-      "subscription_data[metadata][coach_id]": profile.id,
-      "metadata[coach_id]": profile.id,
+      "subscription_data[trial_period_days]": "30",
+      "subscription_data[metadata][coach_id]": user.id,
+      "metadata[coach_id]": user.id,
       "metadata[supabase_user_id]": user.id,
-      success_url: `${SITE_URL}/coach/welcome?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url:  `${SITE_URL}/coach/signup?cancelled=1`,
+      success_url: `${SITE_URL}/welcome?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url:  `${SITE_URL}/signup?cancelled=1`,
       // Save the customer's payment method so we can charge them on
       // trial end automatically.
       payment_method_collection: "always",
@@ -228,13 +225,13 @@ Deno.serve(async (req) => {
       success:      true,
       checkout_url: session.url,
       session_id:   session.id,
-      coach_id:     profile.id,
+      coach_id:     user.id,
     })
   } catch (err) {
-    // Don't roll back the profile — the user IS a valid coach now,
-    // just couldn't make it through Checkout. They can retry from
-    // the frontend without needing to redo signup. Leaves an orphan
-    // Stripe Customer (harmless; no charges without a subscription).
+    // Nothing to roll back — we never granted coach status (the webhook does
+    // that only after Stripe confirms). The pending-coach marker
+    // (coach_stripe_customer_id) is already saved, so a retry reuses the same
+    // customer instead of orphaning a new one.
     console.error("Stripe checkout.sessions.create failed:", err)
     return json(500, { error: "Couldn't start the checkout session. Try again.", code: "stripe_checkout_create_failed", detail: String(err) })
   }

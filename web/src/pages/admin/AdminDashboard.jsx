@@ -181,7 +181,7 @@ const TILE_DEFS = [
   },
   {
     id: 'trials', label: 'Trials in flight', icon: Hourglass, color: 'text-amber-400', bg: 'bg-amber-500/10', live: true,
-    info: 'Subscriptions currently in their 14-day free trial. "Soon" = trials ending within 3 days — your window to nudge before they decide. Lights up once billing is live.',
+    info: 'Subscriptions currently in their 30-day free trial. "Soon" = trials ending within 3 days — your window to nudge before they decide. Lights up once billing is live.',
     value: (s) => ({ big: s.trials, breakdown: [
       { label: 'Coaches',      val: s.trialCoaches },
       { label: 'Ending soon',  val: s.trialsSoon, tone: s.trialsSoon > 0 ? 'amber' : undefined },

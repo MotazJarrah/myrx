@@ -8,7 +8,7 @@
  *           (sign-in itself isn't blocked — it's role-routed AFTER
  *           creds succeed; the only sign-in entry point is the
  *           /for-coaches Sign in button, intended for coaches/admins)
- *       (b) when an athlete clicks a /coach/accept-invite?token=…
+ *       (b) when an athlete clicks a /accept-invite?token=…
  *           email link from desktop. The token stays in the URL so
  *           when they install the mobile app later, the invite
  *           auto-attaches.
@@ -36,7 +36,13 @@ export default function DownloadAppPlaceholder() {
   // (no role flags) fall through to the placeholder JSX below.
   const { profile } = useAuth()
   if (profile?.is_superuser) return <Redirect to="/admin/overview" />
-  if (profile?.is_coach)     return <Redirect to="/coach/portal" />
+  // T199: coach surfaces live on coach.myrxfit.com (this /app placeholder is the
+  // athlete domain). A coach who lands here on a stale main-host session gets a
+  // hard cross-domain bounce to their portal on the coach subdomain.
+  if (profile?.is_coach) {
+    if (typeof window !== 'undefined') window.location.replace('https://coach.myrxfit.com/portal')
+    return null
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex items-center justify-center px-4">

@@ -64,12 +64,12 @@ export default function ReactivationGate() {
       // fresh sign-in. Always landing on the role's main dashboard is
       // the predictable "welcome back" experience the user spec'd.
       //   Admin (superuser)  → /admin/overview
-      //   Coach              → /coach/portal
+      //   Coach              → /portal  (root-level on coach.myrxfit.com, T199)
       //   Anyone else        → /app  (the athlete placeholder; athletes
       //                                are mobile-only per CLAUDE.md, so
       //                                this branch should never fire)
       const home = profile?.is_superuser ? '/admin/overview'
-                 : profile?.is_coach     ? '/coach/portal'
+                 : profile?.is_coach     ? '/portal'
                                          : '/app'
       navigate(home, { replace: true })
     } catch (e) {

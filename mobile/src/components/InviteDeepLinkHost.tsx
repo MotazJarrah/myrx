@@ -157,6 +157,10 @@ export default function InviteDeepLinkHost() {
   //   myrx://auth/confirmed?type=signup                    → auth handoff
   const handleUrl = useCallback((url: string | null) => {
     if (!url) return
+    // T169 diagnostics — log every incoming deep link so courier-mangled
+    // URLs (Hotmail SafeLinks stripping query strings) show up verbatim
+    // in the Metro log.
+    console.log('[deep-link] incoming URL:', url)
     // Auth-handoff URLs come in as myrx://auth/* — short-circuit those
     // before falling through to the invite-token extractor (which would
     // otherwise hit an empty token and silently no-op).

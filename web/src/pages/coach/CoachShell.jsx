@@ -1,5 +1,5 @@
 /**
- * Coach Shell — chrome for the /coach/* authed routes.
+ * Coach Shell — chrome for the /* authed routes.
  *
  * Direct mirror of AdminShell.jsx (admin portal). Same sidebar/drawer/
  * footer layout, same active-state styling, same mobile drawer pattern.
@@ -8,7 +8,7 @@
  *     + "Coach" lime sub-label. NEVER text-rendered — brand rule.
  *   • Nav items: coach surfaces (Dashboard / Clients / Invite / Messages /
  *     Briefing / Adjustments). The 8 Phase-4 surfaces map onto these slots.
- *   • Footer: same avatar + name → /coach/profile + sign-out pattern as
+ *   • Footer: same avatar + name → /profile + sign-out pattern as
  *     admin. Coaches manage their account/settings inside the coach
  *     shell rather than getting bounced to the end-user EditProfile.
  *   • Badges: unread messages from the coach's CLIENTS (not all users like
@@ -29,13 +29,13 @@ import {
 import { supabase } from '../../lib/supabase'
 
 const NAV = [
-  { href: '/coach/portal',      label: 'Dashboard',             icon: LayoutDashboard },
-  { href: '/coach/me',          label: 'My Profile',            icon: UserCircle },
-  { href: '/coach/clients',     label: 'My Clients',            icon: Users },
-  { href: '/coach/progress',    label: 'Weight Goal Progress',  icon: TrendingUp },
-  { href: '/coach/nutrition',   label: 'Nutrition Overview',    icon: Utensils },
-  { href: '/coach/invite',      label: 'Invite Client',         icon: UserPlus },
-  { href: '/coach/messages',    label: 'Messages',              icon: MessageCircle },
+  { href: '/portal',      label: 'Dashboard',             icon: LayoutDashboard },
+  { href: '/me',          label: 'My Profile',            icon: UserCircle },
+  { href: '/clients',     label: 'My Clients',            icon: Users },
+  { href: '/progress',    label: 'Weight Goal Progress',  icon: TrendingUp },
+  { href: '/nutrition',   label: 'Nutrition Overview',    icon: Utensils },
+  { href: '/invite',      label: 'Invite Client',         icon: UserPlus },
+  { href: '/messages',    label: 'Messages',              icon: MessageCircle },
 ]
 
 // Coach subscription tier → display label for the "Coach {Tier}" sub-label.
@@ -70,15 +70,15 @@ function NavLinks({ onClick, unreadMessages }) {
   return (
     <nav className="space-y-0.5">
       {NAV.map(({ href, label, icon: Icon }) => {
-        const isMessages = href === '/coach/messages'
-        // /coach/portal is the dashboard; only "active" on exact match.
-        // /coach/clients also matches the per-client detail route
-        // (/coach/client/:id) for Phase 4.
-        const isClients  = href === '/coach/clients'
+        const isMessages = href === '/messages'
+        // /portal is the dashboard; only "active" on exact match.
+        // /clients also matches the per-client detail route
+        // (/client/:id) for Phase 4.
+        const isClients  = href === '/clients'
         const active =
           location === href ||
           location.startsWith(href + '/') ||
-          (isClients && location.startsWith('/coach/client/'))
+          (isClients && location.startsWith('/client/'))
 
         const badge = isMessages ? unreadMessages : 0
 
@@ -153,7 +153,7 @@ export default function CoachShell({ children }) {
   function SidebarFooter() {
     return (
       <div className="border-t border-border p-3 space-y-1">
-        <Link href="/coach/profile">
+        <Link href="/profile">
           <a className="group flex items-center gap-2.5 rounded-md px-3 py-2 hover:bg-accent transition-colors cursor-pointer">
             <div className="shrink-0">
               {avatarUrl
@@ -227,7 +227,7 @@ export default function CoachShell({ children }) {
               <NavLinks onClick={() => setDrawerOpen(false)} unreadMessages={unreadMessages} />
             </div>
             <div className="border-t border-border p-3 space-y-1">
-              <Link href="/coach/profile" onClick={() => setDrawerOpen(false)}>
+              <Link href="/profile" onClick={() => setDrawerOpen(false)}>
                 <a className="group flex items-center gap-2.5 px-3 py-2 rounded-md hover:bg-accent transition-colors cursor-pointer">
                   {avatarUrl
                     ? <img src={avatarUrl} alt={displayName} className="h-7 w-7 rounded-full object-cover" />

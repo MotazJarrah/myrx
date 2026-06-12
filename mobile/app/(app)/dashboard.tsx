@@ -37,6 +37,8 @@ import TickerNumber from '../../src/components/TickerNumber'
 import AnimateRise from '../../src/components/AnimateRise'
 import InviteBanner from '../../src/components/InviteBanner'
 import CoachChangeBanner from '../../src/components/CoachChangeBanner'
+import TrialBanner from '../../src/components/TrialBanner'
+import TrialEndedModal from '../../src/components/TrialEndedModal'
 import Skeleton from '../../src/components/Skeleton'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
@@ -52,21 +54,30 @@ import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 // assume active so the nav/pills never flash a downgrade before it lands. ───────
 type Tier = 'free' | 'corerx' | 'fullrx'
 const TIER_RANK: Record<Tier, number> = { free: 0, corerx: 1, fullrx: 2 }
-const INACTIVE_COACH_STATUSES = ['lapsed', 'suspended', 'cancelled']
+// T194: ALLOW-list, mirroring is_active_coach() + RadialNav + the web coach gate —
+// a coach's FullRX comp is live ONLY for these; any other status (incl. null /
+// incomplete) drops to the b2c tier. is_coach is itself webhook-managed post-T194.
+const LIVE_COACH_STATUSES = ['trialing', 'active', 'past_due']
 function resolveTier(p: {
   b2c_subscription_tier?: 'free' | 'corerx' | 'fullrx' | null
   coach_id?: string | null
   is_superuser?: boolean
   is_coach?: boolean
   coach_subscription_status?: string | null
+  b2c_trial_ends_at?: string | null
 } | null | undefined, coachActive?: boolean): Tier {
   if (!p) return 'free'
   if (p.is_superuser === true) return 'fullrx'
   if (p.is_coach === true)
-    return INACTIVE_COACH_STATUSES.includes(p.coach_subscription_status ?? '')
-      ? ((p.b2c_subscription_tier as Tier | null) ?? 'free') : 'fullrx'
+    return LIVE_COACH_STATUSES.includes(p.coach_subscription_status ?? '')
+      ? 'fullrx' : ((p.b2c_subscription_tier as Tier | null) ?? 'free')
   if (p.coach_id)
     return coachActive === false ? ((p.b2c_subscription_tier as Tier | null) ?? 'free') : 'fullrx'
+  // T165 — 30-day FullRX reverse trial: our own grant (no store sub).
+  // Live trial lifts the effective tier to fullrx; expiry drops it
+  // automatically with no DB write.
+  if (p.b2c_trial_ends_at && new Date(p.b2c_trial_ends_at).getTime() > Date.now())
+    return 'fullrx'
   return (p.b2c_subscription_tier as Tier | null) ?? 'free'
 }
 
@@ -730,6 +741,14 @@ export default function Dashboard() {
           See mobile/src/components/CoachChangeBanner.tsx for the full
           state machine (assigned vs lost vs fresh-signup-no-show). */}
       <CoachChangeBanner />
+
+      {/* T165 — FullRX trial countdown banner ("FullRX trial — N days
+          left", blue, per-day dismissible, taps to Settings → Billing)
+          + the day-30 step-down modal (trial ended → "you're on Free,
+          here are the tiers"). Both self-gate on profile state — see
+          their headers for the exact render conditions. */}
+      <TrialBanner />
+      <TrialEndedModal />
 
       {/* ── Profile card ─────────────────────────────────────────────── */}
       {/* The card is wrapped in a positioning View so the edit pencil can

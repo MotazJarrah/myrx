@@ -1,5 +1,5 @@
 /**
- * Accept Coach Invite — web /coach/accept-invite?token=xxx
+ * Accept Coach Invite — web /accept-invite?token=xxx
  *
  * SMART-LINK PLACEHOLDER (locked May 27 2026).
  *

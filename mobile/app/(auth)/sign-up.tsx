@@ -1440,19 +1440,53 @@ function WeightScreen({ data, patch, next, mode }: ScreenProps) {
   )
 }
 
+function GiftScreen({ next }: ScreenProps) {
+  // T165 — the 30-day FullRX trial disclosure ("gift screen"). Sits right
+  // after the projection reveal (the aha moment), before any account-
+  // creation step, so the user knows the deal before they commit. Copy is
+  // LOCKED verbatim (2026-06-09): "MyRX is free to use — You're starting
+  // with FullRX free for 30 days. No card required, nothing to cancel."
+  // Deliberately NO tier comparison here — the three-tier choice first
+  // appears at the day-30 step-down (or Settings → Billing), never during
+  // signup. The actual trial grant is written at welcome-end.
+  return (
+    <View>
+      <AnimateRise>
+        <View style={{ alignItems: 'center', marginBottom: 20 }}>
+          <View style={s.giftIconPlate}>
+            <Sparkles size={26} color={palette.blue[300]} strokeWidth={2} />
+          </View>
+        </View>
+      </AnimateRise>
+      <Heading eyebrow="Before we set you up" title="MyRX is free to use"
+        subtitle="You're starting with FullRX free for 30 days. No card required, nothing to cancel." />
+      <PrimaryButton onPress={next} rightIcon={<ArrowRight size={16} color={colors.primaryForeground} />}>
+        Continue
+      </PrimaryButton>
+    </View>
+  )
+}
+
 function WhatsNextScreen({ next }: ScreenProps) {
   // 1:1 port of web's WhatsNextScreen.
   // Three numbered cards + "Save my profile" CTA.
+  // Copy locked 2026-06-10 (T168) — the earlier set predated the coaching
+  // surfaces and assumed a coach connection; this set is generic for B2C
+  // downloads (card 3 deliberately previews the FullRX breadth instead
+  // of mentioning coaches).
   const points = [
     { n: 1,
-      title: 'One log, every metric.',
-      body: "Strength sets, cardio runs, body weight, calories — whatever you train, MyRX tracks it. No more spreadsheets, no second app." },
+      title: 'Training that knows where you’re going.',
+      body: 'Strength, cardio, and beyond — every workout ends with a clear next target to beat.' },
     { n: 2,
-      title: 'The math, done for you.',
-      body: 'Your next set, your next race time, your daily calorie target — projected from your own numbers and updated every time you log.' },
+      title: 'It gets smarter every time you log.',
+      body: 'Your projections, targets, and plan adjust to what you actually did — not a template.' },
     { n: 3,
-      title: 'Connected to your coach.',
-      body: 'Chat with your coach inside the app, share PRs, get tailored guidance. Real human, always in reach.' },
+      // "athlete" dropped 2026-06-10 — user: intimidating for people new
+      // to fitness. "All of you" keeps the whole-picture idea, zero bar
+      // to entry.
+      title: 'All of you, one app.',
+      body: 'Strength, cardio, bodyweight, nutrition, heart, sleep, hydration — everything that drives progress, in one place.' },
   ]
   return (
     <View>
@@ -2752,7 +2786,7 @@ function WelcomeEndScreen({ data }: ScreenProps) {
   // because deriveResumeStep lands them past it. In that case there's
   // no first-effort entry to celebrate, so we drop the card and use
   // shorter copy.
-  const { user, refreshProfile } = useAuth()
+  const { user, profile, refreshProfile } = useAuth()
   const showLogCard = !!data.modality
   const lift   = data.modality === 'strength' ? LIFTS.find((l) => l.id === data.liftId) : null
   const cardio = data.modality === 'cardio'   ? CARDIO.find((c) => c.id === data.distanceId) : null
@@ -2770,11 +2804,47 @@ function WelcomeEndScreen({ data }: ScreenProps) {
       // the (auth) layout treats the user as still mid-journey and
       // will route them back to /sign-up. This UPSERT is the single
       // signal that flips the gate to "done".
+      //
+      // T165: also backfill the required body fields from the in-memory
+      // journey data, in the SAME atomic upsert, when `data` carries
+      // them. This closes the gap where the post-password save
+      // (init-profile-checkpoint) failed: the stats live in `data`
+      // (restored from cached journey state), so writing them here
+      // guarantees the strengthened completeness gate — which now
+      // requires gender / birthdate / height / weight — passes the
+      // instant onboarded_at is set, with no separate round-trip and no
+      // duplicate bodyweight/effort rows. Only fields actually present
+      // in `data` are written, so a value-less resume can't clobber a
+      // real DB value with 0/null (the gate then bounces them and
+      // deriveResumeStep routes them back to fill it).
       if (user?.id) {
+        const bodyPatch: Record<string, any> = {}
+        if (data.sex) bodyPatch.gender = data.sex
+        if (data.dob) bodyPatch.birthdate = data.dob
+        if (data.heightCm > 0) {
+          bodyPatch.current_height = isImperial
+            ? Math.round(data.heightCm / 2.54)
+            : Math.round(data.heightCm)
+          bodyPatch.height_unit = isImperial ? 'imperial' : 'metric'
+        }
+        if (data.weightKg > 0) {
+          bodyPatch.current_weight = isImperial
+            ? Math.round(data.weightKg * 2.20462 * 10) / 10
+            : Math.round(data.weightKg * 10) / 10
+          bodyPatch.weight_unit = isImperial ? 'lb' : 'kg'
+        }
         await supabase.from('profiles').upsert(
           {
             id: user.id,
             auth_user_id: user.id,
+            ...bodyPatch,
+            // T165 — grant the 30-day FullRX reverse trial at journey
+            // completion (our own grant, no store sub; resolveTier reads
+            // it). Guarded so a resume user re-finishing the journey
+            // can't extend an already-running trial.
+            ...((profile as any)?.b2c_trial_ends_at
+              ? {}
+              : { b2c_trial_ends_at: new Date(Date.now() + 30 * 86_400_000).toISOString() }),
             onboarded_at: new Date().toISOString(),
             signup_checkpoint: 'welcome-end',
           },
@@ -2838,6 +2908,11 @@ function WelcomeEndScreen({ data }: ScreenProps) {
             {showLogCard
               ? 'Your account is set up. Two entries are already in your log:'
               : "Your profile is all set — let's get you to your dashboard."}
+          </Text>
+          {/* T165 — finish-line trial restate (locked copy 2026-06-09).
+              Second and final signup touchpoint after the gift screen. */}
+          <Text style={[s.subtitle, { textAlign: 'center', maxWidth: 360, marginTop: 6 }]}>
+            30 days of FullRX starts now — we'll remind you before it ends.
           </Text>
         </View>
         {showLogCard && (
@@ -3145,6 +3220,18 @@ export default function SignUpJourney() {
   // skipped on every subsequent forward + backward navigation.
   // Same UX as phone-otp once verified.
   function shouldSkipOnNav(stepKey: string): boolean {
+    if (stepKey === 'email') {
+      // T165: in RESUME mode the email is already confirmed, so when the
+      // self-heal router (deriveResumeStep) sends a returning user back
+      // to the body screens, forward-nav walks PAST this screen instead
+      // of re-asking for an email that's already verified. Fresh mode is
+      // untouched — there the user is still entering their email, so this
+      // returns false and the screen renders normally.
+      return mode === 'resume'
+        && !!user?.email_confirmed_at
+        && (data.email || '').trim().toLowerCase()
+          === (user.email || '').trim().toLowerCase()
+    }
     if (stepKey === 'otp') {
       return !!user?.email_confirmed_at
         && (data.email || '').trim().toLowerCase()
@@ -3230,6 +3317,7 @@ export default function SignUpJourney() {
       case 'cardio-distance': return <CardioDistanceScreen {...screenProps} />
       case 'cardio-effort':   return <CardioEffortScreen {...screenProps} />
       case 'cardio-reveal':   return <CardioRevealScreen {...screenProps} />
+      case 'gift':            return <GiftScreen {...screenProps} />
       case 'sex':             return <SexScreen {...screenProps} />
       case 'dob':             return <DOBScreen {...screenProps} />
       case 'height':          return <HeightScreen {...screenProps} />
@@ -3674,6 +3762,16 @@ const s = StyleSheet.create({
     fontSize: 9, color: alpha(colors.mutedForeground, 0.5),
     marginTop: 2,
     fontFamily: fonts.mono[400], fontVariant: ['tabular-nums'],
+  },
+
+  // Gift screen (T165) — centered icon plate above the 30-day FullRX
+  // trial disclosure. Blue = the FullRX accent (matches TrialBanner /
+  // PlanCards chrome).
+  giftIconPlate: {
+    width: 56, height: 56, borderRadius: 28,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: withAlpha(palette.blue[500], 0.35),
+    backgroundColor: withAlpha(palette.blue[500], 0.15),
   },
 
   // Strength reveal — "Your next training target" panel.

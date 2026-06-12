@@ -1,15 +1,34 @@
 /**
  * Deep-link target for confirmation links sent in Supabase auth emails.
  *
- * URL shape: myrxfit.com/auth/confirm?token_hash=…&type=signup|magiclink|email_change|recovery
+ * TWO URL shapes arrive here (T169, verified from live Metro captures
+ * 2026-06-10):
+ *
+ *   A. token_hash format (direct-verify):
+ *      myrxfit.com/auth/confirm?token_hash=…&type=signup|magiclink|email_change|recovery
+ *      → we verify client-side via verifyOtp({ token_hash, type }).
+ *
+ *   B. implicit-flow fragment format (what the live "Confirm signup"
+ *      template actually produces): the email button hits Supabase's
+ *      /auth/v1/verify endpoint, which verifies SERVER-side and then
+ *      redirects to myrxfit.com/auth/confirm carrying the freshly-minted
+ *      session in the URL FRAGMENT:
+ *      myrxfit.com/auth/confirm#access_token=…&refresh_token=…&type=signup
+ *      Android App Links hand that to this screen with the fragment
+ *      intact (useLocalSearchParams exposes it under the '#' key). We
+ *      adopt the session via setSession() — no verification needed,
+ *      Supabase already did it.
+ *
+ * The original implementation only handled shape A and dead-ended shape B
+ * with "missing required parameters" (the T169 bug — initially misblamed
+ * on Hotmail SafeLinks stripping the query; the Metro capture proved the
+ * fragment arrives fully intact, we just never read it).
  *
  * Android App Links (configured in AndroidManifest.xml + assetlinks.json on
  * myrxfit.com/.well-known/) hand the URL off to this app, which expo-router
- * resolves to this file. We finish the verification client-side via
- * supabase.auth.verifyOtp({ token_hash, type }) and route the user to the
- * right next screen.
+ * resolves to this file.
  *
- * Why we use token_hash here instead of the 6-digit code: the 6-digit code
+ * Why token_hash instead of the 6-digit code for shape A: the 6-digit code
  * is for users who type it manually into the OTP screen. The link contains
  * a separate, longer token hash that's a one-shot credential — different
  * primitives, both validated by Supabase, both valid for the same auth
@@ -20,6 +39,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { View, Text, StyleSheet, ActivityIndicator, Pressable } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
+import * as Linking from 'expo-linking'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import * as SecureStore from 'expo-secure-store'
 import { AlertCircle } from 'lucide-react-native'
 import { supabase } from '../../src/lib/supabase'
 import { colors } from '../../src/theme'
@@ -40,6 +62,15 @@ export default function AuthConfirm() {
 
   const [status, setStatus] = useState<Status>({ kind: 'verifying' })
 
+  // T169 diagnostics — log exactly what URL opened this screen so a
+  // courier-mangled link (Hotmail SafeLinks etc.) can be reconstructed
+  // from the Metro log instead of guessed at. Cheap, dev-visible only.
+  const incomingUrl = Linking.useURL()
+  useEffect(() => {
+    console.log('[auth/confirm] opened — incoming URL:', incomingUrl ?? '(null)',
+      '| parsed params:', JSON.stringify(params))
+  }, [incomingUrl])
+
   // Guard against the React 18 strict-mode double-mount in dev.
   const startedRef = useRef(false)
 
@@ -48,10 +79,120 @@ export default function AuthConfirm() {
     startedRef.current = true
 
     if (!tokenHash) {
-      setStatus({
-        kind: 'error',
-        message: 'This confirmation link is missing required parameters.',
-      })
+      // No ?token_hash → this is (almost always) shape B: the implicit-
+      // flow redirect carrying the session in the URL FRAGMENT (see the
+      // file header — T169). Three rescue layers before dead-ending:
+      //
+      //   0. Fragment session — parse #access_token/#refresh_token from
+      //      the fragment (useLocalSearchParams exposes it under '#')
+      //      and ADOPT it via setSession(). Supabase already verified
+      //      the email server-side before redirecting; the session in
+      //      the fragment is the proof. This is the primary path for
+      //      the live email template.
+      //
+      //   1. Existing session — the app may already hold a session for
+      //      a confirmed user (magiclink / email_change re-taps).
+      //
+      //   2. Credential-assisted sign-in — mid-signup the app has NO
+      //      session (signUp with confirmation returns none), but the
+      //      journey still holds credentials: email in the AsyncStorage
+      //      journey state (myrx.signup.state) + password in SecureStore
+      //      (myrx.bio.pending — written at the password step, cleared
+      //      at welcome-end). signInWithPassword succeeds ONLY once the
+      //      email is confirmed — exactly what the tapped link just did.
+      //
+      // Only a genuinely-unconfirmed (or credential-less) visitor still
+      // sees the error.
+      const fragmentRaw = (params as any)['#'] as string | undefined
+
+      ;(async () => {
+        // Layer 0 — session in the URL fragment?
+        try {
+          if (fragmentRaw) {
+            const frag: Record<string, string> = {}
+            for (const pair of fragmentRaw.split('&')) {
+              const i = pair.indexOf('=')
+              if (i > 0) frag[decodeURIComponent(pair.slice(0, i))] = decodeURIComponent(pair.slice(i + 1))
+            }
+            const fragType = (frag.type as ConfirmType) || 'signup'
+            if (frag.access_token && frag.refresh_token) {
+              const { data, error } = await supabase.auth.setSession({
+                access_token: frag.access_token,
+                refresh_token: frag.refresh_token,
+              })
+              if (!error && data?.session) {
+                if (fragType === 'recovery') {
+                  router.replace({
+                    pathname: '/(auth)/forgot-password' as any,
+                    params: { fromRecoveryLink: '1' },
+                  })
+                } else if (fragType === 'email_change') {
+                  router.replace('/(app)/dashboard' as any)
+                } else {
+                  router.replace({
+                    pathname: '/(auth)/sign-up' as any,
+                    params: { fromConfirm: '1' },
+                  })
+                }
+                return
+              }
+            }
+            // An error fragment (#error=access_denied&error_code=otp_expired)
+            // means the link was already used or expired — surface the
+            // accurate message instead of "missing parameters".
+            if (frag.error_code === 'otp_expired' || frag.error === 'access_denied') {
+              // Fall through to layers 1-2 first (the user may already be
+              // confirmed from the first use of this same link) — the
+              // layers below handle that; if they fail, the catch-all
+              // error below still shows.
+            }
+          }
+        } catch { /* fall through to the next layer */ }
+
+        // Layer 1 — existing session?
+        try {
+          await supabase.auth.refreshSession()
+        } catch { /* no session to refresh — fall through */ }
+        try {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (user?.email_confirmed_at) {
+            router.replace({
+              pathname: '/(auth)/sign-up' as any,
+              params: { fromConfirm: '1' },
+            })
+            return
+          }
+        } catch { /* fall through */ }
+
+        // Layer 2 — mid-signup credentials?
+        try {
+          const [stateRaw, pendingPw] = await Promise.all([
+            AsyncStorage.getItem('myrx.signup.state').catch(() => null),
+            SecureStore.getItemAsync('myrx.bio.pending').catch(() => null),
+          ])
+          const email: string | undefined = stateRaw
+            ? JSON.parse(stateRaw)?.data?.email
+            : undefined
+          if (email && pendingPw) {
+            const { data, error } = await supabase.auth.signInWithPassword({
+              email: email.trim(),
+              password: pendingPw,
+            })
+            if (!error && data?.user?.email_confirmed_at) {
+              router.replace({
+                pathname: '/(auth)/sign-up' as any,
+                params: { fromConfirm: '1' },
+              })
+              return
+            }
+          }
+        } catch { /* fall through to the error below */ }
+
+        setStatus({
+          kind: 'error',
+          message: 'This confirmation link is missing required parameters.',
+        })
+      })()
       return
     }
 

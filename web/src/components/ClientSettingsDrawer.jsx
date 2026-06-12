@@ -3,7 +3,7 @@
  * a client's account settings from the admin OR coach detail page.
  *
  * Mounted from `/admin/user/:id` (viewerRole='admin') and (Phase 3+)
- * `/coach/client/:id` (viewerRole='coach'). Single component → admin↔coach
+ * `/client/:id` (viewerRole='coach'). Single component → admin↔coach
  * mirror is automatic per the CLAUDE.md mirror rule.
  *
  * v1 (May 26 2026): wraps the shared AccountSettings component (the
@@ -93,7 +93,7 @@ export default function ClientSettingsDrawer({
         {/* Body — renders the shared AccountSettings in target-user mode.
             Path B refactor (May 26 2026): AccountSettings is the ONE
             source of truth for the settings UI across 4 surfaces
-            (end-user /profile, admin /admin/profile, coach /coach/profile,
+            (end-user /profile, admin /admin/profile, coach /profile,
             and admin-editing-client here). Passing targetUserId flips
             the relevant tabs into target-aware mode automatically. */}
         <div className="p-5">

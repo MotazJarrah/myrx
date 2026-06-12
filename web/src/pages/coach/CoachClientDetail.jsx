@@ -1,5 +1,5 @@
 /**
- * Coach → Per-client view — /coach/client/:id
+ * Coach → Per-client view — /client/:id
  *
  * Mirrors AdminUserDetail's structure (May 26 2026 rebuild) — same
  * profile card, same identity row, same stat chips matching mobile,
@@ -102,15 +102,22 @@ function convertWeightForViewer(w, clientUnit, viewerUnit) {
 // viewing coach IS the client's coach (RLS guarantees roster ownership), so
 // `coachActive` is computed synchronously from the coach's own status. ──────
 const TIER_RANK = { free: 0, corerx: 1, fullrx: 2 }
-const INACTIVE_COACH_STATUSES = ['lapsed', 'suspended', 'cancelled']
+// T194: ALLOW-list, mirroring is_active_coach() + the web coach gate — FullRX comp
+// is live ONLY for these; any other status (incl. null / incomplete) drops to b2c.
+const LIVE_COACH_STATUSES = ['trialing', 'active', 'past_due']
 function resolveTier(p, coachActive) {
   if (!p) return 'free'
   if (p.is_superuser === true) return 'fullrx'
   if (p.is_coach === true)
-    return INACTIVE_COACH_STATUSES.includes(p.coach_subscription_status)
-      ? (p.b2c_subscription_tier ?? 'free') : 'fullrx'
+    return LIVE_COACH_STATUSES.includes(p.coach_subscription_status)
+      ? 'fullrx' : (p.b2c_subscription_tier ?? 'free')
   if (p.coach_id)
     return coachActive === false ? (p.b2c_subscription_tier ?? 'free') : 'fullrx'
+  // T165 — 30-day FullRX reverse trial: our own grant (no store sub).
+  // Live trial lifts the effective tier to fullrx; expiry drops it
+  // automatically with no DB write. Mirrors mobile resolveTier.
+  if (p.b2c_trial_ends_at && new Date(p.b2c_trial_ends_at).getTime() > Date.now())
+    return 'fullrx'
   return p.b2c_subscription_tier ?? 'free'
 }
 
@@ -156,7 +163,7 @@ export default function CoachClientDetail() {
   const [, navigate] = useLocation()
   const { user: coachUser, profile: coachProfile } = useAuth()
 
-  // Self-view ("My Profile"): /coach/me carries no :id (or the route id IS the
+  // Self-view ("My Profile"): /me carries no :id (or the route id IS the
   // coach's own uid). In self-mode the page points at the coach's own account
   // and every coach-action-on-another-person control is hidden.
   const selfMode = !routeId || (!!coachUser?.id && routeId === coachUser.id)
@@ -372,7 +379,7 @@ export default function CoachClientDetail() {
       return
     }
     // Bounce back to the roster — the row will already be gone on the fresh fetch.
-    navigate('/coach/clients')
+    navigate('/clients')
   }
 
   // ── Render ─────────────────────────────────────────────────────────────
@@ -387,7 +394,7 @@ export default function CoachClientDetail() {
           <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-semibold text-destructive">{error}</p>
-            <Link href="/coach/clients">
+            <Link href="/clients">
               <a className="mt-2 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
                 <ArrowLeft className="h-3 w-3" /> Back to clients
               </a>
@@ -430,7 +437,7 @@ export default function CoachClientDetail() {
       {/* Back link — client view only; the self-view ("My Profile") is reached
           from the sidebar, so there's nothing to go "back" to. */}
       {!selfMode && (
-        <Link href="/coach/clients">
+        <Link href="/clients">
           <a className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="h-4 w-4" /> Back to clients
           </a>
@@ -486,9 +493,9 @@ export default function CoachClientDetail() {
               message or remove yourself). */}
           {!selfMode && (
           <div className="flex items-center gap-2 shrink-0">
-            {/* Message athlete — deep-links to /coach/messages with this client
+            {/* Message athlete — deep-links to /messages with this client
                 pre-selected. Same filled-primary button as the admin header. */}
-            <Link href={`/coach/messages?clientId=${client.id}`}>
+            <Link href={`/messages?clientId=${client.id}`}>
               <a
                 title="Open chat with this client and start typing"
                 className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
@@ -698,7 +705,7 @@ export default function CoachClientDetail() {
           the profile (admin passes `profile`). */}
       {activeTab === 'dashboard' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-          <DashboardEffortsBlock userId={id} basePath="/coach/client" onViewAll={() => handleTabChange('activity')} />
+          <DashboardEffortsBlock userId={id} basePath="/client" onViewAll={() => handleTabChange('activity')} />
           {tierRank >= TIER_RANK.corerx && (
             <DashboardBodyweightBlock userId={id} profile={client} onViewAll={() => handleTabChange('body')} />
           )}
@@ -720,7 +727,7 @@ export default function CoachClientDetail() {
       {activeTab === 'activity' && (
         <AdminUserActivity
           userId={id}
-          basePath="/coach/client"
+          basePath="/client"
           clientProfile={client}
           onEffortSaved={() => setSnapshotKey(k => k + 1)}
         />

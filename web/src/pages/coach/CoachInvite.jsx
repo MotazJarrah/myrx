@@ -1,5 +1,5 @@
 /**
- * Coach Invite Client — /coach/invite
+ * Coach Invite Client — /invite
  *
  * Email-only v1 (LOCKED May 27 2026, see CLAUDE.md "Coach invite →
  * invitee path"). The coach enters an email; the invite ships with
@@ -575,7 +575,7 @@ export default function CoachInvite() {
                     </div>
                   )
                   return invite.accepted_by ? (
-                    <Link key={invite.id} href={`/coach/client/${invite.accepted_by}`}>
+                    <Link key={invite.id} href={`/client/${invite.accepted_by}`}>
                       <a className="block">{row}</a>
                     </Link>
                   ) : (

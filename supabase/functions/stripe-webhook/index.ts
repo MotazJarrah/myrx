@@ -153,6 +153,16 @@ function mapStatus(stripeStatus: string): string {
   return map[stripeStatus] ?? "lapsed"
 }
 
+// A coach "has access" only while the subscription is LIVE: on trial, paid, or
+// in the card-retry grace window (past_due). Anything else (lapsed/cancelled/
+// suspended) = no portal access AND no mobile athlete perk. is_coach is derived
+// from this on EVERY subscription event, so it is the single source of truth the
+// web portal gate + mobile resolveTier both read (T194 grant-flip).
+const LIVE_COACH_STATUSES = ["trialing", "active", "past_due"]
+function isLiveCoachStatus(status: string): boolean {
+  return LIVE_COACH_STATUSES.includes(status)
+}
+
 // ── billing_events writer ───────────────────────────────────────────
 // Idempotent local mirror of every relevant Stripe event. Each call
 // inserts one row into `billing_events`; stripe_event_id is UNIQUE so
@@ -289,11 +299,17 @@ async function handleSubscriptionUpsert(sub: any, supabase: any) {
   }
   // Upsert on stripe_subscription_id (unique)
   await supabase.from("coach_subscriptions").upsert(row, { onConflict: "stripe_subscription_id" })
-  // Mirror status/tier onto profiles for fast denormalized reads.
+  // Mirror status/tier onto profiles for fast denormalized reads, and SET
+  // is_coach from the live-status check — this is the grant. A coach becomes
+  // is_coach=true only once Stripe reports a live subscription, and flips to
+  // false the moment it lapses/cancels (T194). Also keep the customer id synced
+  // so portal-initiated changes don't lose it.
   await supabase.from("profiles").update({
+    is_coach:                  isLiveCoachStatus(row.status),
     coach_subscription_status: row.status,
     coach_subscription_tier:   row.tier,
     coach_trial_ends_at:       row.trial_end,
+    coach_stripe_customer_id:  sub.customer ?? null,
   }).eq("id", coachId)
   console.log(`[webhook] sub upsert ok: coach=${coachId} sub=${sub.id} status=${row.status} tier=${row.tier}`)
 }
@@ -309,7 +325,9 @@ async function handleSubscriptionDeleted(sub: any, supabase: any) {
     .single()
   const coachId = existing?.coach_id ?? sub.metadata?.coach_id
   if (coachId) {
-    await supabase.from("profiles").update({ coach_subscription_status: "cancelled" }).eq("id", coachId)
+    // Subscription truly ended (not just scheduled-to-cancel) → revoke coach
+    // access. is_coach=false also drops the mobile athlete perk (T194 item 5/6).
+    await supabase.from("profiles").update({ coach_subscription_status: "cancelled", is_coach: false }).eq("id", coachId)
   }
   console.log(`[webhook] sub.deleted ok: sub=${sub.id}`)
 }
@@ -325,7 +343,7 @@ async function handleInvoicePaid(inv: any, supabase: any) {
     .eq("stripe_subscription_id", inv.subscription)
     .single()
   if (existing?.coach_id) {
-    await supabase.from("profiles").update({ coach_subscription_status: "active" }).eq("id", existing.coach_id)
+    await supabase.from("profiles").update({ coach_subscription_status: "active", is_coach: true }).eq("id", existing.coach_id)
   }
   console.log(`[webhook] invoice.paid ok: sub=${inv.subscription}`)
 }
@@ -341,7 +359,9 @@ async function handleInvoiceFailed(inv: any, supabase: any) {
     .eq("stripe_subscription_id", inv.subscription)
     .single()
   if (existing?.coach_id) {
-    await supabase.from("profiles").update({ coach_subscription_status: "past_due" }).eq("id", existing.coach_id)
+    // past_due is the Smart-Retries grace window — keep access (is_coach stays
+    // true) so the coach can fix their card without being locked out (T194).
+    await supabase.from("profiles").update({ coach_subscription_status: "past_due", is_coach: true }).eq("id", existing.coach_id)
   }
   console.log(`[webhook] invoice.payment_failed ok: sub=${inv.subscription}`)
 }
