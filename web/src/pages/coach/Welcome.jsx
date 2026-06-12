@@ -83,6 +83,15 @@ export default function CoachWelcome() {
     return () => { cancelled = true; clearTimeout(timer) }
   }, [])
 
+  // First invoice = the day the 30-day trial ends (coach_trial_ends_at).
+  // Show the real calendar date, not a generic "day 31".
+  const firstInvoiceLabel = (() => {
+    const end = coach?.coach_trial_ends_at
+      ? new Date(coach.coach_trial_ends_at)
+      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    return end.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+  })()
+
   return (
     <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
       <div className="max-w-md w-full text-center space-y-6">
@@ -108,7 +117,7 @@ export default function CoachWelcome() {
                 You're in{coach?.full_name ? `, ${coach.full_name.split(' ')[0]}` : ''}.
               </h1>
               <p className="text-sm text-muted-foreground">
-                30-day trial active. First invoice on day 31 — cancel before then for no charge.
+                30-day trial active. First invoice on {firstInvoiceLabel} — cancel before then for no charge.
               </p>
             </div>
             <div className="space-y-2 pt-2">

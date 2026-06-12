@@ -311,6 +311,20 @@ async function handleSubscriptionUpsert(sub: any, supabase: any) {
     coach_trial_ends_at:       row.trial_end,
     coach_stripe_customer_id:  sub.customer ?? null,
   }).eq("id", coachId)
+  // Stamp onboarded_at the first time a coach goes live. The web coach
+  // journey only stamps it on the Signup welcome-end screen, which the
+  // Stripe-checkout redirect bypasses (checkout lands on /welcome, a
+  // different component). Without onboarded_at, mobile's isProfileComplete()
+  // treats the coach as a half-finished athlete and bounces them through the
+  // end-user signup journey (see mobile/src/lib/profile.ts). This is the
+  // server-side, tab-independent stamp. Guarded on null so renewals never
+  // overwrite the original onboarding date.
+  if (isLiveCoachStatus(row.status)) {
+    await supabase.from("profiles")
+      .update({ onboarded_at: new Date().toISOString() })
+      .eq("id", coachId)
+      .is("onboarded_at", null)
+  }
   console.log(`[webhook] sub upsert ok: coach=${coachId} sub=${sub.id} status=${row.status} tier=${row.tier}`)
 }
 
