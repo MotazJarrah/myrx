@@ -2281,14 +2281,14 @@ function readStoredState() {
     return parsed
   } catch { return null }
 }
-function saveStoredState(step, data) {
+function saveStoredState(step, mode, data) {
   try {
     // Don't persist password — leak hazard. Don't persist photoPreview
     // either — blob URLs are tab-scoped + worthless after reload. Don't
     // persist pendingResendCooldown — it's an ephemeral one-shot relay;
     // a stale value resurrected on reload would wrongly disable Resend.
     const { password, photoPreview, pendingResendCooldown, ...safe } = data
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ step, data: safe }))
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ step, mode, data: safe }))
   } catch { /* silent */ }
 }
 function clearStoredState() {
@@ -2377,6 +2377,46 @@ export default function CoachSignup() {
         return
       }
 
+      // Mid-fresh-coach-signup resume (authoritative -- wins over the
+      // completeness re-derivation below). If sessionStorage holds a FRESH
+      // journey in progress, this user is partway through THIS signup (e.g.
+      // refreshed on the plan step). Trust the stored FRESH step so they land
+      // exactly where they left off -- this must beat the completeness check
+      // below, which (a) cannot see the data-less plan/stripe steps so it
+      // dumps a finished user onto the resume-flow welcome screen, and (b)
+      // treats a deliberately SKIPPED photo (avatar_url null) as "incomplete"
+      // and drags them back to the photo step. A stored step at/after 'name'
+      // is unambiguously a FRESH index -- the abbreviated RESUME flow has only
+      // 8 screens (max index 7), so it can never produce a step this high. (We
+      // persist `mode` too now, for clarity.) Gating at 'name' also stops a
+      // stale early index from stranding a returning athlete on a data screen.
+      const storedFresh = readStoredState()
+      const freshNameIdx = SCREENS_FRESH.indexOf('name')
+      if (
+        storedFresh
+        && typeof storedFresh.step === 'number'
+        && storedFresh.step >= freshNameIdx
+      ) {
+        if (cancelled) return
+        const [sfFirst, ...sfRest] = (profile?.full_name || '').split(' ')
+        setData(prev => ({
+          ...prev,
+          ...(storedFresh.data || {}),
+          email:         user.email || storedFresh.data?.email || prev.email,
+          firstName:     sfFirst || storedFresh.data?.firstName || prev.firstName,
+          lastName:      sfRest.join(' ') || storedFresh.data?.lastName || prev.lastName,
+          phone:         profile?.phone || storedFresh.data?.phone || prev.phone,
+          tier:          initialTier,
+          verifiedEmail: user.email || storedFresh.data?.verifiedEmail || null,
+          verifiedPhone: profile?.phone_verified_at
+            ? (profile.phone || storedFresh.data?.verifiedPhone)
+            : (storedFresh.data?.verifiedPhone || null),
+        }))
+        setStep(Math.min(storedFresh.step, SCREENS_FRESH.length - 1))
+        setMode('fresh')
+        return
+      }
+
       // ── Distinguish "mid-fresh-signup" from "existing athlete upgrading" ──
       //
       // The naive logic (signed in + profile exists → resume mode) fails
@@ -2403,8 +2443,10 @@ export default function CoachSignup() {
       const needsName        = !profile?.full_name
       const needsPhone       = !profile?.phone
       const needsPhoneVerify = !profile?.phone_verified_at
-      const needsPhoto       = !profile?.avatar_url
-      const profileIncomplete = needsName || needsPhone || needsPhoneVerify || needsPhoto
+      // Photo is OPTIONAL (skippable) -- a missing avatar_url must NOT mark the
+      // profile "incomplete", or a user who skipped it gets dragged back to the
+      // photo step on every resume.
+      const profileIncomplete = needsName || needsPhone || needsPhoneVerify
       if (profileIncomplete) {
         if (cancelled) return
         const stored = readStoredState()
@@ -2439,7 +2481,6 @@ export default function CoachSignup() {
           needsName        ? 'name'      :
           needsPhone       ? 'phone'     :
           needsPhoneVerify ? 'phone-otp' :
-          needsPhoto       ? 'photo'     :
                              'plan'
         const targetIdx = SCREENS_FRESH.indexOf(targetScreen)
         setStep(targetIdx >= 0 ? targetIdx : 0)
@@ -2484,7 +2525,7 @@ export default function CoachSignup() {
   // resumed state with the initial state.
   useEffect(() => {
     if (mode === 'loading') return
-    saveStoredState(step, data)
+    saveStoredState(step, mode, data)
   }, [mode, step, data])
 
   function patch(p) { setData(prev => ({ ...prev, ...p })) }
