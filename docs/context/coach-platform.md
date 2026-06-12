@@ -277,10 +277,7 @@ This is a top-level architectural decision. Every routing change, signup change,
 - `/dashboard`, `/strength`, `/cardio`, `/mobility`, `/bodyweight`, `/heart`, `/calories`, `/history`, `/profile`
 - `/effort/strength/:exercise`, `/effort/cardio/:activity`, `/mobility/:movement`
 
-**Post-sign-in routing (web `/auth?mode=signin`):**
-- `profile.is_coach === true` → `/coach/portal`
-- `profile.is_superuser === true` → `/admin/overview`
-- Neither (athlete) → "Download the app" placeholder page
+**Post-sign-in routing (web `/auth?mode=signin`) — superseded June 12 2026 by the account_marker system (next section).** Sign-in, the root `/` route, and the 404 "Back home" button all resolve through ONE shared function: `roleHomePath(profile)` in `web/src/lib/roleRouting.js` (host-aware + marker-aware). Never hand-roll a role redirect — import that.
 
 **Session policy:**
 - When an athlete signs into web (which they should never do once apps ship — but the credentials still work because Supabase Auth doesn't know about roles), they land on the placeholder page. Their web session technically persists (Supabase cookie) but no athlete route consumes it. Manual navigation to any athlete URL → 404.
@@ -296,6 +293,36 @@ This is a top-level architectural decision. Every routing change, signup change,
 - One surface per use-case = clean mental model + clean codebase. No "responsive both ways" complexity.
 
 **Archive:** the 13 athlete page .jsx files (Dashboard, Strength, StrengthDetail, Cardio, CardioDetail, Mobility, MobilityDetail, Bodyweight, Heart, Calories, History, EditProfile, Signup) were moved out of `web/src/pages/` on May 27 2026 to `docs/_archive/web-athlete-pages/`. Available for reference but no longer in the active build. If a coach/admin page references one of them (the EditProfile usage in AdminProfile, for instance), that import was refactored or copied into a coach/admin equivalent at the same time.
+
+---
+
+## account_marker — the A / AC / C signup-role state machine (LOCKED — June 12 2026, T234)
+
+`profiles.account_marker` is the **single durable signal** for which signup journey an account belongs to and where it routes. It exists because `signup_checkpoint` is ONE shared column used by BOTH the athlete journey (mobile) and the coach journey (web) — without the marker, coach-only checkpoint values (`plan`, `stripe`) leak into the athlete journey's resume logic (whose `CHECKPOINT_RANK` can't interpret them) and vice versa. The marker gates **which platform interprets the checkpoint**.
+
+**Values (CHECK-constrained `A | AC | C`, default `A`), assigned by SIGNUP SOURCE after email validation:**
+
+| Marker | Meaning | Set when |
+|---|---|---|
+| `A` | Athlete | Mobile signup (the column default). Also restored by the mobile "switch to athlete" reversal. |
+| `C` | Coach | Web coach signup with a NEW email — stamped by the `init-profile-checkpoint` edge function the moment the profile row is created. Also the settled end-state: coach `welcome-end` stamps `C`. |
+| `AC` | Athlete converting to coach (reversible) | An existing `A` account enters the web coach signup: in-flow at the email step (correct password = the conversion moment), or `detectFlow` when an already-signed-in `A` user loads `/signup`. |
+
+**State machine: `A` and `C` are settled; `AC` is the only transient.** `A → AC` requires a correct password. `AC → C` happens ONLY at coach signup completion (welcome-end, after payment). `AC/C → A` happens ONLY via the mobile coach-pending "Switch to an athlete account" button. A user can bounce between journeys forever — nothing settles until one journey FINISHES, and athlete data is never altered by an unfinished conversion.
+
+**Routing (single source of truth: `roleHomePath(profile)` in `web/src/lib/roleRouting.js`):**
+- Coach host: superuser or active-sub coach (`active|trialing|past_due`) → `/portal`; marker `C`/`AC` unfinished → `/signup` (resume); marker `A` → `/app` (Download the app — served on BOTH hosts).
+- Main host: superuser → `/admin/overview`; everyone else → `/app`.
+- Consumed by `RoleRouter` (root `/`), `NotFoundPage` ("Back home"), and `Auth.jsx` post-sign-in. `RoleRouter` waits for the profile before redirecting (the `A` default during profile load must never mis-route a coach).
+
+**Web coach signup email step (in-flow conversion, `EmailScreen` in `coach/Signup.jsx`):** Continue calls the `check_account_status(p_email)` RPC (SECURITY DEFINER, anon-executable, returns only `{exists, marker}` — no new enumeration surface beyond signUp's own `user_already_exists`). Not found → normal flow. Marker `C` → "you already have a coach account, sign in" prompt. Marker `A`/`AC` → in-flow confirm ("You already have an athlete account — continue as coach?") → in-flow password verify (`signInWithPassword`; wrong password = nothing changes in the DB) → on success: marker `A → AC` (guarded `.neq('account_marker','C')`), profile prefilled, journey jumps past validated steps (`name`/`phone`/`phone-otp` in completeness order, else straight to `plan`). Back-nav reaches the prefilled screens; `shouldSkip` skips the create-password + OTP steps whenever `email === verifiedEmail`. The old signUp-time `emailExistsPrompt` interstitial in `PasswordScreen` remains as a fail-open fallback (the RPC erroring must never block signup).
+
+**Mobile (athlete app):** sign-up hydration intercepts marker `C`/`AC` accounts with no `onboarded_at` → routes to `app/(auth)/coach-pending.tsx` ("Your coach signup is waiting"): **Finish on the web** (opens coach.myrxfit.com, account untouched) or **Switch to an athlete account** (marker → `A`; coach-only checkpoints `plan`/`stripe` remapped to `photo` — the last step both journeys share — then straight into the athlete resume). Completed athletes (incl. `AC` converting + every settled coach) hit the dashboard fast-path first — coaches train as athletes on mobile, unchanged.
+
+**Invariants when touching ANY signup/auth code:**
+1. Never write coach-only checkpoint values to a profile without the marker being `C`/`AC`.
+2. Never route by `is_coach` alone on web — always `roleHomePath`.
+3. The marker may only move `A → AC` (password-verified), `AC → C` (welcome-end), `AC/C → A` (mobile switch), or be set at creation (`A` mobile default / `C` init-profile-checkpoint). No other transitions.
 
 ---
 

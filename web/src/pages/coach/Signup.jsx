@@ -360,7 +360,185 @@ function UnitsScreen({ data, patch, next }) {
   )
 }
 
-function EmailScreen({ data, patch, next }) {
+function EmailScreen({ data, patch, next, onAthleteConverted }) {
+  // T234 — in-flow account detection at the email step. Phases:
+  //   'email'   — the normal email input.
+  //   'confirm' — the email belongs to an existing ATHLETE account
+  //               (marker A, or AC mid-conversion): "you already have an
+  //               athlete account — continue with coach signup?" Nothing
+  //               in the DB changes on this screen.
+  //   'verify'  — the password check. signInWithPassword must succeed;
+  //               a correct password IS the conversion moment: marker
+  //               A -> AC, profile prefilled, journey jumps past the
+  //               already-validated steps. Wrong password = stay here,
+  //               DB untouched.
+  //   'coach'   — the email belongs to a coach account (marker C):
+  //               point them at sign-in (roleHomePath resumes their
+  //               coach signup or opens their portal).
+  const [phase, setPhase]   = useState('email')
+  const [busy, setBusy]     = useState(false)
+  const [error, setError]   = useState(null)
+  const [pw, setPw]         = useState('')
+  const [showPw, setShowPw] = useState(false)
+
+  async function handleContinue() {
+    if (busy) return
+    const email = (data.email || '').trim()
+    if (!/\S+@\S+\.\S+/.test(email)) { setError('Enter a valid email address.'); return }
+    // Back-nav with the already-verified email — nothing to re-check.
+    if (email === data.verifiedEmail) { next(); return }
+    setError(null)
+    setBusy(true)
+    try {
+      const { data: status, error: rpcErr } = await supabase.rpc('check_account_status', { p_email: email })
+      // Fail-open: if the lookup errors, continue to the password screen —
+      // signUp's user_already_exists detection there still catches existing
+      // accounts (the pre-T234 fallback interstitial).
+      if (rpcErr || !status?.exists) { next(); return }
+      if (status.marker === 'C') { setPhase('coach'); return }
+      setPhase('confirm')   // marker A or AC -> athlete-found step
+    } catch {
+      next()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleVerifyPassword() {
+    if (busy || !pw) return
+    setError(null)
+    setBusy(true)
+    try {
+      const { data: signin, error: siErr } = await supabase.auth.signInWithPassword({
+        email: (data.email || '').trim(),
+        password: pw,
+      })
+      if (siErr || !signin?.user) {
+        setError(
+          siErr?.code === 'email_not_confirmed'
+            ? "This account's email isn't verified yet. Open the MyRX app to finish verifying it, then come back."
+            : 'Incorrect password. Try again.',
+        )
+        return
+      }
+      const uid = signin.user.id
+      // THE conversion moment (T234): correct password -> marker A -> AC.
+      // Guarded so a C account can never be downgraded from this path.
+      await supabase.from('profiles')
+        .update({ account_marker: 'AC' })
+        .eq('id', uid)
+        .neq('account_marker', 'C')
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('full_name, phone, phone_verified_at, avatar_url, account_marker')
+        .eq('id', uid)
+        .maybeSingle()
+      onAthleteConverted({ user: signin.user, profile: prof })
+    } catch {
+      setError('Something went wrong. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const errorBox = error ? (
+    <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+      <span>{error}</span>
+    </div>
+  ) : null
+
+  if (phase === 'coach') {
+    return (
+      <>
+        <Heading
+          eyebrow="Account found"
+          title="You already have a coach account"
+          subtitle="Sign in and we'll take you right back to where you left off — your signup if it's unfinished, or your portal if you're already set up."
+        />
+        <div className="mt-8 space-y-4">
+          <div className="rounded-xl border border-border bg-card px-4 py-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Account</p>
+            <p className="text-base font-medium text-foreground break-all">{data.email}</p>
+          </div>
+          <PrimaryButton
+            onClick={() => {
+              const qs = new URLSearchParams({ mode: 'signin', email: data.email || '' })
+              window.location.href = `/auth?${qs.toString()}`
+            }}
+          >
+            Sign in to continue
+          </PrimaryButton>
+          <SecondaryButton onClick={() => { setPhase('email'); setError(null); patch({ email: '' }) }}>
+            Use a different email
+          </SecondaryButton>
+        </div>
+      </>
+    )
+  }
+
+  if (phase === 'confirm') {
+    return (
+      <>
+        <Heading
+          eyebrow="Account found"
+          title="You already have an athlete account"
+          subtitle="Want to continue signing up as a coach? Your athlete profile, training history, and data all stay exactly as they are — coaching gets added on top."
+        />
+        <div className="mt-8 space-y-4">
+          <div className="rounded-xl border border-border bg-card px-4 py-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Account</p>
+            <p className="text-base font-medium text-foreground break-all">{data.email}</p>
+          </div>
+          <PrimaryButton onClick={() => { setError(null); setPhase('verify') }}>
+            Yes, continue as a coach
+          </PrimaryButton>
+          <SecondaryButton onClick={() => { setPhase('email'); setError(null); setPw(''); patch({ email: '' }) }}>
+            No, use a different email
+          </SecondaryButton>
+        </div>
+      </>
+    )
+  }
+
+  if (phase === 'verify') {
+    return (
+      <>
+        <Heading
+          eyebrow="Confirm it's you"
+          title="Enter your password"
+          subtitle={`Sign in as ${data.email} to continue your coach signup.`}
+        />
+        <div className="mt-8 space-y-4">
+          <div className="relative">
+            <TextInput
+              type={showPw ? 'text' : 'password'}
+              value={pw}
+              onChange={v => { setPw(v); if (error) setError(null) }}
+              autoFocus
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPw(s => !s)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label={showPw ? 'Hide password' : 'Show password'}
+            >
+              {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+          {errorBox}
+          <PrimaryButton onClick={handleVerifyPassword} disabled={!pw || busy}>
+            {busy ? 'Checking…' : 'Continue as a coach'}
+          </PrimaryButton>
+          <SecondaryButton onClick={() => { setPhase('confirm'); setPw(''); setError(null) }}>
+            Back
+          </SecondaryButton>
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
       <Heading eyebrow="Save your profile" title="What's your email?" />
@@ -368,11 +546,14 @@ function EmailScreen({ data, patch, next }) {
         <TextInput
           type="email"
           value={data.email}
-          onChange={v => patch({ email: v })}
+          onChange={v => { patch({ email: v }); if (error) setError(null) }}
           autoFocus
           autoComplete="email"
         />
-        <PrimaryButton onClick={next}>Continue</PrimaryButton>
+        {errorBox}
+        <PrimaryButton onClick={handleContinue} disabled={busy}>
+          {busy ? 'Checking…' : 'Continue'}
+        </PrimaryButton>
       </div>
     </>
   )
@@ -2607,6 +2788,13 @@ export default function CoachSignup() {
     if (stepName === 'email-otp') {
       return Boolean(data.verifiedEmail) && data.email === data.verifiedEmail
     }
+    if (stepName === 'password') {
+      // T234: once the email is verified the account exists with a live
+      // password — the create-password step is meaningless (converted
+      // athletes especially must never be asked to "pick a password").
+      // Editing the email un-verifies it and makes this step visitable.
+      return Boolean(data.verifiedEmail) && data.email === data.verifiedEmail
+    }
     if (stepName === 'phone-otp') {
       return Boolean(data.verifiedPhone) && data.phone === data.verifiedPhone
     }
@@ -2646,6 +2834,33 @@ export default function CoachSignup() {
     )
   }
 
+  // T234: an existing athlete just confirmed their password on the email
+  // step (EmailScreen 'verify' phase) — they're signed in and marked AC.
+  // Prefill everything their athlete account already validated and jump
+  // PAST it: name -> phone -> phone-otp in completeness order, or straight
+  // to 'plan' when the athlete profile is complete. Back-nav still reaches
+  // the prefilled screens for edits (and skips the create-password + OTP
+  // steps via shouldSkip, since verifiedEmail / verifiedPhone now match).
+  function handleAthleteConverted({ user: u, profile: prof }) {
+    const [acFirst, ...acRest] = (prof?.full_name || '').split(' ')
+    setData(prev => ({
+      ...prev,
+      email:         u?.email || prev.email,
+      verifiedEmail: u?.email || prev.email,
+      password:      '',
+      firstName:     acFirst || prev.firstName,
+      lastName:      acRest.join(' ') || prev.lastName,
+      phone:         prof?.phone || prev.phone,
+      verifiedPhone: prof?.phone_verified_at ? (prof?.phone || null) : null,
+    }))
+    const targetKey = !prof?.full_name ? 'name'
+      : !prof?.phone ? 'phone'
+      : !prof?.phone_verified_at ? 'phone-otp'
+      : 'plan'
+    const idx = SCREENS_FRESH.indexOf(targetKey)
+    setStep(idx >= 0 ? idx : 0)
+  }
+
   function renderScreen() {
     const sp = { data, patch, next }
     switch (key) {
@@ -2659,7 +2874,7 @@ export default function CoachSignup() {
       case 'height':          return <HeightScreen {...sp} />
       case 'weight':          return <WeightScreen {...sp} />
       case 'promise':         return <PromiseScreen next={next} />
-      case 'email':           return <EmailScreen {...sp} />
+      case 'email':           return <EmailScreen {...sp} onAthleteConverted={handleAthleteConverted} />
       case 'password':        return <PasswordScreen {...sp} back={back} />
       case 'email-otp':       return <OTPScreen {...sp} kind="email" />
       case 'name':            return <NameScreen {...sp} />

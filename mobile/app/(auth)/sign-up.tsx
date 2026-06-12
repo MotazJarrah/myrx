@@ -3039,6 +3039,22 @@ export default function SignUpJourney() {
       return
     }
 
+    // T234: coach-journey account (marker 'C', or an 'AC' conversion whose
+    // athlete side was never completed) with no finished athlete
+    // onboarding. There is no athlete journey to resume for them — their
+    // signup lives at coach.myrxfit.com, and their signup_checkpoint may
+    // hold coach-only values ('plan' / 'stripe') that CHECKPOINT_RANK
+    // can't interpret. Route to the coach-pending screen: finish on the
+    // web, or switch to an athlete account (marker -> 'A' + resume here).
+    // A COMPLETE athlete converting (AC + onboarded) hits the dashboard
+    // fast-path above and never reaches this.
+    const accountMarker = profile?.account_marker
+    if (user && (accountMarker === 'C' || accountMarker === 'AC') && !profile?.onboarded_at) {
+      router.replace('/(auth)/coach-pending' as any)
+      setHydrated(true)
+      return
+    }
+
     // Email-unconfirmed handoff: signIn failed because the user's
     // email isn't yet verified. Two sub-cases based on whether the
     // email was JUST confirmed elsewhere (e.g. user tapped magic
