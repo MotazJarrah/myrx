@@ -20,29 +20,39 @@ const ACTIVE_COACH_STATES = new Set(['active', 'trialing', 'past_due'])
 
 // Where a signed-in user belongs, by account_marker + host:
 //
+//   ANY HOST
+//     admin (is_superuser)               -> /admin/overview
+//       The /admin/*? ProtectedLayout route is mounted OUTSIDE the host
+//       conditional, so the admin portal works on coach.myrxfit.com too.
+//       An admin is an admin everywhere — never default them into the
+//       coach portal (they can still navigate to /portal manually to
+//       preview it). Regression fixed June 12 2026: the first cut of this
+//       resolver sent coach-host admins to /portal, so the admin account
+//       signing in on coach.myrxfit.com landed in the coach portal.
+//
 //   COACH HOST (coach.myrxfit.com)
-//     settled coach / admin preview     -> /portal
+//     settled coach                      -> /portal
 //     C or AC, signup not finished       -> /signup  (resume coach signup)
 //     A (athlete signed in here)         -> /app     (Download the app)
 //
 //   MAIN HOST (myrxfit.com)
-//     admin                              -> /admin/overview
 //     everyone else (athletes, coaches)  -> /app     (Download the app)
 //
 // A null/loading profile resolves to the athlete default (/app) — safe, and
 // callers that care about the load race (RoleRouter) wait for the profile
 // before calling this.
 export function roleHomePath(profile) {
+  if (profile?.is_superuser) return '/admin/overview'
+
   const marker = profile?.account_marker || 'A'
   const settledCoach = Boolean(profile?.is_coach)
     || ACTIVE_COACH_STATES.has(profile?.coach_subscription_status || '')
 
   if (isCoachHost()) {
-    if (profile?.is_superuser || settledCoach) return '/portal'
-    if (marker === 'C' || marker === 'AC')     return '/signup'
+    if (settledCoach)                      return '/portal'
+    if (marker === 'C' || marker === 'AC') return '/signup'
     return '/app'
   }
 
-  if (profile?.is_superuser) return '/admin/overview'
   return '/app'
 }
