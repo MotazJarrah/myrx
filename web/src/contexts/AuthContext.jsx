@@ -32,17 +32,46 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // Initial session check
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       const sessionUser = session?.user ?? null
-      if (sessionUser) {
-        setUser(sessionUser)
-        fetchProfile(sessionUser.id).finally(() => setLoading(false))
-      } else {
+      if (!sessionUser) {
         setUser(null)
         setProfile(null)
         setProfileLoading(false)
         setLoading(false)
+        return
       }
+      // Validate the cached session against GoTrue before trusting it.
+      // getSession() only reads the JWT from localStorage — it returns a
+      // "valid" session even for a user that was hard-deleted server-side
+      // (e.g. an admin Wipe-out while this browser was logged in as that
+      // account). getUser() round-trips to the auth server; a deleted /
+      // invalid user comes back 401/403. We tear the dead session down so
+      // the app lands on sign-in instead of BLACK-SCREENING on a null
+      // profile (the wiped-account bug, T226). A NETWORK error must NOT log
+      // the user out — only a real auth status does. Mirrors mobile
+      // AuthContext.tsx's deleted-user detection.
+      let liveUser = sessionUser
+      try {
+        const { data: { user: validated }, error: userErr } = await supabase.auth.getUser()
+        if (userErr) {
+          if (userErr.status === 401 || userErr.status === 403) {
+            await supabase.auth.signOut().catch(() => {})
+            setUser(null)
+            setProfile(null)
+            setProfileLoading(false)
+            setLoading(false)
+            return
+          }
+          // transient / offline — keep the cached session and proceed
+        } else if (validated) {
+          liveUser = validated
+        }
+      } catch {
+        // network throw — keep the cached session, proceed optimistically
+      }
+      setUser(liveUser)
+      fetchProfile(liveUser.id).finally(() => setLoading(false))
     })
 
     // Subsequent auth state changes
