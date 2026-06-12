@@ -40,7 +40,7 @@ import {
   ChevronLeft, ChevronRight, Check, Loader2, Camera,
   X as XIcon, Eye, EyeOff, Sparkles, Lock, CreditCard,
   Mars, Venus, Transgender, HelpCircle, Gift,
-  Minus, Plus, Dumbbell, User as UserIcon, AlertCircle,
+  Minus, Plus, Dumbbell, User as UserIcon, Users, AlertCircle,
 } from 'lucide-react'
 import { passwordMeetsRequirements } from '../../lib/passwordRules'
 import { PasswordRequirements } from '../../components/PasswordRequirements'
@@ -2014,7 +2014,10 @@ function PlanScreen({ data, patch, next }) {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{t.cap}</p>
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <Users className="h-4 w-4 shrink-0 text-primary" />
+                    <p className="text-sm font-semibold text-foreground">{t.cap}</p>
+                  </div>
                   <div className="mt-2 flex items-baseline gap-1.5">
                     <span className="text-2xl font-bold tabular-nums text-foreground">
                       ${isAnnual ? t.annual : t.monthly}

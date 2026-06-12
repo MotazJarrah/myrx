@@ -18,7 +18,7 @@
 
 import { useState } from 'react'
 import { Link } from 'wouter'
-import { ArrowRight, Check, ChevronDown, Sparkles, Menu, X } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, Sparkles, Menu, Users, X } from 'lucide-react'
 import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
 
 // Reuse the same header pattern as ForCoaches — extracting to a shared
@@ -248,7 +248,10 @@ export default function CoachPricing() {
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-muted-foreground mt-1">{t.cap}</p>
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <Users className="h-4 w-4 shrink-0 text-primary" />
+                      <p className="text-sm font-semibold text-foreground">{t.cap}</p>
+                    </div>
 
                     {/* Price */}
                     <div className="mt-5 space-y-1">
