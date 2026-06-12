@@ -2356,7 +2356,7 @@ export default function CoachSignup() {
       try {
         const { data: p } = await supabase
           .from('profiles')
-          .select('is_coach, is_superuser, coach_subscription_status, coach_stripe_customer_id, full_name, phone, phone_verified_at, avatar_url')
+          .select('is_coach, is_superuser, coach_subscription_status, coach_stripe_customer_id, full_name, phone, phone_verified_at, avatar_url, signup_checkpoint')
           .eq('id', user.id)
           .maybeSingle()
         profile = p
@@ -2413,6 +2413,33 @@ export default function CoachSignup() {
             : (storedFresh.data?.verifiedPhone || null),
         }))
         setStep(Math.min(storedFresh.step, SCREENS_FRESH.length - 1))
+        setMode('fresh')
+        return
+      }
+
+      // Durable resume (T231): if the user reached the plan/checkout stage in a
+      // PRIOR session, profiles.signup_checkpoint is stamped 'plan'/'stripe'.
+      // Bring them straight back to the plan step even when sessionStorage is
+      // gone (tab closed) or was scrambled -- data collection is done + they've
+      // seen the pitch, so the only thing left is pick a tier + pay. (The
+      // sessionStorage early-resume above is the precise within-session signal;
+      // this is the durable cross-session fallback.)
+      if (profile?.signup_checkpoint === 'plan' || profile?.signup_checkpoint === 'stripe') {
+        if (cancelled) return
+        const cpPlanIdx = SCREENS_FRESH.indexOf('plan')
+        const [cpFirst, ...cpRest] = (profile?.full_name || '').split(' ')
+        setData(prev => ({
+          ...prev,
+          ...(readStoredState()?.data || {}),
+          email:         user.email || prev.email,
+          firstName:     cpFirst || prev.firstName,
+          lastName:      cpRest.join(' ') || prev.lastName,
+          phone:         profile?.phone || prev.phone,
+          tier:          initialTier,
+          verifiedEmail: user.email || null,
+          verifiedPhone: profile?.phone_verified_at ? profile.phone : null,
+        }))
+        setStep(cpPlanIdx >= 0 ? cpPlanIdx : 0)
         setMode('fresh')
         return
       }
@@ -2527,6 +2554,26 @@ export default function CoachSignup() {
     if (mode === 'loading') return
     saveStoredState(step, mode, data)
   }, [mode, step, data])
+
+  // Durable signup resume (T231): once a signed-in user reaches the plan /
+  // checkout stage, stamp it on their PROFILE so a later visit -- even after
+  // closing the tab (which wipes sessionStorage) -- brings them back to the
+  // plan step instead of the welcome beginning. Best-effort, fire-and-forget;
+  // resolves the live user inside the effect so it doesn't depend on a
+  // component-level user binding.
+  useEffect(() => {
+    if (mode === 'loading') return
+    const k = SCREENS[step]
+    if (k !== 'plan' && k !== 'stripe') return
+    let cancelled = false
+    supabase.auth.getUser().then(({ data: { user: u } }) => {
+      if (cancelled || !u?.id) return
+      supabase.from('profiles')
+        .upsert({ id: u.id, auth_user_id: u.id, signup_checkpoint: k }, { onConflict: 'id' })
+        .then(() => {}, () => {})
+    })
+    return () => { cancelled = true }
+  }, [mode, step])
 
   function patch(p) { setData(prev => ({ ...prev, ...p })) }
   // Skip-OTP-when-verified navigation.
