@@ -23,10 +23,10 @@
 import { useState } from 'react'
 import { Link } from 'wouter'
 import {
-  ArrowRight, Check, ChevronDown, MessageCircle, TrendingUp,
+  ArrowRight, Check, ChevronDown, MessageCircle, TrendingUp, Menu, X,
 } from 'lucide-react'
 import { useTheme } from '../contexts/ThemeContext'
-import { COACH_TIERS, COACH_FEATURES, renewalAnnual } from '../lib/coachPlan'
+import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
 
 // ── Mock client roster used across all 3 hero mockups ──────────────────
 // Keeping the same 4 clients across mockups makes the page feel like
@@ -79,34 +79,58 @@ const STATUS_COLOR = {
 // ── Header ──────────────────────────────────────────────────────────────
 
 function Header() {
+  const [menuOpen, setMenuOpen] = useState(false)
+  // On the coach surface the user is already in the coach context, so
+  // "For Coaches" would be redundant — we show "For Athletes" instead.
+  // T199: it's a real <a> to https://myrxfit.com (NOT a wouter <Link
+  // href="/">) because on coach.myrxfit.com "/" host-resolves to this same
+  // coach landing; only a full cross-domain navigation reaches the athlete site.
+  const navLinkCls =
+    'rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
   return (
-    <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10 border-b border-border/40">
-      <Link href="/" className="flex items-center gap-2">
-        <img src="/myrx-wordmark-dark.png" alt="MyRX" className="h-7" />
+    <header className="relative z-30 flex h-16 items-center justify-between px-6 md:px-10 border-b border-border/40">
+      <Link href="/" className="flex items-center gap-2 shrink-0">
+        <img src="/myrx-wordmark-dark.png" alt="MyRX" className="h-7 w-auto" />
       </Link>
-      <nav className="flex items-center gap-1 sm:gap-2 text-sm">
-        {/* On /for-coaches the user is already in the coach context;
-            "For Coaches" would be redundant. Swap it for "For Athletes"
-            which routes back to the end-user landing — gives visitors
-            a clear exit if they landed here by mistake or want to see
-            the client side. */}
-        <Link href="/"
-          className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-          For Athletes
-        </Link>
-        <Link href="/coach/pricing"
-          className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-          Pricing
-        </Link>
-        <Link href="/auth?mode=signin"
-          className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors">
-          Sign in
-        </Link>
-        <Link href="/coach/signup"
+
+      {/* Desktop nav (md and up) */}
+      <nav className="hidden md:flex items-center gap-1 sm:gap-2 text-sm">
+        <a href="https://myrxfit.com" className={navLinkCls}>For Athletes</a>
+        <Link href="/pricing" className={navLinkCls}>Pricing</Link>
+        <Link href="/auth?mode=signin" className={navLinkCls}>Sign in</Link>
+        <Link href="/signup"
           className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
           Start free trial
         </Link>
       </nav>
+
+      {/* Mobile (below md): one primary CTA + a hamburger */}
+      <div className="flex md:hidden items-center gap-2">
+        <Link href="/signup"
+          className="rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
+          Start trial
+        </Link>
+        <button
+          type="button"
+          onClick={() => setMenuOpen(v => !v)}
+          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={menuOpen}
+          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+      </div>
+
+      {/* Mobile dropdown — the links that don't fit in the header */}
+      {menuOpen && (
+        <div className="absolute left-0 right-0 top-full z-30 border-b border-border/40 bg-background shadow-lg md:hidden">
+          <nav className="flex flex-col gap-0.5 px-4 py-3 text-sm">
+            <a href="https://myrxfit.com" className={navLinkCls}>For Athletes</a>
+            <Link href="/pricing" onClick={() => setMenuOpen(false)} className={navLinkCls}>Pricing</Link>
+            <Link href="/auth?mode=signin" onClick={() => setMenuOpen(false)} className={navLinkCls}>Sign in</Link>
+          </nav>
+        </div>
+      )}
     </header>
   )
 }
@@ -251,14 +275,14 @@ function Hero() {
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <Link
-                href="/coach/signup"
+                href="/signup"
                 className="group inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
               >
-                Start 14-day free trial
+                Start 30-day free trial
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Link>
               <Link
-                href="/coach/pricing"
+                href="/pricing"
                 className="inline-flex items-center rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
               >
                 See pricing
@@ -380,7 +404,7 @@ function PricingTeaser() {
       <div className="mx-auto max-w-6xl">
         <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground mb-3">Pricing</h2>
         <p className="text-base text-muted-foreground max-w-2xl mb-10">
-          Start your 14-day trial. Cancel anytime.
+          Start your 30-day trial. Cancel anytime.
         </p>
         <div className="grid md:grid-cols-3 gap-4">
           {COACH_TIERS.map(t => (
@@ -402,10 +426,10 @@ function PricingTeaser() {
                 <span className="text-sm text-muted-foreground">/ month</span>
               </div>
               <p className="text-[11px] text-muted-foreground tabular-nums">
-                or ${t.annual}/yr (first year), then ${renewalAnnual(t.monthly)}/yr
+                or ${t.annual}/yr (billed yearly)
               </p>
               <Link
-                href={`/coach/signup?tier=${t.id}`}
+                href={`/signup?tier=${t.id}`}
                 className={`mt-4 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold transition-all ${
                   t.recommended
                     ? 'bg-primary text-primary-foreground hover:opacity-90'
@@ -419,7 +443,7 @@ function PricingTeaser() {
           ))}
         </div>
         <div className="mt-6 text-center">
-          <Link href="/coach/pricing" className="text-sm text-primary hover:underline inline-flex items-center gap-1">
+          <Link href="/pricing" className="text-sm text-primary hover:underline inline-flex items-center gap-1">
             Full pricing details <ArrowRight className="h-3 w-3" />
           </Link>
         </div>
@@ -491,10 +515,10 @@ function BottomCTA() {
           <span className="text-primary">one platform.</span>
         </h2>
         <p className="text-base text-muted-foreground">
-          14 days free. Cancel anytime.
+          30 days free. Cancel anytime.
         </p>
         <Link
-          href="/coach/signup"
+          href="/signup"
           className="group inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
         >
           Start 14-day free trial
