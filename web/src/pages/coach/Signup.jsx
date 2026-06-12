@@ -360,26 +360,60 @@ function UnitsScreen({ data, patch, next }) {
   )
 }
 
-function EmailScreen({ data, patch, next, onAthleteConverted }) {
-  // T234 — in-flow account detection at the email step. Phases:
-  //   'email'   — the normal email input.
-  //   'confirm' — the email belongs to an existing ATHLETE account
-  //               (marker A, or AC mid-conversion): "you already have an
-  //               athlete account — continue with coach signup?" Nothing
-  //               in the DB changes on this screen.
-  //   'verify'  — the password check. signInWithPassword must succeed;
-  //               a correct password IS the conversion moment: marker
-  //               A -> AC, profile prefilled, journey jumps past the
-  //               already-validated steps. Wrong password = stay here,
-  //               DB untouched.
-  //   'coach'   — the email belongs to a coach account (marker C):
-  //               point them at sign-in (roleHomePath resumes their
-  //               coach signup or opens their portal).
+function EmailScreen({ data, patch, next, onAthleteConverted, onResumeAtEmailOtp }) {
+  // T234/T237 — in-flow account detection at the email step. The email is
+  // THE gate: a signup only ever resumes AFTER the account is proven
+  // (login or OTP), decided here. Phases:
+  //   'email'    — the normal email input.
+  //   'confirm'  — the email belongs to an existing ATHLETE account
+  //                (marker A, or AC mid-conversion): "you already have an
+  //                athlete account — continue with coach signup?" Nothing
+  //                in the DB changes on this screen.
+  //   'verify'   — the password check (confirmed-email accounts only).
+  //                signInWithPassword must succeed; a correct password IS
+  //                the conversion moment: marker A -> AC, profile
+  //                prefilled, journey jumps past the already-validated
+  //                steps. Wrong password = stay here, DB untouched.
+  //   'coach'    — confirmed coach account (marker C): point them at
+  //                sign-in (roleHomePath resumes their coach signup or
+  //                opens their portal).
+  //   'staff'    — admin account (marker D, permanent): always "sign in
+  //                instead". No switch offer, no marker change, ever.
+  //   'deletion' — account inside the 30-day deletion grace window:
+  //                sign in to reactivate first.
+  // UNCONFIRMED accounts (email never verified) can't pass ANY login, so
+  // for them the flow resends the 6-digit code and jumps to the code step
+  // right here — entering the code proves ownership (that's the
+  // validation) and the journey continues in place.
   const [phase, setPhase]   = useState('email')
   const [busy, setBusy]     = useState(false)
   const [error, setError]   = useState(null)
   const [pw, setPw]         = useState('')
   const [showPw, setShowPw] = useState(false)
+  // Last check_account_status result — the 'confirm' phase reads
+  // email_confirmed from it to pick password-verify vs OTP-verify.
+  const [acct, setAcct]     = useState(null)
+
+  // Resend the signup code + jump the journey to the email-otp step.
+  // convert=true marks a pending A->AC stamp that the wrapper applies the
+  // moment OTP verification creates a session (an unconfirmed account has
+  // no auth session, so RLS blocks stamping it any earlier).
+  async function resumeUnconfirmed(convert) {
+    try {
+      const { error: rErr } = await supabase.auth.resend({
+        type:    'signup',
+        email:   (data.email || '').trim(),
+        options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Fsignup` },
+      })
+      patch({
+        pendingResendCooldown: rErr && isRateLimitError(rErr) ? parseRateLimitCooldown(rErr) : 60,
+        ...(convert ? { pendingMarkerAC: true } : {}),
+      })
+    } catch {
+      patch({ pendingResendCooldown: 60, ...(convert ? { pendingMarkerAC: true } : {}) })
+    }
+    onResumeAtEmailOtp()
+  }
 
   async function handleContinue() {
     if (busy) return
@@ -395,7 +429,17 @@ function EmailScreen({ data, patch, next, onAthleteConverted }) {
       // signUp's user_already_exists detection there still catches existing
       // accounts (the pre-T234 fallback interstitial).
       if (rpcErr || !status?.exists) { next(); return }
-      if (status.marker === 'C') { setPhase('coach'); return }
+      setAcct(status)
+      // Decision order (T237):
+      if (status.pending_deletion) { setPhase('deletion'); return }
+      if (status.marker === 'D')   { setPhase('staff');    return }
+      if (status.marker === 'C') {
+        if (status.email_confirmed) { setPhase('coach'); return }
+        // Unconfirmed coach signup — password login is impossible, so
+        // continue their own signup in place via the code step.
+        await resumeUnconfirmed(false)
+        return
+      }
       setPhase('confirm')   // marker A or AC -> athlete-found step
     } catch {
       next()
@@ -423,11 +467,13 @@ function EmailScreen({ data, patch, next, onAthleteConverted }) {
       }
       const uid = signin.user.id
       // THE conversion moment (T234): correct password -> marker A -> AC.
-      // Guarded so a C account can never be downgraded from this path.
+      // eq('A') so only a plain athlete transitions: AC stays AC
+      // (idempotent re-validate), C is untouched, and D is doubly safe
+      // (also pinned by the protect_admin_marker DB trigger).
       await supabase.from('profiles')
         .update({ account_marker: 'AC' })
         .eq('id', uid)
-        .neq('account_marker', 'C')
+        .eq('account_marker', 'A')
       const { data: prof } = await supabase
         .from('profiles')
         .select('full_name, phone, phone_verified_at, avatar_url, account_marker')
@@ -477,6 +523,64 @@ function EmailScreen({ data, patch, next, onAthleteConverted }) {
     )
   }
 
+  if (phase === 'staff') {
+    return (
+      <>
+        <Heading
+          eyebrow="Account found"
+          title="This is a staff account"
+          subtitle="Staff accounts don't go through coach signup. Sign in instead and you'll land in the right place."
+        />
+        <div className="mt-8 space-y-4">
+          <div className="rounded-xl border border-border bg-card px-4 py-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Account</p>
+            <p className="text-base font-medium text-foreground break-all">{data.email}</p>
+          </div>
+          <PrimaryButton
+            onClick={() => {
+              const qs = new URLSearchParams({ mode: 'signin', email: data.email || '' })
+              window.location.href = `/auth?${qs.toString()}`
+            }}
+          >
+            Sign in
+          </PrimaryButton>
+          <SecondaryButton onClick={() => { setPhase('email'); setError(null); patch({ email: '' }) }}>
+            Use a different email
+          </SecondaryButton>
+        </div>
+      </>
+    )
+  }
+
+  if (phase === 'deletion') {
+    return (
+      <>
+        <Heading
+          eyebrow="Account found"
+          title="This account is scheduled for deletion"
+          subtitle="It's inside its deletion grace window, so it can't start a coach signup. Sign in to reactivate it first — then come back here to continue."
+        />
+        <div className="mt-8 space-y-4">
+          <div className="rounded-xl border border-border bg-card px-4 py-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Account</p>
+            <p className="text-base font-medium text-foreground break-all">{data.email}</p>
+          </div>
+          <PrimaryButton
+            onClick={() => {
+              const qs = new URLSearchParams({ mode: 'signin', email: data.email || '' })
+              window.location.href = `/auth?${qs.toString()}`
+            }}
+          >
+            Sign in to reactivate
+          </PrimaryButton>
+          <SecondaryButton onClick={() => { setPhase('email'); setError(null); patch({ email: '' }) }}>
+            Use a different email
+          </SecondaryButton>
+        </div>
+      </>
+    )
+  }
+
   if (phase === 'confirm') {
     return (
       <>
@@ -490,8 +594,24 @@ function EmailScreen({ data, patch, next, onAthleteConverted }) {
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Account</p>
             <p className="text-base font-medium text-foreground break-all">{data.email}</p>
           </div>
-          <PrimaryButton onClick={() => { setError(null); setPhase('verify') }}>
-            Yes, continue as a coach
+          <PrimaryButton
+            disabled={busy}
+            onClick={async () => {
+              if (busy) return
+              setError(null)
+              // Confirmed account -> password is the validation.
+              // Unconfirmed account -> password login is impossible;
+              // the 6-digit code is the validation instead. The A->AC
+              // stamp is deferred until the code creates a session.
+              if (acct && acct.email_confirmed === false) {
+                setBusy(true)
+                try { await resumeUnconfirmed(true) } finally { setBusy(false) }
+                return
+              }
+              setPhase('verify')
+            }}
+          >
+            {busy ? 'One sec…' : 'Yes, continue as a coach'}
           </PrimaryButton>
           <SecondaryButton onClick={() => { setPhase('email'); setError(null); setPw(''); patch({ email: '' }) }}>
             No, use a different email
@@ -2538,16 +2658,16 @@ export default function CoachSignup() {
       } catch { /* fall through to fresh */ }
 
       if (!user) {
-        // Scenarios A, C-pre-signin, J — nobody signed in. Standard
-        // fresh flow, possibly with sessionStorage resume from H.
+        // T237: signed out = ALWAYS a fresh walk from page 1, step 1.
+        // A signup only resumes AFTER the account is proven — the email
+        // step detects existing accounts and routes through sign-in /
+        // the switch ask / OTP. The old scenario-H sessionStorage
+        // restore is GONE: it resurrected stale (even wiped) journeys
+        // (T236's bug) and contradicted the resume-only-after-login
+        // rule. The early demo screens cost ~30s to re-walk; once the
+        // email code lands the user has a session and resumes durably
+        // via the signed-in branches below.
         if (cancelled) return
-        const stored = readStoredState()
-        if (stored && typeof stored.step === 'number' && stored.data) {
-          setData(prev => ({ ...prev, ...stored.data, tier: initialTier }))
-          // Clamp step to fresh-screen length minus 1 in case the
-          // stored step was for a different mode that had more screens.
-          setStep(Math.min(stored.step, SCREENS_FRESH.length - 1))
-        }
         setMode('fresh')
         return
       }
@@ -2787,6 +2907,30 @@ export default function CoachSignup() {
     return () => { cancelled = true }
   }, [mode, step])
 
+  // T237: deferred A->AC stamp for UNCONFIRMED-athlete conversions. The
+  // user said yes to switching on the email step, but their account had
+  // no verified email — no session existed, so the stamp couldn't happen
+  // there (RLS blocks anonymous profile writes). The moment OTP
+  // verification creates the session, this effect applies it. Guarded to
+  // eq('A') so settled markers are never touched (D is additionally
+  // pinned by the protect_admin_marker DB trigger). Idempotent: re-runs
+  // on every step change until the flag clears, then never again.
+  // MUST live up here with the other wrapper effects — hooks below the
+  // mode==='loading' early return crash React the moment loading flips.
+  useEffect(() => {
+    if (!data.pendingMarkerAC) return
+    let cancelled = false
+    supabase.auth.getUser().then(({ data: { user: u } }) => {
+      if (cancelled || !u?.id) return
+      supabase.from('profiles')
+        .update({ account_marker: 'AC' })
+        .eq('id', u.id)
+        .eq('account_marker', 'A')
+        .then(() => { if (!cancelled) setData(prev => ({ ...prev, pendingMarkerAC: false })) }, () => {})
+    })
+    return () => { cancelled = true }
+  }, [step, data.pendingMarkerAC])
+
   function patch(p) { setData(prev => ({ ...prev, ...p })) }
   // Skip-OTP-when-verified navigation.
   //
@@ -2894,7 +3038,7 @@ export default function CoachSignup() {
       case 'height':          return <HeightScreen {...sp} />
       case 'weight':          return <WeightScreen {...sp} />
       case 'promise':         return <PromiseScreen next={next} />
-      case 'email':           return <EmailScreen {...sp} onAthleteConverted={handleAthleteConverted} />
+      case 'email':           return <EmailScreen {...sp} onAthleteConverted={handleAthleteConverted} onResumeAtEmailOtp={() => { const i = SCREENS_FRESH.indexOf('email-otp'); setStep(i >= 0 ? i : 0) }} />
       case 'password':        return <PasswordScreen {...sp} back={back} />
       case 'email-otp':       return <OTPScreen {...sp} kind="email" />
       case 'name':            return <NameScreen {...sp} />

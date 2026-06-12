@@ -300,15 +300,28 @@ This is a top-level architectural decision. Every routing change, signup change,
 
 `profiles.account_marker` is the **single durable signal** for which signup journey an account belongs to and where it routes. It exists because `signup_checkpoint` is ONE shared column used by BOTH the athlete journey (mobile) and the coach journey (web) — without the marker, coach-only checkpoint values (`plan`, `stripe`) leak into the athlete journey's resume logic (whose `CHECKPOINT_RANK` can't interpret them) and vice versa. The marker gates **which platform interprets the checkpoint**.
 
-**Values (CHECK-constrained `A | AC | C`, default `A`), assigned by SIGNUP SOURCE after email validation:**
+**Values (CHECK-constrained `A | AC | C | D`, default `A`), assigned by SIGNUP SOURCE after email validation:**
 
 | Marker | Meaning | Set when |
 |---|---|---|
 | `A` | Athlete | Mobile signup (the column default). Also restored by the mobile "switch to athlete" reversal. |
 | `C` | Coach | Web coach signup with a NEW email — stamped by the `init-profile-checkpoint` edge function the moment the profile row is created. Also the settled end-state: coach `welcome-end` stamps `C`. |
-| `AC` | Athlete converting to coach (reversible) | An existing `A` account enters the web coach signup: in-flow at the email step (correct password = the conversion moment), or `detectFlow` when an already-signed-in `A` user loads `/signup`. |
+| `AC` | Athlete converting to coach (reversible) | An existing `A` account enters the web coach signup: in-flow at the email step (correct password — or, for unconfirmed-email accounts, the email OTP — is the conversion moment), or `detectFlow` when an already-signed-in `A` user loads `/signup`. |
+| `D` | Staff / admin (PERMANENT) | Backfilled for `is_superuser` rows; auto-stamped + pinned by the `protect_admin_marker` BEFORE INSERT/UPDATE trigger on profiles — no writer can ever change a `D` marker, and any superuser row is forced to `D`. Signup always shows "staff account — sign in instead". |
 
-**State machine: `A` and `C` are settled; `AC` is the only transient.** `A → AC` requires a correct password. `AC → C` happens ONLY at coach signup completion (welcome-end, after payment). `AC/C → A` happens ONLY via the mobile coach-pending "Switch to an athlete account" button. A user can bounce between journeys forever — nothing settles until one journey FINISHES, and athlete data is never altered by an unfinished conversion.
+**State machine: `A`, `C`, `D` are settled; `AC` is the only transient.** `A → AC` requires proven ownership (correct password, or email-OTP for unconfirmed accounts — stamped post-session via the `pendingMarkerAC` deferred effect). `AC → C` happens ONLY at coach signup completion (welcome-end, after payment). `AC/C → A` happens ONLY via the mobile coach-pending "Switch to an athlete account" button. `D` never transitions, in or out (DB-trigger-pinned). A user can bounce between journeys forever — nothing settles until one journey FINISHES, and athlete data is never altered by an unfinished conversion.
+
+**Signed-out `/signup` NEVER resumes from sessionStorage (T237 — locked June 12 2026).** A signup resumes ONLY after the account is proven (login or OTP). Signed-out entry = always page 1, step 1; the X exit clears the per-tab journey state AND signs out. The email step is THE gate — full decision matrix per `check_account_status(p_email)` → `{exists, marker, email_confirmed, pending_deletion}`:
+
+| Email status | Email step behaviour |
+|---|---|
+| Not found | Continue signup normally (marker `C` assigned at profile creation). |
+| `pending_deletion` | "Scheduled for deletion — sign in to reactivate first." |
+| Marker `D` | "Staff account — sign in instead." No switch offer, ever. |
+| Marker `C`, confirmed | "You already have a coach account — sign in" (post-login: portal if finished, `/signup` resume if not). |
+| Marker `C`, unconfirmed | Can't log in (password sign-in blocked pre-confirmation) → resend the 6-digit code + jump to the code step in place; verifying continues their signup. |
+| Marker `A`/`AC`, confirmed | "You already have an athlete account — continue as coach?" → Yes → password verify → `A→AC` + prefill + skip validated steps. |
+| Marker `A`/`AC`, unconfirmed | Same ask → Yes → resend code + jump to the code step (OTP = the validation); `A→AC` stamps the moment verification creates the session. |
 
 **Routing (single source of truth: `roleHomePath(profile)` in `web/src/lib/roleRouting.js`):**
 - ANY host: superuser → `/admin/overview` FIRST (the `/admin/*?` ProtectedLayout route is mounted outside the host conditional, so the admin portal works on coach.myrxfit.com too — an admin is an admin everywhere; they can still visit `/portal` manually to preview).

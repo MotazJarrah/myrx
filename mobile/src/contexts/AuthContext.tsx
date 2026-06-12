@@ -214,14 +214,15 @@ interface Profile {
   // Used by the journey's hydration to land a returning user one step
   // past their last completed checkpoint.
   signup_checkpoint: string | null
-  // T234 — durable signup/role marker, set after email validation by the
-  // journey that created the account. 'A' = athlete (mobile signup),
+  // T234/T237 — durable signup/role marker, set after email validation by
+  // the journey that created the account. 'A' = athlete (mobile signup),
   // 'C' = coach (web coach signup), 'AC' = an existing athlete converting
-  // to coach on the web (reversible; settles to 'C' at coach welcome-end).
-  // Mobile reads it to keep coach-journey accounts out of the athlete
-  // journey: marker C/AC with no onboarded_at -> (auth)/coach-pending
-  // ("finish on the web, or switch to an athlete account").
-  account_marker?: 'A' | 'AC' | 'C' | null
+  // to coach on the web (reversible; settles to 'C' at coach welcome-end),
+  // 'D' = staff/admin (permanent — pinned by the protect_admin_marker DB
+  // trigger, never transitions). Mobile reads it to keep coach-journey
+  // accounts out of the athlete journey: marker C/AC with no onboarded_at
+  // -> (auth)/coach-pending ("finish on the web, or switch to athlete").
+  account_marker?: 'A' | 'AC' | 'C' | 'D' | null
   // ── T165: 30-day FullRX reverse trial (athlete B2C) ────────────────
   // Our OWN grant, never a store subscription. Set once at welcome-end
   // (now + 30 days). resolveTier (RadialNav / dashboard) returns fullrx
