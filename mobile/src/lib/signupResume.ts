@@ -42,6 +42,26 @@ export function buildResumeOrder(): string[] {
   ]
 }
 
+// The mobile-only "device-setup tail" — biometric → notifications →
+// welcome-end. These steps request OS permissions (Face ID / fingerprint,
+// push), so a signup that FINISHED in a browser (every web-created coach)
+// never ran them: their signup_checkpoint never reached 'biometric'. On
+// mobile they still owe the tail. Returns true while it's still pending.
+//
+// SHARED source of truth (T258): the sign-up hydration AND the (app) gate
+// both call this, so a session-restored web coach on cold open and a fresh
+// sign-in agree on who owes the tail — and can never disagree and ping-pong.
+// Equivalent to the hydration's old `CHECKPOINT_RANK[cp] < 6` ('biometric')
+// test: any checkpoint before biometric — or an unknown/null one — still owes
+// the tail; biometric / notifications / welcome-end mean it's done (or
+// finishing in-session, which navigates straight to the dashboard).
+const TAIL_DONE_CHECKPOINTS = new Set(['biometric', 'notifications', 'welcome-end'])
+export function needsDeviceSetupTail(
+  profile: { signup_checkpoint?: string | null } | null | undefined,
+): boolean {
+  return !TAIL_DONE_CHECKPOINTS.has(profile?.signup_checkpoint || '')
+}
+
 const CHECKPOINT_NEXT: Record<string, string> = {
   password:      'name',
   otp:           'name',

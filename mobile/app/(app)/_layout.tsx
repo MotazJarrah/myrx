@@ -34,6 +34,7 @@ import ReactivationGate from '../../src/components/ReactivationGate'
 import RadialNav from '../../src/components/RadialNav'
 import { colors, alpha, palette } from '../../src/theme'
 import { isProfileComplete } from '../../src/lib/profile'
+import { needsDeviceSetupTail } from '../../src/lib/signupResume'
 import { shellScrollRef } from '../../src/lib/shellScroll'
 import { ChartTooltipProvider } from '../../src/lib/chartTooltipScope'
 
@@ -277,6 +278,26 @@ export default function AppShellLayout() {
   // identical deletion-grace behaviour.
   if ((profile as any)?.scheduled_for_deletion_at) {
     return <ReactivationGate />
+  }
+
+  // Device-setup tail (T258): a web-created coach finishes signup in a
+  // BROWSER, which can't enroll biometrics or request notification
+  // permission — so on their first MOBILE open the app still owes them that
+  // tail (biometric → notifications → welcome-end). On a fresh sign-in,
+  // sign-in.tsx hands off to /(auth)/sign-up?fromSignIn=1 and the journey
+  // hydration runs it; but a session-restored COLD open lands here straight
+  // from index.tsx and never enters /sign-up, so the tail was silently
+  // skipped (Jun 13 2026 bug: web coach opened mobile → straight to dash; the
+  // tail only showed after a manual sign-out + sign-in). Route them into the
+  // same /sign-up handoff — its hydration fast-path jumps to the biometric
+  // step, sharing needsDeviceSetupTail so the two can't disagree and loop.
+  // The (auth)/_layout onSignUp guard keeps the complete profile ON /sign-up
+  // (no bounce back here), and welcome-end stamps signup_checkpoint
+  // 'welcome-end' + refreshes the profile before navigating, so this stops
+  // firing once the tail is done. Admins (marker D) never owe the athlete
+  // tail, so they're excluded.
+  if (!isAdmin && needsDeviceSetupTail(profile)) {
+    return <Redirect href={'/(auth)/sign-up?fromSignIn=1' as any} />
   }
 
   return (

@@ -53,7 +53,7 @@ import { KeyboardScreen } from '../../src/components/KeyboardScreen'
 import AnimateRise from '../../src/components/AnimateRise'
 import TickerNumber from '../../src/components/TickerNumber'
 import { estimate1RM, projectAllRMs, projectPaces, getNextBarbellLoad } from '../../src/lib/formulas'
-import { deriveResumeStep, buildFreshOrder, buildResumeOrder } from '../../src/lib/signupResume'
+import { deriveResumeStep, buildFreshOrder, buildResumeOrder, needsDeviceSetupTail } from '../../src/lib/signupResume'
 import { isProfileComplete } from '../../src/lib/profile'
 import { openLegalDoc } from '../../src/lib/openLegalDoc'
 import { ImageCropper } from '../../src/components/ImageCropper'
@@ -3024,8 +3024,10 @@ export default function SignUpJourney() {
       // checkpoint 'welcome-end' and skip straight through; the journey's
       // own in-session completion navigates directly and never re-enters
       // this hydration.
-      const cpRank = CHECKPOINT_RANK[profile?.signup_checkpoint || ''] || 0
-      if (cpRank < CHECKPOINT_RANK['biometric']) {
+      // needsDeviceSetupTail is the SHARED test (mirrors CHECKPOINT_RANK < 6,
+      // 'biometric'); the (app) gate uses it too so cold-open + sign-in agree
+      // on who still owes the tail and can never ping-pong (T258).
+      if (needsDeviceSetupTail(profile)) {
         const tailOrder = buildResumeOrder()
         const bioIdx = tailOrder.indexOf('biometric')
         if (bioIdx >= 0) {
