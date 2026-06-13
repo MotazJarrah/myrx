@@ -32,9 +32,8 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withRepeat, withSequence,
   withTiming, withDelay, Easing,
 } from 'react-native-reanimated'
-import Svg, { Defs, RadialGradient, Stop, Rect, Line, G } from 'react-native-svg'
 import { ArrowRight, Dumbbell, BookOpen, MessageCircle } from 'lucide-react-native'
-import { colors, alpha, palette, fonts } from '../../src/theme'
+import { colors, alpha, fonts } from '../../src/theme'
 import AnimateRise from '../../src/components/AnimateRise'
 import Wordmark from '../../src/components/Wordmark'
 import AmbientBackground from '../../src/components/AmbientBackground'
@@ -47,64 +46,6 @@ const AUTO_ADVANCE_MS = 3500
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 
-// ── Backdrop ───────────────────────────────────────────────────────────────
-// Ambient grid (faint vertical + horizontal lines) plus two radial-gradient
-// glow blobs (lime top-left, sky-blue top-right). Static SVG — no need for
-// reanimated, this is a one-shot decorative layer.
-function Backdrop() {
-  const cols = 12
-  const rows = 24
-  const cellW = SCREEN_W / cols
-  const cellH = SCREEN_H / rows
-  return (
-    <Svg
-      width={SCREEN_W}
-      height={SCREEN_H}
-      style={StyleSheet.absoluteFill}
-      pointerEvents="none"
-    >
-      <Defs>
-        <RadialGradient id="lime" cx="20%" cy="10%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor={colors.primary} stopOpacity="0.35" />
-          <Stop offset="1" stopColor={colors.primary} stopOpacity="0" />
-        </RadialGradient>
-        <RadialGradient id="sky" cx="85%" cy="20%" rx="55%" ry="55%">
-          <Stop offset="0" stopColor={palette.blue[500]} stopOpacity="0.20" />
-          <Stop offset="1" stopColor={palette.blue[500]} stopOpacity="0" />
-        </RadialGradient>
-      </Defs>
-
-      <Rect x="0" y="0" width={SCREEN_W} height={SCREEN_H} fill="url(#lime)" />
-      <Rect x="0" y="0" width={SCREEN_W} height={SCREEN_H} fill="url(#sky)" />
-
-      {/* Faint grid */}
-      <G opacity={0.08}>
-        {Array.from({ length: cols + 1 }).map((_, i) => (
-          <Line
-            key={`v${i}`}
-            x1={i * cellW}
-            y1={0}
-            x2={i * cellW}
-            y2={SCREEN_H}
-            stroke={colors.foreground}
-            strokeWidth={0.5}
-          />
-        ))}
-        {Array.from({ length: rows + 1 }).map((_, i) => (
-          <Line
-            key={`h${i}`}
-            x1={0}
-            y1={i * cellH}
-            x2={SCREEN_W}
-            y2={i * cellH}
-            stroke={colors.foreground}
-            strokeWidth={0.5}
-          />
-        ))}
-      </G>
-    </Svg>
-  )
-}
 
 // ── Pulsing badge dot ──────────────────────────────────────────────────────
 // Mirrors web Landing's `<span className="animate-ping" />` — an outer

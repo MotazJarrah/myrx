@@ -25,12 +25,10 @@
 import { useEffect, useState } from 'react'
 import {
   View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator,
-  Dimensions,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { KeyboardScreen } from '../../src/components/KeyboardScreen'
 import { router } from 'expo-router'
-import Svg, { Defs, RadialGradient, Stop, Rect, Line, G } from 'react-native-svg'
 import AmbientBackground from '../../src/components/AmbientBackground'
 import { ChevronLeft, AlertCircle, Check, RefreshCw } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
@@ -39,47 +37,7 @@ import { PasswordStrengthMeter, PasswordRequirements, passwordMeetsRequirements 
 import { OTPInput } from '../../src/components/OTPInput'
 import { StepDots } from '../../src/components/StepDots'
 import AnimateRise from '../../src/components/AnimateRise'
-import { colors, alpha, palette } from '../../src/theme'
-
-const { width: SCR_W, height: SCR_H } = Dimensions.get('window')
-
-// Same backdrop as welcome.tsx + sign-in.tsx — grid + lime/sky-blue
-// radial gradient glow. Reserved for top-level entry screens.
-function Backdrop() {
-  const cols = 12, rows = 24
-  const cellW = SCR_W / cols, cellH = SCR_H / rows
-  return (
-    <Svg
-      width={SCR_W}
-      height={SCR_H}
-      style={StyleSheet.absoluteFill}
-      pointerEvents="none"
-    >
-      {/* Same brighter opacities as sign-in.tsx — auth screens are
-          sparse and benefit from a more visible backdrop. */}
-      <Defs>
-        <RadialGradient id="lime" cx="20%" cy="10%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor={colors.primary} stopOpacity="0.45" />
-          <Stop offset="1" stopColor={colors.primary} stopOpacity="0" />
-        </RadialGradient>
-        <RadialGradient id="sky" cx="85%" cy="20%" rx="55%" ry="55%">
-          <Stop offset="0" stopColor={palette.blue[500]} stopOpacity="0.30" />
-          <Stop offset="1" stopColor={palette.blue[500]} stopOpacity="0" />
-        </RadialGradient>
-      </Defs>
-      <Rect x="0" y="0" width={SCR_W} height={SCR_H} fill="url(#lime)" />
-      <Rect x="0" y="0" width={SCR_W} height={SCR_H} fill="url(#sky)" />
-      <G opacity={0.18}>
-        {Array.from({ length: cols + 1 }).map((_, i) => (
-          <Line key={`v${i}`} x1={i * cellW} y1={0} x2={i * cellW} y2={SCR_H} stroke={colors.foreground} strokeWidth={0.5} />
-        ))}
-        {Array.from({ length: rows + 1 }).map((_, i) => (
-          <Line key={`h${i}`} x1={0} y1={i * cellH} x2={SCR_W} y2={i * cellH} stroke={colors.foreground} strokeWidth={0.5} />
-        ))}
-      </G>
-    </Svg>
-  )
-}
+import { colors, alpha } from '../../src/theme'
 
 const TOTAL_STEPS = 3
 

@@ -13,7 +13,7 @@
  * - Forgot-password tap → navigates to /forgot-password (separate screen).
  *
  * Visual chrome matches the welcome carousel + signup journey:
- * - Full Backdrop (grid + lime/sky-blue radial gradient glow).
+ * - Shared <AmbientBackground /> (two lime brand glows).
  * - Header with logo + back chevron to welcome.
  * - Heading cluster: eyebrow ("Welcome back") + title + subtitle —
  *   same structure as every signup screen's <Heading /> component.
@@ -24,11 +24,9 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator,
-  Dimensions, Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, Link, useLocalSearchParams } from 'expo-router'
-import Svg, { Defs, RadialGradient, Stop, Rect, Line, G } from 'react-native-svg'
 import * as SecureStore from 'expo-secure-store'
 import { Fingerprint, AlertCircle, ChevronLeft } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
@@ -39,71 +37,7 @@ import Wordmark from '../../src/components/Wordmark'
 import AmbientBackground from '../../src/components/AmbientBackground'
 import { KeyboardScreen } from '../../src/components/KeyboardScreen'
 import { openLegalDoc } from '../../src/lib/openLegalDoc'
-import { colors, alpha, palette } from '../../src/theme'
-
-const { width: SCR_W, height: SCR_H } = Dimensions.get('window')
-
-// Full backdrop matching welcome.tsx — ambient grid at low opacity
-// PLUS the lime/sky-blue radial gradient glow blobs. This is the
-// "brand moment" backdrop reserved for top-level entry screens
-// (welcome, sign-in, forgot-password). The signup journey
-// intentionally drops the glow blobs so the multi-step flow feels
-// utilitarian rather than marketing.
-function Backdrop() {
-  const cols = 12
-  const rows = 24
-  const cellW = SCR_W / cols
-  const cellH = SCR_H / rows
-  return (
-    <Svg
-      width={SCR_W}
-      height={SCR_H}
-      style={StyleSheet.absoluteFill}
-      pointerEvents="none"
-    >
-      {/* Sign-in is a single-purpose entry screen — small form
-          centered on a large empty canvas. The welcome carousel's
-          opacities (lime 0.35 / sky 0.20 / grid 0.08) leave too much
-          dead black space here, so we bump them: lime 0.45, sky 0.30,
-          grid 0.18. Still a "moody dark" backdrop — not bright —
-          but the brand glow + grid are visible. Same Backdrop
-          shape lives on welcome.tsx with the original opacities;
-          we deliberately diverge here. */}
-      <Defs>
-        <RadialGradient id="lime" cx="20%" cy="10%" rx="60%" ry="60%">
-          <Stop offset="0" stopColor={colors.primary} stopOpacity="0.45" />
-          <Stop offset="1" stopColor={colors.primary} stopOpacity="0" />
-        </RadialGradient>
-        <RadialGradient id="sky" cx="85%" cy="20%" rx="55%" ry="55%">
-          <Stop offset="0" stopColor={palette.blue[500]} stopOpacity="0.30" />
-          <Stop offset="1" stopColor={palette.blue[500]} stopOpacity="0" />
-        </RadialGradient>
-      </Defs>
-      <Rect x="0" y="0" width={SCR_W} height={SCR_H} fill="url(#lime)" />
-      <Rect x="0" y="0" width={SCR_W} height={SCR_H} fill="url(#sky)" />
-      <G opacity={0.18}>
-        {Array.from({ length: cols + 1 }).map((_, i) => (
-          <Line
-            key={`v${i}`}
-            x1={i * cellW} y1={0}
-            x2={i * cellW} y2={SCR_H}
-            stroke={colors.foreground}
-            strokeWidth={0.5}
-          />
-        ))}
-        {Array.from({ length: rows + 1 }).map((_, i) => (
-          <Line
-            key={`h${i}`}
-            x1={0}     y1={i * cellH}
-            x2={SCR_W} y2={i * cellH}
-            stroke={colors.foreground}
-            strokeWidth={0.5}
-          />
-        ))}
-      </G>
-    </Svg>
-  )
-}
+import { colors, alpha } from '../../src/theme'
 
 export default function SignIn() {
   const {

@@ -23,10 +23,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, TextInput, Pressable, StyleSheet, ActivityIndicator,
-  Image, ScrollView, Platform, Dimensions,
+  Image, ScrollView, Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import Svg, { Line, G } from 'react-native-svg'
 import AmbientBackground from '../../src/components/AmbientBackground'
 import { router, Link, useLocalSearchParams } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
@@ -60,46 +59,6 @@ import { openLegalDoc } from '../../src/lib/openLegalDoc'
 import { ImageCropper } from '../../src/components/ImageCropper'
 import { colors, alpha, palette, withAlpha, fonts } from '../../src/theme'
 
-// ── Backdrop ─────────────────────────────────────────────────────────
-// Subtle ambient grid that gives the dark background a "lived-in" texture
-// so the screen doesn't feel like a flat black void. Matches the welcome
-// carousel's grid pattern but DROPS the radial-gradient glow blobs (those
-// are reserved for the welcome screen as a brand moment) and runs the
-// grid lines at lower opacity (0.04 vs 0.08) — present but unobtrusive.
-const { width: SCR_W, height: SCR_H } = Dimensions.get('window')
-function SignupBackdrop() {
-  const cols = 12, rows = 24
-  const cellW = SCR_W / cols, cellH = SCR_H / rows
-  return (
-    <Svg
-      width={SCR_W}
-      height={SCR_H}
-      style={StyleSheet.absoluteFill}
-      pointerEvents="none"
-    >
-      <G opacity={0.04}>
-        {Array.from({ length: cols + 1 }).map((_, i) => (
-          <Line
-            key={`v${i}`}
-            x1={i * cellW} y1={0}
-            x2={i * cellW} y2={SCR_H}
-            stroke={colors.foreground}
-            strokeWidth={0.5}
-          />
-        ))}
-        {Array.from({ length: rows + 1 }).map((_, i) => (
-          <Line
-            key={`h${i}`}
-            x1={0}      y1={i * cellH}
-            x2={SCR_W}  y2={i * cellH}
-            stroke={colors.foreground}
-            strokeWidth={0.5}
-          />
-        ))}
-      </G>
-    </Svg>
-  )
-}
 
 // ── Static catalogs ──────────────────────────────────────────────────
 // 4-option identity grid (locked May 25 2026). Replaces the older
