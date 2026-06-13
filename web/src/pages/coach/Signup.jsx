@@ -3111,7 +3111,12 @@ export default function CoachSignup() {
             no boxes/borders. Hidden on welcome + welcome-end (those
             are full-bleed hero screens). */}
         {!isFullBleed && (
-          <div className="mb-8 flex items-center gap-4">
+          /* pr-12 below sm: the exit X is fixed to the viewport's top-right
+             (absolute right-4, 36px wide). On phone widths the content
+             column spans the full viewport, so without the padding the
+             progress % renders underneath the X. From sm up the centered
+             max-w-lg column clears it naturally. (T239) */
+          <div className="mb-8 flex items-center gap-4 pr-12 sm:pr-0">
             <button onClick={back} disabled={isFirst}
               className="flex h-10 w-10 items-center justify-center -ml-2 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed shrink-0">
               <ChevronLeft className="h-5 w-5" />

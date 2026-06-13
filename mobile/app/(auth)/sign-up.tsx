@@ -3249,6 +3249,17 @@ export default function SignUpJourney() {
         && (data.email || '').trim().toLowerCase()
           === (user.email || '').trim().toLowerCase()
     }
+    if (stepKey === 'password') {
+      // T238: once the email is verified the account exists with a live
+      // password — re-showing "pick a password" on back-nav is
+      // meaningless and reads as a bug. Same trigger condition as the
+      // 'otp' skip below: editing the email on the email screen breaks
+      // the match and re-arms BOTH steps (new email = new signUp).
+      // Mirrors web coach signup's shouldSkip('password') (T234).
+      return !!user?.email_confirmed_at
+        && (data.email || '').trim().toLowerCase()
+          === (user.email || '').trim().toLowerCase()
+    }
     if (stepKey === 'otp') {
       return !!user?.email_confirmed_at
         && (data.email || '').trim().toLowerCase()
