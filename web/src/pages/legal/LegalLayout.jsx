@@ -21,6 +21,7 @@
 import { createContext, useContext } from 'react'
 import { Link } from 'wouter'
 import Wordmark from '../../components/Wordmark'
+import PageShell from '../../components/PageShell'
 
 // When true (provided by the admin Legal library tab), LegalLayout renders ONLY
 // a compact title + effective-date + prose block — no ambient backdrop, logo
@@ -66,14 +67,7 @@ export default function LegalLayout({ title, effectiveDate, children }) {
   }
 
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
-      <div className="pointer-events-none absolute inset-0 ambient-grid opacity-50" aria-hidden />
-      <div
-        className="pointer-events-none absolute left-1/2 top-0 h-[500px] w-[800px] -translate-x-1/2 opacity-30 blur-3xl"
-        style={{ background: 'radial-gradient(ellipse, hsl(var(--primary) / 0.18), transparent 70%)' }}
-        aria-hidden
-      />
-
+    <PageShell>
       <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
         <Link href="/"><Logo /></Link>
       </header>
@@ -90,20 +84,11 @@ export default function LegalLayout({ title, effectiveDate, children }) {
 
         <hr className="my-12 border-border" />
 
-        <footer className="space-y-4 text-xs text-muted-foreground">
-          <p>
-            MyRX is operated by Northern Princess LLC, a Michigan limited liability company.
-            Questions? Email <a href="mailto:privacy@myrxfit.com" className="text-primary underline underline-offset-4">privacy@myrxfit.com</a>.
-          </p>
-          <nav className="flex flex-wrap gap-x-4 gap-y-2">
-            {FOOTER_LINKS.map(l => (
-              <Link key={l.href} href={l.href} className="text-foreground/80 hover:text-foreground transition-colors">
-                {l.label}
-              </Link>
-            ))}
-          </nav>
-        </footer>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          MyRX is operated by Northern Princess LLC, a Michigan limited liability company.
+          Questions? Email <a href="mailto:privacy@myrxfit.com" className="text-primary underline underline-offset-4">privacy@myrxfit.com</a>.
+        </p>
       </main>
-    </div>
+    </PageShell>
   )
 }

@@ -45,6 +45,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import Wordmark from '../../components/Wordmark'
+import SharedShell from '../../components/PageShell'
 
 // ─── Header ─────────────────────────────────────────────────────────────────
 // Match the Landing page chrome: wordmark left, nothing on right.
@@ -85,25 +86,12 @@ function Footer() {
 // ─── Ambient page wrapper (matches Landing.jsx) ─────────────────────────────
 function PageShell({ children }) {
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-background text-foreground flex flex-col">
-      {/* Ambient grid */}
-      <div className="pointer-events-none absolute inset-0 ambient-grid opacity-60" aria-hidden />
-      <div
-        className="pointer-events-none absolute -left-40 top-[-20%] h-[500px] w-[500px] rounded-full opacity-40 blur-3xl"
-        style={{ background: 'radial-gradient(circle, hsl(var(--primary) / 0.35), transparent 70%)' }}
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute -right-40 top-[10%] h-[500px] w-[500px] rounded-full opacity-25 blur-3xl"
-        style={{ background: 'radial-gradient(circle, hsl(220 80% 60% / 0.25), transparent 70%)' }}
-        aria-hidden
-      />
+    <SharedShell>
       <Header />
       <main className="relative z-10 mx-auto flex w-full max-w-[560px] flex-1 flex-col items-center px-6 pb-16 pt-6 md:pt-12">
         {children}
       </main>
-      <Footer />
-    </div>
+    </SharedShell>
   )
 }
 
