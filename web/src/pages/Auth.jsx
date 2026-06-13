@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'wouter'
-import { ArrowLeft, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react'
+import { ArrowLeft, ArrowUpRight, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { friendlyAuthMessage } from '../lib/authErrors'
-import { roleHomePath } from '../lib/roleRouting'
+import { isCoachHost, roleHomePath } from '../lib/roleRouting'
 import Wordmark from '../components/Wordmark'
 import PageShell from '../components/PageShell'
 
@@ -122,8 +122,40 @@ export default function Auth() {
 
   return (
     <PageShell>
-      <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
+      {/* Unified host-aware nav (T264): coach host shows Pricing + the
+          For Athletes pill; athlete host shows the For Coaches pill — each
+          mirrors its own marketing landing so the sign-in page no longer
+          feels orphaned. No "Sign in" (you're on it) and no trial CTA on an
+          auth page; the form's submit button is the page's solid CTA. */}
+      <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10">
         <Link href="/" className="flex items-center shrink-0"><Logo /></Link>
+        <nav className="flex items-center gap-1 sm:gap-2 text-sm">
+          {isCoachHost() ? (
+            <>
+              <Link
+                href="/pricing"
+                className="rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                Pricing
+              </Link>
+              <a
+                href="https://myrxfit.com"
+                className="ml-1 inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
+              >
+                For Athletes
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </a>
+            </>
+          ) : (
+            <a
+              href="https://coach.myrxfit.com"
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
+            >
+              For Coaches
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </nav>
       </header>
       <main className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] max-w-md items-center px-6 pb-12">
         <div className="w-full">

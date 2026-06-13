@@ -23,7 +23,7 @@
 import { useState } from 'react'
 import { Link } from 'wouter'
 import {
-  ArrowRight, Check, ChevronDown, MessageCircle, TrendingUp, Menu, X,
+  ArrowRight, ArrowUpRight, Check, ChevronDown, MessageCircle, TrendingUp, Menu, X,
 } from 'lucide-react'
 import { useTheme } from '../contexts/ThemeContext'
 import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
@@ -83,12 +83,17 @@ const STATUS_COLOR = {
 function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
   // On the coach surface the user is already in the coach context, so
-  // "For Coaches" would be redundant — we show "For Athletes" instead.
+  // "For Coaches" would be redundant — we show "For Athletes" instead, as a
+  // soft-lime pill + arrow (T264 button system) mirroring the "For Coaches"
+  // pill on the athlete landing, placed LAST in the nav.
   // T199: it's a real <a> to https://myrxfit.com (NOT a wouter <Link
   // href="/">) because on coach.myrxfit.com "/" host-resolves to this same
   // coach landing; only a full cross-domain navigation reaches the athlete site.
   const navLinkCls =
     'rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
+  // Soft-lime "For Athletes" pill — directional/cross-origin pointer (T264).
+  const forAthletesCls =
+    'inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20'
   return (
     <header className="relative z-30 flex h-16 items-center justify-between px-6 md:px-10 border-b border-border/40">
       <Link href="/" className="flex items-center gap-2 shrink-0">
@@ -97,13 +102,12 @@ function Header() {
 
       {/* Desktop nav (md and up) */}
       <nav className="hidden md:flex items-center gap-1 sm:gap-2 text-sm">
-        <a href="https://myrxfit.com" className={navLinkCls}>For Athletes</a>
         <Link href="/pricing" className={navLinkCls}>Pricing</Link>
         <Link href="/auth?mode=signin" className={navLinkCls}>Sign in</Link>
-        <Link href="/signup?fresh=1"
-          className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
-          Start free trial
-        </Link>
+        <a href="https://myrxfit.com" className={`ml-1 ${forAthletesCls}`}>
+          For Athletes
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </a>
       </nav>
 
       {/* Mobile (below md): Sign in stays visible + a hamburger for the rest */}
@@ -123,16 +127,16 @@ function Header() {
         </button>
       </div>
 
-      {/* Mobile dropdown — nav links + the trial CTA */}
+      {/* Mobile dropdown — Pricing + the For Athletes pill (last). */}
       {menuOpen && (
         <div className="absolute left-0 right-0 top-full z-30 border-b border-border/40 bg-background shadow-lg md:hidden">
           <nav className="flex flex-col gap-0.5 px-4 py-3 text-sm">
-            <a href="https://myrxfit.com" className={navLinkCls}>For Athletes</a>
             <Link href="/pricing" onClick={() => setMenuOpen(false)} className={navLinkCls}>Pricing</Link>
-            <Link href="/signup?fresh=1" onClick={() => setMenuOpen(false)}
-              className="mt-1 rounded-md bg-primary px-3 py-2.5 text-center font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
-              Start free trial
-            </Link>
+            <a href="https://myrxfit.com"
+              className="mt-1 inline-flex items-center justify-center gap-1.5 rounded-md bg-primary/10 px-3 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20">
+              For Athletes
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </a>
           </nav>
         </div>
       )}

@@ -18,7 +18,7 @@
 
 import { useState } from 'react'
 import { Link } from 'wouter'
-import { ArrowRight, Check, ChevronDown, Sparkles, Menu, Users, X } from 'lucide-react'
+import { ArrowRight, ArrowUpRight, Check, ChevronDown, Sparkles, Menu, Users, X } from 'lucide-react'
 import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
 import Wordmark from '../components/Wordmark'
 import PageShell from '../components/PageShell'
@@ -28,10 +28,16 @@ import PageShell from '../components/PageShell'
 // these two duplicates are fine.
 function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
-  // "For Athletes" intentionally omitted — coach context here shouldn't
-  // cross-promote the end-user landing. "For Coaches" links back to the pitch.
+  // Unified coach nav (T264): Pricing (active here) · Sign in · For Athletes
+  // pill (soft-lime + arrow, last) — identical to ForCoaches so the two
+  // marketing pages never drift. No "For Coaches" (redundant on the coach
+  // site) and no trial CTA in the nav (the page body carries it).
   const navLinkCls =
     'rounded-md px-3 py-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors'
+  // Soft-lime "For Athletes" pill — directional/cross-origin pointer (T264).
+  // Real <a> to https://myrxfit.com (cross-domain), not a wouter <Link>.
+  const forAthletesCls =
+    'inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20'
   return (
     <header className="relative z-30 flex h-16 items-center justify-between px-6 md:px-10 border-b border-border/40">
       <Link href="/" className="flex items-center gap-2 shrink-0">
@@ -40,13 +46,12 @@ function Header() {
 
       {/* Desktop nav (md and up) */}
       <nav className="hidden md:flex items-center gap-1 sm:gap-2 text-sm">
-        <Link href="/for-coaches" className={navLinkCls}>For Coaches</Link>
         <Link href="/pricing" className="rounded-md px-3 py-1.5 text-primary font-semibold">Pricing</Link>
         <Link href="/auth?mode=signin" className={navLinkCls}>Sign in</Link>
-        <Link href="/signup?fresh=1"
-          className="ml-1 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
-          Start free trial
-        </Link>
+        <a href="https://myrxfit.com" className={`ml-1 ${forAthletesCls}`}>
+          For Athletes
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </a>
       </nav>
 
       {/* Mobile (below md): Sign in stays visible + a hamburger for the rest */}
@@ -66,16 +71,16 @@ function Header() {
         </button>
       </div>
 
-      {/* Mobile dropdown — nav links + the trial CTA */}
+      {/* Mobile dropdown — Pricing (active) + the For Athletes pill (last). */}
       {menuOpen && (
         <div className="absolute left-0 right-0 top-full z-30 border-b border-border/40 bg-background shadow-lg md:hidden">
           <nav className="flex flex-col gap-0.5 px-4 py-3 text-sm">
-            <Link href="/for-coaches" onClick={() => setMenuOpen(false)} className={navLinkCls}>For Coaches</Link>
             <Link href="/pricing" onClick={() => setMenuOpen(false)} className="rounded-md px-3 py-2.5 text-primary font-semibold">Pricing</Link>
-            <Link href="/signup?fresh=1" onClick={() => setMenuOpen(false)}
-              className="mt-1 rounded-md bg-primary px-3 py-2.5 text-center font-semibold text-primary-foreground hover:opacity-90 transition-opacity">
-              Start free trial
-            </Link>
+            <a href="https://myrxfit.com"
+              className="mt-1 inline-flex items-center justify-center gap-1.5 rounded-md bg-primary/10 px-3 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20">
+              For Athletes
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </a>
           </nav>
         </div>
       )}
