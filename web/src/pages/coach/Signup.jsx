@@ -189,6 +189,15 @@ const SCREENS_FRESH = [
   'welcome-end',
 ]
 
+// Post-account steps worth persisting to profiles.coach_signup_checkpoint for
+// durable cross-device resume (T256). EXCLUDES the pre-account screens
+// (welcome … email-otp run with no session, so the profile row isn't writable
+// yet — they no-op the stamp anyway) and the RESUME-mode marketing screens
+// (welcome/magic/promise), so a returning user's checkpoint can never regress
+// to step 1. 'welcome-end' is completion, not a resume target. Membership
+// test only; order-independent.
+const DURABLE_COACH_CHECKPOINTS = new Set(['name', 'phone', 'phone-otp', 'photo', 'plan', 'stripe'])
+
 // Screens whose advancement is driven by IN-SCREEN interaction (clicking
 // the food log card, dragging the slider to lock, completing the chat).
 // The sandbox hides its bottom-bar Next button on these so the user
@@ -2807,18 +2816,22 @@ export default function CoachSignup() {
         return
       }
 
-      // Durable resume (T231, T241): if the user reached the plan/checkout
-      // stage in a PRIOR session, profiles.coach_signup_checkpoint is stamped
-      // 'plan'/'stripe'. Bring them straight back to the plan step even when
-      // sessionStorage is gone (tab closed) or was scrambled -- data collection
-      // is done + they've seen the pitch, so the only thing left is pick a tier
-      // + pay. T241: this is the COACH journey's OWN tracker — the athlete
-      // signup_checkpoint is never read or written by the coach flow anymore,
-      // so a mid-athlete conversion can no longer destroy the athlete's
+      // Durable resume (T231, T241, extended T256): coach_signup_checkpoint
+      // records the LAST post-account step the user reached. Map it back to its
+      // FRESH index so a resume — even on a different browser/device, where
+      // sessionStorage is empty — lands EXACTLY there instead of the welcome
+      // beginning. Originally only 'plan'/'stripe' were stamped + resumed, so a
+      // coach who stopped at name/phone/photo and finished on their phone
+      // restarted at step 1 (Jun 13 2026 bug report). 'welcome-end' is
+      // deliberately not a resume target (completion; settled coaches were
+      // bounced to /portal above). T241: this is the COACH journey's OWN
+      // tracker — the athlete signup_checkpoint is never read or written by the
+      // coach flow, so a mid-athlete conversion can't disturb the athlete's
       // mobile resume position.
-      if (profile?.coach_signup_checkpoint === 'plan' || profile?.coach_signup_checkpoint === 'stripe') {
+      const cp = profile?.coach_signup_checkpoint
+      if (cp && DURABLE_COACH_CHECKPOINTS.has(cp)) {
         if (cancelled) return
-        const cpPlanIdx = SCREENS_FRESH.indexOf('plan')
+        const cpIdx = SCREENS_FRESH.indexOf(cp)
         const [cpFirst, ...cpRest] = (profile?.full_name || '').split(' ')
         setData(prev => ({
           ...prev,
@@ -2831,7 +2844,7 @@ export default function CoachSignup() {
           verifiedEmail: user.email || null,
           verifiedPhone: profile?.phone_verified_at ? profile.phone : null,
         }))
-        setStep(cpPlanIdx >= 0 ? cpPlanIdx : 0)
+        setStep(cpIdx >= 0 ? cpIdx : 0)
         setMode('fresh')
         return
       }
@@ -2930,8 +2943,16 @@ export default function CoachSignup() {
       // history) still starts at welcome for the full pitch.
       const isReturningCoach =
         !!profile?.coach_stripe_customer_id || profile?.coach_subscription_status != null
+      // A NATIVE coach (marker 'C') reaching here with a COMPLETE profile but
+      // no checkpoint already walked the full fresh pitch on a prior device
+      // (welcome/magic/promise) — they just stopped before paying. Drop them on
+      // plan too, not a welcome re-pitch (T256, the retroactive half of the
+      // resume fix for accounts that predate per-step checkpoint stamping).
+      // Converting athletes (marker 'AC') have NOT seen the coach pitch, so
+      // they still start at welcome for the full marketing walk.
+      const isNativeCoach = profile?.account_marker === 'C'
       const planIdx = SCREENS_RESUME.indexOf('plan')
-      setStep(isReturningCoach && planIdx >= 0 ? planIdx : 0)
+      setStep((isReturningCoach || isNativeCoach) && planIdx >= 0 ? planIdx : 0)
       setMode('resume')
     }
     detectFlow()
@@ -2947,16 +2968,19 @@ export default function CoachSignup() {
     saveStoredState(step, mode, data)
   }, [mode, step, data])
 
-  // Durable signup resume (T231): once a signed-in user reaches the plan /
-  // checkout stage, stamp it on their PROFILE so a later visit -- even after
-  // closing the tab (which wipes sessionStorage) -- brings them back to the
-  // plan step instead of the welcome beginning. Best-effort, fire-and-forget;
-  // resolves the live user inside the effect so it doesn't depend on a
-  // component-level user binding.
+  // Durable signup resume (T231, extended T256): stamp the user's CURRENT
+  // post-account step onto their PROFILE so a later visit -- even after
+  // closing the tab (sessionStorage gone) or switching to a different
+  // browser/device entirely -- brings them back to that exact step instead of
+  // the welcome beginning. Originally only 'plan'/'stripe' were stamped, which
+  // left a coach who stopped at name/phone/photo restarting at step 1 on their
+  // phone (Jun 13 2026 bug). The whitelist skips pre-account + marketing
+  // screens. Best-effort, fire-and-forget; pre-account steps no-op since
+  // getUser() is null until email-otp creates the session.
   useEffect(() => {
     if (mode === 'loading') return
     const k = SCREENS[step]
-    if (k !== 'plan' && k !== 'stripe') return
+    if (!DURABLE_COACH_CHECKPOINTS.has(k)) return
     let cancelled = false
     supabase.auth.getUser().then(({ data: { user: u } }) => {
       if (cancelled || !u?.id) return
