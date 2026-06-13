@@ -259,7 +259,7 @@ function SecondaryButton({ children, onClick, className = '' }) {
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-card py-3.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors ${className}`}
+      className={`flex w-full items-center justify-center gap-2 rounded-xl border border-primary/40 bg-transparent py-3.5 text-sm font-medium text-foreground hover:bg-primary/10 transition-colors ${className}`}
     >
       {children}
     </button>
