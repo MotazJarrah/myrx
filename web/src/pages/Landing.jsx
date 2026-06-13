@@ -1,5 +1,4 @@
-import { Link } from 'wouter'
-import { Dumbbell, Activity, Weight, Apple, Zap, LineChart, Lock } from 'lucide-react'
+import { Dumbbell, Activity, Moon, Droplet, Apple, TrendingUp, Zap } from 'lucide-react'
 import Wordmark from '../components/Wordmark'
 import PageShell from '../components/PageShell'
 
@@ -9,35 +8,25 @@ function Logo() {
 }
 
 const features = [
-  { icon: Dumbbell,   title: 'Strength projection',  desc: '1RM through 10RM from any set. Choose bench, squat, deadlift, or define your own lift.' },
-  { icon: Activity,   title: 'Pace engine',           desc: 'Row, run, cycle, swim. Projects every standard distance with tuned fatigue coefficients.' },
-  { icon: Weight,     title: 'Bodyweight progress',   desc: 'Pull-ups, dips, push-ups. Track reps, set progression goals, visualise gains.' },
-  { icon: Apple,      title: 'Calorie lab',           desc: 'MET-based calorie estimates across 20+ activities. Calibrated to your bodyweight.' },
-  { icon: LineChart,  title: 'Progress graphs',       desc: 'Your history plotted, your best efforts flagged, your trends visible in one glance.' },
-  { icon: Lock,       title: 'Private by design',     desc: 'Accounts are secured with bcrypt-hashed passwords and HTTP-only session cookies.' },
+  { icon: Dumbbell,   title: 'Strength training', desc: 'Know exactly what to lift to keep progressing.' },
+  { icon: Activity,   title: 'Cardio zones',      desc: 'Train at the right intensity to get faster.' },
+  { icon: Moon,       title: 'Sleep recovery',    desc: "Sleep better and recover for what's next." },
+  { icon: Droplet,    title: 'Hydration goals',   desc: 'Stay hydrated with a target built for you.' },
+  { icon: Apple,      title: 'Nutrition logging', desc: 'Track your macros against your daily target.' },
+  { icon: TrendingUp, title: 'Weight trends',     desc: 'See your weight move toward your goal.' },
 ]
 
 export default function Landing() {
   return (
     <PageShell>
 
-      <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10">
+      {/* myrxfit.com is a PURELY INFORMATIVE landing (T198): no athlete sign
+          in / sign up / pricing — athletes onboard in the mobile app. Per the
+          T263 refresh the "For Coaches" link was removed too — the apex landing
+          makes ZERO reference to the coach platform (user: "dont mention coaches
+          anywhere"); coaches go to coach.myrxfit.com directly. */}
+      <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
         <Logo />
-        {/* myrxfit.com is a PURELY INFORMATIVE landing (T198): no athlete sign
-            in / sign up / pricing — athletes onboard in the mobile app. The only
-            nav item is the pointer to the coach side. T199: this crosses domains
-            to coach.myrxfit.com (a real <a>, not a wouter <Link>) so the coach
-            experience — marketing, signup, login, billing — lives entirely on
-            the coach subdomain and the logged-in session never straddles two
-            origins. */}
-        <nav className="flex items-center gap-1 sm:gap-2">
-          <a
-            href="https://coach.myrxfit.com"
-            className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            For Coaches
-          </a>
-        </nav>
       </header>
 
       <main className="relative z-10 mx-auto max-w-5xl px-6 pb-20 pt-10 md:pt-20">
@@ -55,17 +44,16 @@ export default function Landing() {
             className="animate-rise mt-6 text-[clamp(2.5rem,6vw,4.5rem)] font-semibold leading-[0.95] tracking-tight"
             style={{ animationDelay: '60ms' }}
           >
-            One number in.<br />
-            <span className="text-primary">Every projection out.</span>
+            Your next step.<br />
+            <span className="text-primary">Every step of the way.</span>
           </h1>
 
           <p
             className="animate-rise mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted-foreground md:text-lg"
             style={{ animationDelay: '120ms' }}
           >
-            MyRX is the performance lab for lifters and endurance athletes. Log a single effort — a bench press,
-            a 4000-meter row, a set of pull-ups — and get the full spectrum of rep maxes, pace projections, and
-            target paces. Sports-science formulas, no guesswork.
+            MyRX guides every part of your training — strength, cardio, sleep, hydration — and tells
+            you exactly what to do next, backed by sports science.
           </p>
 
         </section>
@@ -138,7 +126,7 @@ export default function Landing() {
         <section className="mt-20 rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-card to-card p-8 text-center md:p-12">
           <Zap className="mx-auto h-6 w-6 text-primary" />
           <h2 className="mt-3 text-xl font-semibold tracking-tight md:text-2xl">
-            Train with data, not guesses.
+            Always know what's next.
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
             Coming soon to iOS and Android.
