@@ -49,8 +49,11 @@ export function roleHomePath(profile) {
     || ACTIVE_COACH_STATES.has(profile?.coach_subscription_status || '')
 
   if (isCoachHost()) {
-    if (settledCoach)                      return '/portal'
-    if (marker === 'C' || marker === 'AC') return '/signup'
+    if (settledCoach) return '/portal'
+    // Unfinished coach-journey markers all land on /signup, which knows what
+    // to do with each: C/AC resume the coach journey; CA (mid-switch toward
+    // athlete, T241) gets the direction-decision screen there.
+    if (marker === 'C' || marker === 'AC' || marker === 'CA') return '/signup'
     return '/app'
   }
 

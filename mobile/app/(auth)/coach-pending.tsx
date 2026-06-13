@@ -45,21 +45,22 @@ export default function CoachPending() {
     setError('')
     setSwitching(true)
     try {
-      // Coach-only checkpoint values mean nothing to the athlete
-      // journey's CHECKPOINT_RANK — remap them to 'photo' so the athlete
-      // resume lands on the first step the coach journey never covered
-      // (biometric). Shared values (password/otp/name/phone-otp/photo)
-      // pass through untouched and resume exactly where they point.
-      const cp = profile?.signup_checkpoint
-      const patch: Record<string, unknown> = { account_marker: 'A' }
-      if (cp === 'plan' || cp === 'stripe') patch.signup_checkpoint = 'photo'
+      // T241: switching direction, not settling. Marker -> 'CA' (coach
+      // switching to athlete) — directional, so every surface knows the
+      // ATHLETE journey is the active one now: mobile resumes it; the web
+      // coach signup shows the mirror decision screen instead of silently
+      // resuming the coach journey. Settles to 'A' only when the athlete
+      // journey COMPLETES (welcome-end), per the settle law. No checkpoint
+      // remap needed anymore — the coach flow stamps its own
+      // coach_signup_checkpoint and the athlete signup_checkpoint is
+      // pristine, so the resume lands on the true last athlete step.
       const { error: updErr } = await supabase
         .from('profiles')
-        .update(patch)
+        .update({ account_marker: 'CA' })
         .eq('id', user.id)
       if (updErr) throw updErr
       // Re-enter the signup route with fromSignIn so the hydration
-      // effect re-runs against the updated profile: marker is now 'A',
+      // effect re-runs against the updated profile: marker is now 'CA',
       // the coach-pending intercept no longer fires, and the athlete
       // resume logic takes over at the right step.
       router.replace({ pathname: '/(auth)/sign-up' as any, params: { fromSignIn: '1' } })

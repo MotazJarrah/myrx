@@ -2843,7 +2843,12 @@ function WelcomeEndScreen({ data }: ScreenProps) {
             // completion (our own grant, no store sub; resolveTier reads
             // it). Guarded so a resume user re-finishing the journey
             // can't extend an already-running trial.
-            ...((profile as any)?.b2c_trial_ends_at
+            // T242 guard: settled coaches walking the device-setup tail
+            // (biometric/notifications on first app open) must NOT be
+            // granted the athlete B2C trial — it's NULL on coaches by
+            // design (T165) and their access comes from the coach sub.
+            ...(((profile as any)?.b2c_trial_ends_at
+                || ['C', 'D'].includes((profile as any)?.account_marker))
               ? {}
               : { b2c_trial_ends_at: new Date(Date.now() + 30 * 86_400_000).toISOString() }),
             onboarded_at: new Date().toISOString(),
@@ -2851,6 +2856,15 @@ function WelcomeEndScreen({ data }: ScreenProps) {
           },
           { onConflict: 'id' },
         )
+        // T241 settle law: completing the ATHLETE journey settles any
+        // transient switch marker to A. AC (was heading to coach, finished
+        // athlete instead) and CA (switched back, now finished) both land
+        // here; C/D are never touched (a settled coach finishing the
+        // device-setup tail stays C; D is trigger-pinned anyway).
+        await supabase.from('profiles')
+          .update({ account_marker: 'A' })
+          .eq('id', user.id)
+          .in('account_marker', ['AC', 'CA'])
       }
       await refreshProfile()
     } catch { /* best-effort — user can retry from dashboard if it's missing */ }
@@ -3030,11 +3044,39 @@ export default function SignUpJourney() {
 
   useEffect(() => {
     if (authLoading) return
-    if (user && profileLoading && !profile) return
+    // T241 race fix: wait for the SIGNED-IN user's OWN profile row. The old
+    // guard (`profileLoading && !profile`) passed whenever ANY profile was
+    // loaded — during account switching that's the PREVIOUS account's
+    // profile, so the marker/completeness checks below evaluated the wrong
+    // user (the coach-pending intercept silently missed an AC account).
+    // profile === null with loading finished = brand-new account with no
+    // row yet → proceed.
+    if (user && (profileLoading || (profile && (profile as any).id !== user.id))) return
     if (hydrated) return
 
     // Fast-path: fully onboarded user → dashboard.
     if (user && isProfileComplete(profile)) {
+      // T242: web-created coaches finished onboarding in a BROWSER, which
+      // can't request OS permissions — their athlete signup_checkpoint
+      // never reached the mobile-only steps. First app open runs the
+      // device-setup tail (biometric → notifications → welcome-end)
+      // instead of the dashboard. Mobile-completed athletes carry
+      // checkpoint 'welcome-end' and skip straight through; the journey's
+      // own in-session completion navigates directly and never re-enters
+      // this hydration.
+      const cpRank = CHECKPOINT_RANK[profile?.signup_checkpoint || ''] || 0
+      if (cpRank < CHECKPOINT_RANK['biometric']) {
+        const tailOrder = buildResumeOrder()
+        const bioIdx = tailOrder.indexOf('biometric')
+        if (bioIdx >= 0) {
+          setMode('resume')
+          setStep(bioIdx)
+          setMinStep(bioIdx)
+          setData(seedDataFromProfile(profile, user.email))
+          setHydrated(true)
+          return
+        }
+      }
       router.replace('/(app)/dashboard' as any)
       return
     }
@@ -3045,9 +3087,14 @@ export default function SignUpJourney() {
     // signup lives at coach.myrxfit.com, and their signup_checkpoint may
     // hold coach-only values ('plan' / 'stripe') that CHECKPOINT_RANK
     // can't interpret. Route to the coach-pending screen: finish on the
-    // web, or switch to an athlete account (marker -> 'A' + resume here).
-    // A COMPLETE athlete converting (AC + onboarded) hits the dashboard
-    // fast-path above and never reaches this.
+    // web, or switch to an athlete account (marker -> 'CA' + resume here).
+    // T241: marker 'CA' (heading toward ATHLETE) deliberately FALLS
+    // THROUGH this intercept — the resume branches below continue the
+    // athlete journey at its true last step (the athlete
+    // signup_checkpoint is pristine now that the coach flow stamps its
+    // own coach_signup_checkpoint). A COMPLETE athlete converting
+    // (AC + onboarded) hits the dashboard fast-path above and never
+    // reaches this.
     const accountMarker = profile?.account_marker
     if (user && (accountMarker === 'C' || accountMarker === 'AC') && !profile?.onboarded_at) {
       router.replace('/(auth)/coach-pending' as any)

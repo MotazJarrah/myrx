@@ -222,7 +222,14 @@ interface Profile {
   // trigger, never transitions). Mobile reads it to keep coach-journey
   // accounts out of the athlete journey: marker C/AC with no onboarded_at
   // -> (auth)/coach-pending ("finish on the web, or switch to athlete").
-  account_marker?: 'A' | 'AC' | 'C' | 'D' | null
+  // T241: 'CA' = switching coach -> athlete (directional mirror of 'AC';
+  // settles to 'A' when the athlete journey completes, per the settle law).
+  account_marker?: 'A' | 'AC' | 'CA' | 'C' | 'D' | null
+  // T241 — the COACH journey's own progress tracker ('plan' / 'stripe' /
+  // 'welcome-end'), stamped only by the web coach signup. Kept separate
+  // from signup_checkpoint (the athlete journey's tracker) so neither
+  // flow can destroy the other's resume position.
+  coach_signup_checkpoint?: string | null
   // ── T165: 30-day FullRX reverse trial (athlete B2C) ────────────────
   // Our OWN grant, never a store subscription. Set once at welcome-end
   // (now + 30 days). resolveTier (RadialNav / dashboard) returns fullrx

@@ -430,9 +430,12 @@ function EmailScreen({ data, patch, next, onAthleteConverted, onResumeAtEmailOtp
       // accounts (the pre-T234 fallback interstitial).
       if (rpcErr || !status?.exists) { next(); return }
       setAcct(status)
-      // Decision order (T237):
+      // Decision order (T237/T241):
       if (status.pending_deletion) { setPhase('deletion'); return }
       if (status.marker === 'D')   { setPhase('staff');    return }
+      // CA = mid-switch toward ATHLETE (chose "switch to athlete" on mobile
+      // while a coach signup was in flight). Surface the direction decision.
+      if (status.marker === 'CA')  { setPhase('switch-back'); return }
       if (status.marker === 'C') {
         if (status.email_confirmed) { setPhase('coach'); return }
         // Unconfirmed coach signup — password login is impossible, so
@@ -466,14 +469,15 @@ function EmailScreen({ data, patch, next, onAthleteConverted, onResumeAtEmailOtp
         return
       }
       const uid = signin.user.id
-      // THE conversion moment (T234): correct password -> marker A -> AC.
-      // eq('A') so only a plain athlete transitions: AC stays AC
+      // THE conversion moment (T234/T241): correct password -> marker AC
+      // (switching toward coach). in('A','CA') so a plain athlete converts
+      // AND a mid-switch-to-athlete account flips direction; AC stays AC
       // (idempotent re-validate), C is untouched, and D is doubly safe
       // (also pinned by the protect_admin_marker DB trigger).
       await supabase.from('profiles')
         .update({ account_marker: 'AC' })
         .eq('id', uid)
-        .eq('account_marker', 'A')
+        .in('account_marker', ['A', 'CA'])
       const { data: prof } = await supabase
         .from('profiles')
         .select('full_name, phone, phone_verified_at, avatar_url, account_marker')
@@ -575,6 +579,47 @@ function EmailScreen({ data, patch, next, onAthleteConverted, onResumeAtEmailOtp
           </PrimaryButton>
           <SecondaryButton onClick={() => { setPhase('email'); setError(null); patch({ email: '' }) }}>
             Use a different email
+          </SecondaryButton>
+        </div>
+      </>
+    )
+  }
+
+  if (phase === 'switch-back') {
+    // T241: marker CA — they chose "switch to athlete" on mobile mid-coach-
+    // signup. Mirror decision: keep going athlete (in the app), or flip back
+    // to coach here. Flipping back uses the same validation as a fresh
+    // conversion (password, or the OTP path for unconfirmed accounts) — the
+    // marker update flips CA -> AC on success.
+    return (
+      <>
+        <Heading
+          eyebrow="Account found"
+          title="You're switching to an athlete account"
+          subtitle="You chose to continue as an athlete in the MyRX app, and that setup isn't finished yet. Finish it in the app — or pick your coach signup back up right here."
+        />
+        <div className="mt-8 space-y-4">
+          <div className="rounded-xl border border-border bg-card px-4 py-4">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Account</p>
+            <p className="text-base font-medium text-foreground break-all">{data.email}</p>
+          </div>
+          <PrimaryButton
+            disabled={busy}
+            onClick={async () => {
+              if (busy) return
+              setError(null)
+              if (acct && acct.email_confirmed === false) {
+                setBusy(true)
+                try { await resumeUnconfirmed(true) } finally { setBusy(false) }
+                return
+              }
+              setPhase('verify')
+            }}
+          >
+            {busy ? 'One sec…' : 'Continue my coach signup'}
+          </PrimaryButton>
+          <SecondaryButton onClick={() => { setPhase('email'); setError(null); setPw(''); patch({ email: '' }) }}>
+            I'll finish in the app — use a different email
           </SecondaryButton>
         </div>
       </>
@@ -2677,7 +2722,7 @@ export default function CoachSignup() {
       try {
         const { data: p } = await supabase
           .from('profiles')
-          .select('is_coach, is_superuser, coach_subscription_status, coach_stripe_customer_id, full_name, phone, phone_verified_at, avatar_url, signup_checkpoint, account_marker')
+          .select('is_coach, is_superuser, coach_subscription_status, coach_stripe_customer_id, full_name, phone, phone_verified_at, avatar_url, signup_checkpoint, coach_signup_checkpoint, account_marker')
           .eq('id', user.id)
           .maybeSingle()
         profile = p
@@ -2698,11 +2743,23 @@ export default function CoachSignup() {
         return
       }
 
+      // T241: marker CA = this account is mid-switch toward ATHLETE (they
+      // chose "switch to an athlete account" on mobile while a coach signup
+      // was in flight). The web must NOT silently resume the coach journey —
+      // surface the decision instead: continue as coach (CA -> AC + resume)
+      // or finish the athlete setup in the app. Rendered by the wrapper's
+      // 'ca-decision' mode — the mirror of mobile's coach-pending screen.
+      if (profile?.account_marker === 'CA') {
+        if (cancelled) return
+        setMode('ca-decision')
+        return
+      }
+
       // T234: an existing athlete (marker 'A') who has reached the coach signup
       // is mid-conversion -> stamp AC (athlete switching to coach). This durable
       // marker is what RoleRouter reads to keep routing them back INTO coach
       // signup (instead of the athlete download-app page) until they finish +
-      // pay (-> C) or switch back to athlete on mobile (-> A). A brand-new coach
+      // pay (-> C) or settle back to athlete (-> A). A brand-new coach
       // is already 'C' (set at init-profile-checkpoint), so only genuine
       // converting athletes match here. Fire-and-forget; never blocks the flow.
       if (profile?.account_marker === 'A') {
@@ -2749,14 +2806,16 @@ export default function CoachSignup() {
         return
       }
 
-      // Durable resume (T231): if the user reached the plan/checkout stage in a
-      // PRIOR session, profiles.signup_checkpoint is stamped 'plan'/'stripe'.
-      // Bring them straight back to the plan step even when sessionStorage is
-      // gone (tab closed) or was scrambled -- data collection is done + they've
-      // seen the pitch, so the only thing left is pick a tier + pay. (The
-      // sessionStorage early-resume above is the precise within-session signal;
-      // this is the durable cross-session fallback.)
-      if (profile?.signup_checkpoint === 'plan' || profile?.signup_checkpoint === 'stripe') {
+      // Durable resume (T231, T241): if the user reached the plan/checkout
+      // stage in a PRIOR session, profiles.coach_signup_checkpoint is stamped
+      // 'plan'/'stripe'. Bring them straight back to the plan step even when
+      // sessionStorage is gone (tab closed) or was scrambled -- data collection
+      // is done + they've seen the pitch, so the only thing left is pick a tier
+      // + pay. T241: this is the COACH journey's OWN tracker — the athlete
+      // signup_checkpoint is never read or written by the coach flow anymore,
+      // so a mid-athlete conversion can no longer destroy the athlete's
+      // mobile resume position.
+      if (profile?.coach_signup_checkpoint === 'plan' || profile?.coach_signup_checkpoint === 'stripe') {
         if (cancelled) return
         const cpPlanIdx = SCREENS_FRESH.indexOf('plan')
         const [cpFirst, ...cpRest] = (profile?.full_name || '').split(' ')
@@ -2901,7 +2960,7 @@ export default function CoachSignup() {
     supabase.auth.getUser().then(({ data: { user: u } }) => {
       if (cancelled || !u?.id) return
       supabase.from('profiles')
-        .upsert({ id: u.id, auth_user_id: u.id, signup_checkpoint: k }, { onConflict: 'id' })
+        .upsert({ id: u.id, auth_user_id: u.id, coach_signup_checkpoint: k }, { onConflict: 'id' })
         .then(() => {}, () => {})
     })
     return () => { cancelled = true }
@@ -2925,7 +2984,7 @@ export default function CoachSignup() {
       supabase.from('profiles')
         .update({ account_marker: 'AC' })
         .eq('id', u.id)
-        .eq('account_marker', 'A')
+        .in('account_marker', ['A', 'CA'])
         .then(() => { if (!cancelled) setData(prev => ({ ...prev, pendingMarkerAC: false })) }, () => {})
     })
     return () => { cancelled = true }
@@ -2998,6 +3057,50 @@ export default function CoachSignup() {
     )
   }
 
+  // T241: signed-in CA account landed on /signup (roleHomePath sends every
+  // unfinished transient here). CA = heading toward ATHLETE — never silently
+  // resume the coach journey; surface the direction decision. The mirror of
+  // mobile's coach-pending screen. "Continue" flips CA -> AC and reloads so
+  // detectFlow re-runs and resumes the coach journey at its own tracker.
+  if (mode === 'ca-decision') {
+    return (
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center px-4">
+        <div className="w-full max-w-md space-y-4">
+          <Heading
+            eyebrow="Account found"
+            title="You're switching to an athlete account"
+            subtitle="You chose to continue as an athlete in the MyRX app, and that setup isn't finished yet. Finish it in the app — or pick your coach signup back up right here."
+          />
+          <PrimaryButton
+            onClick={async () => {
+              try {
+                const { data: { user: u } } = await supabase.auth.getUser()
+                if (u?.id) {
+                  await supabase.from('profiles')
+                    .update({ account_marker: 'AC' })
+                    .eq('id', u.id)
+                    .eq('account_marker', 'CA')
+                }
+              } catch { /* best-effort — reload re-derives either way */ }
+              window.location.reload()
+            }}
+          >
+            Continue my coach signup
+          </PrimaryButton>
+          <SecondaryButton
+            onClick={async () => {
+              clearStoredState()
+              try { await supabase.auth.signOut() } catch { /* ignore */ }
+              window.location.href = '/'
+            }}
+          >
+            I'll finish in the app — sign out here
+          </SecondaryButton>
+        </div>
+      </div>
+    )
+  }
+
   // T234: an existing athlete just confirmed their password on the email
   // step (EmailScreen 'verify' phase) — they're signed in and marked AC.
   // Prefill everything their athlete account already validated and jump
@@ -3063,8 +3166,14 @@ export default function CoachSignup() {
                 id: u.id,
                 auth_user_id: u.id,   // per CLAUDE.md auth_user_id upsert rule
                 onboarded_at: new Date().toISOString(),
-                signup_checkpoint: 'welcome-end',
-                account_marker: 'C',   // T234: coach signup complete -> settle marker to C
+                // T241: the coach journey stamps its OWN tracker — the athlete
+                // signup_checkpoint stays wherever the athlete journey left it
+                // (for a brand-new web coach that's pre-biometric, which is what
+                // triggers the mobile device-setup tail on first app open, T242).
+                coach_signup_checkpoint: 'welcome-end',
+                // Settle law (T241): completing a journey settles ANY transient.
+                // Coach completion + payment -> C, whatever the marker was.
+                account_marker: 'C',
               },
               { onConflict: 'id' },
             )

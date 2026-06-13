@@ -300,16 +300,25 @@ This is a top-level architectural decision. Every routing change, signup change,
 
 `profiles.account_marker` is the **single durable signal** for which signup journey an account belongs to and where it routes. It exists because `signup_checkpoint` is ONE shared column used by BOTH the athlete journey (mobile) and the coach journey (web) — without the marker, coach-only checkpoint values (`plan`, `stripe`) leak into the athlete journey's resume logic (whose `CHECKPOINT_RANK` can't interpret them) and vice versa. The marker gates **which platform interprets the checkpoint**.
 
-**Values (CHECK-constrained `A | AC | C | D`, default `A`), assigned by SIGNUP SOURCE after email validation:**
+**Values (CHECK-constrained `A | AC | CA | C | D`, default `A`), assigned by SIGNUP SOURCE after email validation:**
 
 | Marker | Meaning | Set when |
 |---|---|---|
-| `A` | Athlete | Mobile signup (the column default). Also restored by the mobile "switch to athlete" reversal. |
-| `C` | Coach | Web coach signup with a NEW email — stamped by the `init-profile-checkpoint` edge function the moment the profile row is created. Also the settled end-state: coach `welcome-end` stamps `C`. |
-| `AC` | Athlete converting to coach (reversible) | An existing `A` account enters the web coach signup: in-flow at the email step (correct password — or, for unconfirmed-email accounts, the email OTP — is the conversion moment), or `detectFlow` when an already-signed-in `A` user loads `/signup`. |
-| `D` | Staff / admin (PERMANENT) | Backfilled for `is_superuser` rows; auto-stamped + pinned by the `protect_admin_marker` BEFORE INSERT/UPDATE trigger on profiles — no writer can ever change a `D` marker, and any superuser row is forced to `D`. Signup always shows "staff account — sign in instead". |
+| `A` | Athlete (settled) | Mobile signup (`init-profile-checkpoint` derives it from the absence of coach metadata). Also the settle target of the athlete journey completing. |
+| `C` | Coach (settled) | Web coach signup with a NEW email (`init-profile-checkpoint` reads `user_metadata.signup_journey === 'coach'`). Also the settle target of coach welcome-end + payment. |
+| `AC` | Switching athlete → coach (transient, DIRECTIONAL) | An existing `A`/`CA` account proves ownership at the coach email step (password, or email-OTP for unconfirmed accounts via the deferred `pendingMarkerAC` effect), or a signed-in `A` loads `/signup`, or the web CA-decision screen's "Continue my coach signup". |
+| `CA` | Switching coach → athlete (transient, DIRECTIONAL) | The mobile coach-pending screen's "Switch to an athlete account" (from `C` or `AC`). |
+| `D` | Staff / admin (PERMANENT) | Backfilled for `is_superuser` rows; auto-stamped + pinned by the `protect_admin_marker` BEFORE INSERT/UPDATE trigger — no writer can ever change a `D` marker. Signup always shows "staff account — sign in instead". |
 
-**State machine: `A`, `C`, `D` are settled; `AC` is the only transient.** `A → AC` requires proven ownership (correct password, or email-OTP for unconfirmed accounts — stamped post-session via the `pendingMarkerAC` deferred effect). `AC → C` happens ONLY at coach signup completion (welcome-end, after payment). `AC/C → A` happens ONLY via the mobile coach-pending "Switch to an athlete account" button. `D` never transitions, in or out (DB-trigger-pinned). A user can bounce between journeys forever — nothing settles until one journey FINISHES, and athlete data is never altered by an unfinished conversion.
+**The SETTLE LAW (user-locked June 12 2026): a transient (`AC`/`CA`) can ONLY settle by COMPLETING a journey — an account can never end as AC or CA.** Coach welcome-end + payment → `C` (from any transient). Mobile athlete welcome-end → `A` (guarded `in ('AC','CA')` — never touches C/D, so a settled coach finishing the mobile device-setup tail stays `C`). Direction flips (`AC ↔ CA`) happen ONLY via explicit decision screens; abandonment changes nothing. A user can flip forever — nothing settles until a journey finishes, and athlete data is never altered by an unfinished conversion.
+
+**The direction decides what each surface does with a transient:**
+- `AC` (coach journey active): web `/signup` resumes the coach journey at `coach_signup_checkpoint`; mobile (not onboarded) shows the **coach-pending** decision screen ("Finish on the web" / "Switch to an athlete account" → `CA`).
+- `CA` (athlete journey active): mobile resumes the athlete journey at its true `signup_checkpoint`; web `/signup` shows the **ca-decision** mirror screen ("Continue my coach signup" → `AC` + reload-resume / "I'll finish in the app — sign out"). The signed-out email step shows the same decision as phase `'switch-back'`.
+
+**Separate journey trackers (T241 — the fix for the clobbered-resume bug):** `profiles.signup_checkpoint` belongs to the ATHLETE journey (mobile); `profiles.coach_signup_checkpoint` belongs to the COACH journey (web — `'plan'`/`'stripe'` stamps + `'welcome-end'`). Neither flow may ever write the other's column. The pre-T241 shared column let the coach flow stamp `'plan'` over a mid-athlete's `'phone-otp'` — mobile's `deriveResumeStep` maps unknown checkpoints to `welcome-end`, which silently "completed" the athlete journey.
+
+**Mobile device-setup tail (T242):** a web coach signup can't request OS permissions, so on mobile entry an onboarded account whose ATHLETE `signup_checkpoint` rank is below `biometric` is routed into the journey tail (`biometric → notifications → welcome-end`) before the dashboard. Mobile-completed athletes carry `welcome-end` and skip straight through. The welcome-end B2C trial grant is guarded off for `C`/`D` markers (coaches don't get the athlete trial — T165).
 
 **Signed-out `/signup` NEVER resumes from sessionStorage (T237 — locked June 12 2026).** A signup resumes ONLY after the account is proven (login or OTP). Signed-out entry = always page 1, step 1; the X exit clears the per-tab journey state AND signs out. The email step is THE gate — full decision matrix per `check_account_status(p_email)` → `{exists, marker, email_confirmed, pending_deletion}`:
 
