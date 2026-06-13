@@ -54,10 +54,8 @@ import SharedShell from '../../components/PageShell'
 function Header() {
   return (
     <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
-      <Link href="/">
-        <a className="inline-flex items-center">
-          <Wordmark />
-        </a>
+      <Link href="/" className="flex items-center shrink-0">
+        <Wordmark />
       </Link>
     </header>
   )

@@ -34,7 +34,7 @@ export default function Wordmark({ className = '', alt = 'MyRX' }) {
       src={src}
       alt={alt}
       style={{ height: WORDMARK_HEIGHT, width: 'auto' }}
-      className={`object-contain ${className}`.trim()}
+      className={`block object-contain ${className}`.trim()}
     />
   )
 }

@@ -69,7 +69,7 @@ export default function LegalLayout({ title, effectiveDate, children }) {
   return (
     <PageShell>
       <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
-        <Link href="/"><Logo /></Link>
+        <Link href="/" className="flex items-center shrink-0"><Logo /></Link>
       </header>
 
       <main className="relative z-10 mx-auto max-w-3xl px-6 pb-24 pt-8">
