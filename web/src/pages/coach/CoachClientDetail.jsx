@@ -899,7 +899,7 @@ function RemoveFromRosterModal({
             <button
               onClick={onCancel}
               disabled={busy}
-              className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+              className="rounded-md border border-primary/40 bg-transparent px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
