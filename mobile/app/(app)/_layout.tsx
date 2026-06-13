@@ -15,6 +15,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   View, Text, ScrollView, Pressable, StyleSheet, ActivityIndicator, Image,
+  BackHandler, ToastAndroid, Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Slot, Redirect, usePathname, router } from 'expo-router'
@@ -35,6 +36,13 @@ import { colors, alpha, palette } from '../../src/theme'
 import { isProfileComplete } from '../../src/lib/profile'
 import { shellScrollRef } from '../../src/lib/shellScroll'
 import { ChartTooltipProvider } from '../../src/lib/chartTooltipScope'
+
+// usePathname() normally returns a group-less path ('/dashboard'), but strip
+// any '/(group)' segment defensively so the Dashboard "home" check in the
+// back-button guard is robust. Mirrors the same helper in RadialNav.tsx.
+function stripRouteGroups(p: string): string {
+  return p.replace(/\/\([^)]+\)/g, '')
+}
 
 // Nav config used to live here as NAV_LINKS + a horizontal-scrolling
 // BottomNav. RadialNav owns the entire bottom nav surface now — both
@@ -187,6 +195,40 @@ export default function AppShellLayout() {
     samsungSyncRecent(7).catch(() => { /* best effort */ })
     syncSleepRecent(30).catch(() => { /* best effort */ })
   }, [user?.id])
+
+  // ── Android back-button guard — double-tap-to-exit (Jun 13 2026) ────────────
+  // The Instagram / WhatsApp pattern so the app can't be closed by accident.
+  // Each hardware-back press steps the user UP one logical level; only at the
+  // true home (Dashboard) does a SECOND back within 2s actually exit. iOS has
+  // no hardware back button and can't be exited programmatically, so this is
+  // Android-only (iOS keeps the default pop-the-stack swipe).
+  //
+  // Resolution order on each back press:
+  //   1. An open shell sheet (chat / suggestion) closes first.
+  //   2. If a screen was pushed (any detail page), pop it — router.back().
+  //   3. On a tab that ISN'T Dashboard, go home to Dashboard.
+  //   4. On Dashboard, arm a "Press back again to exit" toast; a second back
+  //      within 2s exits via BackHandler.exitApp().
+  const exitArmedRef = useRef(false)
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    const onBack = () => {
+      if (chatOpen)    { setChatOpen(false);    return true }
+      if (suggestOpen) { setSuggestOpen(false); return true }
+      if (router.canGoBack()) { router.back(); return true }
+      if (stripRouteGroups(pathname) !== '/dashboard') {
+        router.replace('/(app)/dashboard' as any)
+        return true
+      }
+      if (exitArmedRef.current) { BackHandler.exitApp(); return true }
+      exitArmedRef.current = true
+      ToastAndroid.show('Press back again to exit', ToastAndroid.SHORT)
+      setTimeout(() => { exitArmedRef.current = false }, 2000)
+      return true
+    }
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack)
+    return () => sub.remove()
+  }, [pathname, chatOpen, suggestOpen])
 
   // Show the spinner ONLY during the initial load (no profile yet).
   // Subsequent profile refreshes (e.g. after `refreshProfile()` post-save)
