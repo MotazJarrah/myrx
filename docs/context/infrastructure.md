@@ -76,11 +76,14 @@ Env vars are already set in the shell profile. No need to set them manually.
   see commit history if a token shows up in `cfut_…` form anywhere,
   it must be rotated immediately.)
 - **As of 2026-06-13 a token IS set (no longer "missing").** Scoped token
-  **"MyRX infra (Claude Code)"** — All accounts · Cloudflare Pages: Edit +
-  All zones · DNS: Edit — is stored as a **User-scope** `CLOUDFLARE_API_TOKEN`
-  env var (persists across sessions; wrangler + direct CF API calls via
-  `curl` / `Invoke-RestMethod` pick it up). It does NOT cover Workers / D1 /
-  Rulesets / SSL — mint a wider token or add scopes if a task needs those.
+  **"MyRX infra (Claude Code)"** — **All accounts**: Cloudflare Pages, Workers
+  Scripts, D1, Workers R2 Storage (Edit); **All zones**: DNS, SSL and
+  Certificates, Config Rules (Edit) — is stored as a **User-scope**
+  `CLOUDFLARE_API_TOKEN` env var (persists across sessions; wrangler + direct CF
+  API calls via `curl` / `Invoke-RestMethod` pick it up). Verified 2026-06-13
+  against D1 (myrx-food-library) + Workers (myrx-food-search, myrx-oauth). Need a
+  scope it lacks (Workers KV, Transform/Page Rules, Cache Purge, Zone Settings,
+  account Rulesets)? Add it via the dashboard token edit (... → Edit → + Add more).
   The value lives only in the env var, never a tracked file. (Used 2026-06-13
   to fix the www.myrxfit.com 522 from the terminal — registered www on the
   `myrx` Pages project + repointed its DNS CNAME to `myrx-bwl.pages.dev`; see T259.)
