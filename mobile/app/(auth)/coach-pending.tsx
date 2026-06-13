@@ -6,9 +6,14 @@
  * The athlete app has nothing to resume for them — their journey lives
  * at coach.myrxfit.com. Two ways forward:
  *
- *   1. Finish on the web — opens coach.myrxfit.com; the account is
- *      untouched, and cold-starting the app lands back here until the
- *      coach signup completes (or they switch below).
+ *   1. Finish on the web — opens coach.myrxfit.com/signup (the signup
+ *      front door, NOT the bare root: a browser opened from the app has
+ *      no web session, so the bare root renders the ForCoaches landing —
+ *      which reads as "it just went to the homepage"). The signup's email
+ *      step detects the in-progress coach account and resumes it (sign-in
+ *      if confirmed, a re-sent OTP if not). The account is untouched, and
+ *      cold-starting the app lands back here until the coach signup
+ *      completes (or they switch below).
  *   2. Switch to an athlete account — marker -> 'A'; coach-only
  *      signup_checkpoint values ('plan' / 'stripe') are remapped to
  *      'photo' (the last step the two journeys share) so the athlete
@@ -34,7 +39,14 @@ import { colors, alpha, fonts, radius } from '../../src/theme'
 import AnimateRise from '../../src/components/AnimateRise'
 import AmbientBackground from '../../src/components/AmbientBackground'
 
-const COACH_URL = 'https://coach.myrxfit.com/'
+// The coach signup front door — NOT the bare root. An external browser
+// opened from the app has no web session, and the bare root
+// (coach.myrxfit.com/) renders the ForCoaches marketing landing for
+// signed-out visitors, which read to users as "it just went to the
+// homepage" (Jun 13 2026 bug report). /signup's email step detects the
+// in-progress coach account and resumes it: a confirmed account is asked
+// to sign in, an unconfirmed one gets its 6-digit code re-sent in place.
+const COACH_URL = 'https://coach.myrxfit.com/signup'
 
 export default function CoachPending() {
   const { user, profile, signOut } = useAuth()
