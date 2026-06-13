@@ -6,14 +6,19 @@
  * The athlete app has nothing to resume for them — their journey lives
  * at coach.myrxfit.com. Two ways forward:
  *
- *   1. Finish on the web — opens coach.myrxfit.com/signup (the signup
- *      front door, NOT the bare root: a browser opened from the app has
- *      no web session, so the bare root renders the ForCoaches landing —
- *      which reads as "it just went to the homepage"). The signup's email
- *      step detects the in-progress coach account and resumes it (sign-in
- *      if confirmed, a re-sent OTP if not). The account is untouched, and
- *      cold-starting the app lands back here until the coach signup
- *      completes (or they switch below).
+ *   1. Finish on the web — opens the coach SIGN-IN page with the email
+ *      prefilled (coach.myrxfit.com/auth?mode=signin&email=…), exactly
+ *      where the web's own "you already have a coach account" screen
+ *      sends people. NOT the bare root and NOT /signup: the bare root just
+ *      renders the ForCoaches landing for a session-less browser ("it went
+ *      to the homepage" — the Jun 13 2026 bug), and /signup would re-show
+ *      the coach welcome + email step before landing in the same place.
+ *      Reaching THIS screen means the user is signed in on the phone, so
+ *      their email is confirmed and password sign-in always works. After
+ *      sign-in, web roleHomePath routes the coach marker to /signup,
+ *      resuming at coach_signup_checkpoint (or /portal if settled). The
+ *      account is untouched; cold-starting the app lands back here until
+ *      the coach signup completes (or they switch below).
  *   2. Switch to an athlete account — marker -> 'A'; coach-only
  *      signup_checkpoint values ('plan' / 'stripe') are remapped to
  *      'photo' (the last step the two journeys share) so the athlete
@@ -39,14 +44,18 @@ import { colors, alpha, fonts, radius } from '../../src/theme'
 import AnimateRise from '../../src/components/AnimateRise'
 import AmbientBackground from '../../src/components/AmbientBackground'
 
-// The coach signup front door — NOT the bare root. An external browser
-// opened from the app has no web session, and the bare root
-// (coach.myrxfit.com/) renders the ForCoaches marketing landing for
-// signed-out visitors, which read to users as "it just went to the
-// homepage" (Jun 13 2026 bug report). /signup's email step detects the
-// in-progress coach account and resumes it: a confirmed account is asked
-// to sign in, an unconfirmed one gets its 6-digit code re-sent in place.
-const COACH_URL = 'https://coach.myrxfit.com/signup'
+// The coach SIGN-IN page on the web — exactly where the web's own "you
+// already have a coach account" screen routes people (coach Signup.jsx
+// phase 'coach' -> /auth?mode=signin&email=). NOT the bare root (renders
+// the ForCoaches landing for a session-less browser -- the Jun 13 2026
+// "it went to the homepage" bug) and NOT /signup (which would re-show the
+// welcome + email step to reach the same place). Reaching coach-pending
+// means the user is signed in on the phone, so the email is confirmed and
+// password sign-in always works here. After sign-in, web roleHomePath
+// sends the coach marker to /signup, resuming the journey (or /portal if
+// settled). The email is appended at press time from the signed-in
+// session so it's prefilled on the web sign-in form.
+const COACH_SIGNIN_URL = 'https://coach.myrxfit.com/auth?mode=signin'
 
 export default function CoachPending() {
   const { user, profile, signOut } = useAuth()
@@ -102,7 +111,11 @@ export default function CoachPending() {
         </Text>
         <Pressable
           style={({ pressed }) => [s.primaryBtn, pressed && s.pressed]}
-          onPress={() => { Linking.openURL(COACH_URL).catch(() => {}) }}
+          onPress={() => {
+            const e = user?.email || (profile as any)?.email || ''
+            const url = e ? `${COACH_SIGNIN_URL}&email=${encodeURIComponent(e)}` : COACH_SIGNIN_URL
+            Linking.openURL(url).catch(() => {})
+          }}
         >
           <Text style={s.primaryBtnText}>Finish on the web</Text>
         </Pressable>
