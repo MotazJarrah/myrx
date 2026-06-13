@@ -8,6 +8,7 @@ import {
   Lightbulb, Heart,
 } from 'lucide-react'
 import SuggestionDrawer from './SuggestionDrawer'
+import Wordmark from './Wordmark'
 
 const links = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -20,9 +21,8 @@ const links = [
 ]
 
 function Logo() {
-  const { theme } = useTheme()
-  const src = theme === 'dark' ? '/logo-dark.png?v=6-final' : '/logo-light.png?v=6-final'
-  return <img src={src} alt="MyRX" className="h-9 w-auto object-contain" />
+  // Single shared wordmark — one canonical size, theme-aware (T246).
+  return <Wordmark />
 }
 
 export default function AppShell({ children, isAdmin = false, onSwitchToAdminView }) {

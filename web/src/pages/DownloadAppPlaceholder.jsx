@@ -26,6 +26,7 @@ import { Link, Redirect } from 'wouter'
 import { Smartphone } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
+import Wordmark from '../components/Wordmark'
 
 export default function DownloadAppPlaceholder() {
   // Coaches and admins must never see this athlete placeholder. They land
@@ -65,7 +66,7 @@ export default function DownloadAppPlaceholder() {
           rules. */}
       <header className="flex h-16 items-center px-6 md:px-10 border-b border-border/40">
         <Link href="/?welcome=1" className="flex items-center gap-2 shrink-0">
-          <img src="/myrx-wordmark-dark.png" alt="MyRX — home" className="h-7 w-auto" />
+          <Wordmark alt="MyRX — home" />
         </Link>
       </header>
 

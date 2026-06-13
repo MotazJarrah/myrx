@@ -7,6 +7,7 @@ import {
   MessageCircle, BookOpen, Settings, FileDown,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import Wordmark from '../../components/Wordmark'
 
 const NAV = [
   { href: '/admin/overview',  label: 'Dashboard',            icon: LayoutDashboard },
@@ -36,12 +37,7 @@ function Logo() {
   // Mirrors CoachShell's Logo.
   return (
     <div className="flex items-end gap-2">
-      <img
-        src="/myrx-wordmark-dark.png?v=6-final"
-        alt="MyRX"
-        className="h-5 w-auto"
-        style={{ height: '22px' }}
-      />
+      <Wordmark />
       <span className="text-lg font-semibold tracking-tight text-primary leading-none whitespace-nowrap">
         Admin
       </span>

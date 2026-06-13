@@ -44,20 +44,18 @@ import {
   Clock, Smartphone, Mail, Apple, Play,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { useTheme } from '../../contexts/ThemeContext'
+import Wordmark from '../../components/Wordmark'
 
 // ─── Header ─────────────────────────────────────────────────────────────────
 // Match the Landing page chrome: wordmark left, nothing on right.
 // Wordmark is the no-slogan variant per CLAUDE.md brand rules — the
 // slogan version is reserved for the signup welcome screen only.
 function Header() {
-  const { theme } = useTheme()
-  const src = theme === 'dark' ? '/myrx-wordmark-dark.png' : '/myrx-wordmark-light.png'
   return (
     <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
       <Link href="/">
         <a className="inline-flex items-center">
-          <img src={src} alt="MyRX" className="h-7 w-auto object-contain" />
+          <Wordmark />
         </a>
       </Link>
     </header>

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { useTheme } from '../contexts/ThemeContext'
 import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
+import Wordmark from '../components/Wordmark'
 
 // ── Mock client roster used across all 3 hero mockups ──────────────────
 // Keeping the same 4 clients across mockups makes the page feel like
@@ -90,7 +91,7 @@ function Header() {
   return (
     <header className="relative z-30 flex h-16 items-center justify-between px-6 md:px-10 border-b border-border/40">
       <Link href="/" className="flex items-center gap-2 shrink-0">
-        <img src="/myrx-wordmark-dark.png" alt="MyRX" className="h-7 w-auto" />
+        <Wordmark />
       </Link>
 
       {/* Desktop nav (md and up) */}

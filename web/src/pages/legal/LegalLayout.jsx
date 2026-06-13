@@ -20,7 +20,7 @@
 
 import { createContext, useContext } from 'react'
 import { Link } from 'wouter'
-import { useTheme } from '../../contexts/ThemeContext'
+import Wordmark from '../../components/Wordmark'
 
 // When true (provided by the admin Legal library tab), LegalLayout renders ONLY
 // a compact title + effective-date + prose block — no ambient backdrop, logo
@@ -35,9 +35,7 @@ const PROSE_CLASS =
   'space-y-6 text-sm leading-relaxed text-foreground/90 [&_h2]:mt-10 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2]:text-foreground [&_h3]:mt-6 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-foreground [&_p]:leading-relaxed [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:space-y-1 [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-4 [&_strong]:font-semibold [&_strong]:text-foreground'
 
 function Logo() {
-  const { theme } = useTheme()
-  const src = theme === 'dark' ? '/myrx-wordmark-dark.png' : '/myrx-wordmark-light.png'
-  return <img src={src} alt="MyRX" className="h-5 w-auto object-contain sm:h-7" />
+  return <Wordmark />
 }
 
 const FOOTER_LINKS = [
@@ -52,7 +50,6 @@ const FOOTER_LINKS = [
 ]
 
 export default function LegalLayout({ title, effectiveDate, children }) {
-  const { theme } = useTheme()
   const embedded = useContext(LegalEmbedContext)
 
   // Embedded (admin Legal tab): compact title + date + prose, no page chrome.

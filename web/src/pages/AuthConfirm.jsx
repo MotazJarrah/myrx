@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { friendlyAuthMessage } from '../lib/authErrors'
 import { passwordMeetsRequirements } from '../lib/passwordRules'
 import { PasswordRequirements } from '../components/PasswordRequirements'
+import Wordmark from '../components/Wordmark'
 
 // Auth confirmation handler.
 //
@@ -21,15 +22,8 @@ import { PasswordRequirements } from '../components/PasswordRequirements'
 // Microsoft 365 / Gmail / Yahoo. See: ../docs/email-deliverability notes.
 
 function Logo() {
-  // Real wordmark per brand book ("Never render the brand name as JSX text").
-  return (
-    <img
-      src="/myrx-wordmark-dark.png?v=6-final"
-      alt="MyRX"
-      className="h-auto"
-      style={{ height: '20px', width: 'auto' }}
-    />
-  )
+  // Single shared wordmark — one canonical size, theme-aware (T246).
+  return <Wordmark />
 }
 
 const inputCls = 'w-full rounded-md border border-border bg-input/30 px-3 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring transition-colors'

@@ -20,6 +20,7 @@ import { useState } from 'react'
 import { Link } from 'wouter'
 import { ArrowRight, Check, ChevronDown, Sparkles, Menu, Users, X } from 'lucide-react'
 import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
+import Wordmark from '../components/Wordmark'
 
 // Reuse the same header pattern as ForCoaches — extracting to a shared
 // component would make sense if we add more marketing pages; for v1
@@ -33,7 +34,7 @@ function Header() {
   return (
     <header className="relative z-30 flex h-16 items-center justify-between px-6 md:px-10 border-b border-border/40">
       <Link href="/" className="flex items-center gap-2 shrink-0">
-        <img src="/myrx-wordmark-dark.png" alt="MyRX" className="h-7 w-auto" />
+        <Wordmark />
       </Link>
 
       {/* Desktop nav (md and up) */}

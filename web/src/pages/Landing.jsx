@@ -1,13 +1,10 @@
 import { Link } from 'wouter'
-import { useTheme } from '../contexts/ThemeContext'
 import { Dumbbell, Activity, Weight, Apple, Zap, LineChart, Lock } from 'lucide-react'
+import Wordmark from '../components/Wordmark'
 
 function Logo() {
-  const { theme } = useTheme()
-  const src = theme === 'dark' ? '/logo-dark.png?v=6-final' : '/logo-light.png?v=6-final'
-  return (
-    <img src={src} alt="MyRX" className="h-9 w-auto object-contain" />
-  )
+  // Single shared wordmark — one canonical size, theme-aware (T246).
+  return <Wordmark />
 }
 
 const features = [
