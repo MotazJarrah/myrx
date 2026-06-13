@@ -125,15 +125,6 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  .ambient-grid {
-    background-image:
-      linear-gradient(hsl(var(--border) / 0.4) 1px, transparent 1px),
-      linear-gradient(90deg, hsl(var(--border) / 0.4) 1px, transparent 1px);
-    background-size: 48px 48px;
-    mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-    -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-  }
-
   .glow-primary {
     box-shadow:
       0 0 0 1px hsl(var(--primary) / 0.3),
