@@ -329,7 +329,7 @@ export default function AuthConfirm() {
         style={{ background: 'radial-gradient(ellipse, hsl(var(--primary) / 0.2), transparent 70%)' }}
         aria-hidden
       />
-      <header className="relative z-10 flex h-16 items-center px-6">
+      <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
         <Link href="/"><Logo /></Link>
       </header>
       <main className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] max-w-md items-center px-6 pb-12">

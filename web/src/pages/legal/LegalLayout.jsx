@@ -74,7 +74,7 @@ export default function LegalLayout({ title, effectiveDate, children }) {
         aria-hidden
       />
 
-      <header className="relative z-10 flex h-16 items-center px-6">
+      <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
         <Link href="/"><Logo /></Link>
       </header>
 
