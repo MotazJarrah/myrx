@@ -21,12 +21,21 @@ export default function Landing() {
     <PageShell>
 
       {/* myrxfit.com is a PURELY INFORMATIVE landing (T198): no athlete sign
-          in / sign up / pricing — athletes onboard in the mobile app. Per the
-          T263 refresh the "For Coaches" link was removed too — the apex landing
-          makes ZERO reference to the coach platform (user: "dont mention coaches
-          anywhere"); coaches go to coach.myrxfit.com directly. */}
-      <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
+          in / sign up / pricing — athletes onboard in the mobile app. The lone
+          nav item is the "For Coaches" pointer to coach.myrxfit.com (a real <a>,
+          not a wouter <Link>, so the coach session stays on its own origin —
+          T199). Restored Jun 13 2026 — the T263 refresh removed it, user asked
+          for it back. ("no coaches" meant the body copy, not this nav link.) */}
+      <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10">
         <Logo />
+        <nav className="flex items-center gap-1 sm:gap-2">
+          <a
+            href="https://coach.myrxfit.com"
+            className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            For Coaches
+          </a>
+        </nav>
       </header>
 
       <main className="relative z-10 mx-auto max-w-5xl px-6 pb-20 pt-10 md:pt-20">
