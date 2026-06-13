@@ -35,6 +35,7 @@ import { useAuth } from '../../src/contexts/AuthContext'
 import { friendlyAuthMessage } from '../../src/lib/authErrors'
 import { PasswordInput } from '../../src/components/PasswordInput'
 import AnimateRise from '../../src/components/AnimateRise'
+import Wordmark from '../../src/components/Wordmark'
 import { KeyboardScreen } from '../../src/components/KeyboardScreen'
 import { openLegalDoc } from '../../src/lib/openLegalDoc'
 import { colors, alpha, palette } from '../../src/theme'
@@ -299,11 +300,7 @@ export default function SignIn() {
               <ChevronLeft size={20} color={colors.foreground} />
             </Pressable>
             <View style={{ flex: 1 }} />
-            <Image
-              source={require('../../assets/myrx-wordmark-dark.png')}
-              style={s.logo}
-              resizeMode="contain"
-            />
+            <Wordmark />
           </View>
 
           <View style={s.scrollInner}>

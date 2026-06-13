@@ -26,6 +26,7 @@ import { supabase } from '../../src/lib/supabase'
 import { uniqueChannelName } from '../../src/lib/realtime'
 import { syncRecent as samsungSyncRecent, syncSleepRecent } from '../../src/lib/integrations/samsungHealth'
 import ChatHub from '../../src/components/ChatHub'
+import Wordmark from '../../src/components/Wordmark'
 import SuggestionSheet from '../../src/components/SuggestionSheet'
 import { BiometricLockGate } from '../../src/components/BiometricLockGate'
 import ReactivationGate from '../../src/components/ReactivationGate'
@@ -47,12 +48,11 @@ import { ChartTooltipProvider } from '../../src/lib/chartTooltipScope'
 // Uses the no-slogan wordmark — the slogan version is reserved for the
 // signup welcome screen as a one-shot brand intro. Mirrors web's Navbar +
 // Landing convention.
-const LOGO_DARK = require('../../assets/myrx-wordmark-dark.png')
 
 function Logo() {
   return (
     <Pressable onPress={() => router.replace('/(app)/dashboard' as any)} hitSlop={6}>
-      <Image source={LOGO_DARK} style={s.logoImg} resizeMode="contain" />
+      <Wordmark />
     </Pressable>
   )
 }

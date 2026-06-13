@@ -37,6 +37,7 @@ import {
 import { supabase } from '../../src/lib/supabase'
 import { useAuth } from '../../src/contexts/AuthContext'
 import AnimateRise from '../../src/components/AnimateRise'
+import Wordmark from '../../src/components/Wordmark'
 import { KeyboardScreen } from '../../src/components/KeyboardScreen'
 import { colors, alpha, palette, withAlpha } from '../../src/theme'
 
@@ -96,11 +97,7 @@ function Header({ onBack }: { onBack: () => void }) {
         <ChevronLeft size={20} color={colors.foreground} />
       </Pressable>
       <View style={{ flex: 1 }} />
-      <Image
-        source={require('../../assets/myrx-wordmark-dark.png')}
-        style={s.logo}
-        resizeMode="contain"
-      />
+      <Wordmark />
     </View>
   )
 }

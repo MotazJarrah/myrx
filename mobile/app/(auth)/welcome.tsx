@@ -36,6 +36,7 @@ import Svg, { Defs, RadialGradient, Stop, Rect, Line, G } from 'react-native-svg
 import { ArrowRight, Dumbbell, BookOpen, MessageCircle } from 'lucide-react-native'
 import { colors, alpha, palette, fonts } from '../../src/theme'
 import AnimateRise from '../../src/components/AnimateRise'
+import Wordmark from '../../src/components/Wordmark'
 import { useAuth } from '../../src/contexts/AuthContext'
 
 // How long each slide stays before auto-advancing. 3.5 s — long enough to
@@ -151,11 +152,7 @@ function SlideHero() {
   return (
     <View style={s.slide}>
       <AnimateRise>
-        <Image
-          source={require('../../assets/myrx-wordmark-dark.png')}
-          style={s.logo}
-          resizeMode="contain"
-        />
+        <Wordmark style={{ marginBottom: 8 }} />
       </AnimateRise>
 
       <AnimateRise delay={60}>
