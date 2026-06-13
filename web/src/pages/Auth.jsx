@@ -4,7 +4,6 @@ import { ArrowLeft, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import { friendlyAuthMessage } from '../lib/authErrors'
-import { useIsDesktop } from '../hooks/useIsDesktop'
 import { roleHomePath } from '../lib/roleRouting'
 
 function Logo() {
@@ -37,7 +36,6 @@ export default function Auth() {
 
   const [, navigate] = useLocation()
   const { signInWithEmailOrPhone } = useAuth()
-  const isDesktop = useIsDesktop()
 
   async function handleForgotPassword() {
     if (!email.trim()) { setError('Enter your email address first.'); return }
@@ -73,27 +71,42 @@ export default function Auth() {
         }
       } catch { /* fall through to role-based default */ }
 
-      // Route by role + viewport. Per CLAUDE.md "Web / Mobile role rule":
-      // athletes have ZERO web surfaces — /app is the one legitimate athlete
-      // landing (Download the App). Coaches + admins land on their portals
-      // (desktop). AuthContext profile state loads async, so do a direct lookup;
-      // fall back to /app for any unknown role.
+      // Route by role. Per CLAUDE.md "Web / Mobile role rule": athletes are
+      // NEVER signed in on web — on ANY device, phone browser included. A
+      // plain athlete sign-in is signed back OUT and dropped on the /app
+      // "Download the app" page with no session. Coaches + admins keep their
+      // session and route to their portal. The lookup runs unconditionally
+      // (no desktop gate) so the no-session rule holds on mobile web too.
+      // (T245). AuthContext profile loads async, so do a direct lookup.
       try {
         const { data: { user } } = await supabase.auth.getUser()
-        if (user && isDesktop) {
+        if (user) {
           const { data: prof } = await supabase
             .from('profiles')
             .select('is_superuser, is_coach, account_marker, coach_subscription_status')
             .eq('id', user.id)
             .single()
+          // "Athlete" = NONE of these signals. A coach signing in on the main
+          // host also resolves to /app via roleHomePath (the placeholder then
+          // cross-domain-bounces them to the portal), so we must key off the
+          // ROLE, not the destination — otherwise a coach on myrxfit.com would
+          // get wrongly signed out.
+          const isStaffOrCoach =
+            prof?.is_superuser ||
+            prof?.is_coach ||
+            ['C', 'AC', 'CA'].includes(prof?.account_marker) ||
+            prof?.coach_subscription_status != null
+          if (!isStaffOrCoach) {
+            await supabase.auth.signOut().catch(() => {})
+            window.location.href = '/app'
+            return
+          }
           navigate(roleHomePath(prof))   // T234: host + account_marker aware
           return
         }
       } catch { /* fall through to default */ }
-      // Host-aware default: go to '/' and let RootRoute/RoleRouter route by
-      // host -- coach host -> /signup (resume coach signup) or /portal; main
-      // host -> /app (athlete). A hardcoded /app 404s on coach.myrxfit.com,
-      // which has no athlete app. (T233)
+      // Host-aware default (error path — role unknown): go to '/' and let
+      // RootRoute/RoleRouter route by host. (T233)
       navigate('/')
     } catch (err) {
       setError(friendlyAuthMessage(err, 'Something went wrong.'))
