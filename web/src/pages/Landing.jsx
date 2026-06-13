@@ -1,6 +1,7 @@
 import { Link } from 'wouter'
 import { Dumbbell, Activity, Weight, Apple, Zap, LineChart, Lock } from 'lucide-react'
 import Wordmark from '../components/Wordmark'
+import PageShell from '../components/PageShell'
 
 function Logo() {
   // Single shared wordmark — one canonical size, theme-aware (T246).
@@ -18,19 +19,7 @@ const features = [
 
 export default function Landing() {
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
-      {/* Ambient grid */}
-      <div className="pointer-events-none absolute inset-0 ambient-grid opacity-60" aria-hidden />
-      <div
-        className="pointer-events-none absolute -left-40 top-[-20%] h-[500px] w-[500px] rounded-full opacity-40 blur-3xl"
-        style={{ background: 'radial-gradient(circle, hsl(var(--primary) / 0.35), transparent 70%)' }}
-        aria-hidden
-      />
-      <div
-        className="pointer-events-none absolute -right-40 top-[10%] h-[500px] w-[500px] rounded-full opacity-25 blur-3xl"
-        style={{ background: 'radial-gradient(circle, hsl(220 80% 60% / 0.25), transparent 70%)' }}
-        aria-hidden
-      />
+    <PageShell>
 
       <header className="relative z-10 flex h-16 items-center justify-between px-6 md:px-10">
         <Logo />
@@ -156,29 +145,6 @@ export default function Landing() {
           </p>
         </section>
       </main>
-
-      {/* Legal links — keep in sync with ForCoaches.jsx, CoachPricing.jsx,
-          Pricing.jsx, and LegalLayout.jsx FOOTER_LINKS. Adding them on
-          the public landing page closes a discoverability gap (a curious
-          visitor or store reviewer can find the docs without signing up
-          or visiting the marketing pricing page first). Same ordering
-          rule as the rest: Privacy, Terms, then the rest alphabetical-ish
-          grouped by audience (consumer-first → coach-only → reference). */}
-      <footer className="relative z-10 border-t border-border px-6 py-8 text-xs text-muted-foreground">
-        <div className="mx-auto max-w-6xl space-y-4">
-          <p className="text-center">MyRX · Performance Lab · Built for athletes, not beginners.</p>
-          <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
-            <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
-            <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
-            <Link href="/refund-policy" className="hover:text-foreground transition-colors">Refund Policy</Link>
-            <Link href="/health-disclaimer" className="hover:text-foreground transition-colors">Health Disclaimer</Link>
-            <Link href="/acceptable-use" className="hover:text-foreground transition-colors">Acceptable Use</Link>
-            <Link href="/cookies" className="hover:text-foreground transition-colors">Cookies</Link>
-            <a href="https://coach.myrxfit.com" className="hover:text-foreground transition-colors">For coaches</a>
-          </nav>
-          <p className="text-center text-[10px] text-muted-foreground/60">© {new Date().getFullYear()} MyRX. All rights reserved.</p>
-        </div>
-      </footer>
-    </div>
+    </PageShell>
   )
 }

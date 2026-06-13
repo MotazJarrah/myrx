@@ -6,6 +6,7 @@ import { friendlyAuthMessage } from '../lib/authErrors'
 import { passwordMeetsRequirements } from '../lib/passwordRules'
 import { PasswordRequirements } from '../components/PasswordRequirements'
 import Wordmark from '../components/Wordmark'
+import PageShell from '../components/PageShell'
 
 // Auth confirmation handler.
 //
@@ -322,20 +323,14 @@ export default function AuthConfirm() {
   }
 
   const shell = (content) => (
-    <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
-      <div className="pointer-events-none absolute inset-0 ambient-grid opacity-50" aria-hidden />
-      <div
-        className="pointer-events-none absolute left-1/2 top-0 h-[500px] w-[800px] -translate-x-1/2 opacity-40 blur-3xl"
-        style={{ background: 'radial-gradient(ellipse, hsl(var(--primary) / 0.2), transparent 70%)' }}
-        aria-hidden
-      />
+    <PageShell>
       <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
         <Link href="/"><Logo /></Link>
       </header>
       <main className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] max-w-md items-center px-6 pb-12">
         <div className="w-full">{content}</div>
       </main>
-    </div>
+    </PageShell>
   )
 
   if (status === 'verifying') {

@@ -21,6 +21,7 @@ import { Link } from 'wouter'
 import { ArrowRight, Check, ChevronDown, Sparkles, Menu, Users, X } from 'lucide-react'
 import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
 import Wordmark from '../components/Wordmark'
+import PageShell from '../components/PageShell'
 
 // Reuse the same header pattern as ForCoaches — extracting to a shared
 // component would make sense if we add more marketing pages; for v1
@@ -154,7 +155,7 @@ export default function CoachPricing() {
   const selectedTier = COACH_TIERS.find(t => t.id === selectedTierId) || COACH_TIERS[1]
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <PageShell>
       <Header />
 
       {/* Intro */}
@@ -341,7 +342,6 @@ export default function CoachPricing() {
         </div>
       </section>
 
-      <Footer />
-    </div>
+    </PageShell>
   )
 }

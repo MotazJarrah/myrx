@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase'
 import { friendlyAuthMessage } from '../lib/authErrors'
 import { roleHomePath } from '../lib/roleRouting'
 import Wordmark from '../components/Wordmark'
+import PageShell from '../components/PageShell'
 
 function Logo() {
   // Single shared wordmark — one canonical size, theme-aware (T246).
@@ -120,13 +121,7 @@ export default function Auth() {
   }
 
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-background text-foreground">
-      <div className="pointer-events-none absolute inset-0 ambient-grid opacity-50" aria-hidden />
-      <div
-        className="pointer-events-none absolute left-1/2 top-0 h-[500px] w-[800px] -translate-x-1/2 opacity-40 blur-3xl"
-        style={{ background: 'radial-gradient(ellipse, hsl(var(--primary) / 0.2), transparent 70%)' }}
-        aria-hidden
-      />
+    <PageShell>
       <header className="relative z-10 flex h-16 items-center px-6 md:px-10">
         <Link href="/"><Logo /></Link>
       </header>
@@ -204,6 +199,6 @@ export default function Auth() {
           </div>
         </div>
       </main>
-    </div>
+    </PageShell>
   )
 }

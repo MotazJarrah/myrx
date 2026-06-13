@@ -28,6 +28,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext'
 import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
 import Wordmark from '../components/Wordmark'
+import PageShell from '../components/PageShell'
 
 // ── Mock client roster used across all 3 hero mockups ──────────────────
 // Keeping the same 4 clients across mockups makes the page feel like
@@ -562,7 +563,7 @@ function Footer() {
 export default function ForCoaches() {
   const { theme } = useTheme()
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <PageShell>
       <Header />
       <Hero />
       <Features />
@@ -571,7 +572,6 @@ export default function ForCoaches() {
       <PricingTeaser />
       <FAQ />
       <BottomCTA />
-      <Footer />
-    </div>
+    </PageShell>
   )
 }

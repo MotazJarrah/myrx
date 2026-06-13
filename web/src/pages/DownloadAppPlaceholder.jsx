@@ -27,6 +27,7 @@ import { Smartphone } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
 import Wordmark from '../components/Wordmark'
+import PageShell from '../components/PageShell'
 
 export default function DownloadAppPlaceholder() {
   // Coaches and admins must never see this athlete placeholder. They land
@@ -58,7 +59,7 @@ export default function DownloadAppPlaceholder() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
+    <PageShell>
       {/* T244: home affordance. The wordmark links to /?welcome=1 — RootRoute
           honors ?welcome=1 to render the marketing landing even for a
           signed-in user, so "home" doesn't role-route straight back to this
@@ -114,6 +115,6 @@ export default function DownloadAppPlaceholder() {
           </div>
         </div>
       </div>
-    </div>
+    </PageShell>
   )
 }
