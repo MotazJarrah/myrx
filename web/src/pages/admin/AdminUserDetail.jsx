@@ -1478,7 +1478,7 @@ export default function AdminUserDetail() {
               <button
                 onClick={() => setDeleteOpen(false)}
                 disabled={deleting}
-                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                className="rounded-md border border-primary/40 bg-transparent px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -1564,7 +1564,7 @@ export default function AdminUserDetail() {
               <button
                 onClick={() => setWipeOpen(false)}
                 disabled={wiping}
-                className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                className="rounded-md border border-primary/40 bg-transparent px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-primary/10 transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>

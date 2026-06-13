@@ -110,8 +110,8 @@ const s = StyleSheet.create({
   },
   stayFreeBtn: {
     alignItems: 'center', paddingVertical: 12,
-    borderRadius: 10, borderWidth: 1, borderColor: colors.border,
-    backgroundColor: alpha(colors.input, 0.10),
+    borderRadius: 10, borderWidth: 1, borderColor: alpha(colors.primary, 0.4),
+    backgroundColor: 'transparent',
   },
   stayFreeText: {
     fontFamily: fonts.sans[600], fontSize: 13, color: colors.foreground,

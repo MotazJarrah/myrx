@@ -1761,7 +1761,7 @@ export default function AdminMovements() {
               <div className="flex gap-2">
                 <button
                   onClick={() => setEditingMovement(null)}
-                  className="flex-1 rounded-lg py-2.5 text-sm font-semibold border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                  className="flex-1 rounded-lg py-2.5 text-sm font-semibold border border-primary/40 bg-transparent text-foreground hover:bg-primary/10 transition-all"
                 >
                   Cancel
                 </button>
@@ -2084,7 +2084,7 @@ export default function AdminMovements() {
                     setVariants([]); setVariantInput(''); setVariantShortInput('')
                     setError('')
                   }}
-                  className="flex-1 rounded-lg py-2.5 text-sm font-semibold border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+                  className="flex-1 rounded-lg py-2.5 text-sm font-semibold border border-primary/40 bg-transparent text-foreground hover:bg-primary/10 transition-all"
                 >
                   Cancel
                 </button>
@@ -2340,7 +2340,7 @@ export default function AdminMovements() {
             <div className="flex gap-2 pt-1">
               <button
                 onClick={() => setPendingDelete(null)}
-                className="flex-1 rounded-lg border border-border py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="flex-1 rounded-lg border border-primary/40 bg-transparent py-2 text-xs font-semibold text-foreground hover:bg-primary/10 transition-colors"
               >
                 Cancel
               </button>
@@ -2392,7 +2392,7 @@ export default function AdminMovements() {
             <div className="flex gap-2 pt-1">
               <button
                 onClick={() => setPendingDeleteMany(null)}
-                className="flex-1 rounded-lg border border-border py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="flex-1 rounded-lg border border-primary/40 bg-transparent py-2 text-xs font-semibold text-foreground hover:bg-primary/10 transition-colors"
               >
                 Cancel
               </button>

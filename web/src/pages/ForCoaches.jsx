@@ -288,7 +288,7 @@ function Hero() {
               </Link>
               <Link
                 href="/pricing"
-                className="inline-flex items-center rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+                className="inline-flex items-center rounded-lg border border-primary/40 bg-transparent px-5 py-2.5 text-sm font-medium text-foreground hover:bg-primary/10 transition-colors"
               >
                 See pricing
               </Link>

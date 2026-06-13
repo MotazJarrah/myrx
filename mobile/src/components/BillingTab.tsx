@@ -24,7 +24,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from 'react-native'
-import { Receipt, AlertTriangle, CreditCard } from 'lucide-react-native'
+import { Receipt, AlertTriangle, CreditCard, ArrowRight } from 'lucide-react-native'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import PlanCards from './PlanCards'
@@ -265,6 +265,7 @@ export default function BillingTab({ userId }: Props) {
       {showPlansButton && (
         <Pressable style={s.plansBtn} onPress={() => setPickerOpen(true)}>
           <Text style={s.plansBtnText}>{plansButtonLabel}</Text>
+          <ArrowRight size={16} color={colors.primary} />
         </Pressable>
       )}
       <TransactionsSection grouped={grouped} />
@@ -619,6 +620,7 @@ const s = StyleSheet.create({
   // screaming CTA. colors.primary is HSL so alpha() is correct here.
   plansBtn: {
     borderRadius: 12, paddingVertical: 13,
+    flexDirection: 'row', gap: 6,
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: alpha(colors.primary, 0.40),
     backgroundColor: alpha(colors.primary, 0.10),

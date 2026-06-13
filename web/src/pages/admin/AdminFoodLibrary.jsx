@@ -292,7 +292,7 @@ function FoodForm({ initial, isEdit, foodId, onSave, onCancel, saving, filterWar
           Save
         </button>
         <button type="button" onClick={onCancel}
-          className="rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:bg-accent transition-colors">
+          className="rounded-lg border border-primary/40 bg-transparent px-4 py-2 text-sm text-foreground hover:bg-primary/10 transition-colors">
           Cancel
         </button>
       </div>
@@ -314,7 +314,7 @@ function DeleteConfirm({ food, onConfirm, onCancel, deleting }) {
           Delete
         </button>
         <button onClick={onCancel}
-          className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent transition-colors">
+          className="rounded-lg border border-primary/40 bg-transparent px-3 py-1.5 text-xs text-foreground hover:bg-primary/10 transition-colors">
           Cancel
         </button>
       </div>

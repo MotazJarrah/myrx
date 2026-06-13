@@ -905,8 +905,8 @@ const s = StyleSheet.create({
 
   secondaryBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    borderColor: colors.border, borderWidth: 1,
-    backgroundColor: alpha(colors.card, 0.40),
+    borderColor: alpha(colors.primary, 0.4), borderWidth: 1,
+    backgroundColor: 'transparent',
     borderRadius: 12,
     paddingVertical: 12, paddingHorizontal: 16,
   },

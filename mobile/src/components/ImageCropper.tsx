@@ -483,7 +483,7 @@ const s = StyleSheet.create({
   btnSecondary: {
     paddingVertical: 10, paddingHorizontal: 16,
     borderRadius: 8,
-    borderWidth: 1, borderColor: colors.border,
+    borderWidth: 1, borderColor: alpha(colors.primary, 0.4),
     backgroundColor: 'transparent',
   },
   btnSecondaryText: { color: colors.foreground, fontSize: 14 },

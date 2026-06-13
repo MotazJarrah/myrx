@@ -157,7 +157,7 @@ export default function CoachWelcome() {
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="w-full h-12 rounded-lg border border-border text-foreground font-medium hover:bg-card transition-colors"
+                className="w-full h-12 rounded-lg border border-primary/40 bg-transparent text-foreground font-medium hover:bg-primary/10 transition-colors"
               >
                 Refresh
               </button>

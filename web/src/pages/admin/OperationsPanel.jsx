@@ -1112,7 +1112,7 @@ function ReviewDialog({ runId, onCommit, onDiscard, onDownload, working, error }
         <button
           onClick={onDiscard}
           disabled={working}
-          className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40 transition-colors"
+          className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-transparent px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-primary/10 disabled:opacity-40 transition-colors"
         >
           <X className="h-3 w-3" />
           Discard

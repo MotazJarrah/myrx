@@ -283,7 +283,7 @@ export default function AdminUserBody({ userId, profile, onSaved }) {
               {saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…</> : <><Check className="h-3.5 w-3.5" /> Save</>}
             </button>
             <button type="button" onClick={() => { setShowForm(false); setSaveErr('') }}
-              className="rounded-lg border border-border px-4 py-2 text-xs font-medium text-muted-foreground hover:bg-accent transition-colors">
+              className="rounded-lg border border-primary/40 bg-transparent px-4 py-2 text-xs font-medium text-foreground hover:bg-primary/10 transition-colors">
               Cancel
             </button>
           </div>

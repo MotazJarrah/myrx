@@ -593,7 +593,9 @@ const s = StyleSheet.create({
     color: colors.background,
   },
   secondaryBtn: {
-    backgroundColor: alpha(colors.input, 0.5),
+    borderWidth: 1,
+    borderColor: alpha(colors.primary, 0.4),
+    backgroundColor: 'transparent',
     paddingVertical: 14,
     borderRadius: radius.lg,
     alignItems: 'center',
