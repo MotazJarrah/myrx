@@ -1,4 +1,4 @@
-import { Dumbbell, Activity, Moon, Droplet, Apple, TrendingUp, Zap } from 'lucide-react'
+import { Dumbbell, Activity, Moon, Droplet, Apple, TrendingUp, Zap, ArrowUpRight } from 'lucide-react'
 import Wordmark from '../components/Wordmark'
 import PageShell from '../components/PageShell'
 
@@ -31,9 +31,10 @@ export default function Landing() {
         <nav className="flex items-center gap-1 sm:gap-2">
           <a
             href="https://coach.myrxfit.com"
-            className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
           >
             For Coaches
+            <ArrowUpRight className="h-3.5 w-3.5" />
           </a>
         </nav>
       </header>

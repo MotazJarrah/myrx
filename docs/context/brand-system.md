@@ -91,6 +91,23 @@ NEVER let web and mobile drift on brand colors. NEVER introduce a new green shad
 - **For HSL → HSLA alpha** (semi-transparent overlays): `alpha(colors.primary, 0.1)` produces `hsla(...)`.
 - **For hex → rgba alpha** on palette entries: `withAlpha(palette.myrx.lime, 0.18)` produces `rgba(...)`.
 
+## Button system (LOCKED — Jun 13 2026)
+
+Three lime button styles, one per action INTENT — pick the tier by what the button does, never by looks. Lime = `--primary` (web) / `colors.primary` (mobile).
+
+| Tier | Intent | Web (Tailwind) | Mobile | Use for |
+|---|---|---|---|---|
+| **Solid lime** | Primary action / CTA | `bg-primary text-primary-foreground hover:bg-primary/90` | bg `colors.primary`, dark text (`colors.primaryForeground` / MyRX Dark) | Save · Continue · Create account · Start free trial · Subscribe — the ONE main action on a screen |
+| **Soft lime** | Directional / navigation | `bg-primary/10 text-primary hover:bg-primary/20` + a trailing arrow | bg `alpha(colors.primary, 0.10)`, text `colors.primary` | For Coaches · Manage plan · Learn more · "go to X" — any control that sends you somewhere |
+| **Outline lime** | Reverse / cancel / secondary | `border border-primary/40 text-foreground hover:bg-primary/10` | transparent bg, border `alpha(colors.primary, 0.4)`, text `colors.foreground` | Cancel · Back · Use a different email · dismiss · the step-back action |
+
+Rules:
+- **One solid per view.** At most one solid-lime CTA per screen (the primary action). Everything else is soft or outline — two solids compete; demote the lesser one to outline.
+- **Soft = it navigates.** Directional buttons get the soft tint + a trailing arrow: `ArrowUpRight` for cross-surface/external (e.g. → coach.myrxfit.com), `ArrowRight` for same-surface. The arrow is the "this takes you somewhere" signal.
+- **Outline = it walks back.** Cancel / Back / decline / secondary. Never a solid "Cancel" (a filled lime cancel reads as the thing to click).
+- **Destructive is NOT in this system.** Delete / Wipe / Sign out keep the red `destructive` treatment — outline-lime is for BENIGN reverses (cancel/back) only, never for destructive actions.
+- Applies to EVERY surface — athlete web, coach web, admin portal, mobile. Site/app-wide rollout tracked in T264.
+
 ## Past incident — color update gotcha (May 29 2026)
 
 If you update brand colors but only on one side (web OR mobile), the cross-platform-consistency rule is violated. Both surfaces MUST land together in the same turn. See task log #314 / #318 for the May 29 2026 sweep where the original cool-blue-tinted dark `#0D0F11` (HSL 220, 12%, 6%) was migrated via green-tinted dark `#131A17` (HSL 150, 15%, 9%) — rejected by user — and finally landed at the locked blue-tinted dark `#121721` (HSL 220, 28%, 10%) across both codebases simultaneously, along with primary going from HSL(80, 95%, 55%) → HSL(73, 87%, 60%) to match the locked `#CAF240` lime.
