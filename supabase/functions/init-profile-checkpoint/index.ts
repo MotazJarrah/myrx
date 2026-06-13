@@ -93,6 +93,19 @@ Deno.serve(async (req) => {
     return json(403, { error: "email_mismatch" })
   }
 
+  // T240: the marker is assigned by SIGNUP SOURCE. This function serves
+  // BOTH journeys — the mobile athlete signup AND the web coach signup
+  // call it right after signUp. The web coach signUp stamps
+  // user_metadata.signup_journey = 'coach' at auth-account creation;
+  // the mobile athlete signup sets no such metadata. The v9 bug: it
+  // stamped 'C' unconditionally, so mid-journey MOBILE athletes were
+  // marked as coaches (the coach email step then told them "you already
+  // have a coach account"). An existing athlete CONVERTING via the coach
+  // signup never reaches this function (signUp returns
+  // user_already_exists) — AC is stamped in the coach Signup flow.
+  const journey = (user.user_metadata as Record<string, unknown> | null)?.["signup_journey"]
+  const accountMarker = journey === "coach" ? "C" : "A"
+
   const bd = payload.body_data
   const { error: profErr } = await admin.from("profiles").upsert({
     id:               payload.user_id,
@@ -109,11 +122,7 @@ Deno.serve(async (req) => {
     height_unit:      bd.height_unit,
     distance_unit:    bd.distance_unit,
     signup_checkpoint: "password",
-    // T234: a brand-new web coach signup (no pre-existing athlete account)
-    // is marked 'C' the moment its profile row is created here, right after
-    // email validation. An existing athlete who converts is marked 'AC'
-    // elsewhere (coach Signup detectFlow) and never reaches this function.
-    account_marker:    "C",
+    account_marker:    accountMarker,
   }, { onConflict: "id" })
   if (profErr) {
     console.error("init-profile-checkpoint upsert failed:", profErr)
