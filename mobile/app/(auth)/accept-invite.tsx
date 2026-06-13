@@ -38,6 +38,7 @@ import { supabase } from '../../src/lib/supabase'
 import { useAuth } from '../../src/contexts/AuthContext'
 import AnimateRise from '../../src/components/AnimateRise'
 import Wordmark from '../../src/components/Wordmark'
+import AmbientBackground from '../../src/components/AmbientBackground'
 import { KeyboardScreen } from '../../src/components/KeyboardScreen'
 import { colors, alpha, palette, withAlpha } from '../../src/theme'
 
@@ -741,6 +742,7 @@ function PageShell({
   return (
     <KeyboardScreen style={s.flex}>
       <View style={s.flex}>
+        <AmbientBackground />
         <SafeAreaView style={s.flex} edges={['top']}>
           <Header onBack={onBack} />
           <ScrollView

@@ -32,6 +32,7 @@ import { useAuth } from '../../src/contexts/AuthContext'
 import { supabase } from '../../src/lib/supabase'
 import { colors, alpha, fonts, radius } from '../../src/theme'
 import AnimateRise from '../../src/components/AnimateRise'
+import AmbientBackground from '../../src/components/AmbientBackground'
 
 const COACH_URL = 'https://coach.myrxfit.com/'
 
@@ -77,6 +78,7 @@ export default function CoachPending() {
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
+      <AmbientBackground />
       <AnimateRise style={s.container}>
         <View style={s.badge}>
           <Globe size={22} color={colors.primary} />

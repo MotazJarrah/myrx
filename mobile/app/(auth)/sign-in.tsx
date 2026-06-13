@@ -36,6 +36,7 @@ import { friendlyAuthMessage } from '../../src/lib/authErrors'
 import { PasswordInput } from '../../src/components/PasswordInput'
 import AnimateRise from '../../src/components/AnimateRise'
 import Wordmark from '../../src/components/Wordmark'
+import AmbientBackground from '../../src/components/AmbientBackground'
 import { KeyboardScreen } from '../../src/components/KeyboardScreen'
 import { openLegalDoc } from '../../src/lib/openLegalDoc'
 import { colors, alpha, palette } from '../../src/theme'
@@ -286,7 +287,7 @@ export default function SignIn() {
   return (
     <KeyboardScreen style={s.flex}>
       <View style={s.flex}>
-        <Backdrop />
+        <AmbientBackground />
         <SafeAreaView style={s.flex} edges={['top']}>
           {/* Header: back chevron (exit to welcome) on the left,
               logo on the right. Mirrors the signup journey header

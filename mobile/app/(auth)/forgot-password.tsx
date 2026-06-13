@@ -31,6 +31,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { KeyboardScreen } from '../../src/components/KeyboardScreen'
 import { router } from 'expo-router'
 import Svg, { Defs, RadialGradient, Stop, Rect, Line, G } from 'react-native-svg'
+import AmbientBackground from '../../src/components/AmbientBackground'
 import { ChevronLeft, AlertCircle, Check, RefreshCw } from 'lucide-react-native'
 import { useAuth } from '../../src/contexts/AuthContext'
 import { PasswordInput } from '../../src/components/PasswordInput'
@@ -182,7 +183,7 @@ export default function ForgotPassword() {
   return (
     <KeyboardScreen style={s.flex}>
       <View style={s.flex}>
-        <Backdrop />
+        <AmbientBackground />
         <SafeAreaView style={s.flex} edges={['top']}>
         <View style={s.scrollInner}>
           <AnimateRise style={s.container}>

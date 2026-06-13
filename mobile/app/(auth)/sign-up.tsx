@@ -27,6 +27,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Svg, { Line, G } from 'react-native-svg'
+import AmbientBackground from '../../src/components/AmbientBackground'
 import { router, Link, useLocalSearchParams } from 'expo-router'
 import * as ImagePicker from 'expo-image-picker'
 import * as SecureStore from 'expo-secure-store'
@@ -3432,7 +3433,7 @@ export default function SignUpJourney() {
   return (
     <KeyboardScreen>
       <SafeAreaView style={s.container} edges={['top']}>
-        <SignupBackdrop />
+        <AmbientBackground />
         {/* Header — back arrow visible except in two cases:
             • welcome-end (no point going back from a finished journey)
             • step === minStep when minStep > 0 (resume entry point —

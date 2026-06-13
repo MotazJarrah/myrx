@@ -37,6 +37,7 @@ import { ArrowRight, Dumbbell, BookOpen, MessageCircle } from 'lucide-react-nati
 import { colors, alpha, palette, fonts } from '../../src/theme'
 import AnimateRise from '../../src/components/AnimateRise'
 import Wordmark from '../../src/components/Wordmark'
+import AmbientBackground from '../../src/components/AmbientBackground'
 import { useAuth } from '../../src/contexts/AuthContext'
 
 // How long each slide stays before auto-advancing. 3.5 s — long enough to
@@ -408,7 +409,7 @@ export default function Welcome() {
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>
-      <Backdrop />
+      <AmbientBackground />
 
       {/* Slides */}
       <FlatList
