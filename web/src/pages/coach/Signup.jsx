@@ -44,6 +44,7 @@ import {
 } from 'lucide-react'
 import { passwordMeetsRequirements } from '../../lib/passwordRules'
 import { PasswordRequirements } from '../../components/PasswordRequirements'
+import AmbientBackground from '../../components/AmbientBackground'
 // react-easy-crop drives the avatar crop UI on the PhotoScreen.
 // Same library + UX pattern the end-user web signup uses, so the two
 // flows feel identical at the photo step. cropAndDownscale runs the
@@ -3187,7 +3188,10 @@ export default function CoachSignup() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
+      {/* T249: shared ambient behind the signup journey too, so the flow
+          matches every other page. The X (z-20) + content (z-10) sit above it. */}
+      <AmbientBackground />
       {/* Exit X — always available, top-right corner. Routes back to
           /for-coaches (the marketing landing the signup was launched
           from). Renders on every screen including welcome / welcome-end
@@ -3213,7 +3217,7 @@ export default function CoachSignup() {
       >
         <XIcon className="h-4 w-4" />
       </button>
-      <div className="mx-auto max-w-lg px-4 py-5 pb-12">
+      <div className="relative z-10 mx-auto max-w-lg px-4 py-5 pb-12">
         {/* Top chrome — mirrors mobile signup exactly:
             Back chevron on the left, step dots row + % on the right.
             All in a single horizontal flex row, generous spacing,

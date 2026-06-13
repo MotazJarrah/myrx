@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
 import { CheckCircle2, ArrowRight, Loader2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import AmbientBackground from '../../components/AmbientBackground'
 
 export default function CoachWelcome() {
   const [, setLocation] = useLocation()
@@ -93,8 +94,9 @@ export default function CoachWelcome() {
   })()
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
-      <div className="max-w-md w-full text-center space-y-6">
+    <div className="relative min-h-screen overflow-hidden bg-background text-foreground flex items-center justify-center p-6">
+      <AmbientBackground />
+      <div className="relative z-10 max-w-md w-full text-center space-y-6">
         {status === 'polling' && (
           <>
             <Loader2 className="h-12 w-12 text-primary animate-spin mx-auto" />
