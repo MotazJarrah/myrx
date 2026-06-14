@@ -5,7 +5,7 @@
  *   1. Header — logo + nav (For Coaches active, Pricing, Sign in)
  *   2. Hero — headline + subhead + primary CTA + 3-mockup composition
  *      composed from real coach surfaces (food log roster, weight-goal
- *      progress, chat thread) with mock client data.
+ *      progress, sleep consistency) with mock client data.
  *   3. Features — the 7-feature grid from COACH_FEATURES.
  *   4. How it works — 3-step workflow.
  *   5. Why MyRX — 3 confidence-flavored cards (no competitor framing).
@@ -23,7 +23,7 @@
 import { useState } from 'react'
 import { Link } from 'wouter'
 import {
-  ArrowRight, ArrowUpRight, Check, ChevronDown, MessageCircle, TrendingUp, Menu, X,
+  ArrowRight, ArrowUpRight, Check, ChevronDown, TrendingUp, Menu, X,
 } from 'lucide-react'
 import { useTheme } from '../contexts/ThemeContext'
 import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
@@ -227,44 +227,64 @@ function MockupWeightGoals() {
   )
 }
 
-// ── Mockup C: Chat thread ────────────────────────────────────────────
+// ── Mockup C: Sleep consistency ──────────────────────────────────────
+// Replicates the mobile SleepConsistency chart: one vertical lime bar per
+// night (bedtime → wake), bright = "on target" (within ±10 min of both the
+// target bedtime AND target wake), dim otherwise. Solid indigo lines = the
+// targets; dotted white line = your average bedtime (later than target — the
+// "tighten your bedtime" story). Times are "minutes after 6 PM" so an
+// overnight reads monotonically top→bottom.
 
-function MockupChat() {
-  const maya = MOCK_CLIENTS[1]
+function MockupSleep() {
+  const TARGET_BED = 300, TARGET_WAKE = 780, AVG_BED = 360 // 11:00 PM / 7:00 AM / 12:00 AM
+  const NIGHTS = [
+    [305, 775], [330, 790], [295, 778], [360, 800], [308, 782], [340, 770], [300, 780],
+  ]
+  const W = 320, H = 124, TOP = 10, PLOT_H = 104, GUTTER = 64, RIGHT = 10
+  const plotW = W - GUTTER - RIGHT
+  const lo = Math.min(...NIGHTS.map(n => n[0]), TARGET_BED, AVG_BED) - 25
+  const hi = Math.max(...NIGHTS.map(n => n[1]), TARGET_WAKE) + 25
+  const yOf = v => TOP + (hi > lo ? (v - lo) / (hi - lo) : 0) * PLOT_H
+  const slot = plotW / NIGHTS.length
+  const colW = slot - 4
+  const xOf = i => GUTTER + i * slot + 2
+  const onTarget = (b, w) => Math.abs(b - TARGET_BED) <= 10 && Math.abs(w - TARGET_WAKE) <= 10
+  const fmt = m => {
+    const t = (((Math.round(m) + 18 * 60) % 1440) + 1440) % 1440
+    const h24 = Math.floor(t / 60), min = t % 60
+    const ap = h24 < 12 ? 'AM' : 'PM', h12 = h24 % 12 === 0 ? 12 : h24 % 12
+    return `${h12}:${String(min).padStart(2, '0')} ${ap}`
+  }
+  const mono = { fontSize: 9, fontFamily: 'JetBrains Mono, ui-monospace, monospace' }
   return (
-    <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-xl">
-      {/* Header — Maya is online */}
-      <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-2.5">
-        <img src={maya.photo} alt="" className="h-7 w-7 rounded-full object-cover" />
-        <div className="flex-1 min-w-0">
-          <p className="text-[11px] font-semibold">{maya.name}</p>
-          <p className="text-[9px] text-muted-foreground flex items-center gap-1">
-            <span className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" />
-            Active now
-          </p>
-        </div>
-        <MessageCircle className="h-3 w-3 text-muted-foreground" />
+    <div className="rounded-2xl border border-border bg-card p-4 shadow-xl">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Sleep · consistency</p>
+        <p className="text-[10px] text-muted-foreground">Last 7 nights</p>
       </div>
-      {/* Thread */}
-      <div className="bg-muted/10 px-3 py-3 space-y-2 min-h-[180px]">
-        {/* Incoming — Maya */}
-        <div className="flex items-end gap-1.5">
-          <img src={maya.photo} alt="" className="h-5 w-5 rounded-full object-cover shrink-0" />
-          <div className="max-w-[78%] rounded-xl rounded-bl-sm bg-card border border-border px-2.5 py-1.5">
-            <p className="text-[10px] leading-relaxed text-foreground">
-              Hit a new bench PR today 💪 thanks for the program tweak last week!
-            </p>
-          </div>
-        </div>
-        {/* Outgoing — Coach */}
-        <div className="flex items-end gap-1.5 flex-row-reverse">
-          <img src="/preview-coach-taz.jpg" alt="" className="h-5 w-5 rounded-full object-cover shrink-0" />
-          <div className="max-w-[78%] rounded-xl rounded-br-sm bg-primary text-primary-foreground px-2.5 py-1.5">
-            <p className="text-[10px] leading-relaxed">
-              Massive. Bumping next week's accessory work up too — keep the momentum.
-            </p>
-          </div>
-        </div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full text-primary">
+        {/* nightly sleep windows — lime bars (bright = on target) */}
+        {NIGHTS.map((n, i) => {
+          const top = yOf(n[0])
+          const h = Math.max(3, yOf(n[1]) - top)
+          return <rect key={i} x={xOf(i)} y={top} width={colW} height={h} rx="3" fill="currentColor" fillOpacity={onTarget(n[0], n[1]) ? 1 : 0.3} />
+        })}
+        {/* average bedtime — dotted white, under the solid targets */}
+        <line x1={GUTTER} y1={yOf(AVG_BED)} x2={W - RIGHT} y2={yOf(AVG_BED)} stroke="#ffffff" strokeOpacity="0.7" strokeWidth="1.5" strokeDasharray="2 3" />
+        {/* targets — solid indigo */}
+        <line x1={GUTTER} y1={yOf(TARGET_BED)} x2={W - RIGHT} y2={yOf(TARGET_BED)} stroke="#818cf8" strokeWidth="1.5" />
+        <line x1={GUTTER} y1={yOf(TARGET_WAKE)} x2={W - RIGHT} y2={yOf(TARGET_WAKE)} stroke="#818cf8" strokeWidth="1.5" />
+        {/* gutter time labels */}
+        <text x={GUTTER - 6} y={yOf(TARGET_BED)} textAnchor="end" dominantBaseline="central" fill="#818cf8" style={mono}>{fmt(TARGET_BED)}</text>
+        <text x={GUTTER - 6} y={yOf(AVG_BED)} textAnchor="end" dominantBaseline="central" fill="#ffffff" fillOpacity="0.7" style={mono}>{fmt(AVG_BED)}</text>
+        <text x={GUTTER - 6} y={yOf(TARGET_WAKE)} textAnchor="end" dominantBaseline="central" fill="#818cf8" style={mono}>{fmt(TARGET_WAKE)}</text>
+      </svg>
+      {/* legend */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1.5"><span className="h-3 w-1.5 rounded-sm bg-primary" />On target</span>
+        <span className="flex items-center gap-1.5"><span className="h-3 w-1.5 rounded-sm bg-primary/30" />Off target</span>
+        <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 rounded-sm bg-indigo-400" />Targets</span>
+        <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 rounded-sm bg-white/70" />Avg bedtime</span>
       </div>
     </div>
   )
@@ -287,7 +307,7 @@ function Hero() {
               MyRX for Coaches
             </div>
             <h1 className="text-[clamp(2.25rem,5vw,3.5rem)] font-semibold leading-[1.05] tracking-tight text-foreground">
-              Your clients, every metric,<br />
+              Your clients,<br />every metric,<br />
               <span className="text-primary">one platform.</span>
             </h1>
             <p className="text-base md:text-lg leading-relaxed text-muted-foreground max-w-xl">
@@ -317,7 +337,7 @@ function Hero() {
           <div className="relative space-y-3 lg:space-y-4">
             <div className="lg:rotate-[-1deg]"><MockupFoodLog /></div>
             <div className="lg:ml-6 lg:rotate-[1deg]"><MockupWeightGoals /></div>
-            <div className="lg:ml-12 lg:rotate-[-0.5deg]"><MockupChat /></div>
+            <div className="lg:ml-12 lg:rotate-[-0.5deg]"><MockupSleep /></div>
           </div>
         </div>
       </div>
@@ -531,7 +551,7 @@ function BottomCTA() {
     <section className="px-6 md:px-10 py-20">
       <div className="mx-auto max-w-3xl text-center space-y-6">
         <h2 className="text-3xl md:text-5xl font-semibold tracking-tight text-foreground">
-          Your clients, every metric,<br />
+          Your clients,<br />every metric,<br />
           <span className="text-primary">one platform.</span>
         </h2>
         <p className="text-base text-muted-foreground">
