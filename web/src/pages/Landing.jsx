@@ -291,16 +291,16 @@ export default function Landing() {
 
           {/* 2 + 3 — side by side on desktop, stacked on mobile */}
           <div className="grid gap-4 md:grid-cols-2">
-            {/* 2 — Heart rate (rose) — per-day resting / avg / peak, mirrors
+            {/* 2 — Heart rate (red) — per-day resting / avg / peak, mirrors
                 the mobile HrRangeChart's emerald / sky / zone-heat model. */}
             <div className="animate-rise h-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '320ms' }}>
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Heart className="h-4 w-4 text-rose-400" />
+                    <Heart className="h-4 w-4 text-red-400" />
                     <span className="text-sm font-medium">Heart rate · 7 days</span>
                   </div>
-                  <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[11px] font-medium text-rose-400">
+                  <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[11px] font-medium text-red-400">
                     Resting 52 bpm
                   </span>
                 </div>
@@ -354,10 +354,10 @@ export default function Landing() {
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Moon className="h-4 w-4 text-primary" />
+                    <Moon className="h-4 w-4 text-indigo-400" />
                     <span className="text-sm font-medium">Sleep · last 7 nights</span>
                   </div>
-                  <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
+                  <span className="rounded-full bg-indigo-500/15 px-2 py-0.5 text-[11px] font-medium text-indigo-400">
                     7h 23m avg
                   </span>
                 </div>
@@ -455,10 +455,10 @@ export default function Landing() {
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Apple className="h-4 w-4 text-emerald-400" />
+                    <Apple className="h-4 w-4 text-amber-400" />
                     <span className="text-sm font-medium">Daily intake · 7 days</span>
                   </div>
-                  <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400">
                     Target 1,900
                   </span>
                 </div>
