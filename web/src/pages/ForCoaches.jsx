@@ -9,10 +9,10 @@
  *   3. Features — the 7-feature grid from COACH_FEATURES.
  *   4. How it works — 3-step workflow.
  *   5. Why MyRX — 3 confidence-flavored cards (no competitor framing).
- *   6. Pricing teaser — 3 tier cards inline, jump-to-signup.
- *   7. FAQ — 6 collapsible cards.
- *   8. Bottom CTA — repeat hero headline + primary CTA.
- *   9. Footer — brand line + legal doc links.
+ *   6. FAQ — 6 collapsible cards.
+ *   7. Bottom CTA — repeat hero headline + primary CTA.
+ *   8. Footer — brand line + legal doc links.
+ *   (Pricing lives on its own /pricing page — no teaser on the landing.)
  *
  * Voice / coaching philosophy per CLAUDE.md "Voice and Coaching
  * Philosophy" lock: confident, no aspirational/competitor tone, no
@@ -26,7 +26,7 @@ import {
   ArrowRight, ArrowUpRight, Check, ChevronDown, TrendingUp, Menu, X,
 } from 'lucide-react'
 import { useTheme } from '../contexts/ThemeContext'
-import { COACH_TIERS, COACH_FEATURES } from '../lib/coachPlan'
+import { COACH_FEATURES } from '../lib/coachPlan'
 import Wordmark from '../components/Wordmark'
 import PageShell from '../components/PageShell'
 
@@ -441,62 +441,6 @@ function WhyMyRX() {
   )
 }
 
-// ── Pricing teaser ─────────────────────────────────────────────────────
-
-function PricingTeaser() {
-  return (
-    <section className="px-6 md:px-10 py-16">
-      <div className="mx-auto max-w-6xl">
-        <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground mb-3">Pricing</h2>
-        <p className="text-base text-muted-foreground max-w-2xl mb-10">
-          Start your 30-day trial. Cancel anytime.
-        </p>
-        <div className="grid md:grid-cols-3 gap-4">
-          {COACH_TIERS.map(t => (
-            <div
-              key={t.id}
-              className={`rounded-2xl border-2 p-6 space-y-3 ${t.recommended ? 'border-primary bg-primary/5' : 'border-border bg-card'}`}
-            >
-              <div className="flex items-center gap-2">
-                <p className="text-lg font-semibold text-foreground">Coach {t.name}</p>
-                {t.recommended && (
-                  <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary">
-                    Recommended
-                  </span>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground">{t.cap}</p>
-              <div className="flex items-baseline gap-1.5 pt-2">
-                <span className="text-3xl font-bold tabular-nums text-foreground">${t.monthly}</span>
-                <span className="text-sm text-muted-foreground">/ month</span>
-              </div>
-              <p className="text-[11px] text-muted-foreground tabular-nums">
-                or ${t.annual}/yr (billed yearly)
-              </p>
-              <Link
-                href={`/signup?tier=${t.id}&fresh=1`}
-                className={`mt-4 flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold transition-all ${
-                  t.recommended
-                    ? 'bg-primary text-primary-foreground hover:opacity-90'
-                    : 'border border-border text-foreground hover:bg-accent'
-                }`}
-              >
-                Start trial
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-          ))}
-        </div>
-        <div className="mt-6 text-center">
-          <Link href="/pricing" className="text-sm text-primary hover:underline inline-flex items-center gap-1">
-            Full pricing details <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
-      </div>
-    </section>
-  )
-}
-
 // ── FAQ ────────────────────────────────────────────────────────────────
 
 const FAQ_ITEMS = [
@@ -609,7 +553,6 @@ export default function ForCoaches() {
       <Features />
       <HowItWorks />
       <WhyMyRX />
-      <PricingTeaser />
       <FAQ />
       <BottomCTA />
     </PageShell>
