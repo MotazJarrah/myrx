@@ -130,6 +130,53 @@ const HR_CHART = (() => {
   }
 })()
 
+// Calories preview — replicates the mobile CalorieStrip's "Daily intake log"
+// trend (mobile/src/components/CalorieStrip.tsx): per-day calorie dots over a
+// week, each with a status-coloured band down to baseline (emerald on-target,
+// amber near, red over), a connecting line, and a dashed daily-target line.
+const CAL_TARGET = 1900
+const CAL_DAYS = [
+  { d: 'M', cal: 1850 }, { d: 'T', cal: 1780 }, { d: 'W', cal: 2150 },
+  { d: 'T', cal: 1910 }, { d: 'F', cal: 2420 }, { d: 'S', cal: 1640 },
+  { d: 'S', cal: 1890 },
+]
+const CAL_CHART = (() => {
+  const w = 320, h = 96, pt = 14, pr = 14, pb = 16, pl = 14
+  const innerW = w - pl - pr, innerH = h - pt - pb
+  const maxX = CAL_DAYS.length - 1
+  const cals = CAL_DAYS.map(d => d.cal)
+  const minCal = Math.min(...cals, CAL_TARGET)
+  const maxCal = Math.max(...cals, CAL_TARGET)
+  const span = maxCal - minCal || 200
+  const toX = i => pl + (i / maxX) * innerW
+  const toY = c => pt + (1 - (c - minCal) / span) * innerH
+  const STATUS = {
+    on:   { dot: '#34d399', fill: 'rgba(52,211,153,0.16)' },
+    near: { dot: '#fbbf24', fill: 'rgba(251,191,36,0.16)' },
+    off:  { dot: '#f87171', fill: 'rgba(248,113,113,0.16)' },
+  }
+  const statusFor = c => {
+    const r = c / CAL_TARGET
+    if (r >= 0.92 && r <= 1.08) return 'on'
+    if (r >= 0.80 && r <= 1.20) return 'near'
+    return 'off'
+  }
+  const bandW = innerW / maxX
+  const baseY = h - pb
+  const pts = CAL_DAYS.map((d, i) => {
+    const cx = toX(i), cy = toY(d.cal), st = statusFor(d.cal)
+    const bx = Math.max(pl, cx - bandW / 2)
+    const bw = Math.min(bandW, w - pr - bx)
+    return {
+      label: d.d, x: +cx.toFixed(1), y: +cy.toFixed(1),
+      dot: STATUS[st].dot, fill: STATUS[st].fill,
+      bx: +bx.toFixed(1), bw: +bw.toFixed(1), bh: +Math.max(0, baseY - cy).toFixed(1),
+    }
+  })
+  const poly = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ')
+  return { w, h, pl, pr, targetY: +toY(CAL_TARGET).toFixed(1), pts, poly }
+})()
+
 export default function Landing() {
   return (
     <PageShell>
@@ -357,6 +404,95 @@ export default function Landing() {
                 <div className="flex items-center justify-between pt-4 text-[11px] text-muted-foreground">
                   <span>Indigo band = your average</span>
                   <span className="font-mono tabular-nums">7 nights</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4 — Cardio zones (amber, the running coaching hero) */}
+            <div className="animate-rise h-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '480ms' }}>
+              <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-amber-400" />
+                    <span className="text-sm font-medium">Running · 5K</span>
+                  </div>
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400">
+                    Best 4:30/km
+                  </span>
+                </div>
+                <div className="flex flex-1 items-center">
+                  <div className="grid w-full grid-cols-3 gap-2">
+                    {[
+                      { z: 'Endurance', work: '8 km',      pace: '5:30/km', hi: true },
+                      { z: 'Threshold', work: '4 × 1 km',  pace: '4:40/km' },
+                      { z: 'VO2 Max',   work: '5 × 600 m', pace: '4:15/km' },
+                    ].map(t => (
+                      <div
+                        key={t.z}
+                        className={`rounded-lg border p-2.5 text-center transition-colors ${
+                          t.hi
+                            ? 'border-amber-500/50 bg-amber-500/10'
+                            : 'border-border/60 bg-card/40'
+                        }`}
+                      >
+                        <div className="text-[9px] font-medium uppercase tracking-wider text-amber-400/90">{t.z}</div>
+                        <div className={`mt-1 text-xs font-medium ${t.hi ? 'text-foreground' : 'text-muted-foreground'}`}>{t.work}</div>
+                        <div className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">{t.pace}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between pt-4 text-[11px] text-muted-foreground">
+                  <span>Riegel · Daniels' · polarized 80/20</span>
+                  <span className="font-mono tabular-nums">/km</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 5 — Calories daily intake log — status-coloured trend (emerald
+                on-target / amber near / red over), mirrors the mobile CalorieStrip. */}
+            <div className="animate-rise h-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '560ms' }}>
+              <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Apple className="h-4 w-4 text-emerald-400" />
+                    <span className="text-sm font-medium">Daily intake · 7 days</span>
+                  </div>
+                  <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                    Target 1,900
+                  </span>
+                </div>
+                <div className="flex flex-1 items-center">
+                  <svg
+                    viewBox={`0 0 ${CAL_CHART.w} ${CAL_CHART.h}`}
+                    className="mt-4 w-full"
+                    role="img"
+                    aria-label="Daily calorie intake across the last 7 days versus the 1,900 kcal target"
+                  >
+                    {/* status bands (dot → baseline) */}
+                    {CAL_CHART.pts.map((p, i) => (
+                      <rect key={`cb${i}`} x={p.bx} y={p.y} width={p.bw} height={p.bh} rx="2" fill={p.fill} />
+                    ))}
+                    {/* dashed daily target */}
+                    <line x1={CAL_CHART.pl} y1={CAL_CHART.targetY} x2={CAL_CHART.w - CAL_CHART.pr} y2={CAL_CHART.targetY} stroke="hsl(var(--muted-foreground))" strokeOpacity="0.25" strokeDasharray="3 3" strokeWidth="1" />
+                    {/* connecting line */}
+                    <path d={CAL_CHART.poly} fill="none" stroke="hsl(var(--muted-foreground))" strokeOpacity="0.35" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+                    {/* dots + day labels */}
+                    {CAL_CHART.pts.map((p, i) => (
+                      <g key={`cd${i}`}>
+                        <circle cx={p.x} cy={p.y} r="4" fill={p.dot} stroke="hsl(var(--background))" strokeWidth="1.5" />
+                        <text x={p.x} y={CAL_CHART.h - 4} textAnchor="middle" fill="hsl(var(--muted-foreground))" style={{ fontSize: 9, fontFamily: 'Geist, ui-sans-serif, sans-serif' }}>{p.label}</text>
+                      </g>
+                    ))}
+                  </svg>
+                </div>
+                <div className="flex items-center justify-between pt-4 text-[11px] text-muted-foreground">
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: '#34d399' }} />On target</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: '#fbbf24' }} />Near</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: '#f87171' }} />Over</span>
+                  </span>
+                  <span className="font-mono tabular-nums">kcal</span>
                 </div>
               </div>
             </div>
