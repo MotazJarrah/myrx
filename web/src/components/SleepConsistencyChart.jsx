@@ -66,14 +66,16 @@ export default function SleepConsistencyChart({ nights, targetBedMin, targetWake
   const wakes = sorted.map(s => minsAfter6pm(s.end_at))
   const lo = Math.min(...beds, targetBedMin, avgBedMin) - DOMAIN_PAD
   const hi = Math.max(...wakes, targetWakeMin) + DOMAIN_PAD
-  const yOf = v => TOP_PAD + ((v - lo) / (hi - lo)) * plotH
+  // Flipped: later times sit HIGHER, so bars rise from bedtime (bottom) up to
+  // wake (top) — the natural bottom→up reading (mirrors mobile SleepConsistency).
+  const yOf = v => TOP_PAD + (1 - (v - lo) / (hi - lo)) * plotH
 
   const slot = plotW / sorted.length
   const colW = Math.max(3, slot - COL_GAP)
   const xOf = i => LEFT_GUTTER + i * slot + COL_GAP / 2
 
   const yBed = yOf(targetBedMin), yWake = yOf(targetWakeMin), yAvg = yOf(avgBedMin)
-  const yAvgLabel = Math.abs(yAvg - yBed) < 14 ? yBed + 14 : yAvg
+  const yAvgLabel = Math.abs(yAvg - yBed) < 14 ? (yAvg <= yBed ? yBed - 14 : yBed + 14) : yAvg
 
   return (
     <div ref={wrapRef} className={wrapClass} style={height != null ? { height } : undefined}>
@@ -83,8 +85,8 @@ export default function SleepConsistencyChart({ nights, targetBedMin, targetWake
         <line x1={LEFT_GUTTER} x2={LEFT_GUTTER + plotW} y1={yWake} y2={yWake} stroke={INDIGO} strokeWidth={1.5} />
 
         {sorted.map((s, i) => {
-          const top = yOf(beds[i])
-          const h = Math.max(3, yOf(wakes[i]) - top)
+          const top = Math.min(yOf(beds[i]), yOf(wakes[i]))
+          const h = Math.max(3, Math.abs(yOf(wakes[i]) - yOf(beds[i])))
           const onTarget = Math.abs(beds[i] - targetBedMin) <= ACHIEVED_TOL && Math.abs(wakes[i] - targetWakeMin) <= ACHIEVED_TOL
           const op = onTarget ? (active === i ? 1 : 0.95) : (active === i ? 0.5 : 0.30)
           return (
@@ -114,7 +116,7 @@ export default function SleepConsistencyChart({ nights, targetBedMin, targetWake
       {active != null && sorted[active] && (
         <div
           className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-lg border border-border bg-card px-2 py-1 shadow-md"
-          style={{ left: xOf(active) + colW / 2, top: yOf(beds[active]) - 6 }}
+          style={{ left: xOf(active) + colW / 2, top: Math.min(yOf(beds[active]), yOf(wakes[active])) - 6 }}
         >
           <div className="text-[10px] text-muted-foreground">{fmtDate(sorted[active].start_at)}</div>
           <div className="text-[11px] font-mono tabular-nums text-foreground">{fmtClock(beds[active])} – {fmtClock(wakes[active])}</div>
