@@ -54,35 +54,46 @@ function Header() {
         </a>
       </nav>
 
-      {/* Mobile (below md): Sign in stays visible + a hamburger for the rest */}
-      <div className="flex md:hidden items-center gap-2">
-        <Link href="/auth?mode=signin"
-          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-accent transition-colors">
-          Sign in
-        </Link>
-        <button
-          type="button"
-          onClick={() => setMenuOpen(v => !v)}
-          aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-          aria-expanded={menuOpen}
-          className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-        >
-          {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
-      </div>
+      {/* Mobile (below md): a single hamburger toggles the full menu
+          (Pricing / Sign in / For Athletes) — the panel below. */}
+      <button
+        type="button"
+        onClick={() => setMenuOpen(v => !v)}
+        aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+        aria-expanded={menuOpen}
+        className="md:hidden rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+      >
+        {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+      </button>
 
-      {/* Mobile dropdown — Pricing (active) + the For Athletes pill (last). */}
+      {/* Mobile menu — full-page scrim + a distinct floating panel so it reads
+          clearly as an overlay instead of bleeding into the page. Tapping the
+          scrim closes it. (Pricing is the active row here.) */}
       {menuOpen && (
-        <div className="absolute left-0 right-0 top-full z-30 border-b border-border/40 bg-background shadow-lg md:hidden">
-          <nav className="flex flex-col gap-0.5 px-4 py-3 text-sm">
-            <Link href="/pricing" onClick={() => setMenuOpen(false)} className="rounded-md px-3 py-2.5 text-primary font-semibold">Pricing</Link>
-            <a href="https://myrxfit.com"
-              className="mt-1 inline-flex items-center justify-center gap-1.5 rounded-md bg-primary/10 px-3 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/20">
-              For Athletes
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </a>
-          </nav>
-        </div>
+        <>
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setMenuOpen(false)}
+            className="fixed left-0 right-0 bottom-0 top-16 z-20 bg-black/60 backdrop-blur-sm md:hidden"
+          />
+          <div className="animate-rise absolute left-4 right-4 top-[calc(100%+8px)] z-30 overflow-hidden rounded-xl border border-border bg-card shadow-2xl md:hidden">
+            <nav className="flex flex-col p-1.5 text-sm">
+              <Link href="/pricing" onClick={() => setMenuOpen(false)} className="rounded-lg px-3 py-3 font-semibold text-primary hover:bg-accent transition-colors">
+                Pricing
+              </Link>
+              <div className="mx-3 h-px bg-border/60" />
+              <Link href="/auth?mode=signin" onClick={() => setMenuOpen(false)} className="rounded-lg px-3 py-3 font-medium text-foreground hover:bg-accent transition-colors">
+                Sign in
+              </Link>
+              <div className="mx-3 h-px bg-border/60" />
+              <a href="https://myrxfit.com" className="flex items-center justify-between gap-1.5 rounded-lg bg-primary/10 px-3 py-3 font-medium text-primary transition-colors hover:bg-primary/20">
+                For Athletes
+                <ArrowUpRight className="h-4 w-4" />
+              </a>
+            </nav>
+          </div>
+        </>
       )}
     </header>
   )
