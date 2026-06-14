@@ -16,19 +16,73 @@ const features = [
   { icon: TrendingUp, title: 'Weight trends',     desc: 'See your weight move toward your goal.' },
 ]
 
-// Sleep preview — nightly hours over the last 14 nights. Random-but-realistic
-// mock data for the landing showcase (sleep isn't a live surface yet). The SVG
-// area-chart paths are built once at module load. viewBox 320×96, 8px padding,
-// y-range clamped to 6–8.5 h so the line uses the full height.
-const SLEEP_HOURS = [7.1, 6.5, 7.8, 8.0, 6.9, 7.5, 8.2, 7.0, 6.7, 7.9, 8.1, 7.3, 6.8, 7.6]
-const SLEEP_GOAL = 8
-const SLEEP_PATHS = (() => {
-  const w = 320, h = 96, pad = 8, min = 6, max = 8.5
-  const X = i => pad + (i * (w - pad * 2)) / (SLEEP_HOURS.length - 1)
-  const Y = v => pad + (1 - (v - min) / (max - min)) * (h - pad * 2)
-  const line = SLEEP_HOURS.map((v, i) => `${i === 0 ? 'M' : 'L'}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(' ')
-  const area = `${line} L${X(SLEEP_HOURS.length - 1).toFixed(1)} ${h - pad} L${X(0).toFixed(1)} ${h - pad} Z`
-  return { w, h, pad, line, area, goalY: Y(SLEEP_GOAL).toFixed(1) }
+// Sleep Rhythm preview — replicates the mobile SleepClock (mobile/src/
+// components/SleepClock.tsx): a radial 12-hour dial with one lime sleep arc
+// per night for the last 7 nights (outermost ring = most recent, brightest),
+// faint ring tracks, hour numerals, and an indigo average-sleep-window band
+// just outside the rings. Random-but-realistic bedtimes/wake times; consistent
+// enough that the arcs cluster into a "target" pattern. Geometry mirrors
+// SleepClock.tsx exactly (size 320, outerR 128, ring thickness 11, gap 2).
+const SLEEP_NIGHTS = [
+  { bed: 23.50, wake: 7.00 }, // most recent — idx 0, brightest
+  { bed: 23.00, wake: 6.75 },
+  { bed: 24.50, wake: 7.50 }, // 12:30 AM
+  { bed: 22.75, wake: 6.50 },
+  { bed: 23.75, wake: 7.25 },
+  { bed: 24.25, wake: 7.00 }, // 12:15 AM
+  { bed: 23.25, wake: 6.75 },
+]
+const SLEEP_CLOCK = (() => {
+  const size = 320, cx = 160, cy = 160
+  const outerR = 128, thickness = 11, gap = 2
+  // hour-of-day → angle on a 12-hour dial (12 at top, clockwise) — matches
+  // SleepClock.tsx hourToAngle: ((h % 12) / 12) * 360.
+  const toAngle = h => ((h % 12) / 12) * 360
+  // polar: angle measured clockwise from 12 o'clock (top).
+  const polar = (r, a) => {
+    const rad = ((a - 90) * Math.PI) / 180
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
+  }
+  // SVG arc path from bedAngle → wakeAngle (clockwise sweep).
+  const arc = (r, a1, a2) => {
+    let s = a1, e = a2
+    while (e <= s) e += 360
+    const sweep = e - s
+    const large = sweep > 180 ? 1 : 0
+    const p1 = polar(r, s), p2 = polar(r, e)
+    return `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+  }
+  const rings = SLEEP_NIGHTS.map((n, i) => {
+    const r = outerR - i * (thickness + gap)
+    return {
+      r,
+      d: arc(r, toAngle(n.bed), toAngle(n.wake)),
+      // idx 0 (most recent) is "selected" = full lime; older rings fade.
+      opacity: i === 0 ? 1 : Math.max(0.25, 0.55 - i * 0.05),
+    }
+  })
+  // Circular mean of the bed/wake hours → the typical sleep window (indigo band).
+  const meanH = arr => {
+    let sx = 0, sy = 0
+    for (const h of arr) { const t = (h / 24) * 2 * Math.PI; sx += Math.cos(t); sy += Math.sin(t) }
+    return ((Math.atan2(sy, sx) * 24 / (2 * Math.PI)) % 24 + 24) % 24
+  }
+  const avgR = outerR + thickness / 2 + 6 // 139.5 — just outside the rings
+  const avgD = arc(avgR, toAngle(meanH(SLEEP_NIGHTS.map(n => n.bed))), toAngle(meanH(SLEEP_NIGHTS.map(n => n.wake))))
+  // 12 hour numerals around the rim; 12/3/6/9 are bold cardinals.
+  const labelR = avgR + 2 + 11 // 152.5
+  const numerals = Array.from({ length: 12 }, (_, h) => {
+    const p = polar(labelR, (h / 12) * 360)
+    return { n: h === 0 ? 12 : h, x: +p.x.toFixed(1), y: +p.y.toFixed(1), bold: h % 3 === 0 }
+  })
+  // Faint spokes at 12 / 3 / 6 / 9.
+  const innerR = outerR - 6 * (thickness + gap) // 50 — innermost ring center
+  const spokes = [0, 3, 6, 9].map(h => {
+    const a = (h / 12) * 360
+    const p1 = polar(innerR - 4, a), p2 = polar(outerR + thickness / 2 + 2, a)
+    return { x1: +p1.x.toFixed(1), y1: +p1.y.toFixed(1), x2: +p2.x.toFixed(1), y2: +p2.y.toFixed(1) }
+  })
+  return { size, cx, cy, thickness, bgR: outerR + thickness / 2, rings, avgD, numerals, spokes }
 })()
 
 export default function Landing() {
@@ -146,68 +200,92 @@ export default function Landing() {
                     Best 4:30/km
                   </span>
                 </div>
-                <div className="mt-5 grid grid-cols-3 gap-2">
-                  {[
-                    { z: 'Endurance', work: '8 km',     pace: '5:30/km', hi: true },
-                    { z: 'Threshold', work: '4 × 1 km', pace: '4:40/km' },
-                    { z: 'VO2 Max',   work: '5 × 600 m', pace: '4:15/km' },
-                  ].map(t => (
-                    <div
-                      key={t.z}
-                      className={`rounded-lg border p-2.5 text-center transition-colors ${
-                        t.hi
-                          ? 'border-amber-500/50 bg-amber-500/10'
-                          : 'border-border/60 bg-card/40'
-                      }`}
-                    >
-                      <div className="text-[9px] font-medium uppercase tracking-wider text-amber-400/90">{t.z}</div>
-                      <div className={`mt-1 text-xs font-medium ${t.hi ? 'text-foreground' : 'text-muted-foreground'}`}>{t.work}</div>
-                      <div className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">{t.pace}</div>
-                    </div>
-                  ))}
+                <div className="flex flex-1 items-center">
+                  <div className="grid w-full grid-cols-3 gap-2">
+                    {[
+                      { z: 'Endurance', work: '8 km',      pace: '5:30/km', hi: true },
+                      { z: 'Threshold', work: '4 × 1 km',  pace: '4:40/km' },
+                      { z: 'VO2 Max',   work: '5 × 600 m', pace: '4:15/km' },
+                    ].map(t => (
+                      <div
+                        key={t.z}
+                        className={`rounded-lg border p-2.5 text-center transition-colors ${
+                          t.hi
+                            ? 'border-amber-500/50 bg-amber-500/10'
+                            : 'border-border/60 bg-card/40'
+                        }`}
+                      >
+                        <div className="text-[9px] font-medium uppercase tracking-wider text-amber-400/90">{t.z}</div>
+                        <div className={`mt-1 text-xs font-medium ${t.hi ? 'text-foreground' : 'text-muted-foreground'}`}>{t.work}</div>
+                        <div className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">{t.pace}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="mt-auto flex items-center justify-between pt-4 text-[11px] text-muted-foreground">
+                <div className="flex items-center justify-between pt-4 text-[11px] text-muted-foreground">
                   <span>Riegel · Daniels' · polarized 80/20</span>
                   <span className="font-mono tabular-nums">/km</span>
                 </div>
               </div>
             </div>
 
-            {/* 3 — Sleep rhythm (violet) */}
+            {/* 3 — Sleep rhythm — radial 12-hour clock, one lime arc per night
+                for the last 7 nights + an indigo average-window band. Mirrors
+                the mobile SleepClock. */}
             <div className="animate-rise h-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '400ms' }}>
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Moon className="h-4 w-4 text-violet-400" />
-                    <span className="text-sm font-medium">Sleep · 7.4 h avg</span>
+                    <Moon className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">Sleep · last 7 nights</span>
                   </div>
-                  <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[11px] font-medium text-violet-400">
-                    Goal 8 h
+                  <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
+                    7h 23m avg
                   </span>
                 </div>
-                <svg
-                  viewBox={`0 0 ${SLEEP_PATHS.w} ${SLEEP_PATHS.h}`}
-                  className="mt-5 w-full text-violet-400"
-                  role="img"
-                  aria-label="Nightly sleep hours over the last 14 nights, trending toward the 8-hour goal"
-                >
-                  <defs>
-                    <linearGradient id="sleepFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="currentColor" stopOpacity="0.22" />
-                      <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-                  <line
-                    x1={SLEEP_PATHS.pad} y1={SLEEP_PATHS.goalY}
-                    x2={SLEEP_PATHS.w - SLEEP_PATHS.pad} y2={SLEEP_PATHS.goalY}
-                    stroke="currentColor" strokeOpacity="0.4" strokeDasharray="4 4" strokeWidth="1"
-                  />
-                  <path d={SLEEP_PATHS.area} fill="url(#sleepFill)" />
-                  <path d={SLEEP_PATHS.line} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-                </svg>
-                <div className="mt-auto flex items-center justify-between pt-4 text-[11px] text-muted-foreground">
-                  <span>Dashed = 8 h goal</span>
-                  <span className="font-mono tabular-nums">h</span>
+                <div className="flex flex-1 items-center justify-center py-2">
+                  <svg
+                    viewBox={`0 0 ${SLEEP_CLOCK.size} ${SLEEP_CLOCK.size}`}
+                    className="mx-auto w-full max-w-[220px] text-primary"
+                    role="img"
+                    aria-label="Sleep rhythm — bedtimes and wake times over the last 7 nights, with the average sleep window"
+                  >
+                    {/* clock face */}
+                    <circle cx={SLEEP_CLOCK.cx} cy={SLEEP_CLOCK.cy} r={SLEEP_CLOCK.bgR} fill="rgb(100 116 139)" fillOpacity="0.04" />
+                    {/* spokes at 12 / 3 / 6 / 9 */}
+                    {SLEEP_CLOCK.spokes.map((sp, i) => (
+                      <line key={`sp${i}`} x1={sp.x1} y1={sp.y1} x2={sp.x2} y2={sp.y2} stroke="rgb(148 163 184)" strokeOpacity="0.18" strokeWidth="1" />
+                    ))}
+                    {/* faint ring tracks */}
+                    {SLEEP_CLOCK.rings.map((rg, i) => (
+                      <circle key={`tk${i}`} cx={SLEEP_CLOCK.cx} cy={SLEEP_CLOCK.cy} r={rg.r} fill="none" stroke="rgb(148 163 184)" strokeOpacity="0.10" strokeWidth={SLEEP_CLOCK.thickness} />
+                    ))}
+                    {/* nightly sleep arcs (lime; outermost = last night, brightest) */}
+                    {SLEEP_CLOCK.rings.map((rg, i) => (
+                      <path key={`ar${i}`} d={rg.d} fill="none" stroke="currentColor" strokeOpacity={rg.opacity} strokeWidth={SLEEP_CLOCK.thickness} strokeLinecap="round" />
+                    ))}
+                    {/* average sleep-window band (indigo) */}
+                    <path d={SLEEP_CLOCK.avgD} fill="none" stroke="rgb(129 140 248)" strokeOpacity="0.6" strokeWidth="4" strokeLinecap="round" />
+                    {/* hour numerals */}
+                    {SLEEP_CLOCK.numerals.map(m => (
+                      <text
+                        key={`nm${m.n}`}
+                        x={m.x} y={m.y}
+                        textAnchor="middle" dominantBaseline="central"
+                        fill={m.bold ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))'}
+                        style={{ fontSize: m.bold ? 13 : 11, fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}
+                      >
+                        {m.n}
+                      </text>
+                    ))}
+                    {/* center label — most-recent night */}
+                    <text x={SLEEP_CLOCK.cx} y={SLEEP_CLOCK.cy - 7} textAnchor="middle" dominantBaseline="central" fill="hsl(var(--foreground))" style={{ fontSize: 15, fontWeight: 700 }}>Tue</text>
+                    <text x={SLEEP_CLOCK.cx} y={SLEEP_CLOCK.cy + 12} textAnchor="middle" dominantBaseline="central" fill="hsl(var(--muted-foreground))" style={{ fontSize: 12, fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}>7h 30m</text>
+                  </svg>
+                </div>
+                <div className="flex items-center justify-between pt-4 text-[11px] text-muted-foreground">
+                  <span>Indigo band = your average</span>
+                  <span className="font-mono tabular-nums">7 nights</span>
                 </div>
               </div>
             </div>
