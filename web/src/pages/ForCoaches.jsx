@@ -232,19 +232,23 @@ function MockupWeightGoals() {
 // night (bedtime → wake), bright = "on target" (within ±10 min of both the
 // target bedtime AND target wake), dim otherwise. Solid indigo lines = the
 // targets; dotted white line = your average bedtime (later than target — the
-// "tighten your bedtime" story). Times are "minutes after 6 PM" so an
-// overnight reads monotonically top→bottom.
+// "tighten your bedtime" story). Times are "minutes after 6 PM"; the y-axis is
+// flipped so later = higher, i.e. bars rise from bedtime (bottom) up to wake.
 
 function MockupSleep() {
   const TARGET_BED = 300, TARGET_WAKE = 780, AVG_BED = 360 // 11:00 PM / 7:00 AM / 12:00 AM
+  // Realistic week — 3 nights on target (around 11 PM → 7 AM), the rest drift
+  // late (12:30–1:10 AM bedtimes), so the avg-bedtime line sits clearly late.
   const NIGHTS = [
-    [305, 775], [330, 790], [295, 778], [360, 800], [308, 782], [340, 770], [300, 780],
+    [390, 760], [420, 800], [305, 778], [400, 770], [298, 782], [430, 790], [300, 780],
   ]
   const W = 320, H = 124, TOP = 10, PLOT_H = 104, GUTTER = 64, RIGHT = 10
   const plotW = W - GUTTER - RIGHT
   const lo = Math.min(...NIGHTS.map(n => n[0]), TARGET_BED, AVG_BED) - 25
   const hi = Math.max(...NIGHTS.map(n => n[1]), TARGET_WAKE) + 25
-  const yOf = v => TOP + (hi > lo ? (v - lo) / (hi - lo) : 0) * PLOT_H
+  // Flipped: later times sit HIGHER, so bars rise from bedtime (bottom) up to
+  // wake (top) — the natural bottom→up reading direction.
+  const yOf = v => TOP + (hi > lo ? (1 - (v - lo) / (hi - lo)) : 0) * PLOT_H
   const slot = plotW / NIGHTS.length
   const colW = slot - 4
   const xOf = i => GUTTER + i * slot + 2
@@ -265,8 +269,9 @@ function MockupSleep() {
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full text-primary">
         {/* nightly sleep windows — lime bars (bright = on target) */}
         {NIGHTS.map((n, i) => {
-          const top = yOf(n[0])
-          const h = Math.max(3, yOf(n[1]) - top)
+          const yb = yOf(n[0]), yw = yOf(n[1])
+          const top = Math.min(yb, yw)
+          const h = Math.max(3, Math.abs(yw - yb))
           return <rect key={i} x={xOf(i)} y={top} width={colW} height={h} rx="3" fill="currentColor" fillOpacity={onTarget(n[0], n[1]) ? 1 : 0.3} />
         })}
         {/* average bedtime — dotted white, under the solid targets */}

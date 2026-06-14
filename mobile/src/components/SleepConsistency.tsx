@@ -2,8 +2,9 @@
  * SleepConsistency — a 7-night sleep-window chart (Skia).
  *
  * One VERTICAL bar per night, oldest → newest across the last 7 nights. Each
- * column hangs from that night's bedtime (top) down to its wake (bottom), so
- * the vertical axis is clock time and the bar length is how long you slept.
+ * column rises from that night's bedtime (bottom) up to its wake (top), so the
+ * vertical axis is clock time (later = higher) and the bar length is how long
+ * you slept. (Flipped Jun 2026 — bars now read the natural bottom→up way.)
  *
  * Reference lines (solid = target, dotted = your average):
  *   • Wake (SOLID)         — your average wake; it doubles as the target.
@@ -95,7 +96,9 @@ export default function SleepConsistency({
   const built = useMemo(() => {
     if (!model || w <= 0) return null
     const { cols, lo, hi } = model
-    const yOf  = (v: number) => TOP_PAD + (hi > lo ? (v - lo) / (hi - lo) : 0) * PLOT_H
+    // Flipped: later times sit HIGHER, so bars rise from bedtime (bottom) up
+    // to wake (top) — the natural bottom→up reading direction.
+    const yOf  = (v: number) => TOP_PAD + (hi > lo ? (1 - (v - lo) / (hi - lo)) : 0) * PLOT_H
     const slot = cols.length > 0 ? plotW / cols.length : plotW
     const colW = Math.max(3, slot - COL_GAP)
     const xOf  = (i: number) => LEFT_GUTTER + i * slot + COL_GAP / 2
@@ -103,8 +106,10 @@ export default function SleepConsistency({
     const onPath  = Skia.Path.Make()
     const offPath = Skia.Path.Make()
     cols.forEach((c, i) => {
-      const top = yOf(c.bed)
-      const h   = Math.max(3, yOf(c.wake) - top)
+      const yBed  = yOf(c.bed)
+      const yWake = yOf(c.wake)
+      const top   = Math.min(yBed, yWake)
+      const h     = Math.max(3, Math.abs(yWake - yBed))
       const rrect = { rect: { x: xOf(i), y: top, width: colW, height: h }, rx: 3, ry: 3 }
       ;(c.onTarget ? onPath : offPath).addRRect(rrect)
     })
