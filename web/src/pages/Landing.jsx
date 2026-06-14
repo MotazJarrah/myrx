@@ -142,13 +142,19 @@ const CAL_DAYS = [
 ]
 const CAL_CHART = (() => {
   const w = 320, h = 96, pt = 14, pr = 14, pb = 16, pl = 14
-  const innerW = w - pl - pr, innerH = h - pt - pb
+  const innerH = h - pt - pb
   const maxX = CAL_DAYS.length - 1
   const cals = CAL_DAYS.map(d => d.cal)
   const minCal = Math.min(...cals, CAL_TARGET)
   const maxCal = Math.max(...cals, CAL_TARGET)
   const span = maxCal - minCal || 200
-  const toX = i => pl + (i / maxX) * innerW
+  // Thin, distinct bars (16px) with the dot x-range inset by half a bar, so the
+  // first/last bars stay fully inside the plot and never overlap a neighbour
+  // (the old full-spacing bars overlapped once the edge bar got clamped).
+  const bandW = 16
+  const x0 = pl + bandW / 2 + 2
+  const x1 = w - pr - bandW / 2 - 2
+  const toX = i => x0 + (i / maxX) * (x1 - x0)
   const toY = c => pt + (1 - (c - minCal) / span) * innerH
   const STATUS = {
     on:   { dot: '#34d399', fill: 'rgba(52,211,153,0.16)' },
@@ -161,16 +167,13 @@ const CAL_CHART = (() => {
     if (r >= 0.80 && r <= 1.20) return 'near'
     return 'off'
   }
-  const bandW = innerW / maxX
   const baseY = h - pb
   const pts = CAL_DAYS.map((d, i) => {
     const cx = toX(i), cy = toY(d.cal), st = statusFor(d.cal)
-    const bx = Math.max(pl, cx - bandW / 2)
-    const bw = Math.min(bandW, w - pr - bx)
     return {
       label: d.d, x: +cx.toFixed(1), y: +cy.toFixed(1),
       dot: STATUS[st].dot, fill: STATUS[st].fill,
-      bx: +bx.toFixed(1), bw: +bw.toFixed(1), bh: +Math.max(0, baseY - cy).toFixed(1),
+      bx: +(cx - bandW / 2).toFixed(1), bw: bandW, bh: +Math.max(0, baseY - cy).toFixed(1),
     }
   })
   const poly = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ')
