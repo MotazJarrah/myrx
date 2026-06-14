@@ -342,7 +342,7 @@ TASKS = [
      "web/src/pages/ForCoaches.jsx; commit 25d76cd",
      "2026-06-14"),
     ("T270", "Flip the sleep-consistency chart bottom-up (mobile + coach mockup) + realistic 3-on-target mockup data", "Sleep/UX", "Web+Mobile", "Done",
-     "User 2026-06-14: the chart read top->down (bedtime at top); people read bars bottom->up. Flipped the y-axis (later = higher) on BOTH mobile SleepConsistency and the coach hero mockup, so bars rise from bedtime (bottom) up to wake (top); bar-rect math now uses min/abs to be orientation-safe. Also made the coach mockup data realistic -- 3 nights on target (~11 PM->7 AM), the rest drift to 12:30-1:10 AM. Mobile change needs a device reload to view. NOTE: check docs/context/sleep-coaching.md for any chart-orientation wording to keep in sync.",
+     "User 2026-06-14: the chart read top->down (bedtime at top); people read bars bottom->up. Flipped the y-axis (later = higher) on BOTH mobile SleepConsistency and the coach hero mockup, so bars rise from bedtime (bottom) up to wake (top); bar-rect math now uses min/abs to be orientation-safe. Also made the coach mockup data realistic -- 3 nights on target (~11 PM->7 AM), the rest drift to 12:30-1:10 AM. Mobile change needs a device reload to view. Doc-sync checked 2026-06-14: no docs/context file describes the chart orientation (only the SleepConsistency.tsx header comment, already updated) -- nothing to sync.",
      "",
      "mobile/src/components/SleepConsistency.tsx + web/src/pages/ForCoaches.jsx; commit 61b3971",
      "2026-06-14"),
