@@ -107,7 +107,7 @@ const PRICING_FAQ = [
     a: 'You enter a card to start your 30-day free trial, but nothing is charged on day 1. The first charge happens on day 31 unless you cancel before then.' },
   { q: 'What happens if I cancel during the trial?',
     a: 'No charge. The trial ends, your account closes, and your data is retained per our data-retention policy in case you change your mind.' },
-  { q: 'How does the annual first-year discount work?',
+  { q: 'How does the annual discount work?',
     a: 'Annual subscriptions are 17% off versus paying monthly (≈ 2 months free), and that discount recurs every year — no jump to full price at renewal.' },
   { q: 'Can I switch tiers?',
     a: 'Yes. Upgrade takes effect immediately and your slots are reclaimed. Downgrade takes effect at your next billing cycle so you keep the higher cap for the rest of the period you\'ve already paid for.' },
