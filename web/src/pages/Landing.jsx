@@ -1,4 +1,4 @@
-import { Dumbbell, Activity, Moon, Droplet, Apple, TrendingUp, Zap, ArrowUpRight, ArrowRight } from 'lucide-react'
+import { Dumbbell, Activity, Moon, Droplet, Apple, TrendingUp, Zap, ArrowUpRight } from 'lucide-react'
 import Wordmark from '../components/Wordmark'
 import PageShell from '../components/PageShell'
 
@@ -137,38 +137,23 @@ export default function Landing() {
 
         </section>
 
-        {/* Preview cards — a horizontal "filmstrip" of example screens. The
-            rail scrolls / swipes and its last card bleeds past a right-edge
-            fade, so it reads as "a few SAMPLES — there's more inside the app",
-            not a fixed 3-item inventory. The real breadth list is the features
-            grid directly below. Card internals unchanged; only the framing. */}
-        <section className="relative mx-auto mt-16 max-w-5xl">
-          {/* Eyebrow + a "there's more" cue — frames the strip as samples */}
-          <div className="mb-6 flex items-end justify-between gap-4">
-            <p
-              className="animate-rise text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground"
-              style={{ animationDelay: '200ms' }}
-            >
-              A peek inside
-            </p>
-            <span
-              className="animate-rise hidden items-center gap-1.5 text-xs text-muted-foreground/70 sm:inline-flex"
-              style={{ animationDelay: '200ms' }}
-            >
-              More inside the app
-              <ArrowRight className="h-3.5 w-3.5" />
-            </span>
-          </div>
+        {/* Preview cards — a peek at three real app surfaces (strength = blue,
+            cardio = amber, sleep = violet). Mock-but-realistic data. The "A peek
+            inside" eyebrow frames them as samples; the 6-item features grid
+            below is the full breadth. Plain stacked layout: strength on top,
+            cardio + sleep side-by-side below. */}
+        <section className="mx-auto mt-16 max-w-3xl">
+          {/* Eyebrow — frames the trio as a sample, not the whole inventory */}
+          <p
+            className="animate-rise mb-6 pl-1 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground"
+            style={{ animationDelay: '200ms' }}
+          >
+            A peek inside
+          </p>
 
-          {/* Rail wrapper — scroll rail + right-edge fade mask. */}
-          <div className="relative">
-            {/* Horizontal rail — scroll / swipe, snap, hidden scrollbar. Fixed-
-                width frames make the row overflow so the last card bleeds past
-                the fade ("more beyond"). items-start keeps each card its natural
-                height (no stretched empty shells). */}
-            <div className="flex snap-x snap-mandatory items-start gap-4 overflow-x-auto pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {/* 1 — Strength (widest frame — the rep-max grid needs the room) */}
-              <div className="animate-rise w-[min(90vw,600px)] shrink-0 snap-start rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '240ms' }}>
+          <div className="space-y-4">
+            {/* 1 — Strength rep-max projections (blue, mirrors the mobile detail page) */}
+          <div className="animate-rise rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '240ms' }}>
             <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-6 md:p-8">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -212,8 +197,10 @@ export default function Landing() {
             </div>
           </div>
 
-              {/* 2 — Cardio zones (amber) */}
-              <div className="animate-rise w-[min(80vw,320px)] shrink-0 snap-start rounded-2xl border border-border bg-card/80 p-1 shadow-xl backdrop-blur" style={{ animationDelay: '360ms' }}>
+          {/* 2 + 3 — side by side on desktop, stacked on mobile */}
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* 2 — Cardio zones (amber, mirrors the running coaching hero) */}
+            <div className="animate-rise h-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '320ms' }}>
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -253,8 +240,10 @@ export default function Landing() {
               </div>
             </div>
 
-              {/* 3 — Sleep rhythm — radial 12-hour clock */}
-              <div className="animate-rise w-[min(80vw,320px)] shrink-0 snap-start rounded-2xl border border-border bg-card/80 p-1 shadow-xl backdrop-blur" style={{ animationDelay: '480ms' }}>
+            {/* 3 — Sleep rhythm — radial 12-hour clock, one lime arc per night
+                for the last 7 nights + an indigo average-window band. Mirrors
+                the mobile SleepClock. */}
+            <div className="animate-rise h-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '400ms' }}>
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -311,9 +300,7 @@ export default function Landing() {
                 </div>
               </div>
             </div>
-            </div>
-            {/* Right-edge fade — sells the "more beyond" bleed. */}
-            <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-background to-transparent sm:w-16" />
+          </div>
           </div>
         </section>
 
