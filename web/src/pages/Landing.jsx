@@ -1,4 +1,4 @@
-import { Dumbbell, Activity, Moon, Droplet, Apple, TrendingUp, Zap, ArrowUpRight } from 'lucide-react'
+import { Dumbbell, Activity, Moon, Droplet, Apple, TrendingUp, Zap, ArrowUpRight, ArrowRight } from 'lucide-react'
 import Wordmark from '../components/Wordmark'
 import PageShell from '../components/PageShell'
 
@@ -137,29 +137,38 @@ export default function Landing() {
 
         </section>
 
-        {/* Preview cards — a loosely-stacked PEEK at three real app surfaces
-            (strength = blue anchor, cardio = amber, sleep = violet). Tilted
-            cascade on lg+, clean vertical stack on mobile. The real breadth
-            inventory is the 6-item features grid directly below — so these read
-            as SAMPLES, not "our three features". Card internals unchanged; only
-            the outer wrappers + framing changed. */}
+        {/* Preview cards — a horizontal "filmstrip" of example screens. The
+            rail scrolls / swipes and its last card bleeds past a right-edge
+            fade, so it reads as "a few SAMPLES — there's more inside the app",
+            not a fixed 3-item inventory. The real breadth list is the features
+            grid directly below. Card internals unchanged; only the framing. */}
         <section className="relative mx-auto mt-16 max-w-5xl">
-          {/* Eyebrow — reframes the trio as samples before the eye reaches the cards */}
-          <p
-            className="animate-rise mb-8 pl-1 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground"
-            style={{ animationDelay: '200ms' }}
-          >
-            A peek inside
-          </p>
+          {/* Eyebrow + a "there's more" cue — frames the strip as samples */}
+          <div className="mb-6 flex items-end justify-between gap-4">
+            <p
+              className="animate-rise text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground"
+              style={{ animationDelay: '200ms' }}
+            >
+              A peek inside
+            </p>
+            <span
+              className="animate-rise hidden items-center gap-1.5 text-xs text-muted-foreground/70 sm:inline-flex"
+              style={{ animationDelay: '200ms' }}
+            >
+              More inside the app
+              <ArrowRight className="h-3.5 w-3.5" />
+            </span>
+          </div>
 
-          {/* Tilted cascade — depth comes from per-card lg: transforms, never a
-              grid. lg:pb-8 absorbs the pulled-up negative margins so the gap to
-              the features grid below stays clean. Everything fancy is lg:-gated;
-              below lg it's a plain legible vertical stack. */}
-          <div className="relative lg:pb-8">
-            {/* 1 — Strength (anchor / hero plate: full width, calmest tilt,
-                lowest z, keeps shadow-2xl as the grounded base) */}
-            <div className="animate-rise relative z-10 w-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur lg:rotate-[-1deg] lg:origin-top-left" style={{ animationDelay: '240ms' }}>
+          {/* Rail wrapper — scroll rail + right-edge fade mask. */}
+          <div className="relative">
+            {/* Horizontal rail — scroll / swipe, snap, hidden scrollbar. Fixed-
+                width frames make the row overflow so the last card bleeds past
+                the fade ("more beyond"). items-start keeps each card its natural
+                height (no stretched empty shells). */}
+            <div className="flex snap-x snap-mandatory items-start gap-4 overflow-x-auto pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {/* 1 — Strength (widest frame — the rep-max grid needs the room) */}
+              <div className="animate-rise w-[min(90vw,600px)] shrink-0 snap-start rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '240ms' }}>
             <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-6 md:p-8">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -203,10 +212,8 @@ export default function Landing() {
             </div>
           </div>
 
-            {/* 2 — Cardio zones (amber) — first supporting sample: narrows +
-                pushes right, overlaps up into strength's footer chrome only;
-                shadow-xl avoids a double-shadow seam against the strength plate. */}
-            <div className="animate-rise relative z-20 mt-6 w-full rounded-2xl border border-border bg-card/80 p-1 shadow-xl backdrop-blur lg:-mt-6 lg:ml-auto lg:mr-[22%] lg:w-[58%] lg:rotate-[1.25deg] lg:origin-top-right" style={{ animationDelay: '360ms' }}>
+              {/* 2 — Cardio zones (amber) */}
+              <div className="animate-rise w-[min(80vw,320px)] shrink-0 snap-start rounded-2xl border border-border bg-card/80 p-1 shadow-xl backdrop-blur" style={{ animationDelay: '360ms' }}>
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -246,9 +253,8 @@ export default function Landing() {
               </div>
             </div>
 
-            {/* 3 — Sleep rhythm — radial 12-hour clock (lime arcs + indigo
-                average band). Furthest-right sample, top of the stack. */}
-            <div className="animate-rise relative z-30 mt-6 w-full rounded-2xl border border-border bg-card/80 p-1 shadow-xl backdrop-blur lg:-mt-8 lg:ml-auto lg:mr-[4%] lg:w-[54%] lg:rotate-[-0.75deg] lg:origin-top-right" style={{ animationDelay: '480ms' }}>
+              {/* 3 — Sleep rhythm — radial 12-hour clock */}
+              <div className="animate-rise w-[min(80vw,320px)] shrink-0 snap-start rounded-2xl border border-border bg-card/80 p-1 shadow-xl backdrop-blur" style={{ animationDelay: '480ms' }}>
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -305,6 +311,9 @@ export default function Landing() {
                 </div>
               </div>
             </div>
+            </div>
+            {/* Right-edge fade — sells the "more beyond" bleed. */}
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-background to-transparent sm:w-16" />
           </div>
         </section>
 
