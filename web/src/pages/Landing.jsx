@@ -137,12 +137,29 @@ export default function Landing() {
 
         </section>
 
-        {/* Preview cards — three real app surfaces, each in its own domain
-            colour (strength = blue, cardio = amber, sleep = violet). Mock but
-            realistic data; a showcase of the app, not live numbers. */}
-        <section className="mx-auto mt-16 max-w-3xl space-y-4">
-          {/* 1 — Strength rep-max projections (blue, mirrors the mobile detail page) */}
-          <div className="animate-rise rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '240ms' }}>
+        {/* Preview cards — a loosely-stacked PEEK at three real app surfaces
+            (strength = blue anchor, cardio = amber, sleep = violet). Tilted
+            cascade on lg+, clean vertical stack on mobile. The real breadth
+            inventory is the 6-item features grid directly below — so these read
+            as SAMPLES, not "our three features". Card internals unchanged; only
+            the outer wrappers + framing changed. */}
+        <section className="relative mx-auto mt-16 max-w-5xl">
+          {/* Eyebrow — reframes the trio as samples before the eye reaches the cards */}
+          <p
+            className="animate-rise mb-8 pl-1 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground"
+            style={{ animationDelay: '200ms' }}
+          >
+            A peek inside
+          </p>
+
+          {/* Tilted cascade — depth comes from per-card lg: transforms, never a
+              grid. lg:pb-8 absorbs the pulled-up negative margins so the gap to
+              the features grid below stays clean. Everything fancy is lg:-gated;
+              below lg it's a plain legible vertical stack. */}
+          <div className="relative lg:pb-8">
+            {/* 1 — Strength (anchor / hero plate: full width, calmest tilt,
+                lowest z, keeps shadow-2xl as the grounded base) */}
+            <div className="animate-rise relative z-10 w-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur lg:rotate-[-1deg] lg:origin-top-left" style={{ animationDelay: '240ms' }}>
             <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-6 md:p-8">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -186,10 +203,10 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* 2 + 3 — side by side on desktop, stacked on mobile */}
-          <div className="grid gap-4 md:grid-cols-2">
-            {/* 2 — Cardio zones (amber, mirrors the running coaching hero) */}
-            <div className="animate-rise h-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '320ms' }}>
+            {/* 2 — Cardio zones (amber) — first supporting sample: narrows +
+                pushes right, overlaps up into strength's footer chrome only;
+                shadow-xl avoids a double-shadow seam against the strength plate. */}
+            <div className="animate-rise relative z-20 mt-6 w-full rounded-2xl border border-border bg-card/80 p-1 shadow-xl backdrop-blur lg:-mt-6 lg:ml-auto lg:mr-[22%] lg:w-[58%] lg:rotate-[1.25deg] lg:origin-top-right" style={{ animationDelay: '360ms' }}>
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -229,10 +246,9 @@ export default function Landing() {
               </div>
             </div>
 
-            {/* 3 — Sleep rhythm — radial 12-hour clock, one lime arc per night
-                for the last 7 nights + an indigo average-window band. Mirrors
-                the mobile SleepClock. */}
-            <div className="animate-rise h-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '400ms' }}>
+            {/* 3 — Sleep rhythm — radial 12-hour clock (lime arcs + indigo
+                average band). Furthest-right sample, top of the stack. */}
+            <div className="animate-rise relative z-30 mt-6 w-full rounded-2xl border border-border bg-card/80 p-1 shadow-xl backdrop-blur lg:-mt-8 lg:ml-auto lg:mr-[4%] lg:w-[54%] lg:rotate-[-0.75deg] lg:origin-top-right" style={{ animationDelay: '480ms' }}>
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
