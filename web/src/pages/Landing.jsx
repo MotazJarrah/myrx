@@ -1,4 +1,4 @@
-import { Dumbbell, Activity, Moon, Droplet, Apple, TrendingUp, Zap, ArrowUpRight } from 'lucide-react'
+import { Dumbbell, Activity, Moon, Droplet, Apple, TrendingUp, Zap, ArrowUpRight, Heart } from 'lucide-react'
 import Wordmark from '../components/Wordmark'
 import PageShell from '../components/PageShell'
 
@@ -83,6 +83,51 @@ const SLEEP_CLOCK = (() => {
     return { x1: +p1.x.toFixed(1), y1: +p1.y.toFixed(1), x2: +p2.x.toFixed(1), y2: +p2.y.toFixed(1) }
   })
   return { size, cx, cy, thickness, bgR: outerR + thickness / 2, rings, avgD, numerals, spokes }
+})()
+
+// Heart-rate preview — replicates the mobile HrRangeChart (mobile/src/
+// components/HrRangeChart.tsx): per-day columns with a resting dot (emerald),
+// an avg dot (sky), and a peak-range band coloured by the 5-zone HR heat
+// spectrum (yellow Z1 → red Z5). Random-but-realistic week; rest days show just
+// resting + avg (no band). Zones are even tenths of hrMax (190 here), so the
+// band's vertical heat gradient is anchored once in chart space.
+const HR_DAYS = [
+  { d: 'M', r: 54, a: 66, pl: 110, ph: 145 },
+  { d: 'T', r: 52, a: 63, pl: null, ph: null }, // rest day
+  { d: 'W', r: 55, a: 70, pl: 130, ph: 172 },
+  { d: 'T', r: 53, a: 64, pl: 105, ph: 138 },
+  { d: 'F', r: 51, a: 61, pl: null, ph: null }, // rest day
+  { d: 'S', r: 56, a: 72, pl: 140, ph: 178 },
+  { d: 'S', r: 52, a: 65, pl: 120, ph: 158 },
+]
+const HR_CHART = (() => {
+  const w = 320, h = 180, padL = 26, padT = 12, padB = 22, padR = 6
+  const plotW = w - padL - padR
+  const plotH = h - padT - padB
+  const yMin = 45, yMax = 185, bandW = 9
+  const xC = i => padL + (i + 0.5) * (plotW / HR_DAYS.length)
+  const yS = v => padT + plotH * (1 - (v - yMin) / (yMax - yMin))
+  const cols = HR_DAYS.map((n, i) => {
+    const cx = xC(i)
+    const band = n.pl != null && n.ph != null
+      ? { x: +(cx - bandW / 2).toFixed(1), y: +yS(n.ph).toFixed(1), h: +Math.max(2, yS(n.pl) - yS(n.ph)).toFixed(1) }
+      : null
+    return { label: n.d, x: +cx.toFixed(1), band, avgY: +yS(n.a).toFixed(1), restY: +yS(n.r).toFixed(1) }
+  })
+  const ticks = [60, 100, 140, 180].map(v => ({ v, y: +yS(v).toFixed(1) }))
+  // Top = red (Z5) … bottom = slate (< Z1). Even sixths == the 10%-of-hrMax
+  // zone bands, anchored in chart space so every band reads its true zone colour.
+  const segColors = ['#dc2626', '#ea580c', '#fb923c', '#fbbf24', '#facc15', '#64748b']
+  const stops = []
+  for (let i = 0; i < 6; i++) {
+    stops.push({ o: i / 6, c: segColors[i] }, { o: (i + 1) / 6, c: segColors[i] })
+  }
+  return {
+    w, h, bandW,
+    gy1: +yS(190).toFixed(1), gy2: +yS(76).toFixed(1),
+    plotLeft: padL, plotRight: w - padR,
+    cols, ticks, stops,
+  }
 })()
 
 export default function Landing() {
@@ -199,43 +244,58 @@ export default function Landing() {
 
           {/* 2 + 3 — side by side on desktop, stacked on mobile */}
           <div className="grid gap-4 md:grid-cols-2">
-            {/* 2 — Cardio zones (amber, mirrors the running coaching hero) */}
+            {/* 2 — Heart rate (rose) — per-day resting / avg / peak, mirrors
+                the mobile HrRangeChart's emerald / sky / zone-heat model. */}
             <div className="animate-rise h-full rounded-2xl border border-border bg-card/80 p-1 shadow-2xl backdrop-blur" style={{ animationDelay: '320ms' }}>
               <div className="flex h-full flex-col rounded-xl border border-border/60 bg-gradient-to-br from-card to-card/40 p-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-amber-400" />
-                    <span className="text-sm font-medium">Running · 5K</span>
+                    <Heart className="h-4 w-4 text-rose-400" />
+                    <span className="text-sm font-medium">Heart rate · 7 days</span>
                   </div>
-                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400">
-                    Best 4:30/km
+                  <span className="rounded-full bg-rose-500/15 px-2 py-0.5 text-[11px] font-medium text-rose-400">
+                    Resting 52 bpm
                   </span>
                 </div>
                 <div className="flex flex-1 items-center">
-                  <div className="grid w-full grid-cols-3 gap-2">
-                    {[
-                      { z: 'Endurance', work: '8 km',      pace: '5:30/km', hi: true },
-                      { z: 'Threshold', work: '4 × 1 km',  pace: '4:40/km' },
-                      { z: 'VO2 Max',   work: '5 × 600 m', pace: '4:15/km' },
-                    ].map(t => (
-                      <div
-                        key={t.z}
-                        className={`rounded-lg border p-2.5 text-center transition-colors ${
-                          t.hi
-                            ? 'border-amber-500/50 bg-amber-500/10'
-                            : 'border-border/60 bg-card/40'
-                        }`}
-                      >
-                        <div className="text-[9px] font-medium uppercase tracking-wider text-amber-400/90">{t.z}</div>
-                        <div className={`mt-1 text-xs font-medium ${t.hi ? 'text-foreground' : 'text-muted-foreground'}`}>{t.work}</div>
-                        <div className="mt-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">{t.pace}</div>
-                      </div>
+                  <svg
+                    viewBox={`0 0 ${HR_CHART.w} ${HR_CHART.h}`}
+                    className="mt-4 w-full"
+                    role="img"
+                    aria-label="Resting, average, and peak heart rate across the last 7 days; the peak band is coloured by training zone"
+                  >
+                    <defs>
+                      <linearGradient id="hrZones" gradientUnits="userSpaceOnUse" x1="0" y1={HR_CHART.gy1} x2="0" y2={HR_CHART.gy2}>
+                        {HR_CHART.stops.map((s, i) => (
+                          <stop key={i} offset={`${(s.o * 100).toFixed(2)}%`} stopColor={s.c} stopOpacity="0.9" />
+                        ))}
+                      </linearGradient>
+                    </defs>
+                    {/* Y grid + bpm labels */}
+                    {HR_CHART.ticks.map((t, i) => (
+                      <g key={`hrt${i}`}>
+                        <line x1={HR_CHART.plotLeft} y1={t.y} x2={HR_CHART.plotRight} y2={t.y} stroke="rgb(100 116 139)" strokeOpacity="0.12" strokeWidth="1" />
+                        <text x={HR_CHART.plotLeft - 5} y={t.y} textAnchor="end" dominantBaseline="central" fill="hsl(var(--muted-foreground))" style={{ fontSize: 9, fontFamily: 'JetBrains Mono, ui-monospace, monospace' }}>{t.v}</text>
+                      </g>
                     ))}
-                  </div>
+                    {/* Per-day: peak band + avg dot + resting dot + day label */}
+                    {HR_CHART.cols.map((c, i) => (
+                      <g key={`hrc${i}`}>
+                        {c.band && <rect x={c.band.x} y={c.band.y} width={HR_CHART.bandW} height={c.band.h} rx="3" fill="url(#hrZones)" />}
+                        <circle cx={c.x} cy={c.avgY} r="3.8" fill="#38bdf8" stroke="hsl(var(--background))" strokeWidth="1.5" />
+                        <circle cx={c.x} cy={c.restY} r="3.8" fill="#34d399" stroke="hsl(var(--background))" strokeWidth="1.5" />
+                        <text x={c.x} y={HR_CHART.h - 6} textAnchor="middle" fill="hsl(var(--muted-foreground))" style={{ fontSize: 9, fontFamily: 'Geist, ui-sans-serif, sans-serif' }}>{c.label}</text>
+                      </g>
+                    ))}
+                  </svg>
                 </div>
                 <div className="flex items-center justify-between pt-4 text-[11px] text-muted-foreground">
-                  <span>Riegel · Daniels' · polarized 80/20</span>
-                  <span className="font-mono tabular-nums">/km</span>
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: '#34d399' }} />Resting</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: '#38bdf8' }} />Avg</span>
+                    <span className="flex items-center gap-1.5"><span className="h-2.5 w-1.5 rounded-sm bg-gradient-to-t from-yellow-400 to-red-600" />Peak</span>
+                  </span>
+                  <span className="font-mono tabular-nums">bpm</span>
                 </div>
               </div>
             </div>
